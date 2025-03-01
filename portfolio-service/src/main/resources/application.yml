@@ -1,0 +1,33 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5433/portfolio
+    username: postgres
+    password: password
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    show-sql: true
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: am-portfolio-group
+      auto-offset-reset: earliest
+
+app:
+  kafka:
+    topic: am-document-topic
+
+server:
+  port: 8080
+  servlet:
+    context-path: /
+    
+logging:
+  level:
+    com.portfolio: DEBUG
+    org.hibernate.SQL: DEBUG
