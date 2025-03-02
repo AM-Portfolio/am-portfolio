@@ -43,6 +43,14 @@
         </dependencies>
     </dependencyManagement>
 
+ <repositories>
+        <repository>
+            <id>github</id>
+            <name>GitHub AM Common Data Model Apache Maven Packages</name>
+            <url>https://maven.pkg.github.com/ssd2658/am-common-data-parent</url>
+        </repository>
+    </repositories>
+
     <build>
         <pluginManagement>
             <plugins>

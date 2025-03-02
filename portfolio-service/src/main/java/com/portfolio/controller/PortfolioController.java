@@ -3,7 +3,7 @@ package com.portfolio.controller;
 import com.am.common.amcommondata.domain.asset.Asset;
 import com.am.common.amcommondata.domain.portfolio.Portfolio;
 import com.am.common.amcommondata.model.enums.AssetType;
-import com.portfolio.service.PortfolioService;
+import com.portfolio.service.AMPortfolioService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -16,7 +16,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class PortfolioController {
     
-    private final PortfolioService portfolioService;
+    private final AMPortfolioService portfolioService;
 
     @GetMapping("/{userId}/summary")
     public ResponseEntity<Portfolio> getPortfolioSummary(@PathVariable UUID userId) {
