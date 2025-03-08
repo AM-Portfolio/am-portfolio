@@ -37,8 +37,10 @@ public class PortfolioController {
     @GetMapping("/{portfolioId}/analysis")
     public ResponseEntity<PortfolioAnalysis> getPortfolioAnalysis(
             @PathVariable String portfolioId,
-            @RequestParam String userId) {
-        PortfolioAnalysis analysis = portfolioAnalysisService.analyzePortfolio(portfolioId, userId);
+            @RequestParam String userId,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        PortfolioAnalysis analysis = portfolioAnalysisService.analyzePortfolio(portfolioId, userId, page, size);
         if (analysis == null) {
             return ResponseEntity.notFound().build();
         }

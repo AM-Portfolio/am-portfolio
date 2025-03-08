@@ -13,7 +13,9 @@ public class PortfolioAnalysis {
     private double totalValue;
     private double totalGainLoss;
     private double totalGainLossPercentage;
-    private List<StockPerformance> topGainers;
-    private List<StockPerformance> topLosers;
+    private List<StockPerformance> topFiveGainers; // Default top 5
+    private List<StockPerformance> topFiveLosers; // Default top 5
+    private PaginatedStockPerformance gainers; // Paginated full list
+    private PaginatedStockPerformance losers; // Paginated full list
     private Instant lastUpdated;
 }
