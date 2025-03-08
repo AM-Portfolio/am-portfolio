@@ -1,4 +1,3 @@
-
 spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/portfolio
@@ -23,6 +22,10 @@ spring:
   data:
     #redisendpoint: redis-17365.c325.us-east-1-4.ec2.redns.redis-cloud.com:17365
     redisendpoint: localhost:6379
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=1000,expireAfterWrite=1800s
 
 app:
   kafka:

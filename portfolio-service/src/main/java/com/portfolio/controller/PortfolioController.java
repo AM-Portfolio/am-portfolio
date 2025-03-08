@@ -1,7 +1,5 @@
 package com.portfolio.controller;
 
-import com.am.common.amcommondata.domain.asset.Asset;
-import com.am.common.amcommondata.domain.portfolio.Portfolio;
 import com.am.common.amcommondata.model.PortfolioModel;
 import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.enums.AssetType;

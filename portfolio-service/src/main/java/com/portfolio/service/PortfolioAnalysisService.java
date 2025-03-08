@@ -2,6 +2,8 @@ package com.portfolio.service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -10,6 +12,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import com.am.common.amcommondata.model.PortfolioModel;
@@ -34,6 +37,9 @@ public class PortfolioAnalysisService {
     private static final int DEFAULT_TOP_N = 5;
     private static final int DEFAULT_PAGE_SIZE = 5;
 
+    @Cacheable(value = "portfolioAnalysis", 
+               key = "#portfolioId + '_' + #userId + '_' + #interval.code + '_' + #pageNumber + '_' + #pageSize",
+               unless = "#interval == null || (#interval.duration != null && #interval.duration.toMinutes() < 15)")
     public PortfolioAnalysis analyzePortfolio(
             String portfolioId, 
             String userId, 
@@ -41,6 +47,10 @@ public class PortfolioAnalysisService {
             Integer pageSize,
             TimeInterval interval) {
         try {
+            Instant startProcessing = Instant.now();
+            log.info("Starting portfolio analysis - Portfolio: {}, User: {}, Interval: {}, Page: {}, Size: {}", 
+                    portfolioId, userId, interval != null ? interval.getCode() : "null", pageNumber, pageSize);
+            
             PortfolioModel portfolio = portfolioService.getPortfolioById(UUID.fromString(portfolioId));
             if (portfolio == null) {
                 log.error("Portfolio not found for ID: {}", portfolioId);
@@ -78,7 +88,8 @@ public class PortfolioAnalysisService {
             PaginatedStockPerformance paginatedLosers = getPaginatedPerformances(performances, pageNumber, pageSize, false);
             PaginatedStockPerformance paginatedGainers = getPaginatedPerformances(performances, pageNumber, pageSize, true);
 
-            return PortfolioAnalysis.builder()
+            Instant lastUpdated = Instant.now();
+            PortfolioAnalysis analysis = PortfolioAnalysis.builder()
                 .portfolioId(portfolioId)
                 .userId(userId)
                 .totalValue(totalValue)
@@ -88,8 +99,27 @@ public class PortfolioAnalysisService {
                 .topFiveLosers(topFiveLosers)
                 .gainers(paginatedGainers)
                 .losers(paginatedLosers)
-                .lastUpdated(Instant.now())
+                .lastUpdated(lastUpdated)
                 .build();
+
+            Duration processingTime = Duration.between(startProcessing, lastUpdated);
+            LocalDateTime processedTime = LocalDateTime.ofInstant(lastUpdated, ZoneId.systemDefault());
+            
+            log.info("Completed portfolio analysis - Fresh calculation - Portfolio: {}, Time: {}, Processing Duration: {}ms, " + 
+                    "Total Assets: {}, Top Gainer: {}, Top Loser: {}", 
+                portfolioId,
+                processedTime,
+                processingTime.toMillis(),
+                performances.size(),
+                !topFiveGainers.isEmpty() ? String.format("%s (%.2f%%)", 
+                    topFiveGainers.get(0).getSymbol(), 
+                    topFiveGainers.get(0).getGainLossPercentage()) : "None",
+                !topFiveLosers.isEmpty() ? String.format("%s (%.2f%%)", 
+                    topFiveLosers.get(0).getSymbol(), 
+                    topFiveLosers.get(0).getGainLossPercentage()) : "None"
+            );
+            
+            return analysis;
 
         } catch (Exception e) {
             log.error("Error analyzing portfolio {}: {}", portfolioId, e.getMessage(), e);
