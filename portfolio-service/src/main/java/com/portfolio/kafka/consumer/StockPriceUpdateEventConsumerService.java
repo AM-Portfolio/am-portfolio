@@ -11,7 +11,7 @@ import org.springframework.stereotype.Service;
 import com.am.common.investment.model.equity.EquityPrice;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.portfolio.kafka.model.EquityPriceUpdateEvent;
-import com.portfolio.service.StockPriceRedisService;
+import com.portfolio.rediscache.service.StockPriceRedisService;
 
 import java.util.List;
 

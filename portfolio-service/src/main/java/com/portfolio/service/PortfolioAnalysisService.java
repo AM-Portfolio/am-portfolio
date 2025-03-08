@@ -12,7 +12,6 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import com.am.common.amcommondata.model.PortfolioModel;
@@ -23,6 +22,8 @@ import com.portfolio.model.PortfolioAnalysis;
 import com.portfolio.model.StockPerformance;
 import com.portfolio.model.StockPriceCache;
 import com.portfolio.model.TimeInterval;
+import com.portfolio.rediscache.service.PortfolioAnalysisRedisService;
+import com.portfolio.rediscache.service.StockPriceRedisService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,12 +35,10 @@ public class PortfolioAnalysisService {
     
     private final AMPortfolioService portfolioService;
     private final StockPriceRedisService stockPriceRedisService;
+    private final PortfolioAnalysisRedisService portfolioAnalysisRedisService;
     private static final int DEFAULT_TOP_N = 5;
     private static final int DEFAULT_PAGE_SIZE = 5;
 
-    @Cacheable(value = "portfolioAnalysis", 
-               key = "#portfolioId + '_' + #userId + '_' + #interval.code + '_' + #pageNumber + '_' + #pageSize",
-               unless = "#interval == null || (#interval.duration != null && #interval.duration.toMinutes() < 15)")
     public PortfolioAnalysis analyzePortfolio(
             String portfolioId, 
             String userId, 
@@ -47,8 +46,17 @@ public class PortfolioAnalysisService {
             Integer pageSize,
             TimeInterval interval) {
         try {
+            // Try to get from cache first
+            Optional<PortfolioAnalysis> cachedAnalysis = portfolioAnalysisRedisService.getLatestAnalysis(
+                portfolioId, userId, interval);
+            if (cachedAnalysis.isPresent()) {
+                log.info("Serving portfolio analysis from cache - Portfolio: {}, User: {}, Interval: {}", 
+                    portfolioId, userId, interval != null ? interval.getCode() : "null");
+                return cachedAnalysis.get();
+            }
+
             Instant startProcessing = Instant.now();
-            log.info("Starting portfolio analysis - Portfolio: {}, User: {}, Interval: {}, Page: {}, Size: {}", 
+            log.info("Starting fresh portfolio analysis - Portfolio: {}, User: {}, Interval: {}, Page: {}, Size: {}", 
                     portfolioId, userId, interval != null ? interval.getCode() : "null", pageNumber, pageSize);
             
             PortfolioModel portfolio = portfolioService.getPortfolioById(UUID.fromString(portfolioId));
@@ -102,10 +110,13 @@ public class PortfolioAnalysisService {
                 .lastUpdated(lastUpdated)
                 .build();
 
+            // Cache the analysis
+            portfolioAnalysisRedisService.cachePortfolioAnalysis(analysis, portfolioId, userId, interval);
+
             Duration processingTime = Duration.between(startProcessing, lastUpdated);
             LocalDateTime processedTime = LocalDateTime.ofInstant(lastUpdated, ZoneId.systemDefault());
             
-            log.info("Completed portfolio analysis - Fresh calculation - Portfolio: {}, Time: {}, Processing Duration: {}ms, " + 
+            log.info("Completed fresh portfolio analysis - Portfolio: {}, Time: {}, Processing Duration: {}ms, " + 
                     "Total Assets: {}, Top Gainer: {}, Top Loser: {}", 
                 portfolioId,
                 processedTime,
