@@ -5,7 +5,10 @@ import com.am.common.amcommondata.domain.portfolio.Portfolio;
 import com.am.common.amcommondata.model.PortfolioModel;
 import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.enums.AssetType;
+import com.portfolio.model.PortfolioAnalysis;
 import com.portfolio.service.AMPortfolioService;
+import com.portfolio.service.PortfolioAnalysisService;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -19,15 +22,27 @@ import java.util.UUID;
 public class PortfolioController {
     
     private final AMPortfolioService portfolioService;
+    private final PortfolioAnalysisService portfolioAnalysisService;
 
     @GetMapping("/{portfolioId}")
-    public ResponseEntity<PortfolioModel>  getPortfolioById(@PathVariable String portfolioId) {
+    public ResponseEntity<PortfolioModel> getPortfolioById(@PathVariable String portfolioId) {
         return ResponseEntity.ok(portfolioService.getPortfolioById(UUID.fromString(portfolioId)));
     }
 
     @GetMapping
     public ResponseEntity<List<PortfolioModel>> getPortfolios(@RequestParam String userId) {
         return ResponseEntity.ok(portfolioService.getPortfolios(userId));
+    }
+
+    @GetMapping("/{portfolioId}/analysis")
+    public ResponseEntity<PortfolioAnalysis> getPortfolioAnalysis(
+            @PathVariable String portfolioId,
+            @RequestParam String userId) {
+        PortfolioAnalysis analysis = portfolioAnalysisService.analyzePortfolio(portfolioId, userId);
+        if (analysis == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(analysis);
     }
 
     @GetMapping("/{userId}/summary")
