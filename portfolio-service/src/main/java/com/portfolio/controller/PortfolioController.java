@@ -2,6 +2,8 @@ package com.portfolio.controller;
 
 import com.am.common.amcommondata.domain.asset.Asset;
 import com.am.common.amcommondata.domain.portfolio.Portfolio;
+import com.am.common.amcommondata.model.PortfolioModel;
+import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.enums.AssetType;
 import com.portfolio.service.AMPortfolioService;
 import lombok.RequiredArgsConstructor;
@@ -18,17 +20,25 @@ public class PortfolioController {
     
     private final AMPortfolioService portfolioService;
 
+    @GetMapping("/{portfolioId}")
+    public ResponseEntity<PortfolioModel>  getPortfolioById(@PathVariable String portfolioId) {
+        return ResponseEntity.ok(portfolioService.getPortfolioById(UUID.fromString(portfolioId)));
+    }
+
+    @GetMapping
+    public ResponseEntity<List<PortfolioModel>> getPortfolios(@RequestParam String userId) {
+        return ResponseEntity.ok(portfolioService.getPortfolios(userId));
+    }
+
     @GetMapping("/{userId}/summary")
-    public ResponseEntity<Portfolio> getPortfolioSummary(@PathVariable UUID userId) {
-        //return ResponseEntity.ok(portfolioService.getPortfolioSummary(userId));
+    public ResponseEntity<PortfolioModel> getPortfolioSummary(@PathVariable UUID userId) {
         return ResponseEntity.ok(null);
     }
 
     @GetMapping("/{userId}/holdings")
-    public ResponseEntity<List<Asset>> getHoldingsByAssetType(
+    public ResponseEntity<List<AssetModel>> getHoldingsByAssetType(
             @PathVariable UUID userId,
             @RequestParam(required = false) AssetType assetType) {
-        //return ResponseEntity.ok(portfolioService.getHoldingsByAssetType(userId, assetType));
         return ResponseEntity.ok(null);
     }
 

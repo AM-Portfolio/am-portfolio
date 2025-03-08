@@ -10,6 +10,7 @@ import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.asset.mutualfund.MutualFundModel;
 import com.am.common.amcommondata.model.enums.AssetType;
+import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.FundType;
 import com.portfolio.kafka.model.PortfolioUpdateEvent;
 
@@ -17,38 +18,41 @@ import com.portfolio.kafka.model.PortfolioUpdateEvent;
 public class PortfolioMapper {
 
     public PortfolioModel toPortfolioModel(PortfolioUpdateEvent portfolioEvent) {
+        var assets = mapToAssets(portfolioEvent, portfolioEvent.getBrokerType());
+
         PortfolioModel portfolioModel = PortfolioModel.builder()
         .id(portfolioEvent.getId())
         .name("Default Portfolio")
         .owner(portfolioEvent.getUserId())
+        .brokerType(portfolioEvent.getBrokerType())
         .fundType(FundType.DEFAULT)
         .status("Active")
         .createdBy(portfolioEvent.getUserId())
-        .assets(mapToAssets(portfolioEvent))
+        .assets(assets)
+        //.assetCount(calculateAssetCount(assets))
+        //.totalValue(calculateTotalValue(assets))
         .version(0L)
         .build();
         return portfolioModel;
     }
 
-
-
-    private Set<AssetModel> mapToAssets(PortfolioUpdateEvent portfolio) {
+    private Set<AssetModel> mapToAssets(PortfolioUpdateEvent portfolio, BrokerType brokerType) {
         Set<EquityModel> equities = portfolio.getEquities();
         Set<MutualFundModel> mutualFunds = portfolio.getMutualFunds();
         Set<AssetModel> assets = new HashSet<>();
         
         if (equities != null) {
             var assetModels = equities.stream()
-            .filter(e -> e.getIsin() != null && e.getSymbol() != null)
-            .map(this::mapEquityModelToAsset)
+            .filter(e -> e.getIsin() != null && e.getSymbol() != null )  // @todo all values symbol, isin, name shoudl comes from PortfolioUpdateEvent . Remove filter in upcoming release 
+            .map(e -> mapEquityModelToAsset(e, brokerType))
             .collect(Collectors.toSet());
             assets.addAll(assetModels);
         }
         
         if (mutualFunds != null) {
             var fundModels = mutualFunds.stream()
-                .filter(e -> e.getIsin() != null && e.getSymbol() != null)
-                .map(this::mapToAsset)
+                .filter(e -> e.getIsin() != null && e.getSymbol() != null) // @todo all value shoudl comes from PortfolioUpdateEvent . Remove filter in upcoming release 
+                .map(e -> mapToAsset(e, brokerType))
                 .collect(Collectors.toSet());
             assets.addAll(fundModels);
         }
@@ -56,9 +60,26 @@ public class PortfolioMapper {
         return assets;
     }
 
-    private AssetModel mapEquityModelToAsset(EquityModel equityModel) {
+    // private Double calculateTotalValue(Set<AssetModel> assets) {
+    //     if (assets.isEmpty()) {
+    //         return 0.0;
+    //     }
+    //     return assets.stream()
+    //     .map(asset -> asset.getAvgBuyingPrice() * asset.getQuantity())
+    //     .reduce(0.0, Double::sum);
+    // }
+
+    // private Integer calculateAssetCount(Set<AssetModel> assets) {
+    //     if (assets.isEmpty()) {
+    //         return 0;
+    //     }
+    //     return assets.size();
+    // }
+
+    private AssetModel mapEquityModelToAsset(EquityModel equityModel, BrokerType brokerType) {
         return AssetModel.builder()
         .assetType(AssetType.EQUITY)
+        .brokerType(brokerType)
         .isin(equityModel.getIsin())
         .symbol(equityModel.getSymbol())
         .name(equityModel.getName())
@@ -68,12 +89,13 @@ public class PortfolioMapper {
         .build();
     }
 
-    private AssetModel mapToAsset(MutualFundModel fundModel) {
+    private AssetModel mapToAsset(MutualFundModel fundModel, BrokerType brokerType) {
         return AssetModel.builder()
         .assetType(AssetType.MUTUAL_FUND)
         .isin(fundModel.getIsin())
         .symbol(fundModel.getSymbol())
         .name(fundModel.getName())
+        .brokerType(brokerType)
         .avgBuyingPrice(fundModel.getAvgBuyingPrice())
         .name(fundModel.getName())
         .quantity(fundModel.getQuantity())

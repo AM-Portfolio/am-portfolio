@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7.2-alpine
+    container_name: portfolio_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - portfolio_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redisinsight:
+    image: redislabs/redisinsight:latest
+    container_name: portfolio_redisinsight
+    ports:
+      - "8001:8001"
+    volumes:
+      - redisinsight_data:/db
+    networks:
+      - portfolio_network
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis_data:
+    name: portfolio_redis_data
+  redisinsight_data:
+    name: portfolio_redisinsight_data
+
+networks:
+  portfolio_network:
+    name: portfolio_network

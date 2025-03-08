@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.ComponentScans;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.scheduling.annotation.EnableAsync;
 
 @ComponentScans({
     @ComponentScan("com.am.common.amcommondata"),
@@ -22,9 +23,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
     "com.am.common.amcommondata.domain.portfolio"
 })
 @SpringBootApplication
-
-
-
+@EnableAsync
 public class PortfolioServiceApplication {
     public static void main(String[] args) {
         SpringApplication.run(PortfolioServiceApplication.class, args);

@@ -25,13 +25,13 @@ public class KafkaConfig {
     @Value("${spring.kafka.consumer.group-id}")
     private String groupId;
 
-    @Value("${app.kafka.topic}")
-    private String topicName;
+    // @Value("${app.kafka.topic}")
+    // private String topicName;
 
-    @Bean
-    public NewTopic createTopic() {
-        return new NewTopic(topicName, 1, (short) 1);
-    }
+    // @Bean
+    // public NewTopic createTopic() {
+    //     return new NewTopic(topicName, 1, (short) 1);
+    // }
 
     @Bean
     public ProducerFactory<String, Object> producerFactory() {

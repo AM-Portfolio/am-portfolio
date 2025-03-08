@@ -2,6 +2,8 @@ package com.portfolio.kafka.consumer;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
@@ -12,12 +14,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "app.kafka.portfolio.consumer.enabled", havingValue = "true", matchIfMissing = false)
 public class KafkaConsumerService {
 
     private final ObjectMapper objectMapper;
     private final AMPortfolioService portfolioService;
 
-    @KafkaListener(topics = "${app.kafka.topic}", 
+    @KafkaListener(topics = "${app.kafka.portfolio.topic}", 
                   groupId = "${spring.kafka.consumer.group-id}",
                   containerFactory = "kafkaListenerContainerFactory")
     public void consume(String message, Acknowledgment acknowledgment) {

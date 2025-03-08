@@ -1,3 +1,4 @@
+
 spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/portfolio
@@ -19,10 +20,20 @@ spring:
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+  data:
+    #redisendpoint: redis-17365.c325.us-east-1-4.ec2.redns.redis-cloud.com:17365
+    redisendpoint: localhost:6379
 
 app:
   kafka:
-    topic: am-document-topic
+    portfolio:
+      consumer:
+        enabled: false
+      topic: am-portfolio-topic
+    stock:
+      consumer:
+        enabled: true
+      topic: am-stock-price-update
 
 server:
   port: 8080

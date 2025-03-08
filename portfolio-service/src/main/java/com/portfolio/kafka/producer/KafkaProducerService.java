@@ -18,7 +18,7 @@ public class KafkaProducerService {
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
-    @Value("${app.kafka.topic}")
+    @Value("${app.kafka.portfolio.topic}")
     private String topicName;
 
 
