@@ -6,6 +6,7 @@ import com.am.common.amcommondata.model.PortfolioModel;
 import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.enums.AssetType;
 import com.portfolio.model.PortfolioAnalysis;
+import com.portfolio.model.TimeInterval;
 import com.portfolio.service.AMPortfolioService;
 import com.portfolio.service.PortfolioAnalysisService;
 
@@ -39,12 +40,19 @@ public class PortfolioController {
             @PathVariable String portfolioId,
             @RequestParam String userId,
             @RequestParam(required = false) Integer page,
-            @RequestParam(required = false) Integer size) {
-        PortfolioAnalysis analysis = portfolioAnalysisService.analyzePortfolio(portfolioId, userId, page, size);
-        if (analysis == null) {
-            return ResponseEntity.notFound().build();
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false, defaultValue = "all") String interval) {
+        try {
+            TimeInterval timeInterval = TimeInterval.fromCode(interval);
+            PortfolioAnalysis analysis = portfolioAnalysisService.analyzePortfolio(
+                portfolioId, userId, page, size, timeInterval);
+            if (analysis == null) {
+                return ResponseEntity.notFound().build();
+            }
+            return ResponseEntity.ok(analysis);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
         }
-        return ResponseEntity.ok(analysis);
     }
 
     @GetMapping("/{userId}/summary")

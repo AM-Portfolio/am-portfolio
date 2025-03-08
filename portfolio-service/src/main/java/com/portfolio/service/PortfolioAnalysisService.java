@@ -1,5 +1,6 @@
 package com.portfolio.service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -18,6 +19,7 @@ import com.portfolio.model.PaginatedStockPerformance;
 import com.portfolio.model.PortfolioAnalysis;
 import com.portfolio.model.StockPerformance;
 import com.portfolio.model.StockPriceCache;
+import com.portfolio.model.TimeInterval;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,7 +34,12 @@ public class PortfolioAnalysisService {
     private static final int DEFAULT_TOP_N = 5;
     private static final int DEFAULT_PAGE_SIZE = 5;
 
-    public PortfolioAnalysis analyzePortfolio(String portfolioId, String userId, Integer pageNumber, Integer pageSize) {
+    public PortfolioAnalysis analyzePortfolio(
+            String portfolioId, 
+            String userId, 
+            Integer pageNumber, 
+            Integer pageSize,
+            TimeInterval interval) {
         try {
             PortfolioModel portfolio = portfolioService.getPortfolioById(UUID.fromString(portfolioId));
             if (portfolio == null) {
@@ -44,7 +51,7 @@ public class PortfolioAnalysisService {
                 .filter(asset -> AssetType.EQUITY.equals(asset.getAssetType()))
                 .toList();
 
-            List<StockPerformance> performances = calculateStockPerformances(equityHoldings);
+            List<StockPerformance> performances = calculateStockPerformances(equityHoldings, interval);
             
             // Calculate total portfolio metrics
             double totalValue = performances.stream()
@@ -90,6 +97,54 @@ public class PortfolioAnalysisService {
         }
     }
 
+    private List<StockPerformance> calculateStockPerformances(List<AssetModel> equityHoldings, TimeInterval interval) {
+        Instant startTime = interval != null && interval.getDuration() != null ? 
+            Instant.now().minus(interval.getDuration()) : null;
+
+        return equityHoldings.stream()
+            .map(asset -> getGainLossPercentage(asset, startTime))
+            .filter(java.util.Objects::nonNull)
+            .collect(Collectors.toList());
+    }
+
+    private StockPerformance getGainLossPercentage(AssetModel asset, Instant startTime) {
+        Optional<StockPriceCache> latestPrice;
+        if (startTime != null) {
+            List<StockPriceCache> historicalPrices = stockPriceRedisService.getHistoricalPrices(
+                asset.getSymbol(),
+                startTime.atZone(java.time.ZoneOffset.UTC).toLocalDateTime(),
+                Instant.now().atZone(java.time.ZoneOffset.UTC).toLocalDateTime()
+            );
+            if (historicalPrices.isEmpty()) {
+                log.warn("No historical price data found for symbol: {} since {}", asset.getSymbol(), startTime);
+                return null;
+            }
+            latestPrice = Optional.of(historicalPrices.get(historicalPrices.size() - 1));
+        } else {
+            latestPrice = stockPriceRedisService.getLatestPrice(asset.getSymbol());
+        }
+
+        if (latestPrice.isEmpty()) {
+            log.warn("No price data found for symbol: {}", asset.getSymbol());
+            return null;
+        }
+
+        double currentPrice = latestPrice.get().getClosePrice();
+        double averagePrice = asset.getAvgBuyingPrice();
+        double quantity = asset.getQuantity();
+        double gainLoss = (currentPrice - averagePrice) * quantity;
+        double gainLossPercentage = ((currentPrice - averagePrice) / averagePrice) * 100;
+
+        return StockPerformance.builder()
+            .symbol(asset.getSymbol())
+            .quantity(quantity)
+            .currentPrice(currentPrice)
+            .averagePrice(averagePrice)
+            .gainLoss(gainLoss)
+            .gainLossPercentage(gainLossPercentage)
+            .build();
+    }
+
     private PaginatedStockPerformance getPaginatedPerformances(
             List<StockPerformance> performances, 
             Integer pageNumber, 
@@ -132,36 +187,6 @@ public class PortfolioAnalysisService {
             .totalElements(totalElements)
             .totalPages(totalPages)
             .isLastPage(end >= totalElements)
-            .build();
-    }
-
-    private List<StockPerformance> calculateStockPerformances(List<AssetModel> equityHoldings) {
-        return equityHoldings.stream()
-            .map(this::getGainLossPercentage)
-            .filter(java.util.Objects::nonNull)
-            .collect(Collectors.toList());
-    }
-
-    private StockPerformance getGainLossPercentage(AssetModel asset) {
-        Optional<StockPriceCache> latestPrice = stockPriceRedisService.getLatestPrice(asset.getSymbol());
-        if (latestPrice.isEmpty()) {
-            log.warn("No price data found for symbol: {}", asset.getSymbol());
-            return null;
-        }
-
-        double currentPrice = latestPrice.get().getClosePrice();
-        double averagePrice = asset.getAvgBuyingPrice();
-        double quantity = asset.getQuantity();
-        double gainLoss = (currentPrice - averagePrice) * quantity;
-        double gainLossPercentage = ((currentPrice - averagePrice) / averagePrice) * 100;
-
-        return StockPerformance.builder()
-            .symbol(asset.getSymbol())
-            .quantity(quantity)
-            .currentPrice(currentPrice)
-            .averagePrice(averagePrice)
-            .gainLoss(gainLoss)
-            .gainLossPercentage(gainLossPercentage)
             .build();
     }
 }
