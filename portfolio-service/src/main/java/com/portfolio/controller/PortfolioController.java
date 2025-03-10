@@ -53,16 +53,4 @@ public class PortfolioController {
         }
     }
 
-    @GetMapping("/{userId}/summary")
-    public ResponseEntity<PortfolioModel> getPortfolioSummary(@PathVariable UUID userId) {
-        return ResponseEntity.ok(null);
-    }
-
-    @GetMapping("/{userId}/holdings")
-    public ResponseEntity<List<AssetModel>> getHoldingsByAssetType(
-            @PathVariable UUID userId,
-            @RequestParam(required = false) AssetType assetType) {
-        return ResponseEntity.ok(null);
-    }
-
 }

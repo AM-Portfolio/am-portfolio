@@ -19,7 +19,7 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 @ConditionalOnProperty(name = "app.kafka.stock.consumer.enabled", havingValue = "true", matchIfMissing = false)
-public class StockPriceUpdateEventConsumerService {
+public class PriceUpdateConsumerService {
 
     private final ObjectMapper objectMapper;
     private final StockPriceRedisService stockPriceRedisService;

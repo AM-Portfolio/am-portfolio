@@ -7,18 +7,23 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
+
 import com.portfolio.kafka.model.PortfolioUpdateEvent;
+import com.portfolio.mapper.PortfolioMapper;
 import com.portfolio.service.AMPortfolioService;
+import com.am.common.amcommondata.model.PortfolioModel;
+import com.am.common.amcommondata.service.PortfolioService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 @ConditionalOnProperty(name = "app.kafka.portfolio.consumer.enabled", havingValue = "true", matchIfMissing = false)
-public class KafkaConsumerService {
+public class PortfolioUpdateConsumerService {
 
     private final ObjectMapper objectMapper;
-    private final AMPortfolioService portfolioService;
+    private final PortfolioMapper portfolioMapper;
+    private final PortfolioService portfolioService;
 
     @KafkaListener(topics = "${app.kafka.portfolio.topic}", 
                   groupId = "${spring.kafka.consumer.group-id}",
@@ -30,7 +35,7 @@ public class KafkaConsumerService {
             // Convert JSON string to PortfolioUpdateEvent
             PortfolioUpdateEvent event = objectMapper.readValue(message, PortfolioUpdateEvent.class);
             log.info("Converted to event: {}", event);
-            
+              
             // Process the event
             processMessage(event);
             
@@ -43,6 +48,7 @@ public class KafkaConsumerService {
     }
 
     private void processMessage(PortfolioUpdateEvent event) {
-        portfolioService.processMessage(event);
+        PortfolioModel portfolioModel = portfolioMapper.toPortfolioModel(event);
+        portfolioService.createPortfolio(portfolioModel);
     }
 }
