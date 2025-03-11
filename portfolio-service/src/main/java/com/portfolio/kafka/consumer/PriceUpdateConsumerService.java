@@ -9,8 +9,8 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
 
 import com.am.common.investment.model.equity.EquityPrice;
+import com.am.common.investment.model.events.EquityPriceUpdateEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.portfolio.kafka.model.EquityPriceUpdateEvent;
 import com.portfolio.rediscache.service.StockPriceRedisService;
 
 import java.util.List;
