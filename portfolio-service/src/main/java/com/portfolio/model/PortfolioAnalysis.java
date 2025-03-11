@@ -1,21 +1,25 @@
 package com.portfolio.model;
 
 import java.time.Instant;
-import java.util.List;
+import java.util.Map;
 import lombok.Builder;
 import lombok.Data;
 
 @Data
 @Builder
 public class PortfolioAnalysis {
+    // Core portfolio information
     private String portfolioId;
-    private String userId;
-    private double totalValue;
-    private double totalGainLoss;
-    private double totalGainLossPercentage;
-    private List<StockPerformance> topFiveGainers; // Default top 5
-    private List<StockPerformance> topFiveLosers; // Default top 5
-    private PaginatedStockPerformance gainers; // Paginated full list
-    private PaginatedStockPerformance losers; // Paginated full list
+    private PortfolioSummary summary;
+    
+    // Performance groups
+    private StockPerformanceGroup gainers;
+    private StockPerformanceGroup losers;
+
+    // Time-based performance metrics
+    private Map<TimeInterval, PerformanceMetrics> timeBasedMetrics;
+    
+    // Metadata
+    private TimeInterval currentInterval;
     private Instant lastUpdated;
 }

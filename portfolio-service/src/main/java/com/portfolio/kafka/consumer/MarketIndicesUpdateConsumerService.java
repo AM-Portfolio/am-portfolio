@@ -17,14 +17,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "app.kafka.portfolio.consumer.enabled", havingValue = "true", matchIfMissing = false)
+@ConditionalOnProperty(name = "app.kafka.market-index.consumer.enabled", havingValue = "true", matchIfMissing = false)
 public class MarketIndicesUpdateConsumerService {
 
     private final ObjectMapper objectMapper;
     private final MarketIndexIndicesRedisService marketIndexIndicesRedisService;
 
-    @KafkaListener(topics = "${app.kafka.portfolio.topic}", 
-                  groupId = "${spring.kafka.consumer.group-id}",
+    @KafkaListener(topics = "${app.kafka.market-index.topic}", 
+                  groupId = "${app.kafka.market-index.consumer.id}",
                   containerFactory = "kafkaListenerContainerFactory")
     public void consume(String message, Acknowledgment acknowledgment) {
         try {

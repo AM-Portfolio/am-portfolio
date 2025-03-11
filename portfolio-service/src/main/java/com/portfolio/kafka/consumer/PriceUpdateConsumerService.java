@@ -25,7 +25,7 @@ public class PriceUpdateConsumerService {
     private final StockPriceRedisService stockPriceRedisService;
 
     @KafkaListener(topics = "${app.kafka.stock.topic}", 
-                  groupId = "${spring.kafka.consumer.group-id}",
+                  groupId = "${app.kafka.stock.consumer.id}",
                   containerFactory = "kafkaListenerContainerFactory")
     public void consume(String message, Acknowledgment acknowledgment) {
         try {

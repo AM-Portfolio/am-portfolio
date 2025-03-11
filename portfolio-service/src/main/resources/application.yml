@@ -27,17 +27,27 @@ spring:
       portfolio:
         ttl: 1800  # 30 minutes in seconds
         key-prefix: "portfolio:analysis:"
+      market-index:
+        ttl: 900  # 15 minutes in seconds
+        key-prefix: "market-index:indices:"
 
 app:
   kafka:
     portfolio:
       consumer:
+        id: am-portfolio-group
         enabled: false
       topic: am-portfolio-topic
     stock:
       consumer:
-        enabled: false
+        id: am-stock-group
+        enabled: true
       topic: am-stock-price-update
+    market-index:
+      consumer:
+        id: am-market-index-group
+        enabled: true
+      topic: am-market-index-update
 
 server:
   port: 8080

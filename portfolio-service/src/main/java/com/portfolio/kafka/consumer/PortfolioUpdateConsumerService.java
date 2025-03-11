@@ -26,7 +26,7 @@ public class PortfolioUpdateConsumerService {
     private final PortfolioService portfolioService;
 
     @KafkaListener(topics = "${app.kafka.portfolio.topic}", 
-                  groupId = "${spring.kafka.consumer.group-id}",
+                  groupId = "${app.kafka.portfolio.consumer.id}",
                   containerFactory = "kafkaListenerContainerFactory")
     public void consume(String message, Acknowledgment acknowledgment) {
         try {
