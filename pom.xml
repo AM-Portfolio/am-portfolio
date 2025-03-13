@@ -29,6 +29,8 @@
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <am-common-investment.version>1.6.0-SNAPSHOT</am-common-investment.version>
+        <am-common-data-parent.version>1.1.4-SNAPSHOT</am-common-data-parent.version>
     </properties>
 
     <dependencyManagement>
@@ -43,17 +45,11 @@
         </dependencies>
     </dependencyManagement>
 
- <repositories>
+    <repositories>
         <repository>
-            <id>github</id>
-            <name>GitHub AM Common Data Model Apache Maven Packages</name>
-            <url>https://maven.pkg.github.com/ssd2658/am-common-data-parent</url>
-        </repository>
-    
-        <repository>
-            <id>github 1</id>
-            <name>GitHub AM Common Data Model Apache Maven Packages</name>
-            <url>https://github.com/ssd2658/am-common-investment-data</url>
+            <id>github-investment</id>
+            <name>GitHub AM Common Investment Service Apache Maven Packages</name>
+            <url>https://maven.pkg.github.com/AM-Portfolio/*</url>
         </repository>
     </repositories>
 
