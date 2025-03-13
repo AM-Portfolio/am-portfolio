@@ -1,60 +1,60 @@
+
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/portfolio
-    username: postgres
-    password: password
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/portfolio}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:password}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: none
-    show-sql: true
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:none}
+    show-sql: ${SPRING_JPA_SHOW_SQL:true}
     properties:
       hibernate:
-        format_sql: true
+        format_sql: ${SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL:true}
         dialect: org.hibernate.dialect.PostgreSQLDialect
     database-platform: org.hibernate.dialect.PostgreSQLDialect
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
-      group-id: am-portfolio-group
-      auto-offset-reset: earliest
+      group-id: ${SPRING_KAFKA_CONSUMER_GROUP_ID:am-portfolio-group}
+      auto-offset-reset: ${SPRING_KAFKA_CONSUMER_AUTO_OFFSET_RESET:earliest}
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
   data:
-    #redisendpoint: redis-17365.c325.us-east-1-4.ec2.redns.redis-cloud.com:17365
-    redisendpoint: localhost:6379
+    redisendpoint: ${SPRING_DATA_REDISENDPOINT:localhost:6379}
     redis:
       portfolio:
-        ttl: 1800  # 30 minutes in seconds
-        key-prefix: "portfolio:analysis:"
+        ttl: ${SPRING_DATA_REDIS_PORTFOLIO_TTL:1800}  # 30 minutes in seconds
+        key-prefix: ${SPRING_DATA_REDIS_PORTFOLIO_KEY_PREFIX:"portfolio:analysis:"}
       market-index:
-        ttl: 900  # 15 minutes in seconds
-        key-prefix: "market-index:indices:"
+        ttl: ${SPRING_DATA_REDIS_MARKET_INDEX_TTL:900}  # 15 minutes in seconds
+        key-prefix: ${SPRING_DATA_REDIS_MARKET_INDEX_KEY_PREFIX:"market-index:indices:"}
 
 app:
   kafka:
     portfolio:
       consumer:
-        id: am-portfolio-group
-        enabled: false
-      topic: am-portfolio-topic
+        id: ${APP_KAFKA_PORTFOLIO_CONSUMER_ID:am-portfolio-group}
+        enabled: ${APP_KAFKA_PORTFOLIO_CONSUMER_ENABLED:false}
+      topic: ${APP_KAFKA_PORTFOLIO_TOPIC:am-portfolio-topic}
     stock:
       consumer:
-        id: am-stock-group
-        enabled: true
-      topic: am-stock-price-update
+        id: ${APP_KAFKA_STOCK_CONSUMER_ID:am-stock-group}
+        enabled: ${APP_KAFKA_STOCK_CONSUMER_ENABLED:true}
+      topic: ${APP_KAFKA_STOCK_TOPIC:am-stock-price-update}
     market-index:
       consumer:
-        id: am-market-index-group
-        enabled: true
-      topic: am-market-index-update
+        id: ${APP_KAFKA_MARKET_INDEX_CONSUMER_ID:am-market-index-group}
+        enabled: ${APP_KAFKA_MARKET_INDEX_CONSUMER_ENABLED:true}
+      topic: ${APP_KAFKA_MARKET_INDEX_TOPIC:am-market-index-update}
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
   servlet:
-    context-path: /
+    context-path: ${SERVER_SERVLET_CONTEXT_PATH:/}
 
 logging:
   level:
-    com.portfolio: DEBUG
-    org.hibernate.SQL: DEBUG
+    com.portfolio: ${LOGGING_LEVEL_COM_PORTFOLIO:DEBUG}
+    org.hibernate.SQL: ${LOGGING_LEVEL_ORG_HIBERNATE_SQL:DEBUG}

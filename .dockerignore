@@ -1,0 +1,27 @@
+# Maven build directories
+target/
+**/target/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+
+# Git
+.git/
+.gitignore
+
+# Docker
+.docker/
+docker-compose*.yml
+Dockerfile*
+
+# Logs
+*.log
+
+# Environment files
+.env*
+
+# Other
+README.md
+LICENSE

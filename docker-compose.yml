@@ -1,41 +1,67 @@
 version: '3.8'
 
 services:
-  redis:
-    image: redis:7.2-alpine
-    container_name: portfolio_redis
+  portfolio-service:
+    build:
+      context: .
+    container_name: portfolio_service
     ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
+      - "${SERVER_PORT:-8080}:8080"
+    environment:  
+      # Database Configuration
+      - SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL:-jdbc:postgresql://localhost:5432/portfolio}
+      - SPRING_DATASOURCE_USERNAME=${SPRING_DATASOURCE_USERNAME:-postgres}
+      - SPRING_DATASOURCE_PASSWORD=${SPRING_DATASOURCE_PASSWORD:-password}
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=${SPRING_JPA_HIBERNATE_DDL_AUTO:-none}
+      - SPRING_JPA_SHOW_SQL=${SPRING_JPA_SHOW_SQL:-true}
+      - SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL=${SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL:-true}
+      - SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT=${SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT:-org.hibernate.dialect.PostgreSQLDialect}
+      
+      # Kafka Configuration for Real-time Updates
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=${SPRING_KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}
+      - SPRING_KAFKA_CONSUMER_GROUP_ID=${SPRING_KAFKA_CONSUMER_GROUP_ID:-am-portfolio-group}
+      - SPRING_KAFKA_CONSUMER_AUTO_OFFSET_RESET=${SPRING_KAFKA_CONSUMER_AUTO_OFFSET_RESET:-earliest}
+      - SPRING_KAFKA_CONSUMER_KEY_DESERIALIZER=${SPRING_KAFKA_CONSUMER_KEY_DESERIALIZER:-org.apache.kafka.common.serialization.StringDeserializer}
+      - SPRING_KAFKA_CONSUMER_VALUE_DESERIALIZER=${SPRING_KAFKA_CONSUMER_VALUE_DESERIALIZER:-org.apache.kafka.common.serialization.StringDeserializer}
+      
+      # Redis Configuration for Portfolio and Market Data Caching
+      - SPRING_DATA_REDISENDPOINT=${SPRING_DATA_REDISENDPOINT:-localhost:6379}
+      
+      # Portfolio Analysis Cache Settings
+      - SPRING_DATA_REDIS_PORTFOLIO_TTL=${SPRING_DATA_REDIS_PORTFOLIO_TTL:-1800}
+      - SPRING_DATA_REDIS_PORTFOLIO_KEY_PREFIX=${SPRING_DATA_REDIS_PORTFOLIO_KEY_PREFIX:-"portfolio:analysis:"}
+      
+      # Market Index Cache Settings
+      - SPRING_DATA_REDIS_MARKET_INDEX_TTL=${SPRING_DATA_REDIS_MARKET_INDEX_TTL:-900}
+      - SPRING_DATA_REDIS_MARKET_INDEX_KEY_PREFIX=${SPRING_DATA_REDIS_MARKET_INDEX_KEY_PREFIX:-"market-index:indices:"}
+      
+      # Kafka Topics Configuration
+      ## Portfolio Analysis Stream
+      - APP_KAFKA_PORTFOLIO_CONSUMER_ID=${APP_KAFKA_PORTFOLIO_CONSUMER_ID:-am-portfolio-group}
+      - APP_KAFKA_PORTFOLIO_CONSUMER_ENABLED=${APP_KAFKA_PORTFOLIO_CONSUMER_ENABLED:-false}
+      - APP_KAFKA_PORTFOLIO_TOPIC=${APP_KAFKA_PORTFOLIO_TOPIC:-am-portfolio-topic}
+      
+      ## Real-time Stock Price Updates
+      - APP_KAFKA_STOCK_CONSUMER_ID=${APP_KAFKA_STOCK_CONSUMER_ID:-am-stock-group}
+      - APP_KAFKA_STOCK_CONSUMER_ENABLED=${APP_KAFKA_STOCK_CONSUMER_ENABLED:-true}
+      - APP_KAFKA_STOCK_TOPIC=${APP_KAFKA_STOCK_TOPIC:-am-stock-price-update}
+      
+      ## Market Index Updates
+      - APP_KAFKA_MARKET_INDEX_CONSUMER_ID=${APP_KAFKA_MARKET_INDEX_CONSUMER_ID:-am-market-index-group}
+      - APP_KAFKA_MARKET_INDEX_CONSUMER_ENABLED=${APP_KAFKA_MARKET_INDEX_CONSUMER_ENABLED:-true}
+      - APP_KAFKA_MARKET_INDEX_TOPIC=${APP_KAFKA_MARKET_INDEX_TOPIC:-am-market-index-update}
+      
+      # Server Configuration
+      - SERVER_PORT=${SERVER_PORT:-8080}
+      - SERVER_SERVLET_CONTEXT_PATH=${SERVER_SERVLET_CONTEXT_PATH:-/}
+      
+      # Logging Configuration
+      - LOGGING_LEVEL_COM_PORTFOLIO=${LOGGING_LEVEL_COM_PORTFOLIO:-DEBUG}
+      - LOGGING_LEVEL_ORG_HIBERNATE_SQL=${LOGGING_LEVEL_ORG_HIBERNATE_SQL:-DEBUG}
     networks:
       - portfolio_network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
-  redisinsight:
-    image: redislabs/redisinsight:latest
-    container_name: portfolio_redisinsight
-    ports:
-      - "8001:8001"
-    volumes:
-      - redisinsight_data:/db
-    networks:
-      - portfolio_network
-    depends_on:
-      redis:
-        condition: service_healthy
-        
-volumes:
-  redis_data:
-    name: portfolio_redis_data
-  redisinsight_data:
-    name: portfolio_redisinsight_data
 
 networks:
   portfolio_network:
     name: portfolio_network
+    external: true

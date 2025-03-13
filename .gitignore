@@ -54,6 +54,22 @@ application-*.properties
 application-*.yml
 !application.yml
 
+### Environment Files ###
+!.env
+!.env.*
+
+
+### Docker ###
+.docker/
+docker-compose.override.yml
+!docker-compose.yml
+!docker-compose.*.yml
+
+### Redis ###
+*.rdb
+dump.rdb
+appendonly.aof
+
 ### Others ###
 *.swp
 *.swo
