@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import com.am.common.investment.model.equity.EquityPrice;
 import com.am.common.investment.model.events.EquityPriceUpdateEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.portfolio.rediscache.service.StockPriceRedisService;
 
 import java.util.List;
@@ -29,11 +30,11 @@ public class PriceUpdateConsumerService {
                   containerFactory = "kafkaListenerContainerFactory")
     public void consume(String message, Acknowledgment acknowledgment) {
         try {
-            log.info("Received stock price update message: {}", message);
+            log.info("Received stock price update message: {}", objectMapper.writeValueAsString(message));
             
             // Convert JSON string to EquityPriceUpdateEvent
             EquityPriceUpdateEvent event = objectMapper.readValue(message, EquityPriceUpdateEvent.class);
-            log.info("Converted to stock price event: {}", event);
+            log.info("Converted to stock price event: {}", objectMapper.writeValueAsString(event));
             
             // Process the event
             processStockPriceUpdate(event);
@@ -41,6 +42,8 @@ public class PriceUpdateConsumerService {
             // If processing was successful, acknowledge the message
             acknowledgment.acknowledge();
             log.info("Stock price update processed and acknowledged successfully");
+        } catch (JsonProcessingException e) {
+            log.error("Failed to serialize/deserialize JSON: {}. Error: {}", message, e.getMessage(), e);
         } catch (Exception e) {
             log.error("Failed to process stock price update message: {}. Error: {}", message, e.getMessage(), e);
         }

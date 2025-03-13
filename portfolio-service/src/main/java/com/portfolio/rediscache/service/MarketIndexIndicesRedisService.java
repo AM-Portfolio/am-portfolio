@@ -40,7 +40,7 @@ public class MarketIndexIndicesRedisService {
                 return;
             }
             
-            log.info("Starting to process {} market index indices updates", marketIndexIndicesUpdates.size());
+            log.info("Processing {} market index indices updates", marketIndexIndicesUpdates.size());
             try {
                 // Process in chunks of BATCH_SIZE
                 for (int i = 0; i < marketIndexIndicesUpdates.size(); i += BATCH_SIZE) {
@@ -49,10 +49,10 @@ public class MarketIndexIndicesRedisService {
                     log.debug("Processing batch {} to {} of {}", i, end, marketIndexIndicesUpdates.size());
                     processBatch(batch);
                 }
-                log.info("Successfully processed all {} market index indices updates", marketIndexIndicesUpdates.size());
+                log.info("Market indices batch processing completed successfully");
             } catch (Exception e) {
-                log.error("Error processing price update batch: {}", e.getMessage(), e);
-                // Not rethrowing exception as per requirement to not acknowledge failures
+                log.error("Failed to process market indices batch: {}", e.getMessage());
+                log.debug("Error details: ", e);
             }
         });
     }
@@ -64,15 +64,20 @@ public class MarketIndexIndicesRedisService {
             Map<String, MarketIndexIndicesCache> realtimeUpdates = batch.stream()
                 .map(this::convertToMarketIndexIndicesCache)
                 .collect(Collectors.toMap(
-                    price -> PRICE_KEY_PREFIX + price.getKey(),
-                    price -> price
+                    price -> generateRealtimeKey(price),
+                    price -> price,
+                    (existing, replacement) -> {
+                        log.debug("Duplicate key detected for {}, keeping most recent value", existing.getIndexSymbol());
+                        return existing.getTimestamp().isBefore(replacement.getTimestamp()) ? replacement : existing;
+                    }
                 ));
 
             Map<String, MarketIndexIndicesCache> historicalUpdates = batch.stream()
                 .map(this::convertToMarketIndexIndicesCache)
                 .collect(Collectors.toMap(
-                    price -> HISTORICAL_KEY_PREFIX + price.getKey() + ":" + price.getTimestamp(),
-                    price -> price
+                    price -> generateHistoricalKey(price),
+                    price -> price,
+                    (existing, replacement) -> replacement
                 ));
 
             try {
@@ -80,9 +85,11 @@ public class MarketIndexIndicesRedisService {
                 marketIndexIndicesRedisTemplate.opsForValue().multiSet(realtimeUpdates);
                 realtimeUpdates.keySet().forEach(key -> 
                 marketIndexIndicesRedisTemplate.expire(key, REALTIME_TTL));
-                log.debug("Successfully cached {} realtime price updates", realtimeUpdates.size());
+                log.info("Cached {} realtime market indices", realtimeUpdates.size());
+                log.debug("Realtime updates: {}", realtimeUpdates.keySet());
             } catch (Exception e) {
-                log.error("Failed to cache realtime updates: {}", e.getMessage(), e);
+                log.error("Failed to cache realtime market indices: {}", e.getMessage());
+                log.debug("Failed realtime updates: {}", realtimeUpdates.keySet(), e);
             }
 
             try {
@@ -90,21 +97,32 @@ public class MarketIndexIndicesRedisService {
                 marketIndexIndicesRedisTemplate.opsForValue().multiSet(historicalUpdates);
                 historicalUpdates.keySet().forEach(key -> 
                 marketIndexIndicesRedisTemplate.expire(key, HISTORICAL_TTL));
-                log.debug("Successfully cached {} historical price updates", historicalUpdates.size());
+                log.info("Cached {} historical market indices", historicalUpdates.size());
+                log.debug("Historical updates: {}", historicalUpdates.keySet());
             } catch (Exception e) {
-                log.error("Failed to cache historical updates: {}", e.getMessage(), e);
+                log.error("Failed to cache historical market indices: {}", e.getMessage());
+                log.debug("Failed historical updates: {}", historicalUpdates.keySet(), e);
             }
 
             long duration = System.currentTimeMillis() - startTime;
-            log.info("Batch processing completed in {}ms for {} updates", duration, batch.size());
+            log.debug("Batch processing completed in {}ms", duration);
         } catch (Exception e) {
-            log.error("Failed to process batch: {}", e.getMessage(), e);
+            log.error("Failed to process market indices batch: {}", e.getMessage());
+            log.debug("Error details: ", e);
         }
+    }
+
+    private String generateRealtimeKey(MarketIndexIndicesCache price) {
+        return PRICE_KEY_PREFIX + price.getIndexSymbol();
+    }
+
+    private String generateHistoricalKey(MarketIndexIndicesCache price) {
+        return HISTORICAL_KEY_PREFIX + price.getIndexSymbol() + ":" + price.getTimestamp().toEpochMilli();
     }
 
     private MarketIndexIndicesCache convertToMarketIndexIndicesCache(MarketIndexIndices price) {
         return MarketIndexIndicesCache.builder()
-            .key(price.getKey())
+            .key(price.getIndexSymbol()) // Using indexSymbol as the key
             .index(price.getIndex())
             .indexSymbol(price.getIndexSymbol())
             .indexIndices(price)
@@ -112,12 +130,20 @@ public class MarketIndexIndicesRedisService {
             .build();
     }
 
-    public Optional<MarketIndexIndicesCache> getLatestPrice(String key) {
+    public Optional<MarketIndexIndicesCache> getLatestPrice(String symbol) {
         try {
+            String key = PRICE_KEY_PREFIX + symbol;
             MarketIndexIndicesCache price = marketIndexIndicesRedisTemplate.opsForValue().get(key);
+            if (price != null) {
+                log.info("Retrieved latest price for {}", symbol);
+                log.debug("Price details: {}", price);
+            } else {
+                log.info("No price found for {}", symbol);
+            }
             return Optional.ofNullable(price);
         } catch (Exception e) {
-            log.error("Error retrieving price for key: {}", key, e);
+            log.error("Failed to retrieve price for {}: {}", symbol, e.getMessage());
+            log.debug("Error details: ", e);
             return Optional.empty();
         }
     }
@@ -135,9 +161,12 @@ public class MarketIndexIndicesRedisService {
                     price.getTimestamp().isBefore(endTime.toInstant(ZoneOffset.UTC)))
                 .forEach(historicalPrices::add);
 
+            log.info("Retrieved {} historical prices for {}", historicalPrices.size(), symbol);
+            log.debug("Historical prices: {}", historicalPrices);
             return historicalPrices;
         } catch (Exception e) {
-            log.error("Error retrieving historical prices for symbol: {}", symbol, e);
+            log.error("Failed to retrieve historical prices for {}: {}", symbol, e.getMessage());
+            log.debug("Error details: ", e);
             return List.of();
         }
     }
@@ -145,13 +174,21 @@ public class MarketIndexIndicesRedisService {
     public void deleteOldPrices(String symbol, LocalDateTime beforeTime) {
         try {
             String pattern = HISTORICAL_KEY_PREFIX + symbol + ":*";
-            marketIndexIndicesRedisTemplate.keys(pattern).stream()
+            List<String> deletedKeys = marketIndexIndicesRedisTemplate.keys(pattern).stream()
                 .map(key -> Map.entry(key, marketIndexIndicesRedisTemplate.opsForValue().get(key)))
                 .filter(entry -> entry.getValue() != null && 
                     entry.getValue().getTimestamp().isBefore(beforeTime.toInstant(ZoneOffset.UTC)))
-                .forEach(entry -> marketIndexIndicesRedisTemplate.delete(entry.getKey()));
+                .map(entry -> {
+                    marketIndexIndicesRedisTemplate.delete(entry.getKey());
+                    return entry.getKey();
+                })
+                .collect(Collectors.toList());
+            
+            log.info("Deleted {} old prices for {}", deletedKeys.size(), symbol);
+            log.debug("Deleted keys: {}", deletedKeys);
         } catch (Exception e) {
-            log.error("Error deleting old prices for symbol: {}", symbol, e);
+            log.error("Failed to delete old prices for {}: {}", symbol, e.getMessage());
+            log.debug("Error details: ", e);
         }
     }
 }
