@@ -55,8 +55,8 @@ application-*.yml
 !application.yml
 
 ### Environment Files ###
-!.env
-!.env.*
+.env
+.env.*
 
 
 ### Docker ###
