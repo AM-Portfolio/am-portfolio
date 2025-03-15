@@ -9,9 +9,9 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
 
 import com.am.common.investment.model.equity.EquityPrice;
+import com.am.common.investment.model.events.EquityPriceUpdateEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.portfolio.kafka.model.EquityPriceUpdateEvent;
-import com.portfolio.service.StockPriceRedisService;
+import com.portfolio.rediscache.service.StockPriceRedisService;
 
 import java.util.List;
 
@@ -19,13 +19,13 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 @ConditionalOnProperty(name = "app.kafka.stock.consumer.enabled", havingValue = "true", matchIfMissing = false)
-public class StockPriceUpdateEventConsumerService {
+public class PriceUpdateConsumerService {
 
     private final ObjectMapper objectMapper;
     private final StockPriceRedisService stockPriceRedisService;
 
     @KafkaListener(topics = "${app.kafka.stock.topic}", 
-                  groupId = "${spring.kafka.consumer.group-id}",
+                  groupId = "${app.kafka.stock.consumer.id}",
                   containerFactory = "kafkaListenerContainerFactory")
     public void consume(String message, Acknowledgment acknowledgment) {
         try {
