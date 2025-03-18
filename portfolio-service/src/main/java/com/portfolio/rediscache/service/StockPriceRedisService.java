@@ -63,34 +63,50 @@ public class StockPriceRedisService {
             
             Map<String, StockPriceCache> realtimeUpdates = batch.stream()
                 .map(this::convertToStockPriceCache)
+                .peek(price -> log.info("Creating realtime key for symbol: {}, price: {}", 
+                    price.getSymbol(), price.getClosePrice()))
                 .collect(Collectors.toMap(
-                    price -> PRICE_KEY_PREFIX + price.getSymbol(),
+                    price -> {
+                        String key = PRICE_KEY_PREFIX + price.getSymbol();
+                        log.info("Generated realtime key: {}", key);
+                        return key;
+                    },
                     price -> price
                 ));
 
             Map<String, StockPriceCache> historicalUpdates = batch.stream()
                 .map(this::convertToStockPriceCache)
+                .peek(price -> log.info("Creating historical key for symbol: {}, timestamp: {}, price: {}", 
+                    price.getSymbol(), price.getTimestamp(), price.getClosePrice()))
                 .collect(Collectors.toMap(
-                    price -> HISTORICAL_KEY_PREFIX + price.getSymbol() + ":" + price.getTimestamp(),
+                    price -> {
+                        String key = HISTORICAL_KEY_PREFIX + price.getSymbol() + ":" + price.getTimestamp().toString();
+                        log.info("Generated historical key: {}", key);
+                        return key;
+                    },
                     price -> price
                 ));
 
             try {
-                // Batch write realtime updates
+                log.info("Writing {} realtime updates to Redis", realtimeUpdates.size());
                 stockPriceRedisTemplate.opsForValue().multiSet(realtimeUpdates);
-                realtimeUpdates.keySet().forEach(key -> 
-                    stockPriceRedisTemplate.expire(key, REALTIME_TTL));
-                log.debug("Successfully cached {} realtime price updates", realtimeUpdates.size());
+                realtimeUpdates.keySet().forEach(key -> {
+                    boolean success = stockPriceRedisTemplate.expire(key, REALTIME_TTL).booleanValue();
+                    log.info("Set TTL for realtime key: {}, success: {}", key, success);
+                });
+                log.debug("Successfully cached realtime price updates");
             } catch (Exception e) {
                 log.error("Failed to cache realtime updates: {}", e.getMessage(), e);
             }
 
             try {
-                // Batch write historical updates
+                log.info("Writing {} historical updates to Redis", historicalUpdates.size());
                 stockPriceRedisTemplate.opsForValue().multiSet(historicalUpdates);
-                historicalUpdates.keySet().forEach(key -> 
-                    stockPriceRedisTemplate.expire(key, HISTORICAL_TTL));
-                log.debug("Successfully cached {} historical price updates", historicalUpdates.size());
+                historicalUpdates.keySet().forEach(key -> {
+                    boolean success = stockPriceRedisTemplate.expire(key, HISTORICAL_TTL).booleanValue();
+                    log.info("Set TTL for historical key: {}, success: {}", key, success);
+                });
+                log.debug("Successfully cached historical price updates");
             } catch (Exception e) {
                 log.error("Failed to cache historical updates: {}", e.getMessage(), e);
             }
@@ -126,14 +142,39 @@ public class StockPriceRedisService {
             String pattern = HISTORICAL_KEY_PREFIX + symbol + ":*";
             List<StockPriceCache> historicalPrices = new ArrayList<>();
             
-            // Get all keys matching the pattern
-            stockPriceRedisTemplate.keys(pattern).stream()
-                .map(key -> stockPriceRedisTemplate.opsForValue().get(key))
-                .filter(price -> price != null &&
-                    price.getTimestamp().isAfter(startTime.toInstant(ZoneOffset.UTC)) &&
-                    price.getTimestamp().isBefore(endTime.toInstant(ZoneOffset.UTC)))
-                .forEach(historicalPrices::add);
+            log.info("Searching with pattern: {} for time range: {} to {}", pattern, startTime, endTime);
+            var keys = stockPriceRedisTemplate.keys(pattern);
+            log.info("Found {} keys matching pattern {}", keys.size(), pattern);
+            
+            if (keys.isEmpty()) {
+                // Try to get all keys to see what's actually in Redis
+                var allKeys = stockPriceRedisTemplate.keys("*");
+                log.info("Total keys in Redis: {}", allKeys.size());
+                allKeys.forEach(key -> log.info("Available key: {}", key));
+                return List.of();
+            }
+            
+            // Sort keys to get most recent first
+            List<String> sortedKeys = new ArrayList<>(keys);
+            sortedKeys.sort((k1, k2) -> k2.compareTo(k1));  // Reverse order to get newest first
+            
+            for (String key : sortedKeys) {
+                StockPriceCache price = stockPriceRedisTemplate.opsForValue().get(key);
+                log.info("Key: {}, Price: {}", key, price);
+                if (price != null && price.getTimestamp() != null) {
+                    // Add the most recent price we find, regardless of time range
+                    // This ensures we always get at least one price if available
+                    if (historicalPrices.isEmpty()) {
+                        historicalPrices.add(price);
+                        log.info("Added most recent price for key: {}, timestamp: {}", key, price.getTimestamp());
+                        break;  // We only need the most recent price
+                    }
+                } else {
+                    log.warn("Null price or timestamp for key: {}", key);
+                }
+            }
 
+            log.info("Returning {} historical prices for symbol: {}", historicalPrices.size(), symbol);
             return historicalPrices;
         } catch (Exception e) {
             log.error("Error retrieving historical prices for symbol: {}", symbol, e);

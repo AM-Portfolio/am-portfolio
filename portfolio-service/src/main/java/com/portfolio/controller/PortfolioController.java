@@ -39,7 +39,7 @@ public class PortfolioController {
             @RequestParam String userId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
-            @RequestParam(required = false, defaultValue = "all") String interval) {
+            @RequestParam(required = false) String interval) {
         try {
             TimeInterval timeInterval = TimeInterval.fromCode(interval);
             PortfolioAnalysis analysis = portfolioAnalysisService.analyzePortfolio(

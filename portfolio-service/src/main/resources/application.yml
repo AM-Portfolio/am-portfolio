@@ -4,13 +4,16 @@ spring:
     username: postgres
     password: password
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 3
+      minimum-idle: 1
   jpa:
     hibernate:
       ddl-auto: none
-    show-sql: true
+    show-sql: false
     properties:
       hibernate:
-        format_sql: true
+        format_sql: false
         dialect: org.hibernate.dialect.PostgreSQLDialect
     database-platform: org.hibernate.dialect.PostgreSQLDialect
   kafka:
@@ -20,8 +23,12 @@ spring:
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        fetch.max.bytes: 1048576
+        max.partition.fetch.bytes: 524288
+        fetch.max.wait.ms: 500
+        max.poll.records: 100
   data:
-    #redisendpoint: redis-17365.c325.us-east-1-4.ec2.redns.redis-cloud.com:17365
     redisendpoint: localhost:6379
     redis:
       portfolio:
@@ -40,21 +47,26 @@ app:
       topic: am-portfolio-topic
     stock:
       consumer:
-        id: am-stock-group
-        enabled: true
+        id: am-stock-group.v1
+        enabled: false
       topic: am-stock-price-update
     market-index:
       consumer:
         id: am-market-index-group
-        enabled: true
+        enabled: false
       topic: am-market-index-update
 
 server:
   port: 8080
   servlet:
     context-path: /
+  tomcat:
+    max-threads: 20
+    min-spare-threads: 10
+    max-connections: 200
 
 logging:
   level:
-    com.portfolio: DEBUG
-    org.hibernate.SQL: DEBUG
+    com.portfolio: INFO
+    org.hibernate.SQL: INFO
+    org.springframework.kafka: INFO
