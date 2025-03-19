@@ -8,9 +8,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
 
-import com.portfolio.kafka.model.PortfolioUpdateEvent;
 import com.portfolio.rediscache.service.MarketIndexIndicesRedisService;
-import com.portfolio.service.AMPortfolioService;
 import com.am.common.investment.model.events.MarketIndexIndicesPriceUpdateEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 

@@ -1,6 +1,9 @@
-package com.portfolio.model;
+package com.portfolio.model.portfolio;
 
 import java.time.Instant;
+
+import com.portfolio.model.TimeInterval;
+
 import lombok.Builder;
 import lombok.Data;
 

@@ -9,9 +9,8 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
 
 import com.portfolio.kafka.model.PortfolioUpdateEvent;
-import com.portfolio.mapper.PortfolioMapper;
-import com.portfolio.service.AMPortfolioService;
-import com.am.common.amcommondata.model.PortfolioModel;
+import com.portfolio.mapper.PortfolioMapperv1;
+import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -22,7 +21,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 public class PortfolioUpdateConsumerService {
 
     private final ObjectMapper objectMapper;
-    private final PortfolioMapper portfolioMapper;
+    private final PortfolioMapperv1 portfolioMapper;
     private final PortfolioService portfolioService;
 
     @KafkaListener(topics = "${app.kafka.portfolio.topic}", 
@@ -48,7 +47,7 @@ public class PortfolioUpdateConsumerService {
     }
 
     private void processMessage(PortfolioUpdateEvent event) {
-        PortfolioModel portfolioModel = portfolioMapper.toPortfolioModel(event);
+        PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
         portfolioService.createPortfolio(portfolioModel);
-    }
+    }   
 }

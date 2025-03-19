@@ -8,8 +8,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
-import com.portfolio.model.PortfolioAnalysis;
 import com.portfolio.model.TimeInterval;
+import com.portfolio.model.portfolio.PortfolioAnalysis;
 
 import lombok.extern.slf4j.Slf4j;
 

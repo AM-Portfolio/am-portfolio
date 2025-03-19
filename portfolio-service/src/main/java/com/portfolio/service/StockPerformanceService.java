@@ -9,6 +9,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 import com.am.common.amcommondata.model.asset.AssetModel;
+import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.portfolio.model.PaginatedStockPerformance;
 import com.portfolio.model.StockPerformance;
 import com.portfolio.model.StockPerformanceGroup;
@@ -27,7 +28,7 @@ public class StockPerformanceService {
     private static final int DEFAULT_TOP_N = 5;
     private static final int DEFAULT_PAGE_SIZE = 5;
 
-    public List<StockPerformance> calculateStockPerformances(List<AssetModel> equityHoldings, TimeInterval interval) {
+    public List<StockPerformance> calculateStockPerformances(List<EquityModel> equityHoldings, TimeInterval interval) {
         Instant startTime = interval != null && interval.getDuration() != null ? 
             Instant.now().minus(interval.getDuration()) : null;
 

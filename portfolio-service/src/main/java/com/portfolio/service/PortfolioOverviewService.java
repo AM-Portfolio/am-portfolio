@@ -1,15 +1,12 @@
 package com.portfolio.service;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 
-import com.am.common.amcommondata.model.PortfolioModel;
 import com.am.common.amcommondata.model.PortfolioModelV1;
-import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.enums.AssetType;
 import com.am.common.amcommondata.service.PortfolioService;
@@ -25,51 +22,20 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class PortfolioAnalysisService {
+public class PortfolioOverviewService {
     
     private final PortfolioService portfolioService;
     private final StockPerformanceService stockPerformanceService;
     private final PortfolioAnalysisBuilder portfolioAnalysisBuilder;
     private final PortfolioAnalysisRedisService portfolioAnalysisRedisService;
 
-    public PortfolioAnalysis analyzePortfolio(
-            String portfolioId, 
-            String userId, 
-            Integer pageNumber, 
-            Integer pageSize,
-            TimeInterval interval) {
-        try {
-            Optional<PortfolioAnalysis> cachedAnalysis = getCachedAnalysis(portfolioId, userId, interval);
-            if (cachedAnalysis.isPresent()) {
-                return cachedAnalysis.get();
-            }
-
-            Instant startProcessing = Instant.now();
-            log.info("Starting fresh portfolio analysis - Portfolio: {}, User: {}, Interval: {}", 
-                    portfolioId, userId, interval != null ? interval.getCode() : "null");
-            
-            List<StockPerformance> performances = getPortfolioPerformances(portfolioId, interval);
-            if (performances == null) {
-                return null;
-            }
-
-            PortfolioAnalysis analysis = portfolioAnalysisBuilder.buildAnalysis(portfolioId, 
-                userId, 
-                performances, 
-                pageNumber, 
-                pageSize, 
-                interval,
-                startProcessing
-            );
-
-            portfolioAnalysisRedisService.cachePortfolioAnalysis(analysis, portfolioId, userId, interval);
-            return analysis;
-
-        } catch (Exception e) {
-            log.error("Error analyzing portfolio {}: {}", portfolioId, e.getMessage(), e);
-            return null;
-        }
-    }
+    // public PortfolioOverview overviewPortfolio(String userId) {
+    //     var portfolios = portfolioService.getPortfolioByUserId(userId);
+    //     if (portfolios == null) {
+    //         return null;
+    //     }
+          
+    // }
 
     private Optional<PortfolioAnalysis> getCachedAnalysis(String portfolioId, String userId, TimeInterval interval) {
         Optional<PortfolioAnalysis> cachedAnalysis = portfolioAnalysisRedisService.getLatestAnalysis(
@@ -79,7 +45,6 @@ public class PortfolioAnalysisService {
             log.info("Serving portfolio analysis from cache - Portfolio: {}, User: {}, Interval: {}", 
                 portfolioId, userId, interval != null ? interval.getCode() : "null");
         }
-        
         return cachedAnalysis;
     }
 

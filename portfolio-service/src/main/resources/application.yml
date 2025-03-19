@@ -1,21 +1,4 @@
 spring:
-  datasource:
-    url: jdbc:postgresql://localhost:5432/portfolio
-    username: postgres
-    password: password
-    driver-class-name: org.postgresql.Driver
-    hikari:
-      maximum-pool-size: 3
-      minimum-idle: 1
-  jpa:
-    hibernate:
-      ddl-auto: none
-    show-sql: false
-    properties:
-      hibernate:
-        format_sql: false
-        dialect: org.hibernate.dialect.PostgreSQLDialect
-    database-platform: org.hibernate.dialect.PostgreSQLDialect
   kafka:
     bootstrap-servers: localhost:9092
     consumer:
@@ -39,11 +22,15 @@ spring:
         key-prefix: "market-index:indices:"
 
 app:
+  persistence:
+    mongodb:
+      uri: mongodb://admin:password@localhost:27017/portfolio?authSource=admin
+      database: portfolio
   kafka:
     portfolio:
       consumer:
         id: am-portfolio-group
-        enabled: false
+        enabled: true
       topic: am-portfolio-topic
     stock:
       consumer:
@@ -68,5 +55,4 @@ server:
 logging:
   level:
     com.portfolio: INFO
-    org.hibernate.SQL: INFO
     org.springframework.kafka: INFO

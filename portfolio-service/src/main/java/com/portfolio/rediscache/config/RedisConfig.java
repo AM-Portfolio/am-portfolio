@@ -11,8 +11,8 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.portfolio.model.MarketIndexIndicesCache;
-import com.portfolio.model.PortfolioAnalysis;
 import com.portfolio.model.StockPriceCache;
+import com.portfolio.model.portfolio.PortfolioAnalysis;
 
 @Configuration
 @EnableCaching

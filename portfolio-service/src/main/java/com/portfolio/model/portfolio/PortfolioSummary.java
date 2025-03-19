@@ -1,4 +1,4 @@
-package com.portfolio.model;
+package com.portfolio.model.portfolio;
 
 import java.time.Instant;
 import lombok.Builder;

@@ -11,11 +11,11 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 
 import com.portfolio.model.MarketComparison;
-import com.portfolio.model.PerformanceMetrics;
-import com.portfolio.model.PortfolioAnalysis;
-import com.portfolio.model.PortfolioSummary;
 import com.portfolio.model.StockPerformance;
 import com.portfolio.model.TimeInterval;
+import com.portfolio.model.portfolio.PerformanceMetrics;
+import com.portfolio.model.portfolio.PortfolioAnalysis;
+import com.portfolio.model.portfolio.PortfolioSummary;
 import com.portfolio.service.StockPerformanceService;
 
 import lombok.RequiredArgsConstructor;

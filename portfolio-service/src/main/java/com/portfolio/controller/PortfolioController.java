@@ -1,11 +1,10 @@
 package com.portfolio.controller;
 
 import com.am.common.amcommondata.model.PortfolioModel;
-import com.am.common.amcommondata.model.asset.AssetModel;
-import com.am.common.amcommondata.model.enums.AssetType;
-import com.portfolio.model.PortfolioAnalysis;
+import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.model.TimeInterval;
-import com.portfolio.service.AMPortfolioService;
+import com.portfolio.model.portfolio.PortfolioAnalysis;
 import com.portfolio.service.PortfolioAnalysisService;
 
 import lombok.RequiredArgsConstructor;
@@ -20,17 +19,17 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class PortfolioController {
     
-    private final AMPortfolioService portfolioService;
+    private final PortfolioService portfolioService;
     private final PortfolioAnalysisService portfolioAnalysisService;
 
     @GetMapping("/{portfolioId}")
-    public ResponseEntity<PortfolioModel> getPortfolioById(@PathVariable String portfolioId) {
+    public ResponseEntity<PortfolioModelV1> getPortfolioById(@PathVariable String portfolioId) {
         return ResponseEntity.ok(portfolioService.getPortfolioById(UUID.fromString(portfolioId)));
     }
 
     @GetMapping
-    public ResponseEntity<List<PortfolioModel>> getPortfolios(@RequestParam String userId) {
-        return ResponseEntity.ok(portfolioService.getPortfolios(userId));
+    public ResponseEntity<List<PortfolioModelV1>> getPortfolios(@RequestParam String userId) {
+        return ResponseEntity.ok(portfolioService.getPortfoliosByUserId(userId));
     }
 
     @GetMapping("/{portfolioId}/analysis")
@@ -52,5 +51,7 @@ public class PortfolioController {
             return ResponseEntity.badRequest().build();
         }
     }
+
+
 
 }
