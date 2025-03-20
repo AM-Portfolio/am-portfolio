@@ -2,7 +2,7 @@ spring:
   kafka:
     bootstrap-servers: localhost:9092
     consumer:
-      group-id: am-portfolio-group
+      group-id: am-portfolio-group-1
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
@@ -15,11 +15,17 @@ spring:
     redisendpoint: localhost:6379
     redis:
       portfolio:
-        ttl: 1800  # 30 minutes in seconds
+        ttl: 129600  # 30 Days in seconds
         key-prefix: "portfolio:analysis:"
       market-index:
-        ttl: 900  # 15 minutes in seconds
+        ttl: 129600  # 30 Days in seconds
         key-prefix: "market-index:indices:"
+      stock:
+        ttl: 129600  # 30 Days in seconds
+        key-prefix: "stock:price:"
+        historical:
+          key-prefix: "stock:historical:"
+          ttl: 129600  # 30 Days in seconds
 
 app:
   persistence:
@@ -29,13 +35,13 @@ app:
   kafka:
     portfolio:
       consumer:
-        id: am-portfolio-group
-        enabled: true
+        id: am-portfolio-group-1
+        enabled: false
       topic: am-portfolio-topic
     stock:
       consumer:
         id: am-stock-group.v1
-        enabled: false
+        enabled: true
       topic: am-stock-price-update
     market-index:
       consumer:

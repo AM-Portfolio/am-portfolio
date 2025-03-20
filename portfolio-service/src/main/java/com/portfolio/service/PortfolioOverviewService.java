@@ -1,23 +1,26 @@
 package com.portfolio.service;
 
 import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
-import com.am.common.amcommondata.model.asset.equity.EquityModel;
-import com.am.common.amcommondata.model.enums.AssetType;
+import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.service.PortfolioService;
-import com.portfolio.builder.PortfolioAnalysisBuilder;
-import com.portfolio.model.StockPerformance;
-import com.portfolio.model.TimeInterval;
-import com.portfolio.model.portfolio.PortfolioAnalysis;
-import com.portfolio.rediscache.service.PortfolioAnalysisRedisService;
+import com.portfolio.mapper.PortfolioMapperv1;
+import com.portfolio.mapper.holdings.PortfolioHoldingsMapper;
+import com.portfolio.model.portfolio.EquityHoldings;
+import com.portfolio.model.portfolio.PortfolioHoldings;
+import com.portfolio.model.portfolio.v1.BrokerPortfolioSummary;
+import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
+import com.portfolio.rediscache.service.StockPriceRedisService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import java.time.LocalDateTime;
+import java.util.HashMap;
 
 @Service
 @RequiredArgsConstructor
@@ -25,40 +28,66 @@ import lombok.extern.slf4j.Slf4j;
 public class PortfolioOverviewService {
     
     private final PortfolioService portfolioService;
-    private final StockPerformanceService stockPerformanceService;
-    private final PortfolioAnalysisBuilder portfolioAnalysisBuilder;
-    private final PortfolioAnalysisRedisService portfolioAnalysisRedisService;
+    private final PortfolioMapperv1 portfolioMapper;
+    private final PortfolioHoldingsMapper portfolioHoldingsMapper;
+    private final StockPriceRedisService stockPriceRedisService;
 
-    // public PortfolioOverview overviewPortfolio(String userId) {
-    //     var portfolios = portfolioService.getPortfolioByUserId(userId);
-    //     if (portfolios == null) {
-    //         return null;
-    //     }
-          
-    // }
-
-    private Optional<PortfolioAnalysis> getCachedAnalysis(String portfolioId, String userId, TimeInterval interval) {
-        Optional<PortfolioAnalysis> cachedAnalysis = portfolioAnalysisRedisService.getLatestAnalysis(
-            portfolioId, userId, interval);
-        
-        if (cachedAnalysis.isPresent()) {
-            log.info("Serving portfolio analysis from cache - Portfolio: {}, User: {}, Interval: {}", 
-                portfolioId, userId, interval != null ? interval.getCode() : "null");
-        }
-        return cachedAnalysis;
-    }
-
-    private List<StockPerformance> getPortfolioPerformances(String portfolioId, TimeInterval interval) {
-        PortfolioModelV1 portfolio = portfolioService.getPortfolioById(UUID.fromString(portfolioId));
-        if (portfolio == null) {
-            log.error("Portfolio not found for ID: {}", portfolioId);
+    public PortfolioSummaryV1 overviewPortfolio(String userId) {
+        var portfolios = portfolioService.getPortfoliosByUserId(userId);
+        if (portfolios == null) {
             return null;
         }
 
-        List<EquityModel> equityHoldings = portfolio.getEquityModels().stream()
-            .filter(asset -> AssetType.EQUITY.equals(asset.getAssetType()))
-            .toList();
+        // Group by broker and create summary
+        Map<BrokerType, BrokerPortfolioSummary> brokerSummaryMap = new HashMap<>();
 
-        return stockPerformanceService.calculateStockPerformances(equityHoldings, interval);
+        for (var portfolio : portfolios) {
+            var portfolioSummary = portfolioMapper.toPortfolioModelV1(portfolio);
+
+            brokerSummaryMap.computeIfAbsent(portfolio.getBrokerType(), brokerType -> portfolioSummary);
+        }
+
+        // Create final summary
+        PortfolioSummaryV1 finalSummary = getPortfolioSummary(portfolios);
+        finalSummary.setBrokerPortfolios(brokerSummaryMap);
+
+        return finalSummary;
+    }
+
+    private PortfolioSummaryV1 getPortfolioSummary(List<PortfolioModelV1> portfolio) {
+        var totalValue = portfolio.stream().mapToDouble(PortfolioModelV1::getTotalValue).sum();
+        return PortfolioSummaryV1.builder()
+            .totalValue(totalValue)
+            .lastUpdated(LocalDateTime.now())
+            .build();
+    }
+
+    public PortfolioHoldings getPortfolioHoldings(String userId) {
+        var portfolios = portfolioService.getPortfoliosByUserId(userId);
+        if (portfolios == null) {
+            return null;
+        }
+        var portfolioHoldings = portfolioHoldingsMapper.toPortfolioHoldingsV1(portfolios);
+        portfolioHoldings.setEquityHoldings(enrichStockPriceAndPerformance(portfolioHoldings.getEquityHoldings()));
+        return portfolioHoldings;
+    }
+
+    private List<EquityHoldings> enrichStockPriceAndPerformance(List<EquityHoldings> equityHoldings) {
+        return equityHoldings.stream()
+            .map(this::enrichStockPriceAndPerformance)
+            .toList();
+    }
+
+    private EquityHoldings enrichStockPriceAndPerformance(EquityHoldings equityHoldings) {
+        var latestPrice = stockPriceRedisService.getLatestPrice(equityHoldings.getSymbol());
+        if (latestPrice.isPresent()) {
+            var currentPrice = latestPrice.get().getClosePrice();
+            var currentValue = currentPrice * equityHoldings.getQuantity();
+            equityHoldings.setCurrentPrice(currentPrice);
+            equityHoldings.setCurrentValue(currentValue);
+            equityHoldings.setGainLoss(currentValue - equityHoldings.getInvestmentCost());
+            equityHoldings.setGainLossPercentage(equityHoldings.getGainLoss() / equityHoldings.getInvestmentCost());
+        }
+        return equityHoldings;
     }
 }

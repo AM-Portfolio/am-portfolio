@@ -32,10 +32,12 @@ public class StockPerformanceService {
         Instant startTime = interval != null && interval.getDuration() != null ? 
             Instant.now().minus(interval.getDuration()) : null;
 
-        return equityHoldings.stream()
+        var performances = equityHoldings.stream()
             .map(asset -> getGainLossPercentage(asset, startTime))
             .filter(java.util.Objects::nonNull)
             .toList();
+
+        return performances;
     }
 
     public StockPerformanceGroup calculatePerformanceGroup(
@@ -127,7 +129,7 @@ public class StockPerformanceService {
         double gainLoss = (currentPrice - averagePrice) * quantity;
         double gainLossPercentage = ((currentPrice - averagePrice) / averagePrice) * 100;
 
-        return StockPerformance.builder()
+        var stockPerformance = StockPerformance.builder()
             .symbol(asset.getSymbol())
             .quantity(quantity)
             .currentPrice(currentPrice)
@@ -135,6 +137,8 @@ public class StockPerformanceService {
             .gainLoss(gainLoss)
             .gainLossPercentage(gainLossPercentage)
             .build();
+
+        return stockPerformance;
     }
 
     private PaginatedStockPerformance getPaginatedPerformances(

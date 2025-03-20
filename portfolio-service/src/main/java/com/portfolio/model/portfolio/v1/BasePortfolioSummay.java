@@ -1,6 +1,6 @@
 package com.portfolio.model.portfolio.v1;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
@@ -14,12 +14,13 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @JsonInclude(Include.NON_NULL)
 public class BasePortfolioSummay {
-    private double totalValue;
-    private double totalCost;
-    private double totalGainLoss;
-    private double totalGainLossPercentage;
-    private int totalAssets;
-    private int gainersCount;
-    private int losersCount;
-    private Instant lastUpdated;
+
+    private Double totalValue;
+    private Double totalCost;
+    private Double totalGainLoss;
+    private Double totalGainLossPercentage;
+    private Integer totalAssets;
+    private Integer gainersCount;
+    private Integer losersCount;
+    private LocalDateTime lastUpdated;
 }

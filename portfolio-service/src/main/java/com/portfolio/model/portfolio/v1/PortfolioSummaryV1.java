@@ -1,8 +1,8 @@
 package com.portfolio.model.portfolio.v1;
 
-import java.time.Instant;
-import java.util.List;
+import java.util.Map;
 
+import com.am.common.amcommondata.model.enums.BrokerType;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
 
@@ -17,5 +17,5 @@ import lombok.experimental.SuperBuilder;
 @EqualsAndHashCode(callSuper = true)
 @JsonInclude(Include.NON_NULL)
 public class PortfolioSummaryV1 extends BasePortfolioSummay {
-    private List<BrokerPortfolioSummary> brokerPortfolios;
+    private Map<BrokerType, BrokerPortfolioSummary> brokerPortfolios;
 }

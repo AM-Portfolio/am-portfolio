@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.Map;
 
 import com.portfolio.model.TimeInterval;
+import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 
 import lombok.Builder;
 import lombok.Data;
@@ -12,11 +13,7 @@ import lombok.Data;
 @Builder
 public class PortfolioOverview {
     // Core portfolio information
-    private String portfolioId;
-    private PortfolioSummary summary;
-    
-    // Time-based performance metrics
-    private Map<TimeInterval, PerformanceMetrics> timeBasedMetrics;
+    private PortfolioSummaryV1 portfolioSummary;
     
     // Metadata
     private TimeInterval currentInterval;
