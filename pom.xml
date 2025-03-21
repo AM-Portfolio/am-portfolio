@@ -24,10 +24,11 @@
         <java.version>17</java.version>
         <spring-boot.version>3.2.3</spring-boot.version>
         <spring-kafka.version>3.1.1</spring-kafka.version>
-        <postgresql.version>42.7.2</postgresql.version>
         <lombok.version>1.18.30</lombok.version>
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
+        <am.investment.version>1.5.2-SNAPSHOT</am.investment.version>
+        <am.common.version>1.2.5-SNAPSHOT</am.common.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <am-common-investment.version>1.6.0-SNAPSHOT</am-common-investment.version>
         <am-common-data-parent.version>1.1.4-SNAPSHOT</am-common-data-parent.version>

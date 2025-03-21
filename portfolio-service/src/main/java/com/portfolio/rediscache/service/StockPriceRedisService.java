@@ -1,4 +1,4 @@
-package com.portfolio.service;
+package com.portfolio.rediscache.service;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -10,6 +10,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -26,11 +27,19 @@ import lombok.extern.slf4j.Slf4j;
 public class StockPriceRedisService {
 
     private final RedisTemplate<String, StockPriceCache> stockPriceRedisTemplate;
-    private static final String PRICE_KEY_PREFIX = "stock:price:";
-    private static final String HISTORICAL_KEY_PREFIX = "stock:historical:";
-    private static final Duration REALTIME_TTL = Duration.ofHours(24); // Keep realtime data for 24 hours
-    private static final Duration HISTORICAL_TTL = Duration.ofDays(30); // Keep historical data for 30 days
     private static final int BATCH_SIZE = 100;
+
+    @Value("${spring.data.redis.stock.ttl}")
+    private Integer stockTtl;
+
+    @Value("${spring.data.redis.stock.key-prefix}")
+    private String stockKeyPrefix;
+
+    @Value("${spring.data.redis.stock.historical.key-prefix}")
+    private String historicalKeyPrefix;
+
+    @Value("${spring.data.redis.stock.historical.ttl}")
+    private Integer historicalTtl;
 
     @Async
     public CompletableFuture<Void> cacheEquityPriceUpdateBatch(List<EquityPrice> priceUpdates) {
@@ -63,34 +72,50 @@ public class StockPriceRedisService {
             
             Map<String, StockPriceCache> realtimeUpdates = batch.stream()
                 .map(this::convertToStockPriceCache)
+                .peek(price -> log.info("Creating realtime key for symbol: {}, price: {}", 
+                    price.getSymbol(), price.getClosePrice()))
                 .collect(Collectors.toMap(
-                    price -> PRICE_KEY_PREFIX + price.getSymbol(),
+                    price -> {
+                        String key = stockKeyPrefix + price.getSymbol();
+                        log.info("Generated realtime key: {}", key);
+                        return key;
+                    },
                     price -> price
                 ));
 
             Map<String, StockPriceCache> historicalUpdates = batch.stream()
                 .map(this::convertToStockPriceCache)
+                .peek(price -> log.info("Creating historical key for symbol: {}, timestamp: {}, price: {}", 
+                    price.getSymbol(), price.getTimestamp(), price.getClosePrice()))
                 .collect(Collectors.toMap(
-                    price -> HISTORICAL_KEY_PREFIX + price.getSymbol() + ":" + price.getTimestamp(),
+                    price -> {
+                        String key = historicalKeyPrefix + price.getSymbol() + ":" + price.getTimestamp().toString();
+                        log.info("Generated historical key: {}", key);
+                        return key;
+                    },
                     price -> price
                 ));
 
             try {
-                // Batch write realtime updates
+                log.info("Writing {} realtime updates to Redis", realtimeUpdates.size());
                 stockPriceRedisTemplate.opsForValue().multiSet(realtimeUpdates);
-                realtimeUpdates.keySet().forEach(key -> 
-                    stockPriceRedisTemplate.expire(key, REALTIME_TTL));
-                log.debug("Successfully cached {} realtime price updates", realtimeUpdates.size());
+                realtimeUpdates.keySet().forEach(key -> {
+                    boolean success = stockPriceRedisTemplate.expire(key, Duration.ofSeconds(stockTtl)).booleanValue();
+                    log.info("Set TTL for realtime key: {}, success: {}", key, success);
+                });
+                log.debug("Successfully cached realtime price updates");
             } catch (Exception e) {
                 log.error("Failed to cache realtime updates: {}", e.getMessage(), e);
             }
 
             try {
-                // Batch write historical updates
+                log.info("Writing {} historical updates to Redis", historicalUpdates.size());
                 stockPriceRedisTemplate.opsForValue().multiSet(historicalUpdates);
-                historicalUpdates.keySet().forEach(key -> 
-                    stockPriceRedisTemplate.expire(key, HISTORICAL_TTL));
-                log.debug("Successfully cached {} historical price updates", historicalUpdates.size());
+                historicalUpdates.keySet().forEach(key -> {
+                    boolean success = stockPriceRedisTemplate.expire(key, Duration.ofSeconds(historicalTtl)).booleanValue();
+                    log.info("Set TTL for historical key: {}, success: {}", key, success);
+                });
+                log.debug("Successfully cached historical price updates");
             } catch (Exception e) {
                 log.error("Failed to cache historical updates: {}", e.getMessage(), e);
             }
@@ -112,7 +137,7 @@ public class StockPriceRedisService {
 
     public Optional<StockPriceCache> getLatestPrice(String symbol) {
         try {
-            String key = PRICE_KEY_PREFIX + symbol;
+            String key = stockKeyPrefix + symbol;
             StockPriceCache price = stockPriceRedisTemplate.opsForValue().get(key);
             return Optional.ofNullable(price);
         } catch (Exception e) {
@@ -123,17 +148,34 @@ public class StockPriceRedisService {
 
     public List<StockPriceCache> getHistoricalPrices(String symbol, LocalDateTime startTime, LocalDateTime endTime) {
         try {
-            String pattern = HISTORICAL_KEY_PREFIX + symbol + ":*";
+            String pattern = historicalKeyPrefix + symbol + ":*";
             List<StockPriceCache> historicalPrices = new ArrayList<>();
             
-            // Get all keys matching the pattern
-            stockPriceRedisTemplate.keys(pattern).stream()
-                .map(key -> stockPriceRedisTemplate.opsForValue().get(key))
-                .filter(price -> price != null &&
-                    price.getTimestamp().isAfter(startTime.toInstant(ZoneOffset.UTC)) &&
-                    price.getTimestamp().isBefore(endTime.toInstant(ZoneOffset.UTC)))
-                .forEach(historicalPrices::add);
+            log.info("Searching with pattern: {} for time range: {} to {}", pattern, startTime, endTime);
+            var keys = stockPriceRedisTemplate.keys(pattern);
+            log.info("Found {} keys matching pattern {}", keys.size(), pattern);
+            
+            // Sort keys to get most recent first
+            List<String> sortedKeys = new ArrayList<>(keys);
+            sortedKeys.sort((k1, k2) -> k2.compareTo(k1));  // Reverse order to get newest first
+            
+            for (String key : sortedKeys) {
+                StockPriceCache price = stockPriceRedisTemplate.opsForValue().get(key);
+                log.info("Key: {}, Price: {}", key, price);
+                if (price != null && price.getTimestamp() != null) {
+                    // Add the most recent price we find, regardless of time range
+                    // This ensures we always get at least one price if available
+                    if (historicalPrices.isEmpty()) {
+                        historicalPrices.add(price);
+                        log.info("Added most recent price for key: {}, timestamp: {}", key, price.getTimestamp());
+                        break;  // We only need the most recent price
+                    }
+                } else {
+                    log.warn("Null price or timestamp for key: {}", key);
+                }
+            }
 
+            log.info("Returning {} historical prices for symbol: {}", historicalPrices.size(), symbol);
             return historicalPrices;
         } catch (Exception e) {
             log.error("Error retrieving historical prices for symbol: {}", symbol, e);
@@ -143,7 +185,7 @@ public class StockPriceRedisService {
 
     public void deleteOldPrices(String symbol, LocalDateTime beforeTime) {
         try {
-            String pattern = HISTORICAL_KEY_PREFIX + symbol + ":*";
+            String pattern = historicalKeyPrefix + symbol + ":*";
             stockPriceRedisTemplate.keys(pattern).stream()
                 .map(key -> Map.entry(key, stockPriceRedisTemplate.opsForValue().get(key)))
                 .filter(entry -> entry.getValue() != null && 
