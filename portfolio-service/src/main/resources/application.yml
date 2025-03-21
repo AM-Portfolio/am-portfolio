@@ -14,9 +14,15 @@ spring:
   data:
     redisendpoint: localhost:6379
     redis:
-      portfolio:
-        ttl: 129600  # 30 Days in seconds
+      portfolio-mover:
+        ttl: 900  # 15 minutes in seconds
         key-prefix: "portfolio:analysis:"
+      portfolio-summary:
+        ttl: 900  # 15 minutes in seconds
+        key-prefix: "portfolio:summary:"
+      portfolio-holdings:
+        ttl: 900  # 15 minutes in seconds
+        key-prefix: "portfolio:holdings:"
       market-index:
         ttl: 129600  # 30 Days in seconds
         key-prefix: "market-index:indices:"
@@ -40,7 +46,7 @@ app:
       topic: am-portfolio-topic
     stock:
       consumer:
-        id: am-stock-group.v1
+        id: am-stock-group.v2
         enabled: true
       topic: am-stock-price-update
     market-index:

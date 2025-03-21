@@ -12,7 +12,7 @@ import lombok.Data;
 @Data
 @Builder
 @JsonInclude(Include.NON_NULL)
-public class EquityHoldings {
+public class  EquityHoldings {
    private String isin;
    private String symbol;
    private String name;

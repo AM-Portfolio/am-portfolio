@@ -11,34 +11,30 @@ import org.springframework.stereotype.Service;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.PortfolioAnalysis;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class PortfolioAnalysisRedisService {
     
     private final RedisTemplate<String, PortfolioAnalysis> portfolioAnalysisRedisTemplate;
-    private final String keyPrefix;
-    private final Duration defaultTtl;
 
-    public PortfolioAnalysisRedisService(
-            RedisTemplate<String, PortfolioAnalysis> portfolioAnalysisRedisTemplate,
-            @Value("${spring.data.redis.portfolio.key-prefix:portfolio:analysis:}") String keyPrefix,
-            @Value("${spring.data.redis.portfolio.ttl:1800}") Integer ttlSeconds) {
-        this.portfolioAnalysisRedisTemplate = portfolioAnalysisRedisTemplate;
-        this.keyPrefix = keyPrefix;
-        this.defaultTtl = Duration.ofSeconds(ttlSeconds);
-        log.info("Initialized PortfolioAnalysisRedisService with TTL: {} seconds", ttlSeconds);
-    }
+    @Value("${spring.data.redis.portfolio-mover.ttl}")
+    private Integer portfolioMoverTtl;
+
+    @Value("${spring.data.redis.portfolio-mover.key-prefix}")
+    private String portfolioMoverKeyPrefix;
 
     public void cachePortfolioAnalysis(PortfolioAnalysis analysis, String portfolioId, String userId, TimeInterval interval) {
         String key = buildKey(portfolioId, userId, interval);
         try {
             // For short intervals, use the interval duration as TTL
             Duration ttl = interval != null && interval.getDuration() != null && 
-                          interval.getDuration().compareTo(defaultTtl) < 0 
+                          interval.getDuration().compareTo(Duration.ofSeconds(portfolioMoverTtl)) < 0 
                           ? interval.getDuration() 
-                          : defaultTtl;
+                          : Duration.ofSeconds(portfolioMoverTtl);
             
             portfolioAnalysisRedisTemplate.opsForValue().set(key, analysis, ttl);
             log.debug("Cached portfolio analysis for key: {} with TTL: {} seconds", key, ttl.getSeconds());
@@ -71,7 +67,7 @@ public class PortfolioAnalysisRedisService {
     }
 
     private String buildKey(String portfolioId, String userId, TimeInterval interval) {
-        return keyPrefix + portfolioId + ":" + userId + ":" + 
+        return portfolioMoverKeyPrefix + portfolioId + ":" + userId + ":" + 
                (interval != null ? interval.getCode() : "default");
     }
 }

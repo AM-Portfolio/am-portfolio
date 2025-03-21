@@ -1,5 +1,6 @@
 package com.portfolio.model.portfolio;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -12,5 +13,7 @@ import lombok.Data;
 @Builder
 @JsonInclude(Include.NON_NULL)
 public class PortfolioHoldings {
+    private String userId;
     private List<EquityHoldings> equityHoldings;
+    private LocalDateTime lastUpdated;
 }

@@ -39,4 +39,25 @@ public class PortfolioHoldingsMapper {
             .build();
         return portfolioHoldings;
     }
+
+    public List<EquityHoldings> toEquityHoldings(List<PortfolioModelV1> portfolios) {
+        Map<String, EquityHoldings> equityHoldingsMap = new HashMap<>();
+
+        for (PortfolioModelV1 portfolio : portfolios) {
+            for (EquityModel equity : portfolio.getEquityModels()) {
+                String isin = equity.getIsin();
+
+                EquityHoldings holdings = equityHoldingsMap.computeIfAbsent(isin, k -> equityHoldingsMapper.toEquityHoldings(equity));
+
+                holdings.setQuantity(holdings.getQuantity() + equity.getQuantity());
+
+                // Add broker holding
+                holdings.getBrokerPortfolios().add(EquityBrokerHolding.builder()
+                    .brokerType(portfolio.getBrokerType())
+                    .quantity(equity.getQuantity())
+                    .build());
+            }
+        }
+        return equityHoldingsMap.values().stream().collect(Collectors.toList());
+    }
 }

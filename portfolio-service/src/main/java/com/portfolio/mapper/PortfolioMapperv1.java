@@ -1,15 +1,11 @@
 package com.portfolio.mapper;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
-import com.am.common.amcommondata.model.PortfolioModel;
 import com.am.common.amcommondata.model.PortfolioModelV1;
-import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.asset.mutualfund.MutualFundModel;
 import com.am.common.amcommondata.model.enums.AssetType;
@@ -42,7 +38,7 @@ public class PortfolioMapperv1 {
     public BrokerPortfolioSummary toPortfolioModelV1(PortfolioModelV1 portfolio) {
 
         BrokerPortfolioSummary portfolioModel = BrokerPortfolioSummary.builder()
-        .totalValue(calculateTotalValue(portfolio.getEquityModels()))
+        .investmentValue(calculateTotalValue(portfolio.getEquityModels()))
         .totalAssets(portfolio.getAssetCount())
         .lastUpdated(portfolio.getUpdatedAt())
         .build();

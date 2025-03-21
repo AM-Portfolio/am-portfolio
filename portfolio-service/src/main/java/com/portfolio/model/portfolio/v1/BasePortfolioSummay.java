@@ -15,8 +15,8 @@ import lombok.experimental.SuperBuilder;
 @JsonInclude(Include.NON_NULL)
 public class BasePortfolioSummay {
 
-    private Double totalValue;
-    private Double totalCost;
+    private Double investmentValue;
+    private Double currentValue;
     private Double totalGainLoss;
     private Double totalGainLossPercentage;
     private Integer totalAssets;

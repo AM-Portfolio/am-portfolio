@@ -1,6 +1,5 @@
 package com.portfolio.rediscache.config;
 
-
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -13,21 +12,21 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.portfolio.model.MarketIndexIndicesCache;
 import com.portfolio.model.StockPriceCache;
 import com.portfolio.model.portfolio.PortfolioAnalysis;
+import com.portfolio.model.portfolio.PortfolioHoldings;
+import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 
 @Configuration
 @EnableCaching
 public class RedisConfig {
 
-    @Bean
-    public RedisTemplate<String, StockPriceCache> stockPriceRedisTemplate(RedisConnectionFactory connectionFactory) {
-        RedisTemplate<String, StockPriceCache> template = new RedisTemplate<>();
+    private <T> RedisTemplate<String, T> createRedisTemplate(RedisConnectionFactory connectionFactory, Class<T> clazz) {
+        RedisTemplate<String, T> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
         
         ObjectMapper mapper = new ObjectMapper();
         mapper.findAndRegisterModules();
         
-        Jackson2JsonRedisSerializer<StockPriceCache> serializer = new Jackson2JsonRedisSerializer<>(StockPriceCache.class);
-        serializer.setObjectMapper(mapper);
+        Jackson2JsonRedisSerializer<T> serializer = new Jackson2JsonRedisSerializer<>(mapper, clazz);
         
         template.setKeySerializer(new StringRedisSerializer());
         template.setValueSerializer(serializer);
@@ -35,43 +34,30 @@ public class RedisConfig {
         template.setHashValueSerializer(serializer);
         
         return template;
+    }
+
+    @Bean
+    public RedisTemplate<String, StockPriceCache> stockPriceRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, StockPriceCache.class);
     }
 
     @Bean
     public RedisTemplate<String, PortfolioAnalysis> portfolioAnalysisRedisTemplate(RedisConnectionFactory connectionFactory) {
-        RedisTemplate<String, PortfolioAnalysis> template = new RedisTemplate<>();
-        template.setConnectionFactory(connectionFactory);
-        
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.findAndRegisterModules();
-        
-        Jackson2JsonRedisSerializer<PortfolioAnalysis> serializer = new Jackson2JsonRedisSerializer<>(PortfolioAnalysis.class);
-        serializer.setObjectMapper(mapper);
-        
-        template.setKeySerializer(new StringRedisSerializer());
-        template.setValueSerializer(serializer);
-        template.setHashKeySerializer(new StringRedisSerializer());
-        template.setHashValueSerializer(serializer);
-        
-        return template;
+        return createRedisTemplate(connectionFactory, PortfolioAnalysis.class);
+    }
+
+    @Bean
+    public RedisTemplate<String, PortfolioHoldings> portfolioHoldingsRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, PortfolioHoldings.class);
+    }
+
+    @Bean
+    public RedisTemplate<String, PortfolioSummaryV1> portfolioSummaryRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, PortfolioSummaryV1.class);
     }
 
     @Bean
     public RedisTemplate<String, MarketIndexIndicesCache> marketIndexIndicesRedisTemplate(RedisConnectionFactory connectionFactory) {
-        RedisTemplate<String, MarketIndexIndicesCache> template = new RedisTemplate<>();
-        template.setConnectionFactory(connectionFactory);
-        
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.findAndRegisterModules();
-        
-        Jackson2JsonRedisSerializer<MarketIndexIndicesCache> serializer = new Jackson2JsonRedisSerializer<>(MarketIndexIndicesCache.class);
-        serializer.setObjectMapper(mapper);
-        
-        template.setKeySerializer(new StringRedisSerializer());
-        template.setValueSerializer(serializer);
-        template.setHashKeySerializer(new StringRedisSerializer());
-        template.setHashValueSerializer(serializer);
-        
-        return template;
+        return createRedisTemplate(connectionFactory, MarketIndexIndicesCache.class);
     }
 }
