@@ -10,12 +10,14 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import com.am.common.investment.model.equity.MarketIndexIndices;
-import com.portfolio.model.MarketIndexIndicesCache;
+import com.portfolio.model.IndexIndices;
+import com.portfolio.model.TimeInterval;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,11 +27,20 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class MarketIndexIndicesRedisService {
 
-    private final RedisTemplate<String, MarketIndexIndicesCache> marketIndexIndicesRedisTemplate;
-    private static final String PRICE_KEY_PREFIX = "marketindex:value:";
-    private static final String HISTORICAL_KEY_PREFIX = "marketindex:historical:";
-    private static final Duration REALTIME_TTL = Duration.ofHours(24); // Keep realtime data for 24 hours
-    private static final Duration HISTORICAL_TTL = Duration.ofDays(30); // Keep historical data for 30 days
+    private final RedisTemplate<String, IndexIndices> marketIndexIndicesRedisTemplate;
+
+    @Value("${spring.data.redis.market-indices.ttl}")
+    private Integer marketIndicesTtl;
+
+    @Value("${spring.data.redis.market-indices.key-prefix}")
+    private String marketIndicesKeyPrefix;
+
+    @Value("${spring.data.redis.market-indices.historical.ttl}")
+    private Integer marketIndicesHistoricalTtl;
+
+    @Value("${spring.data.redis.market-indices.historical.key-prefix}")
+    private String marketIndicesHistoricalKeyPrefix;
+
     private static final int BATCH_SIZE = 100;
 
     @Async
@@ -61,17 +72,17 @@ public class MarketIndexIndicesRedisService {
         try {
             long startTime = System.currentTimeMillis();
             
-            Map<String, MarketIndexIndicesCache> realtimeUpdates = batch.stream()
-                .map(this::convertToMarketIndexIndicesCache)
+            Map<String, IndexIndices> realtimeUpdates = batch.stream()
+                .map(this::convertToIndexIndicesCache)
                 .collect(Collectors.toMap(
-                    price -> PRICE_KEY_PREFIX + price.getKey(),
+                    price -> marketIndicesKeyPrefix + price.getIndexSymbol(),
                     price -> price
                 ));
 
-            Map<String, MarketIndexIndicesCache> historicalUpdates = batch.stream()
-                .map(this::convertToMarketIndexIndicesCache)
+            Map<String, IndexIndices> historicalUpdates = batch.stream()
+                .map(this::convertToIndexIndicesCache)
                 .collect(Collectors.toMap(
-                    price -> HISTORICAL_KEY_PREFIX + price.getKey() + ":" + price.getTimestamp(),
+                    price -> marketIndicesHistoricalKeyPrefix + price.getIndexSymbol() + ":" + price.getTimestamp(),
                     price -> price
                 ));
 
@@ -79,7 +90,7 @@ public class MarketIndexIndicesRedisService {
                 // Batch write realtime updates
                 marketIndexIndicesRedisTemplate.opsForValue().multiSet(realtimeUpdates);
                 realtimeUpdates.keySet().forEach(key -> 
-                marketIndexIndicesRedisTemplate.expire(key, REALTIME_TTL));
+                marketIndexIndicesRedisTemplate.expire(key, Duration.ofSeconds(marketIndicesTtl)));
                 log.debug("Successfully cached {} realtime price updates", realtimeUpdates.size());
             } catch (Exception e) {
                 log.error("Failed to cache realtime updates: {}", e.getMessage(), e);
@@ -89,7 +100,7 @@ public class MarketIndexIndicesRedisService {
                 // Batch write historical updates
                 marketIndexIndicesRedisTemplate.opsForValue().multiSet(historicalUpdates);
                 historicalUpdates.keySet().forEach(key -> 
-                marketIndexIndicesRedisTemplate.expire(key, HISTORICAL_TTL));
+                marketIndexIndicesRedisTemplate.expire(key, Duration.ofSeconds(marketIndicesHistoricalTtl)));
                 log.debug("Successfully cached {} historical price updates", historicalUpdates.size());
             } catch (Exception e) {
                 log.error("Failed to cache historical updates: {}", e.getMessage(), e);
@@ -102,19 +113,69 @@ public class MarketIndexIndicesRedisService {
         }
     }
 
-    private MarketIndexIndicesCache convertToMarketIndexIndicesCache(MarketIndexIndices price) {
-        return MarketIndexIndicesCache.builder()
-            .key(price.getKey())
-            .index(price.getIndex())
+    private IndexIndices convertToIndexIndicesCache(MarketIndexIndices price) {
+        return IndexIndices.builder()
+            .key(price.getIndexSymbol())
             .indexSymbol(price.getIndexSymbol())
+            .index(price.getIndex())
             .indexIndices(price)
             .timestamp(price.getTimestamp().toInstant(ZoneOffset.UTC))
             .build();
     }
 
-    public Optional<MarketIndexIndicesCache> getLatestPrice(String key) {
+    public Optional<IndexIndices> getPrice(String indexSymbol, TimeInterval timeInterval) {
         try {
-            MarketIndexIndicesCache price = marketIndexIndicesRedisTemplate.opsForValue().get(key);
+            log.info("Searching price for indexSymbol: {} with timeInterval: {}", indexSymbol, timeInterval);
+            
+            // First try to get from real-time cache
+            String key = marketIndicesKeyPrefix + indexSymbol;
+            log.debug("Checking real-time cache for key: {}", key);
+            IndexIndices price = marketIndexIndicesRedisTemplate.opsForValue().get(key);
+            
+            if (price != null) {
+                log.info("Found price in real-time cache for indexSymbol: {}", indexSymbol);
+                return Optional.of(price);
+            }
+            log.debug("No price found in real-time cache for indexSymbol: {}", indexSymbol);
+
+            // If not found in real-time cache, search in given time interval if duration is not null
+            if (timeInterval.getDuration() != null) {
+                LocalDateTime now = LocalDateTime.now();
+                LocalDateTime startTime = now.minus(timeInterval.getDuration());
+                log.debug("Searching historical data for indexSymbol: {} in interval: {} to {}", 
+                    indexSymbol, startTime, now);
+
+                // Get historical prices for the given time interval
+                List<IndexIndices> intervalPrices = getHistoricalPrices(indexSymbol, startTime, now);
+                
+                if (!intervalPrices.isEmpty()) {
+                    log.info("Found price in historical data (interval) for indexSymbol: {}", indexSymbol);
+                    return Optional.of(intervalPrices.get(0));
+                }
+                log.debug("No price found in historical data (interval) for indexSymbol: {}", indexSymbol);
+            }
+
+            // If not found in given interval, search in last 5 days
+            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime fiveDaysAgo = now.minusDays(5);
+            log.debug("Searching historical data for indexSymbol: {} in last 5 days", indexSymbol);
+            List<IndexIndices> historicalPrices = getHistoricalPrices(indexSymbol, fiveDaysAgo, now);
+            
+            if (!historicalPrices.isEmpty()) {
+                log.info("Found price in historical data (5 days) for indexSymbol: {}", indexSymbol);
+                return Optional.of(historicalPrices.get(0));
+            }
+
+            log.warn("No price found for indexSymbol: {} in real-time, given interval, or last 5 days", indexSymbol);
+            return Optional.empty();
+        } catch (Exception e) {
+            log.error("Error retrieving price for indexSymbol: {}", indexSymbol, e);
+            return Optional.empty();
+        }
+    }
+    public Optional<IndexIndices> getLatestPrice(String key) {
+        try {
+            IndexIndices price = marketIndexIndicesRedisTemplate.opsForValue().get(key);
             return Optional.ofNullable(price);
         } catch (Exception e) {
             log.error("Error retrieving price for key: {}", key, e);
@@ -122,10 +183,10 @@ public class MarketIndexIndicesRedisService {
         }
     }
 
-    public List<MarketIndexIndicesCache> getHistoricalPrices(String symbol, LocalDateTime startTime, LocalDateTime endTime) {
+    public List<IndexIndices> getHistoricalPrices(String symbol, LocalDateTime startTime, LocalDateTime endTime) {
         try {
-            String pattern = HISTORICAL_KEY_PREFIX + symbol + ":*";
-            List<MarketIndexIndicesCache> historicalPrices = new ArrayList<>();
+            String pattern = marketIndicesHistoricalKeyPrefix + symbol + ":*";
+            List<IndexIndices> historicalPrices = new ArrayList<>();
             
             // Get all keys matching the pattern
             marketIndexIndicesRedisTemplate.keys(pattern).stream()
@@ -144,7 +205,7 @@ public class MarketIndexIndicesRedisService {
 
     public void deleteOldPrices(String symbol, LocalDateTime beforeTime) {
         try {
-            String pattern = HISTORICAL_KEY_PREFIX + symbol + ":*";
+            String pattern = marketIndicesHistoricalKeyPrefix + symbol + ":*";
             marketIndexIndicesRedisTemplate.keys(pattern).stream()
                 .map(key -> Map.entry(key, marketIndexIndicesRedisTemplate.opsForValue().get(key)))
                 .filter(entry -> entry.getValue() != null && 

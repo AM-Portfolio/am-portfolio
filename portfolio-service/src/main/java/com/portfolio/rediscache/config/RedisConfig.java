@@ -9,7 +9,7 @@ import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.portfolio.model.MarketIndexIndicesCache;
+import com.portfolio.model.IndexIndices;
 import com.portfolio.model.StockPriceCache;
 import com.portfolio.model.portfolio.PortfolioAnalysis;
 import com.portfolio.model.portfolio.PortfolioHoldings;
@@ -57,7 +57,7 @@ public class RedisConfig {
     }
 
     @Bean
-    public RedisTemplate<String, MarketIndexIndicesCache> marketIndexIndicesRedisTemplate(RedisConnectionFactory connectionFactory) {
-        return createRedisTemplate(connectionFactory, MarketIndexIndicesCache.class);
+    public RedisTemplate<String, IndexIndices> marketIndexIndicesRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, IndexIndices.class);
     }
 }

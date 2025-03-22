@@ -23,15 +23,42 @@ spring:
       portfolio-holdings:
         ttl: 900  # 15 minutes in seconds
         key-prefix: "portfolio:holdings:"
-      market-index:
+      market-indices:
         ttl: 129600  # 30 Days in seconds
-        key-prefix: "market-index:indices:"
+        key-prefix: "market-indices:indices:"
+        historical:
+          key-prefix: "market-indices:historical-indices:"
+          ttl: 129600  # 30 Days in seconds
       stock:
         ttl: 129600  # 30 Days in seconds
         key-prefix: "stock:price:"
         historical:
-          key-prefix: "stock:historical:"
+          key-prefix: "stock:historical-price:"
           ttl: 129600  # 30 Days in seconds
+
+nse:
+  broad-market-indices:
+    - NIFTY 50
+    - NIFTY NEXT 50
+    - NIFTY MIDCAP 50
+    - NIFTY MIDCAP 100
+    - NIFTY MIDCAP 150
+    - NIFTY MIDCAP 250
+    - NIFTY MIDCAP 500
+    - NIFTY SMLCAP 100
+    - NIFTY SMLCAP 250
+    - NIFTY SMLCAP 500
+  sector-indices:
+    - NIFTY BANK
+    - NIFTY IT
+    - NIFTY PHARMA
+    - NIFTY AUTO
+    - NIFTY METAL
+    - NIFTY ENERGY
+    - NIFTY FMCG
+    - NIFTY MEDIA
+    - NIFTY REALTY
+    - NIFTY PSU BANK
 
 app:
   persistence:
@@ -47,13 +74,13 @@ app:
     stock:
       consumer:
         id: am-stock-group.v2
-        enabled: true
+        enabled: false
       topic: am-stock-price-update
     market-index:
       consumer:
-        id: am-market-index-group
-        enabled: false
-      topic: am-market-index-update
+        id: am-market-index-group-1
+        enabled: true
+      topic: nse-indices-update
 
 server:
   port: 8080
@@ -66,5 +93,5 @@ server:
 
 logging:
   level:
-    com.portfolio: INFO
+    com.portfolio: DEBUG
     org.springframework.kafka: INFO

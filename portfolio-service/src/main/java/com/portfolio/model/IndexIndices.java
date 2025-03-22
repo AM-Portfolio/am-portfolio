@@ -13,7 +13,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class MarketIndexIndicesCache {
+public class IndexIndices {
     private String key;
     private String index;
     private String indexSymbol;
