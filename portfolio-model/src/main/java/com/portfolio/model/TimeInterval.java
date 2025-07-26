@@ -24,6 +24,14 @@ public enum TimeInterval {
         this.duration = duration;
         this.code = code;
     }
+    
+    public String getCode() {
+        return code;
+    }
+    
+    public Duration getDuration() {
+        return duration;
+    }
 
     public static TimeInterval fromCode(String code) {
         if (code == null) return OVERALL;

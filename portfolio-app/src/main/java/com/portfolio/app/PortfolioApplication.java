@@ -10,6 +10,8 @@ import org.springframework.scheduling.annotation.EnableAsync;
 @ComponentScans({
     @ComponentScan("com.am.common.amcommondata"),
     @ComponentScan("com.portfolio.api"),
+    @ComponentScan("com.portfolio.redis"),
+    @ComponentScan("com.portfolio.api"),
     @ComponentScan("com.am.common.amcommondata.service"),
     @ComponentScan("org.am.mypotrfolio.service.mapper"),
     @ComponentScan("com.am.common.amcommondata.mapper"),
