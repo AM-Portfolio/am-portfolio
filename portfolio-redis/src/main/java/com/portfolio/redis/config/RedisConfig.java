@@ -11,6 +11,7 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.portfolio.model.market.IndexIndices;
+import com.portfolio.model.cache.StockIndicesEventDataCache;
 import com.portfolio.model.cache.StockPriceCache;
 import com.portfolio.model.portfolio.PortfolioAnalysis;
 import com.portfolio.model.portfolio.PortfolioHoldings;
@@ -55,6 +56,11 @@ public class RedisConfig {
     @Bean
     public RedisTemplate<String, PortfolioSummaryV1> portfolioSummaryRedisTemplate(RedisConnectionFactory connectionFactory) {
         return createRedisTemplate(connectionFactory, PortfolioSummaryV1.class);
+    }
+
+    @Bean
+    public RedisTemplate<String, StockIndicesEventDataCache> stockIndicesRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, StockIndicesEventDataCache.class);
     }
 
     @Bean
