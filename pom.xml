@@ -18,6 +18,7 @@
 
     <modules>
         <module>portfolio-model</module>
+        <module>portfolio-market-data</module>
         <module>portfolio-service</module>
         <module>portfolio-api</module>
         <module>portfolio-redis</module>
@@ -32,10 +33,10 @@
         <lombok.version>1.18.30</lombok.version>
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
-        <am.investment.version>1.6.21-SNAPSHOT</am.investment.version>
+        <am.investment.version>1.6.22-SNAPSHOT</am.investment.version>
         <am.common.version>1.2.5-SNAPSHOT</am.common.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <am-common-investment.version>1.6.21-SNAPSHOT</am-common-investment.version>
+        <am-common-investment.version>1.6.22-SNAPSHOT</am-common-investment.version>
         <am-common-data-parent.version>1.1.4-SNAPSHOT</am-common-data-parent.version>
     </properties>
 

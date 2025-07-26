@@ -5,12 +5,19 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.ComponentScans;
+import org.springframework.context.annotation.Import;
 import org.springframework.scheduling.annotation.EnableAsync;
 
+import com.portfolio.app.config.DatabaseConfig;
+import com.portfolio.app.config.MarketDataApiConfigResolver;
+
+@Import({DatabaseConfig.class, MarketDataApiConfigResolver.class})
 @ComponentScans({
     @ComponentScan("com.am.common.amcommondata"),
     @ComponentScan("com.portfolio.api"),
     @ComponentScan("com.portfolio.redis"),
+    @ComponentScan("com.portfolio.marketdata"),
+    @ComponentScan("com.am.common.investment.service"),
     @ComponentScan("com.portfolio.api"),
     @ComponentScan("com.am.common.amcommondata.service"),
     @ComponentScan("org.am.mypotrfolio.service.mapper"),
