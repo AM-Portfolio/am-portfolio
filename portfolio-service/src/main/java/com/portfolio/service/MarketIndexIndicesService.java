@@ -8,9 +8,9 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 
 import com.portfolio.config.NSEIndicesConfig;
-import com.portfolio.model.IndexIndices;
+import com.portfolio.model.market.IndexIndices;
 import com.portfolio.model.TimeInterval;
-import com.portfolio.rediscache.service.MarketIndexIndicesRedisService;
+import com.portfolio.redis.service.MarketIndexIndicesRedisService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

@@ -11,8 +11,8 @@ import com.portfolio.mapper.holdings.PortfolioHoldingsMapper;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.PortfolioHoldings;
-import com.portfolio.rediscache.service.PortfolioHoldingsRedisService;
-import com.portfolio.rediscache.service.StockPriceRedisService;
+import com.portfolio.redis.service.PortfolioHoldingsRedisService;
+import com.portfolio.redis.service.StockIndicesRedisService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +26,7 @@ public class PortfolioHoldingsService {
     
     private final PortfolioService portfolioService;
     private final PortfolioHoldingsMapper portfolioHoldingsMapper;
-    private final StockPriceRedisService stockPriceRedisService;
+    private final StockIndicesRedisService stockPriceRedisService;
     private final PortfolioHoldingsRedisService portfolioHoldingsRedisService;
 
     public PortfolioHoldings getPortfolioHoldings(String userId, TimeInterval interval) {
