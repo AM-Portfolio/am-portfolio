@@ -1,7 +1,9 @@
 package com.portfolio.analytics.service.providers;
 
+import com.am.common.amcommondata.model.MarketCapType;
 import com.portfolio.analytics.service.AbstractIndexAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
+import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
@@ -11,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Provider for market cap allocation analytics
@@ -19,8 +22,8 @@ import java.util.*;
 @Slf4j
 public class MarketCapAllocationProvider extends AbstractIndexAnalyticsProvider<MarketCapAllocation> {
 
-    public MarketCapAllocationProvider(NseIndicesService nseIndicesService, MarketDataService marketDataService) {
-        super(nseIndicesService, marketDataService);
+    public MarketCapAllocationProvider(NseIndicesService nseIndicesService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService) {
+        super(nseIndicesService, marketDataService, securityDetailsService);
     }
 
     @Override
@@ -53,42 +56,65 @@ public class MarketCapAllocationProvider extends AbstractIndexAnalyticsProvider<
                 .build();
         }
         
-        // Define market cap segments
-        Map<String, List<MarketDataResponse>> segmentMap = new HashMap<>();
-        segmentMap.put("Large Cap", new ArrayList<>());
-        segmentMap.put("Mid Cap", new ArrayList<>());
-        segmentMap.put("Small Cap", new ArrayList<>());
+        // Use SecurityDetailsService to group symbols by market cap type
+        Map<String, List<String>> marketCapGroups = securityDetailsService.groupSymbolsByMarketType(indexStockSymbols);
         
-        // Group stocks by market cap segment
-        // In a real implementation, this would use actual market cap data
-        // For now, we'll use a simplified approach with mock data
+        log.info("Market cap groups for index {}: {}", indexSymbol, marketCapGroups.keySet());
+        
+        // Create a mapping for market cap type enum to segment name
+        Map<String, String> marketCapTypeToSegmentName = new HashMap<>();
+        marketCapTypeToSegmentName.put(MarketCapType.LARGE_CAP.name(), "Large Cap");
+        marketCapTypeToSegmentName.put(MarketCapType.MID_CAP.name(), "Mid Cap");
+        marketCapTypeToSegmentName.put(MarketCapType.SMALL_CAP.name(), "Small Cap");
+        marketCapTypeToSegmentName.put(MarketCapType.MICRO_CAP.name(), "Micro Cap");
+        marketCapTypeToSegmentName.put("null", "Unknown"); // Handle null market cap type
+        
+        // Calculate market cap for each stock
         double totalMarketCap = 0.0;
         Map<String, Double> stockMarketCaps = new HashMap<>();
-        Map<Long, String> instrumentToSymbol = new HashMap<>(); // Map to store instrument token to symbol mapping
+        Map<String, String> symbolToSegment = new HashMap<>(); // Map to store symbol to segment mapping
         
         for (String symbol : marketData.keySet()) {
             MarketDataResponse data = marketData.get(symbol);
-            // Store the mapping of instrument token to symbol
-            instrumentToSymbol.put(data.getInstrumentToken(), symbol);
             
-            // Mock market cap calculation (price * assumed outstanding shares)
-            // In a real implementation, get actual shares outstanding from a data source
-            double mockShares = getMockOutstandingShares(symbol);
-            double marketCap = data.getLastPrice() * mockShares;
+            // Calculate market cap using just the price as a proxy
+            // In a real implementation, would multiply by actual outstanding shares
+            double marketCap = data.getLastPrice() * 1000000000.0; // Assuming 1B shares for all stocks
             stockMarketCaps.put(symbol, marketCap);
             totalMarketCap += marketCap;
             
-            // Assign to segment based on market cap
-            String segment;
-            if (marketCap > 50000000000.0) { // > 50B
-                segment = "Large Cap";
-            } else if (marketCap > 10000000000.0) { // > 10B
-                segment = "Mid Cap";
-            } else {
-                segment = "Small Cap";
+            // Find which segment this symbol belongs to
+            for (Map.Entry<String, List<String>> entry : marketCapGroups.entrySet()) {
+                if (entry.getValue().contains(symbol)) {
+                    String segmentName = marketCapTypeToSegmentName.getOrDefault(entry.getKey(), "Unknown");
+                    symbolToSegment.put(symbol, segmentName);
+                    break;
+                }
             }
             
-            segmentMap.get(segment).add(data);
+            // If symbol wasn't found in any group, assign based on calculated market cap
+            if (!symbolToSegment.containsKey(symbol)) {
+                String segment;
+                if (marketCap > 50000000000.0) { // > 50B
+                    segment = "Large Cap";
+                } else if (marketCap > 10000000000.0) { // > 10B
+                    segment = "Mid Cap";
+                } else {
+                    segment = "Small Cap";
+                }
+                symbolToSegment.put(symbol, segment);
+            }
+        }
+        
+        // Group market data by segment
+        Map<String, List<MarketDataResponse>> segmentMap = new HashMap<>();
+        for (String segment : new HashSet<>(symbolToSegment.values())) {
+            segmentMap.put(segment, new ArrayList<>());
+        }
+        
+        for (String symbol : marketData.keySet()) {
+            String segment = symbolToSegment.getOrDefault(symbol, "Unknown");
+            segmentMap.computeIfAbsent(segment, k -> new ArrayList<>()).add(marketData.get(symbol));
         }
         
         // Calculate allocation percentages and create segment objects
@@ -97,13 +123,21 @@ public class MarketCapAllocationProvider extends AbstractIndexAnalyticsProvider<
             String segmentName = entry.getKey();
             List<MarketDataResponse> segmentStocks = entry.getValue();
             
+            if (segmentStocks.isEmpty()) {
+                continue; // Skip empty segments
+            }
+            
             // Calculate total market cap for this segment
             double segmentMarketCap = 0.0;
             Map<String, Double> symbolToMarketCap = new HashMap<>();
             
             for (MarketDataResponse stock : segmentStocks) {
-                // Get the symbol from our mapping using instrument token
-                String symbol = instrumentToSymbol.get(stock.getInstrumentToken());
+                // Get symbol from instrument token
+                String symbol = indexStockSymbols.stream()
+                    .filter(s -> marketData.containsKey(s) && marketData.get(s).getInstrumentToken() == stock.getInstrumentToken())
+                    .findFirst()
+                    .orElse(null);
+                
                 if (symbol != null) {
                     double marketCap = stockMarketCaps.getOrDefault(symbol, 0.0);
                     segmentMarketCap += marketCap;
@@ -140,20 +174,5 @@ public class MarketCapAllocationProvider extends AbstractIndexAnalyticsProvider<
             .build();
     }
     
-    /**
-     * Get mock outstanding shares for a stock (for demonstration)
-     * In a real implementation, this would come from a stock data service
-     */
-    private double getMockOutstandingShares(String symbol) {
-        // Simple mock implementation - in real code, get this from a proper source
-        if (symbol.startsWith("RELIANCE") || symbol.startsWith("TCS")) {
-            return 8000000000.0; // 8 billion shares
-        } else if (symbol.startsWith("HDFC") || symbol.startsWith("INFY")) {
-            return 5000000000.0; // 5 billion shares
-        } else if (symbol.startsWith("ITC") || symbol.startsWith("SBI")) {
-            return 3000000000.0; // 3 billion shares
-        } else {
-            return 1000000000.0; // 1 billion shares
-        }
-    }
+
 }

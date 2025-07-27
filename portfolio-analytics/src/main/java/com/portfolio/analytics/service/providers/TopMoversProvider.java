@@ -2,6 +2,7 @@ package com.portfolio.analytics.service.providers;
 
 import com.portfolio.analytics.service.AbstractIndexAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
+import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
@@ -20,8 +21,8 @@ import java.util.stream.Collectors;
 @Slf4j
 public class TopMoversProvider extends AbstractIndexAnalyticsProvider<GainerLoser> {
 
-    public TopMoversProvider(NseIndicesService nseIndicesService, MarketDataService marketDataService) {
-        super(nseIndicesService, marketDataService);
+    public TopMoversProvider(NseIndicesService nseIndicesService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService) {
+        super(nseIndicesService, marketDataService, securityDetailsService);
     }
 
     @Override

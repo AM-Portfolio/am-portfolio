@@ -2,6 +2,7 @@ package com.portfolio.analytics.service.providers;
 
 import com.portfolio.analytics.service.AbstractIndexAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
+import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
@@ -20,8 +21,8 @@ import java.util.stream.Collectors;
 @Slf4j
 public class SectorAllocationProvider extends AbstractIndexAnalyticsProvider<SectorAllocation> {
 
-    public SectorAllocationProvider(NseIndicesService nseIndicesService, MarketDataService marketDataService) {
-        super(nseIndicesService, marketDataService);
+    public SectorAllocationProvider(NseIndicesService nseIndicesService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService) {
+        super(nseIndicesService, marketDataService, securityDetailsService);
     }
 
     @Override
@@ -55,38 +56,59 @@ public class SectorAllocationProvider extends AbstractIndexAnalyticsProvider<Sec
                 .build();
         }
         
-        // Group stocks by sector and industry
-        Map<String, List<String>> sectorToStocks = new HashMap<>();
+        // Use SecurityDetailsService to group stocks by sector and industry
+        Map<String, List<String>> sectorToStocks = securityDetailsService.groupSymbolsBySector(indexStockSymbols);
+        Map<String, List<String>> industryToStocks = securityDetailsService.groupSymbolsByIndustry(indexStockSymbols);
+        
+        log.info("Sector groups for index {}: {}", indexSymbol, sectorToStocks.keySet());
+        log.info("Industry groups for index {}: {}", indexSymbol, industryToStocks.keySet());
+        
+        // Create mappings for stock to sector and industry to sector
         Map<String, String> stockToSector = new HashMap<>();
-        Map<String, List<String>> industryToStocks = new HashMap<>();
         Map<String, String> industryToSector = new HashMap<>();
         Map<String, Double> stockToMarketCap = new HashMap<>();
         
-        double totalMarketCap = 0.0;
+        // Map stocks to sectors
+        for (Map.Entry<String, List<String>> entry : sectorToStocks.entrySet()) {
+            String sector = entry.getKey();
+            for (String symbol : entry.getValue()) {
+                stockToSector.put(symbol, sector);
+            }
+        }
         
-        // Assign mock sectors and industries
+        // Map industries to sectors and determine which stocks belong to which industry
+        Map<String, Set<String>> industryStockSets = new HashMap<>();
+        for (Map.Entry<String, List<String>> entry : industryToStocks.entrySet()) {
+            String industry = entry.getKey();
+            List<String> stocks = entry.getValue();
+            industryStockSets.put(industry, new HashSet<>(stocks));
+            
+            // Find the most common sector for stocks in this industry
+            Map<String, Integer> sectorCounts = new HashMap<>();
+            for (String symbol : stocks) {
+                String sector = stockToSector.getOrDefault(symbol, "Unknown");
+                sectorCounts.put(sector, sectorCounts.getOrDefault(sector, 0) + 1);
+            }
+            
+            // Assign the industry to the most common sector
+            String mostCommonSector = sectorCounts.entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
+                .orElse("Unknown");
+                
+            industryToSector.put(industry, mostCommonSector);
+        }
+        
+        // Calculate market cap for each stock
+        double totalMarketCap = 0.0;
         for (String symbol : marketData.keySet()) {
             MarketDataResponse data = marketData.get(symbol);
             
-            // Mock sector and industry assignment
-            String sector = getMockSectorForSymbol(symbol);
-            String industry = getMockIndustryForSymbol(symbol);
+            // Calculate market cap (price * outstanding shares)
+            double marketCap = data.getLastPrice() * 1000000;
             
-            // Mock market cap calculation
-            double mockShares = getMockOutstandingShares(symbol);
-            double marketCap = data.getLastPrice() * mockShares;
-            
-            // Store mappings
-            stockToSector.put(symbol, sector);
             stockToMarketCap.put(symbol, marketCap);
             totalMarketCap += marketCap;
-            
-            // Group by sector
-            sectorToStocks.computeIfAbsent(sector, k -> new ArrayList<>()).add(symbol);
-            
-            // Group by industry
-            industryToStocks.computeIfAbsent(industry, k -> new ArrayList<>()).add(symbol);
-            industryToSector.put(industry, sector);
         }
         
         // Calculate sector weights
@@ -157,68 +179,5 @@ public class SectorAllocationProvider extends AbstractIndexAnalyticsProvider<Sec
             .sectorWeights(sectorWeights)
             .industryWeights(industryWeights)
             .build();
-    }
-    
-    /**
-     * Get mock sector for a symbol
-     */
-    private String getMockSectorForSymbol(String symbol) {
-        if (symbol.startsWith("INFO") || symbol.startsWith("TCS") || symbol.startsWith("WIPRO") || symbol.startsWith("INFY")) {
-            return "Information Technology";
-        } else if (symbol.startsWith("HDFC") || symbol.startsWith("ICICI") || symbol.startsWith("SBI") || symbol.startsWith("PNB")) {
-            return "Financial Services";
-        } else if (symbol.startsWith("RELIANCE") || symbol.startsWith("ONGC")) {
-            return "Energy";
-        } else if (symbol.startsWith("BHARTI") || symbol.startsWith("IDEA")) {
-            return "Telecommunication";
-        } else if (symbol.startsWith("ITC") || symbol.startsWith("HUL")) {
-            return "Consumer Goods";
-        } else {
-            return "Others";
-        }
-    }
-    
-    /**
-     * Get mock industry for a symbol
-     */
-    private String getMockIndustryForSymbol(String symbol) {
-        if (symbol.startsWith("INFO") || symbol.startsWith("TCS")) {
-            return "IT Consulting";
-        } else if (symbol.startsWith("WIPRO") || symbol.startsWith("INFY")) {
-            return "IT Services";
-        } else if (symbol.startsWith("HDFC")) {
-            return "Banking";
-        } else if (symbol.startsWith("ICICI")) {
-            return "Financial Services";
-        } else if (symbol.startsWith("SBI") || symbol.startsWith("PNB")) {
-            return "Public Sector Banks";
-        } else if (symbol.startsWith("RELIANCE")) {
-            return "Conglomerate";
-        } else if (symbol.startsWith("ONGC")) {
-            return "Oil & Gas";
-        } else if (symbol.startsWith("BHARTI") || symbol.startsWith("IDEA")) {
-            return "Telecom Services";
-        } else if (symbol.startsWith("ITC")) {
-            return "FMCG";
-        } else if (symbol.startsWith("HUL")) {
-            return "Consumer Products";
-        } else {
-            return "Miscellaneous";
-        }
-    }
-    
-    /**
-     * Get mock outstanding shares for a stock
-     */
-    private double getMockOutstandingShares(String symbol) {
-        if (symbol.startsWith("RELIANCE") || symbol.startsWith("TCS")) {
-            return 8000000000.0; // 8 billion shares
-        } else if (symbol.startsWith("HDFC") || symbol.startsWith("INFY")) {
-            return 5000000000.0; // 5 billion shares
-        } else if (symbol.startsWith("ITC") || symbol.startsWith("SBI")) {
-            return 3000000000.0; // 3 billion shares
-        } else {
-            return 1000000000.0; // 1 billion shares
-        }
     }
 }

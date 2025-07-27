@@ -1,5 +1,6 @@
 package com.portfolio.analytics.service;
 
+import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
@@ -21,6 +22,7 @@ public abstract class AbstractIndexAnalyticsProvider<T> implements AnalyticsProv
     
     protected final NseIndicesService nseIndicesService;
     protected final MarketDataService marketDataService;
+    protected final SecurityDetailsService securityDetailsService;
     
     /**
      * Fetch all stock symbols for a given index

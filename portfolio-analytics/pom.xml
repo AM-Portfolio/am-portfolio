@@ -22,6 +22,11 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
+            <groupId>com.am.common</groupId>
+            <artifactId>am-common-data-service</artifactId>
+            <version>${am.common.version}</version> 
+        </dependency>
+        <dependency>
             <groupId>com.portfolio</groupId>
             <artifactId>portfolio-market-data</artifactId>
             <version>${project.version}</version>
