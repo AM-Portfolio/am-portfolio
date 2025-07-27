@@ -24,6 +24,7 @@
         <module>portfolio-redis</module>
         <module>portfolio-kafka</module>
         <module>portfolio-app</module>
+        <module>portfolio-analytics</module>
     </modules>
 
     <properties>

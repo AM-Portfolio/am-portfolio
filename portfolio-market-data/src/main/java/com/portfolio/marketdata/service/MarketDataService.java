@@ -34,8 +34,24 @@ public class MarketDataService {
     public Map<String, MarketDataResponse> getOhlcData(List<String> symbols) {
         log.info("Getting OHLC data for {} symbols", symbols.size());
         
-        return marketDataApiClient.getOhlcDataSync(symbols)
-            .getData();
+        try {
+            MarketDataResponseWrapper wrapper = marketDataApiClient.getOhlcDataSync(symbols);
+            if (wrapper == null) {
+                log.warn("Received null response wrapper from market data API");
+                return Map.of();
+            }
+            
+            Map<String, MarketDataResponse> data = wrapper.getData();
+            if (data == null) {
+                log.warn("Received null data map from market data API");
+                return Map.of();
+            }
+            
+            return data;
+        } catch (Exception e) {
+            log.error("Error fetching OHLC data: {}", e.getMessage(), e);
+            return Map.of();
+        }
     }
     
     /**
@@ -49,7 +65,24 @@ public class MarketDataService {
         
         return marketDataApiClient.getOhlcData(symbols)
             .subscribeOn(Schedulers.boundedElastic())
-            .map(MarketDataResponseWrapper::getData)
+            .map(wrapper -> {
+                if (wrapper == null) {
+                    log.warn("Received null response wrapper from market data API (async)");
+                    return Map.<String, MarketDataResponse>of();
+                }
+                
+                Map<String, MarketDataResponse> data = wrapper.getData();
+                if (data == null) {
+                    log.warn("Received null data map from market data API (async)");
+                    return Map.<String, MarketDataResponse>of();
+                }
+                
+                return data;
+            })
+            .onErrorResume(e -> {
+                log.error("Error fetching OHLC data asynchronously: {}", e.getMessage(), e);
+                return reactor.core.publisher.Mono.just(Map.<String, MarketDataResponse>of());
+            })
             .toFuture();
     }
     

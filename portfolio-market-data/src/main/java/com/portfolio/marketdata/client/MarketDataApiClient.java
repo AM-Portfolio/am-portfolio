@@ -89,9 +89,10 @@ public class MarketDataApiClient extends AbstractApiClient {
         String path = config.getOhlcPath() + "?symbols=" + symbolsParam;
         log.debug("Fetching OHLC data for {} from {}", symbolsParam, path);
         
-        // Now we can directly deserialize to MarketDataResponseWrapper since it extends HashMap
+        // Deserialize to MarketDataResponseWrapper
         return get(path, MarketDataResponseWrapper.class)
-                .doOnSuccess(data -> log.debug("Successfully fetched OHLC data for {} with {} entries", symbolsParam, data.size()))
+                .doOnSuccess(data -> log.debug("Successfully fetched OHLC data for {} with {} entries", symbolsParam, 
+                        data.getData() != null ? data.getData().size() : 0))
                 .doOnError(e -> log.error("Failed to fetch OHLC data for {}: {}", symbolsParam, e.getMessage()));
     }
 
@@ -113,6 +114,9 @@ public class MarketDataApiClient extends AbstractApiClient {
      */
     public Map<String, Double> getCurrentPrices(List<String> symbols) {
         MarketDataResponseWrapper wrapper = getOhlcDataSync(symbols);
+        if (wrapper.getData() == null) {
+            return Map.of();
+        }
         return wrapper.getData().entrySet().stream()
                 .collect(java.util.stream.Collectors.toMap(
                         Map.Entry::getKey,
