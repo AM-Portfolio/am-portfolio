@@ -23,6 +23,11 @@ public class MarketDataApiConfig {
     private String ohlcPath = "/api/v1/market-data/ohlc";
     
     /**
+     * API path for historical data.
+     */
+    private String historicalDataPath = "/api/v1/market-data/historical-data";
+    
+    /**
      * Connection timeout in milliseconds.
      */
     private int connectionTimeout = 5000;
