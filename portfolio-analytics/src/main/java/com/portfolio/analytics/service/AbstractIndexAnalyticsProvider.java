@@ -1,28 +1,36 @@
 package com.portfolio.analytics.service;
 
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
-import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
 import com.portfolio.marketdata.model.indices.IndexConstituent;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Abstract base class for index analytics providers
  * @param <T> The type of analytics data returned
  */
 @Slf4j
-@RequiredArgsConstructor
-public abstract class AbstractIndexAnalyticsProvider<T> implements AnalyticsProvider<T> {
+public abstract class AbstractIndexAnalyticsProvider<T> extends AbstractAnalyticsProvider<T, String> implements AnalyticsProvider<T> {
     
     protected final NseIndicesService nseIndicesService;
-    protected final MarketDataService marketDataService;
-    protected final SecurityDetailsService securityDetailsService;
+    
+    /**
+     * Constructor for AbstractIndexAnalyticsProvider
+     * 
+     * @param nseIndicesService Service for fetching index constituents
+     * @param marketDataService Service for fetching market data
+     * @param securityDetailsService Service for security metadata
+     */
+    public AbstractIndexAnalyticsProvider(NseIndicesService nseIndicesService, 
+                                         MarketDataService marketDataService, 
+                                         SecurityDetailsService securityDetailsService) {
+        super(marketDataService, securityDetailsService);
+        this.nseIndicesService = nseIndicesService;
+    }
     
     /**
      * Fetch all stock symbols for a given index
@@ -48,34 +56,9 @@ public abstract class AbstractIndexAnalyticsProvider<T> implements AnalyticsProv
         }
     }
     
-    /**
-     * Fetch market data for a list of stock symbols
-     * @param symbols List of stock symbols
-     * @return Map of symbols to market data responses
-     */
-    protected Map<String, MarketDataResponse> getMarketData(List<String> symbols) {
-        if (symbols.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        
-        log.info("Fetching market data for {} symbols", symbols.size());
-        try {
-            Map<String, MarketDataResponse> marketData = marketDataService.getOhlcData(symbols);
-            if (marketData == null) {
-                log.warn("Market data service returned null response");
-                return Collections.emptyMap();
-            }
-            return marketData;
-        } catch (Exception e) {
-            log.error("Error fetching market data: {}", e.getMessage(), e);
-            return Collections.emptyMap();
-        }
-    }
-    
     @Override
-    public T generateAnalytics(String symbol, Object... params) {
-        // Default implementation delegates to the simpler method
-        // Subclasses should override this if they need to handle additional parameters
-        return generateAnalytics(symbol);
+    protected List<String> getSymbols(String indexSymbol) {
+        // Delegate to the existing method
+        return getIndexSymbols(indexSymbol);
     }
 }

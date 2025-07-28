@@ -16,7 +16,15 @@ import java.time.LocalDate;
 @NoArgsConstructor
 @AllArgsConstructor
 public class AdvancedAnalyticsRequest {
+
     /**
+     * 
+     * The portfolio ID to analyze
+     */
+    private String portfolioId;
+    
+    /**
+     * 
      * The index symbol to analyze (e.g., "NIFTY 50", "NIFTY BANK")
      */
     private String indexSymbol;

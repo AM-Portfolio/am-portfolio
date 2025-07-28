@@ -24,6 +24,8 @@ import java.time.LocalDate;
 @AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class AdvancedAnalyticsResponse {
+
+    private String portfolioId;
     /**
      * The index symbol that was analyzed
      */

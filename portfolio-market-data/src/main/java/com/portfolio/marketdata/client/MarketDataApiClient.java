@@ -1,7 +1,10 @@
 package com.portfolio.marketdata.client;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -82,28 +85,54 @@ public class MarketDataApiClient extends AbstractApiClient {
      * Gets the OHLC data for the specified symbols.
      * 
      * @param symbols the symbols to get OHLC data for
+     * @param refresh whether to refresh the data or use cached data (default: true)
      * @return a Mono of MarketDataResponseWrapper
      */
-    public Mono<MarketDataResponseWrapper> getOhlcData(List<String> symbols) {
-        String symbolsParam = String.join(",", symbols);
-        String path = config.getOhlcPath() + "?symbols=" + symbolsParam;
-        log.debug("Fetching OHLC data for {} from {}", symbolsParam, path);
+    public Mono<MarketDataResponseWrapper> getOhlcData(List<String> symbols, boolean refresh) {
+        // URL encode each symbol individually to handle special characters like &
+        String symbolsParam = symbols.stream()
+                .map(symbol -> URLEncoder.encode(symbol, StandardCharsets.UTF_8))
+                .collect(Collectors.joining(","));
+                
+        String path = config.getOhlcPath() + "?symbols=" + symbolsParam + "&refresh=" + refresh;
+        log.debug("Fetching OHLC data for {} from {} with refresh={}", String.join(",", symbols), path, refresh);
         
         // Deserialize to MarketDataResponseWrapper
         return get(path, MarketDataResponseWrapper.class)
-                .doOnSuccess(data -> log.debug("Successfully fetched OHLC data for {} with {} entries", symbolsParam, 
+                .doOnSuccess(data -> log.debug("Successfully fetched OHLC data for {} with {} entries", String.join(",", symbols), 
                         data.getData() != null ? data.getData().size() : 0))
-                .doOnError(e -> log.error("Failed to fetch OHLC data for {}: {}", symbolsParam, e.getMessage()));
+                .doOnError(e -> log.error("Failed to fetch OHLC data for {}: {}", String.join(",", symbols), e.getMessage()));
+    }
+    
+    /**
+     * Gets the OHLC data for the specified symbols with default refresh=true.
+     * 
+     * @param symbols the symbols to get OHLC data for
+     * @return a Mono of MarketDataResponseWrapper
+     */
+    public Mono<MarketDataResponseWrapper> getOhlcData(List<String> symbols) {
+        return getOhlcData(symbols, true);
     }
 
     /**
      * Gets the OHLC data for the specified symbols synchronously.
      * 
      * @param symbols the symbols to get OHLC data for
+     * @param refresh whether to refresh the data or use cached data (default: true)
+     * @return the MarketDataResponseWrapper
+     */
+    public MarketDataResponseWrapper getOhlcDataSync(List<String> symbols, boolean refresh) {
+        return getOhlcData(symbols, refresh).block();
+    }
+    
+    /**
+     * Gets the OHLC data for the specified symbols synchronously with default refresh=true.
+     * 
+     * @param symbols the symbols to get OHLC data for
      * @return the MarketDataResponseWrapper
      */
     public MarketDataResponseWrapper getOhlcDataSync(List<String> symbols) {
-        return getOhlcData(symbols).block();
+        return getOhlcDataSync(symbols, true);
     }
     
     /**

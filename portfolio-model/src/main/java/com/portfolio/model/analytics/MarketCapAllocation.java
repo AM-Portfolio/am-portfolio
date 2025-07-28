@@ -16,6 +16,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class MarketCapAllocation {
+    private String portfolioId;
     private String indexSymbol;
     private Instant timestamp;
     private List<CapSegment> segments;
