@@ -14,8 +14,12 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 import com.portfolio.marketdata.client.base.AbstractApiClient;
 import com.portfolio.marketdata.config.MarketDataApiConfig;
+import com.portfolio.marketdata.model.FilterType;
+import com.portfolio.marketdata.model.HistoricalDataRequest;
 import com.portfolio.marketdata.model.HistoricalDataResponseWrapper;
+import com.portfolio.marketdata.model.InstrumentType;
 import com.portfolio.marketdata.model.MarketDataResponseWrapper;
+import com.portfolio.marketdata.model.TimeFrame;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
@@ -158,57 +162,47 @@ public class MarketDataApiClient extends AbstractApiClient {
     /**
      * Gets historical market data for the specified symbols with various filtering options.
      * 
-     * @param symbols the symbols to get historical data for
-     * @param fromDate the start date for historical data (inclusive)
-     * @param toDate the end date for historical data (inclusive)
-     * @param interval the time interval for data points (e.g., "day", "15min")
-     * @param instrumentType the instrument type (e.g., "EQ" for equity)
-     * @param filterType the type of filtering to apply ("ALL", "START_END", "CUSTOM")
-     * @param filterFrequency the frequency for CUSTOM filtering (required when filterType is CUSTOM)
-     * @param continuous whether to use continuous data (optional)
+     * @param request the historical data request parameters
      * @return a Mono of HistoricalDataResponseWrapper
      */
-    public Mono<HistoricalDataResponseWrapper> getHistoricalData(
-            List<String> symbols, 
-            LocalDate fromDate, 
-            LocalDate toDate, 
-            String interval, 
-            String instrumentType, 
-            String filterType, 
-            Integer filterFrequency,
-            Boolean continuous) {
+    public Mono<HistoricalDataResponseWrapper> getHistoricalData(HistoricalDataRequest request) {
         
         // URL encode each symbol individually to handle special characters
-        String symbolsParam = symbols.stream()
+        String symbolsParam = request.getSymbols().stream()
                 .map(symbol -> URLEncoder.encode(symbol, StandardCharsets.UTF_8))
                 .collect(Collectors.joining(","));
         
         StringBuilder pathBuilder = new StringBuilder(config.getHistoricalDataPath())
                 .append("?symbols=").append(symbolsParam)
-                .append("&from=").append(fromDate)
-                .append("&to=").append(toDate)
-                .append("&interval=").append(interval)
-                .append("&instrumentType=").append(instrumentType)
-                .append("&filterType=").append(filterType);
+                .append("&from=").append(request.getFromDate())
+                .append("&to=").append(request.getToDate())
+                .append("&interval=").append(request.getTimeFrame().getValue())
+                .append("&instrumentType=").append(request.getInstrumentType().getValue())
+                .append("&filterType=").append(request.getFilterType().getValue());
         
         // Add optional parameters if provided
-        if (filterFrequency != null && "CUSTOM".equals(filterType)) {
-            pathBuilder.append("&filterFrequency=").append(filterFrequency);
+        if (request.getFilterFrequency() != null && FilterType.CUSTOM.equals(request.getFilterType())) {
+            pathBuilder.append("&filterFrequency=").append(request.getFilterFrequency());
         }
         
-        if (continuous != null) {
-            pathBuilder.append("&continuous=").append(continuous);
+        if (request.getContinuous() != null) {
+            pathBuilder.append("&continuous=").append(request.getContinuous());
+        }
+        
+        if (request.getRefresh() != null) {
+            pathBuilder.append("&refresh=").append(request.getRefresh());
         }
         
         String path = pathBuilder.toString();
         log.debug("Fetching historical data for {} from {} to {} with interval={}, filterType={}", 
-                String.join(",", symbols), fromDate, toDate, interval, filterType);
+                String.join(",", request.getSymbols()), request.getFromDate(), request.getToDate(), 
+                request.getTimeFrame(), request.getFilterType());
         
         return get(path, HistoricalDataResponseWrapper.class)
                 .doOnSuccess(data -> log.debug("Successfully fetched historical data for {} with {} data points", 
-                        String.join(",", symbols), data.getTotalDataPoints()))
+                        String.join(",", request.getSymbols()), data.getTotalDataPoints()))
                 .doOnError(e -> log.error("Failed to fetch historical data for {}: {}", 
-                        String.join(",", symbols), e.getMessage()));
+                        String.join(",", request.getSymbols()), e.getMessage()));
     }
     
     /**
@@ -218,31 +212,48 @@ public class MarketDataApiClient extends AbstractApiClient {
      * @param symbols the symbols to get historical data for
      * @param fromDate the start date for historical data (inclusive)
      * @param toDate the end date for historical data (inclusive)
-     * @param interval the time interval for data points (e.g., "day", "15min")
-     * @param instrumentType the instrument type (e.g., "EQ" for equity)
-     * @param filterType the type of filtering to apply ("ALL", "START_END", "CUSTOM")
+     * @param timeFrame the time interval for data points (e.g., DAY, FIFTEEN_MIN)
+     * @param instrumentType the instrument type (e.g., EQ for equity)
+     * @param filterType the type of filtering to apply (ALL, START_END, CUSTOM)
      * @return a Mono of HistoricalDataResponseWrapper
      */
     public Mono<HistoricalDataResponseWrapper> getHistoricalData(
             List<String> symbols, 
             LocalDate fromDate, 
             LocalDate toDate, 
-            String interval, 
-            String instrumentType, 
-            String filterType) {
-        
-        return getHistoricalData(symbols, fromDate, toDate, interval, instrumentType, filterType, null, null);
+            TimeFrame timeFrame, 
+            InstrumentType instrumentType, 
+            FilterType filterType) {
+    
+        return getHistoricalData(HistoricalDataRequest.builder()
+                .symbols(symbols)
+                .fromDate(fromDate)
+                .toDate(toDate)
+                .timeFrame(timeFrame)
+                .instrumentType(instrumentType)
+                .filterType(filterType)
+                .build());
     }
     
+    /**
+     * Gets historical market data for the specified symbols synchronously.
+     * 
+     * @param request the historical data request parameters
+     * @return the HistoricalDataResponseWrapper
+     */
+    public HistoricalDataResponseWrapper getHistoricalDataSync(HistoricalDataRequest request) {
+        return getHistoricalData(request).block();
+    }
+
     /**
      * Gets historical market data for the specified symbols synchronously.
      * 
      * @param symbols the symbols to get historical data for
      * @param fromDate the start date for historical data (inclusive)
      * @param toDate the end date for historical data (inclusive)
-     * @param interval the time interval for data points (e.g., "day", "15min")
-     * @param instrumentType the instrument type (e.g., "EQ" for equity)
-     * @param filterType the type of filtering to apply ("ALL", "START_END", "CUSTOM")
+     * @param timeFrame the time interval for data points (e.g., DAY, FIFTEEN_MIN)
+     * @param instrumentType the instrument type (e.g., EQ for equity)
+     * @param filterType the type of filtering to apply (ALL, START_END, CUSTOM)
      * @param filterFrequency the frequency for CUSTOM filtering (required when filterType is CUSTOM)
      * @param continuous whether to use continuous data (optional)
      * @return the HistoricalDataResponseWrapper
@@ -251,14 +262,22 @@ public class MarketDataApiClient extends AbstractApiClient {
             List<String> symbols, 
             LocalDate fromDate, 
             LocalDate toDate, 
-            String interval, 
-            String instrumentType, 
-            String filterType, 
+            TimeFrame timeFrame, 
+            InstrumentType instrumentType, 
+            FilterType filterType, 
             Integer filterFrequency,
             Boolean continuous) {
-        
-        return getHistoricalData(symbols, fromDate, toDate, interval, instrumentType, filterType, 
-                filterFrequency, continuous).block();
+    
+        return getHistoricalDataSync(HistoricalDataRequest.builder()
+                .symbols(symbols)
+                .fromDate(fromDate)
+                .toDate(toDate)
+                .timeFrame(timeFrame)
+                .instrumentType(instrumentType)
+                .filterType(filterType)
+                .filterFrequency(filterFrequency)
+                .continuous(continuous)
+                .build());
     }
     
     /**
@@ -268,19 +287,26 @@ public class MarketDataApiClient extends AbstractApiClient {
      * @param symbols the symbols to get historical data for
      * @param fromDate the start date for historical data (inclusive)
      * @param toDate the end date for historical data (inclusive)
-     * @param interval the time interval for data points (e.g., "day", "15min")
-     * @param instrumentType the instrument type (e.g., "EQ" for equity)
-     * @param filterType the type of filtering to apply ("ALL", "START_END", "CUSTOM")
+     * @param timeFrame the time interval for data points (e.g., DAY, FIFTEEN_MIN)
+     * @param instrumentType the instrument type (e.g., EQ for equity)
+     * @param filterType the type of filtering to apply (ALL, START_END, CUSTOM)
      * @return the HistoricalDataResponseWrapper
      */
     public HistoricalDataResponseWrapper getHistoricalDataSync(
             List<String> symbols, 
             LocalDate fromDate, 
             LocalDate toDate, 
-            String interval, 
-            String instrumentType, 
-            String filterType) {
-        
-        return getHistoricalDataSync(symbols, fromDate, toDate, interval, instrumentType, filterType, null, null);
+            TimeFrame timeFrame, 
+            InstrumentType instrumentType, 
+            FilterType filterType) {
+    
+        return getHistoricalDataSync(HistoricalDataRequest.builder()
+                .symbols(symbols)
+                .fromDate(fromDate)
+                .toDate(toDate)
+                .timeFrame(timeFrame)
+                .instrumentType(instrumentType)
+                .filterType(filterType)
+                .build());
     }
 }

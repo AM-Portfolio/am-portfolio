@@ -19,7 +19,7 @@ import java.util.stream.Collectors;
 public class MarketIndexController {
     
     private final MarketIndexIndicesService marketIndexService;
-
+     
     @GetMapping("/all")
     public ResponseEntity<List<IndexIndices>> getAllMarketIndices(
         @RequestParam(required = false) String interval,
