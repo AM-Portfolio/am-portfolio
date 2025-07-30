@@ -90,7 +90,7 @@ public abstract class AbstractAnalyticsProvider<T, I> {
      * @param symbols List of stock symbols
      * @return Map of symbols to market data responses
      */
-    protected Map<String, MarketData> getMarketData(List<String> symbols) {
+    public Map<String, MarketData> getMarketData(List<String> symbols) {
         if (symbols.isEmpty()) {
             return Collections.emptyMap();
         }
@@ -115,7 +115,7 @@ public abstract class AbstractAnalyticsProvider<T, I> {
      * @param timeFrameRequest Time frame parameters (fromDate, toDate, timeFrame)
      * @return Map of symbols to historical data responses
      */
-    protected Map<String, MarketData> getHistoricalData(List<String> symbols, TimeFrameRequest timeFrameRequest) {
+    public Map<String, MarketData> getHistoricalData(List<String> symbols, TimeFrameRequest timeFrameRequest) {
         if (symbols.isEmpty()) {
             return Collections.emptyMap();
         }
@@ -130,7 +130,7 @@ public abstract class AbstractAnalyticsProvider<T, I> {
                     .symbols(symbols)
                     .fromDate(timeFrameRequest.getFromDate())
                     .toDate(timeFrameRequest.getToDate())
-                    // Use the string value from TimeFrame enum
+                    .timeFrame(timeFrameRequest.getTimeFrame())
                     .build();
             
             Map<String, MarketData> historicalData = marketDataService.getHistoricalData(request);

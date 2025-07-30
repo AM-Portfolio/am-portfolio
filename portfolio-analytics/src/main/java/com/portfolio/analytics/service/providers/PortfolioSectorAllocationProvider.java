@@ -5,10 +5,11 @@ import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.analytics.service.AbstractPortfolioAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
+import com.portfolio.analytics.service.utils.AnalyticsUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
-// MarketData is already imported below
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.SectorAllocation;
+import com.portfolio.model.analytics.request.TimeFrameRequest;
 import com.portfolio.model.market.MarketData;
 
 import lombok.extern.slf4j.Slf4j;
@@ -36,87 +37,123 @@ public class PortfolioSectorAllocationProvider extends AbstractPortfolioAnalytic
 
     @Override
     public SectorAllocation generateAnalytics(String portfolioId) {
-        log.info("Calculating sector allocations for portfolio: {}", portfolioId);
+        return generateSectorAllocation(portfolioId, null);
+    }
+    
+    @Override
+    public SectorAllocation generateAnalytics(String portfolioId, TimeFrameRequest timeFrameRequest) {
+        return generateSectorAllocation(portfolioId, timeFrameRequest);
+    }
+    
+    /**
+     * Common method to generate sector allocation with or without time frame
+     */
+    private SectorAllocation generateSectorAllocation(String portfolioId, TimeFrameRequest timeFrameRequest) {
+        log.info("Calculating sector allocations for portfolio: {} with timeFrame: {}", portfolioId, timeFrameRequest);
         
         // Get portfolio data
         PortfolioModelV1 portfolio = getPortfolio(portfolioId);
         if (portfolio == null || portfolio.getEquityModels() == null || portfolio.getEquityModels().isEmpty()) {
             log.warn("No portfolio or holdings found for ID: {}", portfolioId);
-            return SectorAllocation.builder()
-                .portfolioId(portfolioId)
-                .timestamp(Instant.now())
-                .sectorWeights(Collections.emptyList())
-                .industryWeights(Collections.emptyList())
-                .build();
+            return createEmptyResult(portfolioId);
         }
         
         // Get symbols from portfolio holdings
         List<String> portfolioSymbols = getPortfolioSymbols(portfolio);
         if (portfolioSymbols.isEmpty()) {
             log.warn("No stock symbols found in portfolio: {}", portfolioId);
-            return SectorAllocation.builder()
-                .portfolioId(portfolioId)
-                .timestamp(Instant.now())
-                .sectorWeights(Collections.emptyList())
-                .industryWeights(Collections.emptyList())
-                .build();
+            return createEmptyResult(portfolioId);
         }
         
-        // Fetch market data for all stocks in the portfolio
-        Map<String, MarketData> marketData = getMarketData(portfolioSymbols);
+        // Fetch market data for all stocks in the portfolio using AnalyticsUtils
+        Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, timeFrameRequest);
         if (marketData.isEmpty()) {
             log.warn("No market data available for portfolio: {}", portfolioId);
-            return SectorAllocation.builder()
-                .portfolioId(portfolioId)
-                .timestamp(Instant.now())
-                .sectorWeights(Collections.emptyList())
-                .industryWeights(Collections.emptyList())
-                .build();
+            return createEmptyResult(portfolioId);
         }
         
-        // Use SecurityDetailsService to group stocks by sector and industry
+        // Create a map of symbol to holding quantity
+        Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
+        
+        // Group stocks by sector and industry
         Map<String, List<String>> sectorToStocks = securityDetailsService.groupSymbolsBySector(portfolioSymbols);
         Map<String, List<String>> industryToStocks = securityDetailsService.groupSymbolsByIndustry(portfolioSymbols);
         
-        log.info("Sector groups for portfolio {}: {}", portfolioId, sectorToStocks.keySet());
-        log.info("Industry groups for portfolio {}: {}", portfolioId, industryToStocks.keySet());
+        log.debug("Sector groups for portfolio {}: {}", portfolioId, sectorToStocks.keySet());
+        log.debug("Industry groups for portfolio {}: {}", portfolioId, industryToStocks.keySet());
         
-        // Create a map of symbol to holding quantity
-        Map<String, Double> symbolToQuantity = portfolio.getEquityModels().stream()
+        // Map industry to parent sector
+        Map<String, String> industryToSector = mapIndustriesToSectors(industryToStocks, sectorToStocks);
+        
+        // Calculate market values for each stock
+        Map<String, Double> stockToMarketValue = new HashMap<>();
+        double totalPortfolioValue = calculateMarketValues(marketData, symbolToQuantity, stockToMarketValue);
+        
+        // Calculate sector and industry weights
+        List<SectorAllocation.SectorWeight> sectorWeights = calculateSectorWeights(
+                sectorToStocks, stockToMarketValue, totalPortfolioValue);
+        
+        List<SectorAllocation.IndustryWeight> industryWeights = calculateIndustryWeights(
+                industryToStocks, industryToSector, stockToMarketValue, totalPortfolioValue);
+        
+        return SectorAllocation.builder()
+            .portfolioId(portfolioId)
+            .timestamp(Instant.now())
+            .sectorWeights(sectorWeights)
+            .industryWeights(industryWeights)
+            .build();
+    }
+    
+    /**
+     * Create empty result when no data is available
+     */
+    private SectorAllocation createEmptyResult(String portfolioId) {
+        return SectorAllocation.builder()
+            .portfolioId(portfolioId)
+            .timestamp(Instant.now())
+            .sectorWeights(Collections.emptyList())
+            .industryWeights(Collections.emptyList())
+            .build();
+    }
+    
+    /**
+     * Create a map of symbol to holding quantity
+     */
+    private Map<String, Double> createSymbolToQuantityMap(PortfolioModelV1 portfolio) {
+        return portfolio.getEquityModels().stream()
             .collect(Collectors.toMap(
                 EquityModel::getSymbol,
                 EquityModel::getQuantity,
                 (a, b) -> a + b // In case of duplicate symbols, sum the quantities
             ));
+    }
+    
+    /**
+     * Map industries to their parent sectors
+     */
+    private Map<String, String> mapIndustriesToSectors(
+            Map<String, List<String>> industryToStocks, 
+            Map<String, List<String>> sectorToStocks) {
         
-        // Create mappings for stock to sector and industry to sector
-        Map<String, String> stockToSector = new HashMap<>();
         Map<String, String> industryToSector = new HashMap<>();
-        Map<String, Double> stockToMarketValue = new HashMap<>();
         
-        // Map stocks to sectors
-        for (Map.Entry<String, List<String>> entry : sectorToStocks.entrySet()) {
-            String sector = entry.getKey();
-            for (String symbol : entry.getValue()) {
-                stockToSector.put(symbol, sector);
-            }
-        }
-        
-        // Map industries to sectors and determine which stocks belong to which industry
-        Map<String, Set<String>> industryStockSets = new HashMap<>();
-        for (Map.Entry<String, List<String>> entry : industryToStocks.entrySet()) {
-            String industry = entry.getKey();
-            List<String> stocks = entry.getValue();
-            industryStockSets.put(industry, new HashSet<>(stocks));
+        // Determine the parent sector for each industry
+        for (String industry : industryToStocks.keySet()) {
+            List<String> industrySymbols = industryToStocks.get(industry);
             
-            // Find the most common sector for stocks in this industry
-            Map<String, Integer> sectorCounts = new HashMap<>();
-            for (String symbol : stocks) {
-                String sector = stockToSector.getOrDefault(symbol, "Unknown");
-                sectorCounts.put(sector, sectorCounts.getOrDefault(sector, 0) + 1);
+            // Count occurrences of each sector for stocks in this industry
+            Map<String, Long> sectorCounts = new HashMap<>();
+            for (String symbol : industrySymbols) {
+                for (Map.Entry<String, List<String>> entry : sectorToStocks.entrySet()) {
+                    if (entry.getValue().contains(symbol)) {
+                        String sector = entry.getKey();
+                        sectorCounts.put(sector, sectorCounts.getOrDefault(sector, 0L) + 1);
+                        break;
+                    }
+                }
             }
             
-            // Assign the industry to the most common sector
+            // Find the most common sector for this industry
             String mostCommonSector = sectorCounts.entrySet().stream()
                 .max(Map.Entry.comparingByValue())
                 .map(Map.Entry::getKey)
@@ -125,8 +162,19 @@ public class PortfolioSectorAllocationProvider extends AbstractPortfolioAnalytic
             industryToSector.put(industry, mostCommonSector);
         }
         
-        // Calculate market value for each stock in the portfolio
+        return industryToSector;
+    }
+    
+    /**
+     * Calculate market values for each stock and total portfolio value
+     */
+    private double calculateMarketValues(
+            Map<String, MarketData> marketData, 
+            Map<String, Double> symbolToQuantity, 
+            Map<String, Double> stockToMarketValue) {
+        
         double totalPortfolioValue = 0.0;
+        
         for (String symbol : marketData.keySet()) {
             MarketData data = marketData.get(symbol);
             double quantity = symbolToQuantity.getOrDefault(symbol, 0.0);
@@ -138,25 +186,31 @@ public class PortfolioSectorAllocationProvider extends AbstractPortfolioAnalytic
             totalPortfolioValue += marketValue;
         }
         
-        // Calculate sector weights
+        return totalPortfolioValue;
+    }
+    
+    /**
+     * Calculate sector weights
+     */
+    private List<SectorAllocation.SectorWeight> calculateSectorWeights(
+            Map<String, List<String>> sectorToStocks, 
+            Map<String, Double> stockToMarketValue, 
+            double totalPortfolioValue) {
+        
         List<SectorAllocation.SectorWeight> sectorWeights = new ArrayList<>();
+        
         for (Map.Entry<String, List<String>> entry : sectorToStocks.entrySet()) {
             String sectorName = entry.getKey();
             List<String> stocks = entry.getValue();
             
             // Calculate total market value for this sector
-            double sectorMarketValue = stocks.stream()
-                .mapToDouble(symbol -> stockToMarketValue.getOrDefault(symbol, 0.0))
-                .sum();
+            double sectorMarketValue = calculateGroupMarketValue(stocks, stockToMarketValue);
             
             // Calculate weight percentage
-            double weightPercentage = totalPortfolioValue > 0 ? (sectorMarketValue / totalPortfolioValue) * 100 : 0;
+            double weightPercentage = calculateWeightPercentage(sectorMarketValue, totalPortfolioValue);
             
             // Get top stocks by market value
-            List<String> topStocks = stocks.stream()
-                .sorted(Comparator.comparing(symbol -> stockToMarketValue.getOrDefault(symbol, 0.0)).reversed())
-                .limit(5)
-                .collect(Collectors.toList());
+            List<String> topStocks = getTopStocksByValue(stocks, stockToMarketValue, 5);
             
             sectorWeights.add(SectorAllocation.SectorWeight.builder()
                 .sectorName(sectorName)
@@ -166,26 +220,36 @@ public class PortfolioSectorAllocationProvider extends AbstractPortfolioAnalytic
                 .build());
         }
         
-        // Calculate industry weights
+        // Sort by weight percentage (highest to lowest)
+        sectorWeights.sort(Comparator.comparing(SectorAllocation.SectorWeight::getWeightPercentage).reversed());
+        
+        return sectorWeights;
+    }
+    
+    /**
+     * Calculate industry weights
+     */
+    private List<SectorAllocation.IndustryWeight> calculateIndustryWeights(
+            Map<String, List<String>> industryToStocks, 
+            Map<String, String> industryToSector, 
+            Map<String, Double> stockToMarketValue, 
+            double totalPortfolioValue) {
+        
         List<SectorAllocation.IndustryWeight> industryWeights = new ArrayList<>();
+        
         for (Map.Entry<String, List<String>> entry : industryToStocks.entrySet()) {
             String industryName = entry.getKey();
             List<String> stocks = entry.getValue();
             String parentSector = industryToSector.get(industryName);
             
             // Calculate total market value for this industry
-            double industryMarketValue = stocks.stream()
-                .mapToDouble(symbol -> stockToMarketValue.getOrDefault(symbol, 0.0))
-                .sum();
+            double industryMarketValue = calculateGroupMarketValue(stocks, stockToMarketValue);
             
             // Calculate weight percentage
-            double weightPercentage = totalPortfolioValue > 0 ? (industryMarketValue / totalPortfolioValue) * 100 : 0;
+            double weightPercentage = calculateWeightPercentage(industryMarketValue, totalPortfolioValue);
             
             // Get top stocks by market value
-            List<String> topStocks = stocks.stream()
-                .sorted(Comparator.comparing(symbol -> stockToMarketValue.getOrDefault(symbol, 0.0)).reversed())
-                .limit(3)
-                .collect(Collectors.toList());
+            List<String> topStocks = getTopStocksByValue(stocks, stockToMarketValue, 3);
             
             industryWeights.add(SectorAllocation.IndustryWeight.builder()
                 .industryName(industryName)
@@ -197,14 +261,34 @@ public class PortfolioSectorAllocationProvider extends AbstractPortfolioAnalytic
         }
         
         // Sort by weight percentage (highest to lowest)
-        sectorWeights.sort(Comparator.comparing(SectorAllocation.SectorWeight::getWeightPercentage).reversed());
         industryWeights.sort(Comparator.comparing(SectorAllocation.IndustryWeight::getWeightPercentage).reversed());
         
-        return SectorAllocation.builder()
-            .portfolioId(portfolioId)
-            .timestamp(Instant.now())
-            .sectorWeights(sectorWeights)
-            .industryWeights(industryWeights)
-            .build();
+        return industryWeights;
+    }
+    
+    /**
+     * Calculate total market value for a group of stocks
+     */
+    private double calculateGroupMarketValue(List<String> stocks, Map<String, Double> stockToMarketValue) {
+        return stocks.stream()
+            .mapToDouble(symbol -> stockToMarketValue.getOrDefault(symbol, 0.0))
+            .sum();
+    }
+    
+    /**
+     * Calculate weight percentage
+     */
+    private double calculateWeightPercentage(double groupValue, double totalValue) {
+        return totalValue > 0 ? (groupValue / totalValue) * 100 : 0;
+    }
+    
+    /**
+     * Get top stocks by market value
+     */
+    private List<String> getTopStocksByValue(List<String> stocks, Map<String, Double> stockToMarketValue, int limit) {
+        return stocks.stream()
+            .sorted(Comparator.comparing(symbol -> stockToMarketValue.getOrDefault(symbol, 0.0)).reversed())
+            .limit(limit)
+            .collect(Collectors.toList());
     }
 }

@@ -2,11 +2,12 @@ package com.portfolio.analytics.service.providers;
 
 import com.portfolio.analytics.service.AbstractIndexAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
+import com.portfolio.analytics.service.utils.AnalyticsUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
-// MarketData is already imported below
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
 import com.portfolio.model.analytics.Heatmap;
+import com.portfolio.model.analytics.request.TimeFrameRequest;
 import com.portfolio.model.market.MarketData;
 
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Provider for sector heatmap analytics
@@ -33,79 +35,39 @@ public class SectorHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatma
 
     @Override
     public Heatmap generateAnalytics(String indexSymbol) {
-        log.info("Generating sector heatmap for index: {}", indexSymbol);
+        return generateHeatmap(indexSymbol, null);
+    }
+    
+    @Override
+    public Heatmap generateAnalytics(String indexSymbol, TimeFrameRequest timeFrameRequest) {
+        return generateHeatmap(indexSymbol, timeFrameRequest);
+    }
+    
+    /**
+     * Common method to generate heatmap with or without time frame
+     */
+    private Heatmap generateHeatmap(String indexSymbol, TimeFrameRequest timeFrameRequest) {
+        log.info("Generating sector heatmap for index: {} with timeFrame: {}", indexSymbol, timeFrameRequest);
 
-        var indexStockSymbols = getIndexSymbols(indexSymbol);
+        // Get index symbols
+        List<String> indexStockSymbols = getIndexSymbols(indexSymbol);
         if (indexStockSymbols.isEmpty()) {
             log.warn("No stock symbols found for index: {}", indexSymbol);
-            return Heatmap.builder()
-                .indexSymbol(indexSymbol)
-                .timestamp(Instant.now())
-                .sectors(Collections.emptyList())
-                .build();
+            return createEmptyHeatmap(indexSymbol);
         }
         
-        var marketData = getMarketData(indexStockSymbols);
+        // Fetch market data using AnalyticsUtils
+        Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, indexStockSymbols, timeFrameRequest);
         if (marketData.isEmpty()) {
             log.warn("No market data available for index: {}", indexSymbol);
-            return Heatmap.builder()
-                .indexSymbol(indexSymbol)
-                .timestamp(Instant.now())
-                .sectors(Collections.emptyList())
-                .build();
+            return createEmptyHeatmap(indexSymbol);
         }
         
-        // Group stocks by sector and calculate performance
-        Map<String, List<MarketData>> sectorMap = new HashMap<>();
-        
-        // Get stock metadata from Redis or another source to map symbols to sectors
-        // For now, we'll use a simplified approach with mock sector data
-        for (String symbol : marketData.keySet()) {
-            // In a real implementation, you would get the sector from a stock metadata service
-            // For now, we'll assign mock sectors based on symbol prefix
-            String sector = getMockSectorForSymbol(symbol);
-            
-            sectorMap.computeIfAbsent(sector, k -> new ArrayList<>())
-                .add(marketData.get(symbol));
-        }
+        // Group stocks by sector
+        Map<String, List<MarketData>> sectorMap = groupStocksBySector(marketData);
         
         // Calculate performance for each sector
-        List<Heatmap.SectorPerformance> sectorPerformances = new ArrayList<>();
-        for (Map.Entry<String, List<MarketData>> entry : sectorMap.entrySet()) {
-            String sectorName = entry.getKey();
-            List<MarketData> sectorStocks = entry.getValue();
-            
-            // Calculate average performance for the sector
-            double totalPerformance = 0.0;
-            double totalChangePercent = 0.0;
-            
-            for (MarketData stock : sectorStocks) {
-                double closePrice = stock.getOhlc().getClose();
-                double openPrice = stock.getOhlc().getOpen();
-                
-                if (openPrice > 0) {
-                    double changePercent = ((stock.getLastPrice() - openPrice) / openPrice) * 100;
-                    totalChangePercent += changePercent;
-                    
-                    // Performance score based on price movement relative to previous close
-                    double performanceScore = ((stock.getLastPrice() - stock.getOhlc().getClose()) / stock.getOhlc().getClose()) * 100;
-                    totalPerformance += performanceScore;
-                }
-            }
-            
-            double avgPerformance = sectorStocks.isEmpty() ? 0 : totalPerformance / sectorStocks.size();
-            double avgChangePercent = sectorStocks.isEmpty() ? 0 : totalChangePercent / sectorStocks.size();
-            
-            // Assign color based on performance
-            String color = getColorForPerformance(avgPerformance);
-            
-            sectorPerformances.add(Heatmap.SectorPerformance.builder()
-                .sectorName(sectorName)
-                .performance(avgPerformance)
-                .changePercent(avgChangePercent)
-                .color(color)
-                .build());
-        }
+        List<Heatmap.SectorPerformance> sectorPerformances = calculateSectorPerformances(sectorMap);
         
         // Sort sectors by performance (highest to lowest)
         sectorPerformances.sort(Comparator.comparing(Heatmap.SectorPerformance::getPerformance).reversed());
@@ -115,6 +77,122 @@ public class SectorHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatma
             .timestamp(Instant.now())
             .sectors(sectorPerformances)
             .build();
+    }
+    
+    /**
+     * Create an empty heatmap result when no data is available
+     */
+    private Heatmap createEmptyHeatmap(String indexSymbol) {
+        return Heatmap.builder()
+            .indexSymbol(indexSymbol)
+            .timestamp(Instant.now())
+            .sectors(Collections.emptyList())
+            .build();
+    }
+    
+    /**
+     * Group stocks by sector
+     */
+    private Map<String, List<MarketData>> groupStocksBySector(Map<String, MarketData> marketData) {
+        Map<String, List<MarketData>> sectorMap = new HashMap<>();
+        
+        // In a production environment, use securityDetailsService to get actual sectors
+        // For now, we'll use a simplified approach with mock sector data
+        for (Map.Entry<String, MarketData> entry : marketData.entrySet()) {
+            String symbol = entry.getKey();
+            MarketData data = entry.getValue();
+            
+            // Get sector for this symbol
+            String sector = getMockSectorForSymbol(symbol);
+            
+            // Add to sector group
+            sectorMap.computeIfAbsent(sector, k -> new ArrayList<>()).add(data);
+        }
+        
+        return sectorMap;
+    }
+    
+    /**
+     * Calculate performance metrics for each sector
+     */
+    private List<Heatmap.SectorPerformance> calculateSectorPerformances(Map<String, List<MarketData>> sectorMap) {
+        List<Heatmap.SectorPerformance> sectorPerformances = new ArrayList<>();
+        
+        for (Map.Entry<String, List<MarketData>> entry : sectorMap.entrySet()) {
+            String sectorName = entry.getKey();
+            List<MarketData> sectorStocks = entry.getValue();
+            
+            // Calculate sector metrics
+            SectorMetrics metrics = calculateSectorMetrics(sectorStocks);
+            
+            // Assign color based on performance
+            String color = getColorForPerformance(metrics.getPerformance());
+            
+            // Create sector performance object
+            sectorPerformances.add(Heatmap.SectorPerformance.builder()
+                .sectorName(sectorName)
+                .performance(metrics.getPerformance())
+                .changePercent(metrics.getChangePercent())
+                .color(color)
+                .build());
+        }
+        
+        return sectorPerformances;
+    }
+    
+    /**
+     * Calculate performance metrics for a list of stocks
+     */
+    private SectorMetrics calculateSectorMetrics(List<MarketData> stocks) {
+        double totalPerformance = 0.0;
+        double totalChangePercent = 0.0;
+        int validStockCount = 0;
+        
+        for (MarketData stock : stocks) {
+            if (stock.getOhlc() != null) {
+                double closePrice = stock.getOhlc().getClose();
+                double openPrice = stock.getOhlc().getOpen();
+                
+                if (openPrice > 0 && closePrice > 0) {
+                    // Calculate change from open to current price
+                    double changePercent = ((stock.getLastPrice() - openPrice) / openPrice) * 100;
+                    totalChangePercent += changePercent;
+                    
+                    // Performance score based on price movement relative to previous close
+                    double performanceScore = ((stock.getLastPrice() - closePrice) / closePrice) * 100;
+                    totalPerformance += performanceScore;
+                    
+                    validStockCount++;
+                }
+            }
+        }
+        
+        // Calculate averages
+        double avgPerformance = validStockCount > 0 ? totalPerformance / validStockCount : 0;
+        double avgChangePercent = validStockCount > 0 ? totalChangePercent / validStockCount : 0;
+        
+        return new SectorMetrics(avgPerformance, avgChangePercent);
+    }
+    
+    /**
+     * Helper class to hold sector metrics
+     */
+    private static class SectorMetrics {
+        private final double performance;
+        private final double changePercent;
+        
+        public SectorMetrics(double performance, double changePercent) {
+            this.performance = performance;
+            this.changePercent = changePercent;
+        }
+        
+        public double getPerformance() {
+            return performance;
+        }
+        
+        public double getChangePercent() {
+            return changePercent;
+        }
     }
     
     /**
