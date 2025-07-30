@@ -4,6 +4,7 @@ import com.portfolio.model.analytics.GainerLoser;
 import com.portfolio.model.analytics.Heatmap;
 import com.portfolio.model.analytics.MarketCapAllocation;
 import com.portfolio.model.analytics.SectorAllocation;
+import com.portfolio.model.market.MarketData;
 import com.portfolio.redis.service.StockIndicesRedisService;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
@@ -81,7 +82,7 @@ public class IndexAnalyticsService {
         }
         
         // Group stocks by sector and calculate performance
-        Map<String, List<MarketDataResponse>> sectorMap = new HashMap<>();
+        Map<String, List<MarketData>> sectorMap = new HashMap<>();
         
         // Get stock metadata from Redis or another source to map symbols to sectors
         // For now, we'll use a simplified approach with mock sector data
@@ -96,15 +97,15 @@ public class IndexAnalyticsService {
         
         // Calculate performance for each sector
         List<Heatmap.SectorPerformance> sectorPerformances = new ArrayList<>();
-        for (Map.Entry<String, List<MarketDataResponse>> entry : sectorMap.entrySet()) {
+        for (Map.Entry<String, List<MarketData>> entry : sectorMap.entrySet()) {
             String sectorName = entry.getKey();
-            List<MarketDataResponse> sectorStocks = entry.getValue();
+            List<MarketData> sectorStocks = entry.getValue();
             
             // Calculate average performance for the sector
             double totalPerformance = 0.0;
             double totalChangePercent = 0.0;
             
-            for (MarketDataResponse stock : sectorStocks) {
+            for (MarketData stock : sectorStocks) {
                 double closePrice = stock.getOhlc().getClose();
                 double openPrice = stock.getOhlc().getOpen();
                 
@@ -262,7 +263,7 @@ public class IndexAnalyticsService {
         }
         
         // Define market cap segments
-        Map<String, List<MarketDataResponse>> segmentMap = new HashMap<>();
+        Map<String, List<MarketData>> segmentMap = new HashMap<>();
         segmentMap.put("Large Cap", new ArrayList<>());
         segmentMap.put("Mid Cap", new ArrayList<>());
         segmentMap.put("Small Cap", new ArrayList<>());
@@ -275,7 +276,7 @@ public class IndexAnalyticsService {
         Map<Long, String> instrumentToSymbol = new HashMap<>(); // Map to store instrument token to symbol mapping
         
         for (String symbol : marketData.keySet()) {
-            MarketDataResponse data = marketData.get(symbol);
+            MarketData data = marketData.get(symbol);
             // Store the mapping of instrument token to symbol
             instrumentToSymbol.put(data.getInstrumentToken(), symbol);
             
@@ -301,15 +302,15 @@ public class IndexAnalyticsService {
         
         // Calculate allocation percentages and create segment objects
         List<MarketCapAllocation.CapSegment> segments = new ArrayList<>();
-        for (Map.Entry<String, List<MarketDataResponse>> entry : segmentMap.entrySet()) {
+        for (Map.Entry<String, List<MarketData>> entry : segmentMap.entrySet()) {
             String segmentName = entry.getKey();
-            List<MarketDataResponse> segmentStocks = entry.getValue();
+            List<MarketData> segmentStocks = entry.getValue();
             
             // Calculate total market cap for this segment
             double segmentMarketCap = 0.0;
             Map<String, Double> symbolToMarketCap = new HashMap<>();
             
-            for (MarketDataResponse stock : segmentStocks) {
+            for (MarketData stock : segmentStocks) {
                 // Get the symbol from our mapping using instrument token
                 String symbol = instrumentToSymbol.get(stock.getInstrumentToken());
                 if (symbol != null) {

@@ -3,10 +3,12 @@ package com.portfolio.analytics.service.providers;
 import com.portfolio.analytics.service.AbstractIndexAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
-import com.portfolio.marketdata.model.MarketDataResponse;
+// MarketData is already imported below
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
 import com.portfolio.model.analytics.Heatmap;
+import com.portfolio.model.market.MarketData;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -54,7 +56,7 @@ public class SectorHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatma
         }
         
         // Group stocks by sector and calculate performance
-        Map<String, List<MarketDataResponse>> sectorMap = new HashMap<>();
+        Map<String, List<MarketData>> sectorMap = new HashMap<>();
         
         // Get stock metadata from Redis or another source to map symbols to sectors
         // For now, we'll use a simplified approach with mock sector data
@@ -69,15 +71,15 @@ public class SectorHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatma
         
         // Calculate performance for each sector
         List<Heatmap.SectorPerformance> sectorPerformances = new ArrayList<>();
-        for (Map.Entry<String, List<MarketDataResponse>> entry : sectorMap.entrySet()) {
+        for (Map.Entry<String, List<MarketData>> entry : sectorMap.entrySet()) {
             String sectorName = entry.getKey();
-            List<MarketDataResponse> sectorStocks = entry.getValue();
+            List<MarketData> sectorStocks = entry.getValue();
             
             // Calculate average performance for the sector
             double totalPerformance = 0.0;
             double totalChangePercent = 0.0;
             
-            for (MarketDataResponse stock : sectorStocks) {
+            for (MarketData stock : sectorStocks) {
                 double closePrice = stock.getOhlc().getClose();
                 double openPrice = stock.getOhlc().getOpen();
                 

@@ -19,7 +19,7 @@ import com.portfolio.marketdata.model.HistoricalDataRequest;
 import com.portfolio.marketdata.model.HistoricalDataResponseWrapper;
 import com.portfolio.marketdata.model.InstrumentType;
 import com.portfolio.marketdata.model.MarketDataResponseWrapper;
-import com.portfolio.marketdata.model.TimeFrame;
+import com.portfolio.model.market.TimeFrame;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;

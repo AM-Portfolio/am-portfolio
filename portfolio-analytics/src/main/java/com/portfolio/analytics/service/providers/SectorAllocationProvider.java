@@ -3,10 +3,11 @@ package com.portfolio.analytics.service.providers;
 import com.portfolio.analytics.service.AbstractIndexAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
-import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
 import com.portfolio.model.analytics.SectorAllocation;
+import com.portfolio.model.market.MarketData;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -102,7 +103,7 @@ public class SectorAllocationProvider extends AbstractIndexAnalyticsProvider<Sec
         // Calculate market cap for each stock
         double totalMarketCap = 0.0;
         for (String symbol : marketData.keySet()) {
-            MarketDataResponse data = marketData.get(symbol);
+            MarketData data = marketData.get(symbol);
             
             // Calculate market cap (price * outstanding shares)
             double marketCap = data.getLastPrice() * 1000000;

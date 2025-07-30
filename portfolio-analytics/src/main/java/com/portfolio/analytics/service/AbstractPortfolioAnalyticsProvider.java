@@ -87,11 +87,5 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
         }
         return getPortfolioSymbols(portfolio);
     }
-    
-    @Override
-    public T generateAnalytics(String portfolioId, Object... params) {
-        // Default implementation delegates to the simpler method
-        // Subclasses should override this if they need to handle additional parameters
-        return generateAnalytics(portfolioId);
-    }
+
 }

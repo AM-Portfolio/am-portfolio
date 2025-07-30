@@ -5,17 +5,20 @@ import com.portfolio.model.analytics.Heatmap;
 import com.portfolio.model.analytics.MarketCapAllocation;
 import com.portfolio.model.analytics.SectorAllocation;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
+import com.portfolio.model.analytics.request.TimeFrameRequest;
 import com.portfolio.model.analytics.response.AdvancedAnalyticsResponse;
 import com.portfolio.analytics.service.IndexAnalyticsFacade;
+import com.portfolio.model.market.TimeFrame;
+
+import org.springframework.format.annotation.DateTimeFormat;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.Instant;
+import java.time.LocalDate;
 
 /**
  * REST controller for index analytics
@@ -31,48 +34,123 @@ public class IndexAnalyticsController {
     /**
      * Get sector heatmap for an index
      * @param indexSymbol The index symbol (e.g., "NIFTY 50", "NIFTY BANK")
+     * @param fromDate Optional start date for the analysis period
+     * @param toDate Optional end date for the analysis period
+     * @param timeFrame Optional time frame interval (e.g., DAY, HOUR)
      * @return Heatmap data
      */
     @GetMapping("/{indexSymbol}/heatmap")
-    public ResponseEntity<Heatmap> getSectorHeatmap(@PathVariable String indexSymbol) {
-        log.info("REST request to get sector heatmap for index: {}", indexSymbol);
-        return ResponseEntity.ok(indexAnalyticsFacade.generateSectorHeatmap(indexSymbol));
+    public ResponseEntity<Heatmap> getSectorHeatmap(
+            @PathVariable String indexSymbol,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(required = false) TimeFrame timeFrame) {
+        
+        log.info("REST request to get sector heatmap for index: {} from {} to {} with timeFrame: {}", 
+                indexSymbol, fromDate, toDate, timeFrame);
+        
+        // Create a TimeFrameRequest to pass the parameters
+        TimeFrameRequest timeFrameRequest = TimeFrameRequest.builder()
+                .fromDate(fromDate)
+                .toDate(toDate)
+                .timeFrame(timeFrame)
+                .build();
+                
+        return ResponseEntity.ok(indexAnalyticsFacade.generateSectorHeatmap(indexSymbol, timeFrameRequest));
     }
     
     /**
      * Get top gainers and losers for an index
      * @param indexSymbol The index symbol
-     * @param limit Number of top gainers/losers to return (default: 5)
-     * @return GainerLoser data
+     * @param limit Optional limit parameter for number of top gainers/losers (default: 5)
+     * @param fromDate Optional start date for the analysis period
+     * @param toDate Optional end date for the analysis period
+     * @param timeFrame Optional time frame interval (e.g., DAY, HOUR)
+     * @return Top movers data
      */
     @GetMapping("/{indexSymbol}/movers")
-    public ResponseEntity<GainerLoser> getTopMovers(
+    public ResponseEntity<GainerLoser> getTopGainersLosers(
             @PathVariable String indexSymbol,
-            @RequestParam(defaultValue = "5") int limit) {
-        log.info("REST request to get top {} movers for index: {}", limit, indexSymbol);
-        return ResponseEntity.ok(indexAnalyticsFacade.getTopGainersLosers(indexSymbol, limit));
+            @RequestParam(required = false, defaultValue = "5") int limit,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(required = false) TimeFrame timeFrame) {
+        
+        log.info("REST request to get top {} gainers/losers for index: {} from {} to {} with timeFrame: {}", 
+                limit, indexSymbol, fromDate, toDate, timeFrame);
+        
+        // Create a TimeFrameRequest to pass the parameters
+        TimeFrameRequest timeFrameRequest = TimeFrameRequest.builder()
+                .fromDate(fromDate)
+                .toDate(toDate)
+                .timeFrame(timeFrame)
+                .build();
+                
+        return ResponseEntity.ok(indexAnalyticsFacade.getTopGainersLosers(indexSymbol, limit, timeFrameRequest));
     }
     
     /**
      * Get sector and industry allocation percentages for an index
      * @param indexSymbol The index symbol
+     * @param fromDate Optional start date for the analysis period
+     * @param toDate Optional end date for the analysis period
+     * @param timeFrame Optional time frame interval (e.g., DAY, HOUR)
      * @return SectorAllocation data
      */
     @GetMapping("/{indexSymbol}/allocation")
-    public ResponseEntity<SectorAllocation> getSectorAllocation(@PathVariable String indexSymbol) {
-        log.info("REST request to get sector allocation for index: {}", indexSymbol);
-        return ResponseEntity.ok(indexAnalyticsFacade.calculateSectorAllocations(indexSymbol));
+    public ResponseEntity<SectorAllocation> getSectorAllocation(
+            @PathVariable String indexSymbol,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(required = false) TimeFrame timeFrame) {
+        
+        log.info("REST request to get sector allocation for index: {} from {} to {} with timeFrame: {}", 
+                indexSymbol, fromDate, toDate, timeFrame);
+        
+        if (fromDate != null || toDate != null || timeFrame != null) {
+            // Create a TimeFrameRequest to pass the parameters
+            TimeFrameRequest timeFrameRequest = TimeFrameRequest.builder()
+                    .fromDate(fromDate)
+                    .toDate(toDate)
+                    .timeFrame(timeFrame)
+                    .build();
+            
+            return ResponseEntity.ok(indexAnalyticsFacade.calculateSectorAllocations(indexSymbol, timeFrameRequest));
+        } else {
+            return ResponseEntity.ok(indexAnalyticsFacade.calculateSectorAllocations(indexSymbol));
+        }
     }
     
     /**
      * Get market capitalization allocation breakdown for an index
      * @param indexSymbol The index symbol
+     * @param fromDate Optional start date for the analysis period
+     * @param toDate Optional end date for the analysis period
+     * @param timeFrame Optional time frame interval (e.g., DAY, HOUR)
      * @return MarketCapAllocation data
      */
     @GetMapping("/{indexSymbol}/market-cap")
-    public ResponseEntity<MarketCapAllocation> getMarketCapAllocation(@PathVariable String indexSymbol) {
-        log.info("REST request to get market cap allocation for index: {}", indexSymbol);
-        return ResponseEntity.ok(indexAnalyticsFacade.calculateMarketCapAllocations(indexSymbol));
+    public ResponseEntity<MarketCapAllocation> getMarketCapAllocation(
+            @PathVariable String indexSymbol,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(required = false) TimeFrame timeFrame) {
+        
+        log.info("REST request to get market cap allocation for index: {} from {} to {} with timeFrame: {}", 
+                indexSymbol, fromDate, toDate, timeFrame);
+        
+        if (fromDate != null || toDate != null || timeFrame != null) {
+            // Create a TimeFrameRequest to pass the parameters
+            TimeFrameRequest timeFrameRequest = TimeFrameRequest.builder()
+                    .fromDate(fromDate)
+                    .toDate(toDate)
+                    .timeFrame(timeFrame)
+                    .build();
+            
+            return ResponseEntity.ok(indexAnalyticsFacade.calculateMarketCapAllocations(indexSymbol, timeFrameRequest));
+        } else {
+            return ResponseEntity.ok(indexAnalyticsFacade.calculateMarketCapAllocations(indexSymbol));
+        }
     }
     
     /**
@@ -85,11 +163,24 @@ public class IndexAnalyticsController {
     public ResponseEntity<AdvancedAnalyticsResponse> getAdvancedAnalytics(
             @PathVariable String indexSymbol,
             @RequestBody AdvancedAnalyticsRequest request) {
-        log.info("REST request for advanced analytics on index: {} with timeframe: {} to {}", 
-                indexSymbol, request.getStartDate(), request.getEndDate());
+        log.info("REST request for advanced analytics on index: {} with timeframe: {} to {}, timeFrame: {}", 
+                indexSymbol, request.getFromDate(), request.getToDate(), request.getTimeFrame());
         
         // Set the index symbol from the path parameter (overriding any value in the request)
         request.setIndexSymbol(indexSymbol);
+        
+        // Log pagination information if provided
+        if (request.getPagination() != null) {
+            if (request.getPagination().isReturnAllData()) {
+                log.info("Request to return all data without pagination");
+            } else {
+                log.info("Pagination requested: page {}, size {}, sortBy {}, sortDirection {}",
+                        request.getPagination().getPage(),
+                        request.getPagination().getSize(),
+                        request.getPagination().getSortBy(),
+                        request.getPagination().getSortDirection());
+            }
+        }
         
         return ResponseEntity.ok(indexAnalyticsFacade.calculateAdvancedAnalytics(request));
     }

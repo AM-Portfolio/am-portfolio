@@ -3,6 +3,8 @@ package com.portfolio.marketdata.model;
 import java.time.LocalDate;
 import java.util.List;
 
+import com.portfolio.model.market.TimeFrame;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;

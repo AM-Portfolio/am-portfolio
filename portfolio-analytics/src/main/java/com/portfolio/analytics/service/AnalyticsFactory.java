@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import com.portfolio.model.analytics.request.TimeFrameRequest;
+
 /**
  * Factory for creating and managing analytics providers for both index and portfolio analytics
  */
@@ -74,6 +76,37 @@ public class AnalyticsFactory {
      */
     public <T> T generateAnalytics(AnalyticsType type, String symbol, Object... params) {
         AnalyticsProvider<T> provider = getProvider(type);
+        return provider.generateAnalytics(symbol, params);
+    }
+    
+    /**
+     * Generate analytics data using the appropriate provider with time frame parameters
+     * @param type The analytics type
+     * @param symbol The symbol to generate analytics for
+     * @param timeFrameRequest Time frame parameters (fromDate, toDate, timeFrame)
+     * @return The analytics data
+     * @param <T> The type of analytics data returned
+     */
+    public <T> T generateAnalytics(AnalyticsType type, String symbol, TimeFrameRequest timeFrameRequest) {
+        AnalyticsProvider<T> provider = getProvider(type);
+        // For now, delegate to the simple version until providers are updated to support time frame
+        // TODO: Update providers to handle TimeFrameRequest directly
+        return provider.generateAnalytics(symbol);
+    }
+    
+    /**
+     * Generate analytics data using the appropriate provider with time frame parameters and additional parameters
+     * @param type The analytics type
+     * @param symbol The symbol to generate analytics for
+     * @param timeFrameRequest Time frame parameters (fromDate, toDate, timeFrame)
+     * @param params Additional parameters for analytics generation
+     * @return The analytics data
+     * @param <T> The type of analytics data returned
+     */
+    public <T> T generateAnalytics(AnalyticsType type, String symbol, TimeFrameRequest timeFrameRequest, Object... params) {
+        AnalyticsProvider<T> provider = getProvider(type);
+        // For now, delegate to the version with params until providers are updated to support time frame
+        // TODO: Update providers to handle TimeFrameRequest directly
         return provider.generateAnalytics(symbol, params);
     }
     

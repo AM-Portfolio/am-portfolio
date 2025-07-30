@@ -7,9 +7,10 @@ import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.analytics.service.AbstractPortfolioAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
-import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.MarketCapAllocation;
+import com.portfolio.model.market.MarketData;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -60,7 +61,7 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
         }
         
         // Fetch market data for all stocks in the portfolio
-        Map<String, MarketDataResponse> marketData = getMarketData(portfolioSymbols);
+        Map<String, MarketData> marketData = getMarketData(portfolioSymbols);
         if (marketData.isEmpty()) {
             log.warn("No market data available for portfolio: {}", portfolioId);
             return MarketCapAllocation.builder()
@@ -97,7 +98,7 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
         Map<String, String> symbolToSegment = new HashMap<>(); // Map to store symbol to segment mapping
         
         for (String symbol : marketData.keySet()) {
-            MarketDataResponse data = marketData.get(symbol);
+            MarketData data = marketData.get(symbol);
             double quantity = symbolToQuantity.getOrDefault(symbol, 0.0);
             
             // Calculate market value of this holding

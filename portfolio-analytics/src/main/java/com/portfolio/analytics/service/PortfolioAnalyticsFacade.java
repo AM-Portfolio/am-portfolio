@@ -69,13 +69,13 @@ public class PortfolioAnalyticsFacade {
      */
     public AdvancedAnalyticsResponse calculateAdvancedAnalytics(AdvancedAnalyticsRequest request) {
         log.info("Calculating advanced analytics for portfolio: {} from {} to {}", 
-                request.getPortfolioId(), request.getStartDate(), request.getEndDate());
+                request.getPortfolioId(), request.getFromDate(), request.getToDate());
         
         // Start building the response
         AdvancedAnalyticsResponse.AdvancedAnalyticsResponseBuilder responseBuilder = AdvancedAnalyticsResponse.builder()
                 .portfolioId(request.getPortfolioId())
-                .startDate(request.getStartDate())
-                .endDate(request.getEndDate())
+                .startDate(request.getFromDate())
+                .endDate(request.getToDate())
                 .timestamp(java.time.Instant.now());
         
         // Add comparison index if provided

@@ -4,16 +4,17 @@ import com.am.common.amcommondata.model.MarketCapType;
 import com.portfolio.analytics.service.AbstractIndexAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
-import com.portfolio.marketdata.model.MarketDataResponse;
+// MarketData is already imported below
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
 import com.portfolio.model.analytics.MarketCapAllocation;
+import com.portfolio.model.market.MarketData;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Provider for market cap allocation analytics
@@ -75,7 +76,7 @@ public class MarketCapAllocationProvider extends AbstractIndexAnalyticsProvider<
         Map<String, String> symbolToSegment = new HashMap<>(); // Map to store symbol to segment mapping
         
         for (String symbol : marketData.keySet()) {
-            MarketDataResponse data = marketData.get(symbol);
+            MarketData data = marketData.get(symbol);
             
             // Calculate market cap using just the price as a proxy
             // In a real implementation, would multiply by actual outstanding shares
@@ -107,7 +108,7 @@ public class MarketCapAllocationProvider extends AbstractIndexAnalyticsProvider<
         }
         
         // Group market data by segment
-        Map<String, List<MarketDataResponse>> segmentMap = new HashMap<>();
+        Map<String, List<MarketData>> segmentMap = new HashMap<>();
         for (String segment : new HashSet<>(symbolToSegment.values())) {
             segmentMap.put(segment, new ArrayList<>());
         }
@@ -119,9 +120,9 @@ public class MarketCapAllocationProvider extends AbstractIndexAnalyticsProvider<
         
         // Calculate allocation percentages and create segment objects
         List<MarketCapAllocation.CapSegment> segments = new ArrayList<>();
-        for (Map.Entry<String, List<MarketDataResponse>> entry : segmentMap.entrySet()) {
+        for (Map.Entry<String, List<MarketData>> entry : segmentMap.entrySet()) {
             String segmentName = entry.getKey();
-            List<MarketDataResponse> segmentStocks = entry.getValue();
+            List<MarketData> segmentStocks = entry.getValue();
             
             if (segmentStocks.isEmpty()) {
                 continue; // Skip empty segments
@@ -131,7 +132,7 @@ public class MarketCapAllocationProvider extends AbstractIndexAnalyticsProvider<
             double segmentMarketCap = 0.0;
             Map<String, Double> symbolToMarketCap = new HashMap<>();
             
-            for (MarketDataResponse stock : segmentStocks) {
+            for (MarketData stock : segmentStocks) {
                 // Get symbol from instrument token
                 String symbol = indexStockSymbols.stream()
                     .filter(s -> marketData.containsKey(s) && marketData.get(s).getInstrumentToken() == stock.getInstrumentToken())

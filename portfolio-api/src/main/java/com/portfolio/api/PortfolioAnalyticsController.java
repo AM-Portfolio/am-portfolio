@@ -81,16 +81,16 @@ public class PortfolioAnalyticsController {
      * @param request The advanced analytics request parameters
      * @return Combined analytics data based on requested components
      */
-    @PostMapping("/{portfolioId}/advanced")
-    public ResponseEntity<AdvancedAnalyticsResponse> getAdvancedAnalytics(
-            @PathVariable String portfolioId,
-            @RequestBody AdvancedAnalyticsRequest request) {
-        log.info("REST request for advanced analytics on portfolio: {} with timeframe: {} to {}", 
-                portfolioId, request.getStartDate(), request.getEndDate());
+    // @PostMapping("/{portfolioId}/advanced")
+    // public ResponseEntity<AdvancedAnalyticsResponse> getAdvancedAnalytics(
+    //         @PathVariable String portfolioId,
+    //         @RequestBody AdvancedAnalyticsRequest request) {
+    //     log.info("REST request for advanced analytics on portfolio: {} with timeframe: {} to {}", 
+    //             portfolioId, request.getStartDate(), request.getEndDate());
         
-        // Set the portfolio ID from the path parameter (overriding any value in the request)
-        request.setPortfolioId(portfolioId);
+    //     // Set the portfolio ID from the path parameter (overriding any value in the request)
+    //     request.setPortfolioId(portfolioId);
         
-        return ResponseEntity.ok(portfolioAnalyticsFacade.calculateAdvancedAnalytics(request));
-    }
+    //     return ResponseEntity.ok(portfolioAnalyticsFacade.calculateAdvancedAnalytics(request));
+    // }
 }

@@ -1,21 +1,21 @@
 package com.portfolio.model.analytics.request;
 
 import lombok.AllArgsConstructor;
-import lombok.Builder;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
-
-import java.time.LocalDate;
+import lombok.experimental.SuperBuilder;
 
 /**
  * Request object for advanced analytics that combines multiple analytics features
  * with timeframe support.
  */
 @Data
-@Builder
+@SuperBuilder
 @NoArgsConstructor
 @AllArgsConstructor
-public class AdvancedAnalyticsRequest {
+@EqualsAndHashCode(callSuper = true)
+public class AdvancedAnalyticsRequest extends TimeFrameRequest {
 
     /**
      * 
@@ -30,14 +30,9 @@ public class AdvancedAnalyticsRequest {
     private String indexSymbol;
     
     /**
-     * Start date for the analysis period
+     * Pagination parameters for the results
      */
-    private LocalDate startDate;
-    
-    /**
-     * End date for the analysis period (defaults to current date if not specified)
-     */
-    private LocalDate endDate;
+    private PaginationRequest pagination;
     
     /**
      * Whether to include heatmap data in the response

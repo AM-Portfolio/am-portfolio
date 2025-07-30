@@ -6,10 +6,11 @@ import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.analytics.service.AbstractPortfolioAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
-import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.GainerLoser;
 import com.portfolio.model.analytics.GainerLoser.StockMovement;
+import com.portfolio.model.market.MarketData;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -60,7 +61,7 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
         }
         
         // Fetch market data for all stocks in the portfolio
-        Map<String, MarketDataResponse> marketData = getMarketData(portfolioSymbols);
+        Map<String, MarketData> marketData = getMarketData(portfolioSymbols);
         if (marketData.isEmpty()) {
             log.warn("No market data available for portfolio: {}", portfolioId);
             return createEmptyResponse(portfolioId);
@@ -152,13 +153,13 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
      * Calculates performance metrics for each stock
      */
     private PerformanceMetrics calculatePerformanceMetrics(
-            Map<String, MarketDataResponse> marketData, Map<String, Double> symbolToQuantity) {
+            Map<String, MarketData> marketData, Map<String, Double> symbolToQuantity) {
         
         PerformanceMetrics metrics = new PerformanceMetrics();
         
-        for (Map.Entry<String, MarketDataResponse> entry : marketData.entrySet()) {
+        for (Map.Entry<String, MarketData> entry : marketData.entrySet()) {
             String symbol = entry.getKey();
-            MarketDataResponse data = entry.getValue();
+            MarketData data = entry.getValue();
             double quantity = symbolToQuantity.getOrDefault(symbol, 0.0);
             
             double closePrice = data.getOhlc().getClose();
@@ -189,7 +190,7 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
     private List<StockMovement> getTopMovers(
             PerformanceMetrics metrics, 
             int limit, 
-            Map<String, MarketDataResponse> marketData, 
+            Map<String, MarketData> marketData, 
             Map<String, Double> symbolToQuantity,
             Predicate<Double> filter) {
         

@@ -1,4 +1,4 @@
-package com.portfolio.marketdata.model;
+package com.portfolio.model.market;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

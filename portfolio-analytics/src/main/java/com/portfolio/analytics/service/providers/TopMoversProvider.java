@@ -3,16 +3,16 @@ package com.portfolio.analytics.service.providers;
 import com.portfolio.analytics.service.AbstractIndexAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
-import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
 import com.portfolio.model.analytics.GainerLoser;
+import com.portfolio.model.market.MarketData;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Provider for top movers (gainers and losers) analytics
@@ -72,9 +72,9 @@ public class TopMoversProvider extends AbstractIndexAnalyticsProvider<GainerLose
         Map<String, Double> symbolToPerformance = new HashMap<>();
         Map<String, Double> symbolToChangePercent = new HashMap<>();
         
-        for (Map.Entry<String, MarketDataResponse> entry : marketData.entrySet()) {
+        for (Map.Entry<String, MarketData> entry : marketData.entrySet()) {
             String symbol = entry.getKey();
-            MarketDataResponse data = entry.getValue();
+            MarketData data = entry.getValue();
             
             double closePrice = data.getOhlc().getClose();
             double openPrice = data.getOhlc().getOpen();

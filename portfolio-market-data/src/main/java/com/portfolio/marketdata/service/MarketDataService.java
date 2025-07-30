@@ -2,6 +2,7 @@ package com.portfolio.marketdata.service;
 
 import java.time.LocalDate;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -11,14 +12,15 @@ import org.springframework.stereotype.Service;
 
 import com.portfolio.marketdata.client.MarketDataApiClient;
 import com.portfolio.marketdata.model.FilterType;
-import com.portfolio.marketdata.model.HistoricalData;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
 import com.portfolio.marketdata.model.HistoricalDataResponse;
 import com.portfolio.marketdata.model.HistoricalDataResponseWrapper;
 import com.portfolio.marketdata.model.InstrumentType;
 import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.model.MarketDataResponseWrapper;
-import com.portfolio.marketdata.model.TimeFrame;
+import com.portfolio.marketdata.util.MarketDataConverter;
+import com.portfolio.model.market.MarketData;
+import com.portfolio.model.market.TimeFrame;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,7 +44,7 @@ public class MarketDataService {
      * @param refresh Whether to refresh the data or use cached data
      * @return Map of symbols to their respective market data
      */
-    public Map<String, MarketDataResponse> getOhlcData(List<String> symbols, boolean refresh) {
+    public Map<String, MarketData> getOhlcData(List<String> symbols, boolean refresh) {
         log.info("Getting OHLC data for {} symbols with refresh={}", symbols.size(), refresh);
         
         try {
@@ -52,13 +54,19 @@ public class MarketDataService {
                 return Map.of();
             }
             
-            Map<String, MarketDataResponse> data = wrapper.getData();
-            if (data == null) {
+            Map<String, MarketDataResponse> responseData = wrapper.getData();
+            if (responseData == null) {
                 log.warn("Received null data map from market data API");
                 return Map.of();
             }
             
-            return data;
+            // Convert MarketDataResponse to MarketData
+            Map<String, MarketData> marketDataMap = new HashMap<>();
+            responseData.forEach((symbol, response) -> {
+                marketDataMap.put(symbol, MarketDataConverter.fromMarketDataResponse(response));
+            });
+            
+            return marketDataMap;
         } catch (Exception e) {
             log.error("Error fetching OHLC data: {}", e.getMessage(), e);
             return Map.of();
@@ -71,7 +79,7 @@ public class MarketDataService {
      * @param symbols List of symbols to fetch data for
      * @return Map of symbols to their respective market data
      */
-    public Map<String, MarketDataResponse> getOhlcData(List<String> symbols) {
+    public Map<String, MarketData> getOhlcData(List<String> symbols) {
         return getOhlcData(symbols, true);
     }
     
@@ -82,7 +90,7 @@ public class MarketDataService {
      * @param refresh Whether to refresh the data or use cached data
      * @return CompletableFuture containing a map of symbols to their respective market data
      */
-    public CompletableFuture<Map<String, MarketDataResponse>> getOhlcDataAsync(List<String> symbols, boolean refresh) {
+    public CompletableFuture<Map<String, MarketData>> getOhlcDataAsync(List<String> symbols, boolean refresh) {
         log.info("Getting OHLC data asynchronously for {} symbols with refresh={}", symbols.size(), refresh);
         
         return marketDataApiClient.getOhlcData(symbols, refresh)
@@ -90,20 +98,26 @@ public class MarketDataService {
             .map(wrapper -> {
                 if (wrapper == null) {
                     log.warn("Received null response wrapper from market data API (async)");
-                    return Map.<String, MarketDataResponse>of();
+                    return Map.<String, MarketData>of();
                 }
                 
-                Map<String, MarketDataResponse> data = wrapper.getData();
-                if (data == null) {
+                Map<String, MarketDataResponse> responseData = wrapper.getData();
+                if (responseData == null) {
                     log.warn("Received null data map from market data API (async)");
-                    return Map.<String, MarketDataResponse>of();
+                    return Map.<String, MarketData>of();
                 }
                 
-                return data;
+                // Convert MarketDataResponse to MarketData
+                Map<String, MarketData> marketDataMap = new HashMap<>();
+                responseData.forEach((symbol, response) -> {
+                    marketDataMap.put(symbol, MarketDataConverter.fromMarketDataResponse(response));
+                });
+                
+                return marketDataMap;
             })
             .onErrorResume(e -> {
                 log.error("Error fetching OHLC data asynchronously: {}", e.getMessage(), e);
-                return reactor.core.publisher.Mono.just(Map.<String, MarketDataResponse>of());
+                return Mono.just(Map.<String, MarketData>of());
             })
             .toFuture();
     }
@@ -114,7 +128,7 @@ public class MarketDataService {
      * @param symbols List of symbols to fetch data for
      * @return CompletableFuture containing a map of symbols to their respective market data
      */
-    public CompletableFuture<Map<String, MarketDataResponse>> getOhlcDataAsync(List<String> symbols) {
+    public CompletableFuture<Map<String, MarketData>> getOhlcDataAsync(List<String> symbols) {
         return getOhlcDataAsync(symbols, true);
     }
     
@@ -128,9 +142,9 @@ public class MarketDataService {
     public Double getCurrentPrice(String symbol, boolean refresh) {
         log.info("Getting current price for symbol: {} with refresh={}", symbol, refresh);
         
-        Map<String, MarketDataResponse> data = getOhlcData(List.of(symbol), refresh);
-        MarketDataResponse response = data.get(symbol);
-        return response != null ? response.getLastPrice() : null;
+        Map<String, MarketData> data = getOhlcData(List.of(symbol), refresh);
+        MarketData marketData = data.get(symbol);
+        return marketData != null ? marketData.getLastPrice() : null;
     }
     
     /**
@@ -150,18 +164,21 @@ public class MarketDataService {
      * @return Map of symbols to their respective current prices
      */
     public Map<String, Double> getCurrentPrices(List<String> symbols) {
-        log.info("Getting current prices for {} symbols", symbols.size());
-        
-        return marketDataApiClient.getCurrentPrices(symbols);
+        Map<String, MarketData> data = getOhlcData(symbols, true);
+        return data.entrySet().stream()
+            .collect(Collectors.toMap(
+                Map.Entry::getKey,
+                entry -> entry.getValue().getLastPrice()
+            ));
     }
     
     /**
      * Get historical market data for the specified symbols with various filtering options.
      * 
      * @param request The historical data request parameters
-     * @return Map of symbols to their respective historical data responses
+     * @return Map of symbols to their respective market data
      */
-    public Map<String, HistoricalDataResponse> getHistoricalData(HistoricalDataRequest request) {
+    public Map<String, MarketData> getHistoricalData(HistoricalDataRequest request) {
         
         log.info("Getting historical data for {} symbols from {} to {} with interval={}, filterType={}", 
                 request.getSymbols().size(), request.getFromDate(), request.getToDate(), 
@@ -175,11 +192,20 @@ public class MarketDataService {
                 return java.util.Collections.emptyMap();
             }
             
-            return response.getData();
+            log.info("Successfully fetched historical data for {} symbols with {} total data points", 
+                    response.getSuccessfulSymbols(), response.getTotalDataPoints());
+            
+            // Convert HistoricalDataResponse to MarketData
+            Map<String, MarketData> marketDataMap = new HashMap<>();
+            for (Map.Entry<String, HistoricalDataResponse> entry : response.getData().entrySet()) {
+                marketDataMap.put(entry.getKey(), MarketDataConverter.fromHistoricalDataResponse(entry.getValue()));
+            }
+            
+            return marketDataMap;
             
         } catch (Exception e) {
             log.error("Error fetching historical data: {}", e.getMessage(), e);
-            return java.util.Collections.emptyMap();
+            return java.util.Collections.<String, MarketData>emptyMap();
         }
     }
     
@@ -190,9 +216,9 @@ public class MarketDataService {
      * @param symbols List of symbols to fetch historical data for
      * @param fromDate Start date for historical data (inclusive)
      * @param toDate End date for historical data (inclusive)
-     * @return Map of symbols to their respective historical data responses
+     * @return Map of symbols to their respective market data
      */
-    public Map<String, HistoricalDataResponse> getHistoricalData(
+    public Map<String, MarketData> getHistoricalData(
             List<String> symbols, 
             LocalDate fromDate, 
             LocalDate toDate) {
@@ -216,9 +242,9 @@ public class MarketDataService {
      * @param timeFrame Time interval for data points (e.g., DAY, FIFTEEN_MIN)
      * @param instrumentType Instrument type (e.g., EQ for equity)
      * @param filterType Type of filtering to apply (ALL, START_END, CUSTOM)
-     * @return Map of symbols to their respective historical data responses
+     * @return Map of symbols to their respective market data
      */
-    public Map<String, HistoricalDataResponse> getHistoricalData(
+    public Map<String, MarketData> getHistoricalData(
             List<String> symbols, 
             LocalDate fromDate, 
             LocalDate toDate, 
@@ -245,23 +271,72 @@ public class MarketDataService {
      * @param toDate End date for historical data (inclusive)
      * @return Historical data response for the symbol, or null if not found
      */
-    public HistoricalDataResponse getHistoricalDataForSymbol(
+    public MarketData getHistoricalDataForSymbol(
             String symbol, 
             LocalDate fromDate, 
             LocalDate toDate) {
         
-        HistoricalDataRequest request = HistoricalDataRequest.builder()
-                .symbols(java.util.Collections.singletonList(symbol))
+        Map<String, MarketData> result = getHistoricalData(
+                Collections.singletonList(symbol), 
+                fromDate, 
+                toDate);
+        
+        return result.get(symbol);
+    }
+    
+    /**
+     * Get historical market data as MarketData objects for the specified symbols.
+     * This allows using the same interface for both current and historical market data.
+     * 
+     * @param symbols List of symbols to fetch historical data for
+     * @param fromDate Start date for historical data (inclusive)
+     * @param toDate End date for historical data (inclusive)
+     * @return Map of symbols to their respective market data
+     */
+    public Map<String, MarketData> getHistoricalMarketData(
+            List<String> symbols, 
+            LocalDate fromDate, 
+            LocalDate toDate) {
+        
+        return getHistoricalMarketData(HistoricalDataRequest.builder()
+                .symbols(symbols)
                 .fromDate(fromDate)
                 .toDate(toDate)
                 .timeFrame(TimeFrame.DAY)
                 .instrumentType(InstrumentType.EQ)
                 .filterType(FilterType.ALL)
-                .build();
+                .build());
+    }
+    
+    /**
+     * Get historical market data as MarketData objects with various filtering options.
+     * 
+     * @param request The historical data request with all parameters
+     * @return Map of symbols to their respective market data
+     */
+    public Map<String, MarketData> getHistoricalMarketData(HistoricalDataRequest request) {
+        // Since getHistoricalData now directly returns MarketData, we can just call it
+        return getHistoricalData(request);
+    }
+    
+    /**
+     * Convert historical data responses to market data responses.
+     * This allows analytics providers to use the same interface for both current and historical data.
+     * 
+     * @param historicalData Map of symbols to their historical data responses
+     * @return Map of symbols to their market data responses
+     */
+    public Map<String, MarketData> convertHistoricalToMarketData(Map<String, HistoricalDataResponse> historicalData) {
+        if (historicalData == null || historicalData.isEmpty()) {
+            return Collections.emptyMap();
+        }
         
-        Map<String, HistoricalDataResponse> dataMap = getHistoricalData(request);
+        Map<String, MarketData> marketDataMap = new HashMap<>();
+        historicalData.forEach((symbol, response) -> {
+            marketDataMap.put(symbol, MarketDataConverter.fromHistoricalDataResponse(response));
+        });
         
-        return dataMap.get(symbol);
+        return marketDataMap;
     }
     
     /**
@@ -277,7 +352,7 @@ public class MarketDataService {
      * @param continuous Whether to use continuous data (optional)
      * @return Historical data response for the symbol, or null if not found
      */
-    public HistoricalDataResponse getHistoricalDataForSymbol(
+    public MarketData getHistoricalDataForSymbol(
             String symbol, 
             LocalDate fromDate, 
             LocalDate toDate, 
@@ -298,18 +373,41 @@ public class MarketDataService {
                 .continuous(continuous)
                 .build();
         
-        Map<String, HistoricalDataResponse> dataMap = getHistoricalData(request);
+        Map<String, MarketData> dataMap = getHistoricalData(request);
         
         return dataMap.get(symbol);
     }
     
     /**
-     * Get historical market data for the specified symbols asynchronously.
+     * Get historical market data as MarketData objects asynchronously.
      * 
-     * @param request The historical data request parameters
-     * @return CompletableFuture containing a map of symbols to their respective historical data responses
+     * @param symbols List of symbols to fetch historical data for
+     * @param fromDate Start date for historical data (inclusive)
+     * @param toDate End date for historical data (inclusive)
+     * @return CompletableFuture containing a map of symbols to their respective market data
      */
-    public CompletableFuture<Map<String, HistoricalDataResponse>> getHistoricalDataAsync(HistoricalDataRequest request) {
+    public CompletableFuture<Map<String, MarketData>> getHistoricalMarketDataAsync(
+            List<String> symbols, 
+            LocalDate fromDate, 
+            LocalDate toDate) {
+        
+        return getHistoricalMarketDataAsync(HistoricalDataRequest.builder()
+                .symbols(symbols)
+                .fromDate(fromDate)
+                .toDate(toDate)
+                .timeFrame(TimeFrame.DAY)
+                .instrumentType(InstrumentType.EQ)
+                .filterType(FilterType.ALL)
+                .build());
+    }
+    
+    /**
+     * Get historical market data as MarketData objects asynchronously with various filtering options.
+     * 
+     * @param request The historical data request with all parameters
+     * @return CompletableFuture containing a map of symbols to their respective market data
+     */
+    public CompletableFuture<Map<String, MarketData>> getHistoricalMarketDataAsync(HistoricalDataRequest request) {
         
         log.info("Getting historical data asynchronously for {} symbols from {} to {} with interval={}, filterType={}", 
                 request.getSymbols().size(), request.getFromDate(), request.getToDate(), 
@@ -320,23 +418,15 @@ public class MarketDataService {
                 .map(wrapper -> {
                     if (wrapper == null || wrapper.getData() == null) {
                         log.warn("No historical data returned for symbols: {}", String.join(",", request.getSymbols()));
-                        return Collections.<String, HistoricalDataResponse>emptyMap();
+                        return Collections.<String, MarketData>emptyMap();
                     }
                     
                     Map<String, HistoricalDataResponse> data = wrapper.getData();
-                    if (data == null) {
-                        log.warn("Received null data map from market data API (async)");
-                        return Collections.<String, HistoricalDataResponse>emptyMap();
-                    }
-                    
-                    log.info("Successfully fetched historical data asynchronously for {} symbols with {} total data points", 
-                            wrapper.getSuccessfulSymbols(), wrapper.getTotalDataPoints());
-                    
-                    return data;
+                    return convertHistoricalToMarketData(data);
                 })
                 .onErrorResume(e -> {
                     log.error("Error fetching historical data asynchronously: {}", e.getMessage(), e);
-                    return Mono.just(Collections.<String, HistoricalDataResponse>emptyMap());
+                    return Mono.just(Collections.<String, MarketData>emptyMap());
                 })
                 .toFuture();
     }
@@ -354,57 +444,19 @@ public class MarketDataService {
      * @param filterType Type of filtering to apply (ALL, START_END, CUSTOM)
      * @param filterFrequency Frequency for CUSTOM filtering (required when filterType is CUSTOM)
      * @param continuous Whether to use continuous data (optional)
-     * @return CompletableFuture containing a map of symbols to their respective historical data responses
+     * @return CompletableFuture containing a map of symbols to their respective market data
      */
-    public CompletableFuture<Map<String, HistoricalDataResponse>> getHistoricalDataAsync(
-            List<String> symbols, 
-            LocalDate fromDate, 
-            LocalDate toDate, 
-            TimeFrame timeFrame, 
-            InstrumentType instrumentType, 
-            FilterType filterType, 
-            Integer filterFrequency,
-            Boolean continuous) {
+    public CompletableFuture<Map<String, MarketData>> getHistoricalDataAsync(HistoricalDataRequest request) {
         
         return getHistoricalDataAsync(HistoricalDataRequest.builder()
-                .symbols(symbols)
-                .fromDate(fromDate)
-                .toDate(toDate)
-                .timeFrame(timeFrame)
-                .instrumentType(instrumentType)
-                .filterType(filterType)
-                .filterFrequency(filterFrequency)
-                .continuous(continuous)
-                .build());
-    }
-    
-    /**
-     * Get historical market data for the specified symbols asynchronously.
-     * Simplified version with fewer parameters and defaults for filterFrequency and continuous.
-     * 
-     * @param symbols List of symbols to fetch historical data for
-     * @param fromDate Start date for historical data (inclusive)
-     * @param toDate End date for historical data (inclusive)
-     * @param timeFrame Time interval for data points (e.g., DAY, FIFTEEN_MIN)
-     * @param instrumentType Instrument type (e.g., EQ for equity)
-     * @param filterType Type of filtering to apply (ALL, START_END, CUSTOM)
-     * @return CompletableFuture containing a map of symbols to their respective historical data responses
-     */
-    public CompletableFuture<Map<String, HistoricalDataResponse>> getHistoricalDataAsync(
-            List<String> symbols, 
-            LocalDate fromDate, 
-            LocalDate toDate, 
-            TimeFrame timeFrame, 
-            InstrumentType instrumentType, 
-            FilterType filterType) {
-        
-        return getHistoricalDataAsync(HistoricalDataRequest.builder()
-                .symbols(symbols)
-                .fromDate(fromDate)
-                .toDate(toDate)
-                .timeFrame(timeFrame)
-                .instrumentType(instrumentType)
-                .filterType(filterType)
+                .symbols(request.getSymbols())
+                .fromDate(request.getFromDate())
+                .toDate(request.getToDate())
+                .timeFrame(request.getTimeFrame())
+                .instrumentType(request.getInstrumentType())
+                .filterType(request.getFilterType())
+                .filterFrequency(request.getFilterFrequency())
+                .continuous(request.getContinuous())
                 .build());
     }
 }

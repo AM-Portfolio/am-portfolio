@@ -6,9 +6,9 @@ import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.analytics.service.AbstractPortfolioAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
-import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.Heatmap;
+import com.portfolio.model.market.MarketData;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -59,7 +59,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         }
         
         // Fetch market data for all stocks in the portfolio
-        Map<String, MarketDataResponse> marketData = getMarketData(portfolioSymbols);
+        Map<String, MarketData> marketData = getMarketData(portfolioSymbols);
         if (marketData.isEmpty()) {
             log.warn("No market data available for portfolio: {}", portfolioId);
             return Heatmap.builder()
@@ -81,11 +81,11 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         Map<String, List<String>> sectorToStocks = securityDetailsService.groupSymbolsBySector(portfolioSymbols);
         
         // Group market data by sector
-        Map<String, List<MarketDataResponse>> sectorMap = new HashMap<>();
+        Map<String, List<MarketData>> sectorMap = new HashMap<>();
         Map<String, List<Double>> sectorQuantities = new HashMap<>();
         
         for (String symbol : marketData.keySet()) {
-            // Get sector for this symbol
+            MarketData data = marketData.get(symbol);
             String sector = "Unknown";
             for (Map.Entry<String, List<String>> entry : sectorToStocks.entrySet()) {
                 if (entry.getValue().contains(symbol)) {
@@ -95,7 +95,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             }
             
             sectorMap.computeIfAbsent(sector, k -> new ArrayList<>())
-                .add(marketData.get(symbol));
+                .add(data);
             
             sectorQuantities.computeIfAbsent(sector, k -> new ArrayList<>())
                 .add(symbolToQuantity.getOrDefault(symbol, 0.0));
@@ -103,9 +103,9 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         
         // Calculate performance for each sector
         List<Heatmap.SectorPerformance> sectorPerformances = new ArrayList<>();
-        for (Map.Entry<String, List<MarketDataResponse>> entry : sectorMap.entrySet()) {
+        for (Map.Entry<String, List<MarketData>> entry : sectorMap.entrySet()) {
             String sectorName = entry.getKey();
-            List<MarketDataResponse> sectorStocks = entry.getValue();
+            List<MarketData> sectorStocks = entry.getValue();
             List<Double> quantities = sectorQuantities.get(sectorName);
             
             // Calculate weighted average performance for the sector
@@ -114,7 +114,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             double totalValue = 0.0;
             
             for (int i = 0; i < sectorStocks.size(); i++) {
-                MarketDataResponse stock = sectorStocks.get(i);
+                MarketData stock = sectorStocks.get(i);
                 double quantity = quantities.get(i);
                 double value = stock.getLastPrice() * quantity;
                 totalValue += value;

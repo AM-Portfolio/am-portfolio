@@ -1,4 +1,4 @@
-package com.portfolio.marketdata.model;
+package com.portfolio.model.market;
 
 /**
  * Enum representing different time intervals for market data.

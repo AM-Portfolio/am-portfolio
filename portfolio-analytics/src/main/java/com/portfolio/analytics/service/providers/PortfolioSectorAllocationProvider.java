@@ -6,9 +6,11 @@ import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.analytics.service.AbstractPortfolioAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
-import com.portfolio.marketdata.model.MarketDataResponse;
+// MarketData is already imported below
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.SectorAllocation;
+import com.portfolio.model.market.MarketData;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -61,7 +63,7 @@ public class PortfolioSectorAllocationProvider extends AbstractPortfolioAnalytic
         }
         
         // Fetch market data for all stocks in the portfolio
-        Map<String, MarketDataResponse> marketData = getMarketData(portfolioSymbols);
+        Map<String, MarketData> marketData = getMarketData(portfolioSymbols);
         if (marketData.isEmpty()) {
             log.warn("No market data available for portfolio: {}", portfolioId);
             return SectorAllocation.builder()
@@ -126,7 +128,7 @@ public class PortfolioSectorAllocationProvider extends AbstractPortfolioAnalytic
         // Calculate market value for each stock in the portfolio
         double totalPortfolioValue = 0.0;
         for (String symbol : marketData.keySet()) {
-            MarketDataResponse data = marketData.get(symbol);
+            MarketData data = marketData.get(symbol);
             double quantity = symbolToQuantity.getOrDefault(symbol, 0.0);
             
             // Calculate market value (price * quantity)
