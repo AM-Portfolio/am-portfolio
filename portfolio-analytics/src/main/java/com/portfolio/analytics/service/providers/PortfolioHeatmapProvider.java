@@ -5,6 +5,7 @@ import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.analytics.service.AbstractPortfolioAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
+import com.portfolio.analytics.service.utils.HeatmapUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.Heatmap;
@@ -156,80 +157,15 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             List<MarketData> sectorStocks = entry.getValue();
             List<Double> quantities = sectorQuantitiesMap.get(sectorName);
             
-            // Calculate weighted averages for the sector
-            SectorMetrics metrics = calculateSectorMetrics(sectorStocks, quantities);
+            // Calculate weighted averages for the sector using utility
+            HeatmapUtils.SectorMetrics metrics = HeatmapUtils.calculateWeightedSectorMetrics(sectorStocks, quantities);
             
-            // Assign color based on performance
-            String color = getColorForPerformance(metrics.avgPerformance);
-            
-            sectorPerformances.add(Heatmap.SectorPerformance.builder()
-                .sectorName(sectorName)
-                .performance(metrics.avgPerformance)
-                .changePercent(metrics.avgChangePercent)
-                .color(color)
-                .build());
+            // Create sector performance object using utility
+            sectorPerformances.add(HeatmapUtils.createSectorPerformance(sectorName, metrics));
         }
         
         return sectorPerformances;
     }
     
-    /**
-     * Calculate weighted average metrics for a sector
-     */
-    private SectorMetrics calculateSectorMetrics(List<MarketData> sectorStocks, List<Double> quantities) {
-        log.debug("Calculating metrics for sector with {} stocks", sectorStocks.size());
-        double totalPerformance = 0.0;
-        double totalChangePercent = 0.0;
-        double totalValue = 0.0;
-        
-        for (int i = 0; i < sectorStocks.size(); i++) {
-            MarketData stock = sectorStocks.get(i);
-            double quantity = quantities.get(i);
-            double value = stock.getLastPrice() * quantity;
-            totalValue += value;
-            
-            double closePrice = stock.getOhlc().getClose();
-            double openPrice = stock.getOhlc().getOpen();
-            
-            if (openPrice > 0) {
-                // Calculate intraday change percentage
-                double changePercent = ((stock.getLastPrice() - openPrice) / openPrice) * 100;
-                totalChangePercent += changePercent * value; // Weight by value
-                
-                // Performance score based on price movement relative to previous close
-                double performanceScore = ((stock.getLastPrice() - closePrice) / closePrice) * 100;
-                totalPerformance += performanceScore * value; // Weight by value
-            }
-        }
-        
-        double avgPerformance = totalValue > 0 ? totalPerformance / totalValue : 0;
-        double avgChangePercent = totalValue > 0 ? totalChangePercent / totalValue : 0;
-        
-        return new SectorMetrics(avgPerformance, avgChangePercent);
-    }
-    
-    /**
-     * Helper class to store sector metrics
-     */
-    private static class SectorMetrics {
-        final double avgPerformance;
-        final double avgChangePercent;
-        
-        SectorMetrics(double avgPerformance, double avgChangePercent) {
-            this.avgPerformance = avgPerformance;
-            this.avgChangePercent = avgChangePercent;
-        }
-    }
-    
-    /**
-     * Get color code based on performance value
-     */
-    private String getColorForPerformance(double performance) {
-        if (performance > 3) return "#006400"; // Dark Green
-        if (performance > 1) return "#32CD32"; // Lime Green
-        if (performance > 0) return "#90EE90"; // Light Green
-        if (performance > -1) return "#FFA07A"; // Light Salmon
-        if (performance > -3) return "#FF4500"; // Orange Red
-        return "#8B0000"; // Dark Red
-    }
+    // SectorMetrics class and related methods have been moved to HeatmapUtils
 }

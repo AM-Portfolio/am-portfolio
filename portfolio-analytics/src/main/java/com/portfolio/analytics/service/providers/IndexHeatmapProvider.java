@@ -3,6 +3,7 @@ package com.portfolio.analytics.service.providers;
 import com.portfolio.analytics.service.AbstractIndexAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
 import com.portfolio.analytics.service.utils.AnalyticsUtils;
+import com.portfolio.analytics.service.utils.HeatmapUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
@@ -182,20 +183,14 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
             List<MarketData> sectorStocks = entry.getValue();
             
             // Calculate metrics for this sector
-            log.debug("Calculating metrics for sector '{}' with {} stocks", sectorName, sectorStocks.size());
-            SectorMetrics metrics = calculateSectorMetrics(sectorStocks);
+            log.debug("Calculating metrics for sector '{}'", sectorName);
+            HeatmapUtils.SectorMetrics metrics = HeatmapUtils.calculateSectorMetrics(sectorStocks);
             
-            // Get color based on performance
-            String color = getColorForPerformance(metrics.getPerformance());
+            // Create sector performance object using utility
+            sectorPerformances.add(HeatmapUtils.createSectorPerformance(sectorName, metrics));
             
-            // Create sector performance object
-            sectorPerformances.add(Heatmap.SectorPerformance.builder()
-                .sectorName(sectorName)
-                .performance(metrics.getPerformance())
-                .changePercent(metrics.getChangePercent())
-                .color(color)
-                .build());
-            
+            // Get color based on performance for logging
+            String color = HeatmapUtils.getColorForPerformance(metrics.getPerformance());
             log.debug("Sector '{}' performance: {}, change: {}%, color: {}", 
                     sectorName, metrics.getPerformance(), metrics.getChangePercent(), color);
         }
@@ -204,76 +199,7 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
         return sectorPerformances;
     }
     
-    /**
-     * Calculate performance metrics for a list of stocks
-     */
-    private SectorMetrics calculateSectorMetrics(List<MarketData> stocks) {
-        log.debug("Calculating sector metrics for {} stocks", stocks.size());
-        double totalPerformance = 0.0;
-        double totalChangePercent = 0.0;
-        int validStockCount = 0;
-        
-        for (MarketData stock : stocks) {
-            if (stock.getOhlc() != null) {
-                double closePrice = stock.getOhlc().getClose();
-                double openPrice = stock.getOhlc().getOpen();
-                
-                if (openPrice > 0 && closePrice > 0) {
-                    // Calculate change from open to current price
-                    double changePercent = ((stock.getLastPrice() - openPrice) / openPrice) * 100;
-                    totalChangePercent += changePercent;
-                    
-                    // Performance score based on price movement relative to previous close
-                    double performanceScore = ((stock.getLastPrice() - closePrice) / closePrice) * 100;
-                    totalPerformance += performanceScore;
-                    
-                    validStockCount++;
-                }
-            }
-        }
-        
-        // Calculate averages
-        double avgPerformance = validStockCount > 0 ? totalPerformance / validStockCount : 0;
-        double avgChangePercent = validStockCount > 0 ? totalChangePercent / validStockCount : 0;
-        
-        log.debug("Calculated metrics from {} valid stocks out of {} total stocks", 
-                validStockCount, stocks.size());
-        
-        return new SectorMetrics(avgPerformance, avgChangePercent);
-    }
-    
-    /**
-     * Helper class to hold sector metrics
-     */
-    private static class SectorMetrics {
-        private final double performance;
-        private final double changePercent;
-        
-        public SectorMetrics(double performance, double changePercent) {
-            this.performance = performance;
-            this.changePercent = changePercent;
-        }
-        
-        public double getPerformance() {
-            return performance;
-        }
-        
-        public double getChangePercent() {
-            return changePercent;
-        }
-    }
-    
-    /**
-     * Get color code based on performance value
-     */
-    private String getColorForPerformance(double performance) {
-        if (performance > 3) return "#006400"; // Dark Green
-        if (performance > 1) return "#32CD32"; // Lime Green
-        if (performance > 0) return "#90EE90"; // Light Green
-        if (performance > -1) return "#FFA07A"; // Light Salmon
-        if (performance > -3) return "#FF4500"; // Orange Red
-        return "#8B0000"; // Dark Red
-    }
+    // SectorMetrics class and related methods have been moved to HeatmapUtils
     
     /**
      * Get a mock sector name based on symbol prefix (for demonstration)
