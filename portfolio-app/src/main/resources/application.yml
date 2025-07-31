@@ -115,4 +115,10 @@ springdoc:
 logging:
   level:
     com.portfolio: DEBUG
+    com.portfolio.analytics: DEBUG
+    com.portfolio.api: DEBUG
+    com.portfolio.marketdata: DEBUG
+    com.portfolio.model: DEBUG
+    com.am.common: DEBUG
+    com.am.common.amcommondata: DEBUG
     org.springframework.kafka: INFO

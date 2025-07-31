@@ -22,9 +22,9 @@ import java.util.*;
  */
 @Service
 @Slf4j
-public class MarketCapAllocationProvider extends AbstractIndexAnalyticsProvider<MarketCapAllocation> {
+public class IndexMarketCapAllocationProvider extends AbstractIndexAnalyticsProvider<MarketCapAllocation> {
 
-    public MarketCapAllocationProvider(NseIndicesService nseIndicesService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService) {
+    public IndexMarketCapAllocationProvider(NseIndicesService nseIndicesService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService) {
         super(nseIndicesService, marketDataService, securityDetailsService);
     }
 
@@ -42,11 +42,13 @@ public class MarketCapAllocationProvider extends AbstractIndexAnalyticsProvider<
     
     @Override
     public MarketCapAllocation generateAnalytics(String indexSymbol) {
+        log.info("Generating market cap allocation for index: {}", indexSymbol);
         return generateMarketCapAllocation(indexSymbol, null);
     }
     
     @Override
     public MarketCapAllocation generateAnalytics(String indexSymbol, TimeFrameRequest timeFrameRequest) {
+        log.info("Generating market cap allocation for index: {} with timeFrame parameters", indexSymbol);
         return generateMarketCapAllocation(indexSymbol, timeFrameRequest);
     }
     
@@ -86,6 +88,8 @@ public class MarketCapAllocationProvider extends AbstractIndexAnalyticsProvider<
         // Sort segments by weight percentage (highest to lowest)
         segments.sort(Comparator.comparing(MarketCapAllocation.CapSegment::getWeightPercentage).reversed());
         
+        log.info("Generated market cap allocation with {} segments for index: {}", segments.size(), indexSymbol);
+        
         return MarketCapAllocation.builder()
             .indexSymbol(indexSymbol)
             .timestamp(Instant.now())
@@ -108,7 +112,7 @@ public class MarketCapAllocationProvider extends AbstractIndexAnalyticsProvider<
      * Classify symbols by market cap type
      */
     private Map<String, String> classifySymbolsByMarketCap(List<String> symbols, Map<String, MarketData> marketData) {
-        // Create market cap type mapping
+        log.debug("Classifying {} symbols by market cap", symbols.size());
         Map<String, String> marketCapTypeToSegmentName = createMarketCapTypeMapping();
         
         // Get market cap groups from security details service
@@ -168,6 +172,7 @@ public class MarketCapAllocationProvider extends AbstractIndexAnalyticsProvider<
      * Calculate market caps for all stocks
      */
     private Map<String, Double> calculateMarketCaps(Map<String, MarketData> marketData) {
+        log.debug("Calculating market caps for {} stocks", marketData.size());
         Map<String, Double> stockMarketCaps = new HashMap<>();
         
         for (Map.Entry<String, MarketData> entry : marketData.entrySet()) {

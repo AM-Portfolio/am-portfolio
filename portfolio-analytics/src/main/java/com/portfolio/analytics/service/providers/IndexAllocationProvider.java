@@ -22,9 +22,9 @@ import java.util.stream.Collectors;
  */
 @Service
 @Slf4j
-public class SectorAllocationProvider extends AbstractIndexAnalyticsProvider<SectorAllocation> {
+public class IndexAllocationProvider extends AbstractIndexAnalyticsProvider<SectorAllocation> {
 
-    public SectorAllocationProvider(NseIndicesService nseIndicesService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService) {
+    public IndexAllocationProvider(NseIndicesService nseIndicesService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService) {
         super(nseIndicesService, marketDataService, securityDetailsService);
     }
 

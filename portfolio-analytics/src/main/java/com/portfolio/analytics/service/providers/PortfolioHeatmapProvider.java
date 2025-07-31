@@ -74,6 +74,8 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         // Sort sectors by performance (highest to lowest)
         sectorPerformances.sort(Comparator.comparing(Heatmap.SectorPerformance::getPerformance).reversed());
         
+        log.info("Generated heatmap with {} sectors for portfolio: {}", sectorPerformances.size(), portfolioId);
+        
         return Heatmap.builder()
             .portfolioId(portfolioId)
             .timestamp(Instant.now())
@@ -96,6 +98,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
      * Create a map of symbol to holding quantity
      */
     private Map<String, Double> createSymbolToQuantityMap(PortfolioModelV1 portfolio) {
+        log.debug("Creating symbol to quantity map for portfolio: {}", portfolio.getName());
         return portfolio.getEquityModels().stream()
             .collect(Collectors.toMap(
                 EquityModel::getSymbol,
@@ -113,6 +116,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             Map<String, Double> symbolToQuantity,
             Map<String, List<MarketData>> sectorMarketDataMap,
             Map<String, List<Double>> sectorQuantitiesMap) {
+        log.debug("Grouping {} stocks by sector", marketData.size());
         
         for (String symbol : marketData.keySet()) {
             MarketData data = marketData.get(symbol);
@@ -144,6 +148,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             Map<String, List<MarketData>> sectorMarketDataMap,
             Map<String, List<Double>> sectorQuantitiesMap) {
         
+        log.debug("Calculating performance metrics for {} sectors", sectorMarketDataMap.size());
         List<Heatmap.SectorPerformance> sectorPerformances = new ArrayList<>();
         
         for (Map.Entry<String, List<MarketData>> entry : sectorMarketDataMap.entrySet()) {
@@ -172,6 +177,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
      * Calculate weighted average metrics for a sector
      */
     private SectorMetrics calculateSectorMetrics(List<MarketData> sectorStocks, List<Double> quantities) {
+        log.debug("Calculating metrics for sector with {} stocks", sectorStocks.size());
         double totalPerformance = 0.0;
         double totalChangePercent = 0.0;
         double totalValue = 0.0;

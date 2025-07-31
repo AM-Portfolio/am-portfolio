@@ -2,6 +2,7 @@ package com.portfolio.analytics.service.providers;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
+import com.am.common.amcommondata.model.security.SecurityModel;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.analytics.service.AbstractPortfolioAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
@@ -16,8 +17,10 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.Comparator;
 
 /**
  * Provider for portfolio top movers (gainers and losers) analytics
@@ -80,11 +83,19 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
         List<StockMovement> losers = getTopMovers(
                 metrics, limit, marketData, symbolToQuantity, performance -> performance < 0);
         
+        // Calculate sector movements
+        List<GainerLoser.SectorMovement> sectorMovements = calculateSectorMovements(
+                portfolioSymbols, marketData, metrics.symbolToPerformance, metrics.symbolToChangePercent);
+        
+        log.info("Generated top movers analytics with {} gainers and {} losers for portfolio: {}", 
+            gainers.size(), losers.size(), portfolioId);
+            
         return GainerLoser.builder()
             .portfolioId(portfolioId)
             .timestamp(Instant.now())
             .topGainers(gainers)
             .topLosers(losers)
+            .sectorMovements(sectorMovements)
             .build();
     }
     
@@ -154,7 +165,7 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
      */
     private PerformanceMetrics calculatePerformanceMetrics(
             Map<String, MarketData> marketData, Map<String, Double> symbolToQuantity) {
-        
+        log.debug("Calculating performance metrics for {} stocks", marketData.size());
         PerformanceMetrics metrics = new PerformanceMetrics();
         
         for (Map.Entry<String, MarketData> entry : marketData.entrySet()) {
@@ -193,6 +204,7 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
             Map<String, MarketData> marketData, 
             Map<String, Double> symbolToQuantity,
             Predicate<Double> filter) {
+        log.debug("Finding top {} movers with filter condition", limit);
         
         // For gainers: ascending=false (highest first)
         // For losers: ascending=true (lowest first)
@@ -211,18 +223,42 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
                 continue;
             }
             
-            double changePercent = metrics.symbolToChangePercent.getOrDefault(symbol, 0.0);
-            double marketValue = metrics.symbolToMarketValue.getOrDefault(symbol, 0.0);
-            double weightPercentage = metrics.totalPortfolioValue > 0 ? 
-                    (marketValue / metrics.totalPortfolioValue) * 100 : 0;
+            // Format change percent with precision
+            Double changePercent = Math.round(metrics.symbolToChangePercent.getOrDefault(symbol, 0.0) * 100.0) / 100.0;
+            
+            // Calculate and format change amount with precision
+            double lastPrice = marketData.get(symbol).getLastPrice();
+            double closePrice = marketData.get(symbol).getOhlc().getClose();
+            Double changeAmount = Math.round((lastPrice - closePrice) * 100.0) / 100.0;
+            
+            // Format market value and weight percentage with precision
+            Double marketValue = Math.round(metrics.symbolToMarketValue.getOrDefault(symbol, 0.0) * 100.0) / 100.0;
+            Double weightPercentage = metrics.totalPortfolioValue > 0 ? 
+                    Math.round((marketValue / metrics.totalPortfolioValue) * 10000.0) / 100.0 : 0.0;
+        
+            // Get security details
+            SecurityModel securityModel = securityDetailsService.getSecurityDetails(Collections.singletonList(symbol)).get(symbol);
+            String sector = "Unknown";
+            String companyName = symbol;
+            
+            if (securityModel != null && securityModel.getMetadata() != null) {
+                sector = securityModel.getMetadata().getSector();
+                if (sector == null) {
+                    sector = "Unknown";
+                }
+            }
             
             movers.add(StockMovement.builder()
                 .symbol(symbol)
+                .companyName(companyName)
                 .changePercent(changePercent)
-                .lastPrice(marketData.get(symbol).getLastPrice())
+                .changeAmount(changeAmount)
+                .lastPrice(lastPrice)
+                .ohlcData(marketData.get(symbol).getOhlc())
                 .quantity(symbolToQuantity.getOrDefault(symbol, 0.0))
                 .marketValue(marketValue)
                 .weightPercentage(weightPercentage)
+                .sector(sector)
                 .build());
             
             // Stop if we have enough movers
@@ -232,5 +268,72 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
         }
         
         return movers;
+    }
+    
+    /**
+     * Calculate sector-wise movement data
+     */
+    private List<GainerLoser.SectorMovement> calculateSectorMovements(
+            List<String> symbols,
+            Map<String, MarketData> marketData,
+            Map<String, Double> symbolToPerformance,
+            Map<String, Double> symbolToChangePercent) {
+        log.debug("Calculating sector movements for {} symbols", symbols.size());
+        
+        // Group symbols by sector
+        Map<String, List<String>> sectorToSymbols = securityDetailsService.groupSymbolsBySector(symbols);
+        
+        // Calculate sector movements
+        return sectorToSymbols.entrySet().stream()
+            .map(entry -> {
+                String sectorName = entry.getKey();
+                List<String> sectorSymbols = entry.getValue();
+                
+                // Calculate average change percent for the sector
+                double avgChangePercent = sectorSymbols.stream()
+                    .filter(symbol -> symbolToChangePercent.containsKey(symbol))
+                    .mapToDouble(symbol -> symbolToChangePercent.getOrDefault(symbol, 0.0))
+                    .average()
+                    .orElse(0.0);
+                
+                // Get top gainers in this sector
+                List<String> topGainerSymbols = sectorSymbols.stream()
+                    .filter(symbol -> symbolToPerformance.containsKey(symbol) && symbolToPerformance.get(symbol) > 0)
+                    .sorted(Comparator.comparing(symbol -> -symbolToPerformance.getOrDefault(symbol, 0.0)))
+                    .limit(3) // Top 3 gainers per sector
+                    .collect(Collectors.toList());
+                
+                // Get top losers in this sector
+                List<String> topLoserSymbols = sectorSymbols.stream()
+                    .filter(symbol -> symbolToPerformance.containsKey(symbol) && symbolToPerformance.get(symbol) < 0)
+                    .sorted(Comparator.comparing(symbol -> symbolToPerformance.getOrDefault(symbol, 0.0)))
+                    .limit(3) // Top 3 losers per sector
+                    .collect(Collectors.toList());
+                
+                // Create stock performance map
+                Map<String, Double> stockPerformance = sectorSymbols.stream()
+                    .filter(symbol -> symbolToPerformance.containsKey(symbol))
+                    .collect(Collectors.toMap(
+                        Function.identity(),
+                        symbol -> symbolToPerformance.getOrDefault(symbol, 0.0),
+                        (v1, v2) -> v1 // In case of duplicate keys
+                    ));
+                
+                // Calculate market cap weight (if available in future)
+                double marketCapWeight = 0.0; // Placeholder for future implementation
+                
+                // Build sector movement object
+                return GainerLoser.SectorMovement.builder()
+                    .sectorName(sectorName)
+                    .averageChangePercent(avgChangePercent)
+                    .stockCount(sectorSymbols.size())
+                    .marketCapWeight(marketCapWeight)
+                    .topGainerSymbols(topGainerSymbols)
+                    .topLoserSymbols(topLoserSymbols)
+                    .stockPerformance(stockPerformance)
+                    .build();
+            })
+            .sorted(Comparator.comparing(GainerLoser.SectorMovement::getAverageChangePercent).reversed())
+            .collect(Collectors.toList());
     }
 }

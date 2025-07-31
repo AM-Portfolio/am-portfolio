@@ -22,9 +22,9 @@ import java.util.stream.Collectors;
  */
 @Service
 @Slf4j
-public class SectorHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap> {
+public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap> {
 
-    public SectorHeatmapProvider(NseIndicesService nseIndicesService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService) {
+    public IndexHeatmapProvider(NseIndicesService nseIndicesService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService) {
         super(nseIndicesService, marketDataService, securityDetailsService);
     }
 
@@ -35,11 +35,13 @@ public class SectorHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatma
 
     @Override
     public Heatmap generateAnalytics(String indexSymbol) {
+        log.info("Generating sector heatmap for index: {}", indexSymbol);
         return generateHeatmap(indexSymbol, null);
     }
     
     @Override
     public Heatmap generateAnalytics(String indexSymbol, TimeFrameRequest timeFrameRequest) {
+        log.info("Generating sector heatmap for index: {} with time frame parameters", indexSymbol);
         return generateHeatmap(indexSymbol, timeFrameRequest);
     }
     
@@ -72,6 +74,8 @@ public class SectorHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatma
         // Sort sectors by performance (highest to lowest)
         sectorPerformances.sort(Comparator.comparing(Heatmap.SectorPerformance::getPerformance).reversed());
         
+        log.info("Generated heatmap with {} sectors for index: {}", sectorPerformances.size(), indexSymbol);
+        
         return Heatmap.builder()
             .indexSymbol(indexSymbol)
             .timestamp(Instant.now())
@@ -94,10 +98,53 @@ public class SectorHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatma
      * Group stocks by sector
      */
     private Map<String, List<MarketData>> groupStocksBySector(Map<String, MarketData> marketData) {
+        log.debug("Grouping {} stocks by sector", marketData.size());
         Map<String, List<MarketData>> sectorMap = new HashMap<>();
         
-        // In a production environment, use securityDetailsService to get actual sectors
-        // For now, we'll use a simplified approach with mock sector data
+        if (marketData.isEmpty()) {
+            return sectorMap;
+        }
+        
+        // Extract symbols from market data
+        List<String> symbols = new ArrayList<>(marketData.keySet());
+        
+        // Use SecurityDetailsService to get sector information
+        Map<String, List<String>> sectorToSymbols = securityDetailsService.groupSymbolsBySector(symbols);
+        
+        // Map market data to sectors
+        for (Map.Entry<String, List<String>> entry : sectorToSymbols.entrySet()) {
+            String sector = entry.getKey();
+            List<String> sectorSymbols = entry.getValue();
+            
+            // Create a list of MarketData objects for this sector
+            List<MarketData> sectorStocks = sectorSymbols.stream()
+                .filter(marketData::containsKey)
+                .map(marketData::get)
+                .collect(Collectors.toList());
+            
+            // Only add sectors with data
+            if (!sectorStocks.isEmpty()) {
+                sectorMap.put(sector, sectorStocks);
+            }
+        }
+        
+        // Handle any symbols that might not have sector information
+        // by using the mock implementation as fallback
+        if (sectorMap.isEmpty()) {
+            log.warn("No sector information found from SecurityDetailsService, using fallback mock implementation");
+            return fallbackGroupStocksBySector(marketData);
+        }
+        
+        return sectorMap;
+    }
+    
+    /**
+     * Fallback method to group stocks by sector using mock data
+     * Used when SecurityDetailsService doesn't return sector information
+     */
+    private Map<String, List<MarketData>> fallbackGroupStocksBySector(Map<String, MarketData> marketData) {
+        Map<String, List<MarketData>> sectorMap = new HashMap<>();
+        
         for (Map.Entry<String, MarketData> entry : marketData.entrySet()) {
             String symbol = entry.getKey();
             MarketData data = entry.getValue();
@@ -116,6 +163,7 @@ public class SectorHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatma
      * Calculate performance metrics for each sector
      */
     private List<Heatmap.SectorPerformance> calculateSectorPerformances(Map<String, List<MarketData>> sectorMap) {
+        log.debug("Calculating performance metrics for {} sectors", sectorMap.size());
         List<Heatmap.SectorPerformance> sectorPerformances = new ArrayList<>();
         
         for (Map.Entry<String, List<MarketData>> entry : sectorMap.entrySet()) {

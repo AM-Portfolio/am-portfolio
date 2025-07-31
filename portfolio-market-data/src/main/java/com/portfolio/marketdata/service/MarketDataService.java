@@ -80,7 +80,7 @@ public class MarketDataService {
      * @return Map of symbols to their respective market data
      */
     public Map<String, MarketData> getOhlcData(List<String> symbols) {
-        return getOhlcData(symbols, true);
+        return getOhlcData(symbols, false);
     }
     
     /**
@@ -164,7 +164,7 @@ public class MarketDataService {
      * @return Map of symbols to their respective current prices
      */
     public Map<String, Double> getCurrentPrices(List<String> symbols) {
-        Map<String, MarketData> data = getOhlcData(symbols, true);
+        Map<String, MarketData> data = getOhlcData(symbols, false);
         return data.entrySet().stream()
             .collect(Collectors.toMap(
                 Map.Entry::getKey,

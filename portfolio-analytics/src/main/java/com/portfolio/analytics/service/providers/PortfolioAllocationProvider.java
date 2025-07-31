@@ -24,9 +24,9 @@ import java.util.stream.Collectors;
  */
 @Service
 @Slf4j
-public class PortfolioSectorAllocationProvider extends AbstractPortfolioAnalyticsProvider<SectorAllocation> {
+public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvider<SectorAllocation> {
 
-    public PortfolioSectorAllocationProvider(PortfolioService portfolioService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService) {
+    public PortfolioAllocationProvider(PortfolioService portfolioService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService) {
         super(portfolioService, marketDataService, securityDetailsService);
     }
 
@@ -37,11 +37,13 @@ public class PortfolioSectorAllocationProvider extends AbstractPortfolioAnalytic
 
     @Override
     public SectorAllocation generateAnalytics(String portfolioId) {
+        log.info("Generating sector allocation for portfolio: {}", portfolioId);
         return generateSectorAllocation(portfolioId, null);
     }
     
     @Override
     public SectorAllocation generateAnalytics(String portfolioId, TimeFrameRequest timeFrameRequest) {
+        log.info("Generating sector allocation for portfolio: {} with time frame parameters", portfolioId);
         return generateSectorAllocation(portfolioId, timeFrameRequest);
     }
     
@@ -120,6 +122,7 @@ public class PortfolioSectorAllocationProvider extends AbstractPortfolioAnalytic
      * Create a map of symbol to holding quantity
      */
     private Map<String, Double> createSymbolToQuantityMap(PortfolioModelV1 portfolio) {
+        log.debug("Creating symbol to quantity map for portfolio: {}", portfolio.getName());
         return portfolio.getEquityModels().stream()
             .collect(Collectors.toMap(
                 EquityModel::getSymbol,
@@ -134,6 +137,7 @@ public class PortfolioSectorAllocationProvider extends AbstractPortfolioAnalytic
     private Map<String, String> mapIndustriesToSectors(
             Map<String, List<String>> industryToStocks, 
             Map<String, List<String>> sectorToStocks) {
+        log.debug("Mapping {} industries to {} sectors", industryToStocks.size(), sectorToStocks.size());
         
         Map<String, String> industryToSector = new HashMap<>();
         
@@ -172,6 +176,7 @@ public class PortfolioSectorAllocationProvider extends AbstractPortfolioAnalytic
             Map<String, MarketData> marketData, 
             Map<String, Double> symbolToQuantity, 
             Map<String, Double> stockToMarketValue) {
+        log.debug("Calculating market values for {} stocks", marketData.size());
         
         double totalPortfolioValue = 0.0;
         
@@ -222,6 +227,8 @@ public class PortfolioSectorAllocationProvider extends AbstractPortfolioAnalytic
         
         // Sort by weight percentage (highest to lowest)
         sectorWeights.sort(Comparator.comparing(SectorAllocation.SectorWeight::getWeightPercentage).reversed());
+        
+        log.info("Generated sector weights with {} sectors", sectorWeights.size());
         
         return sectorWeights;
     }

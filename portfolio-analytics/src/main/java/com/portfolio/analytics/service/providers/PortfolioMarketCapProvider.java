@@ -109,6 +109,8 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
         List<MarketCapAllocation.CapSegment> segments = createCapSegments(
                 segmentToSymbols, stockMarketValues, totalPortfolioValue);
         
+        log.info("Generated market cap allocation with {} segments for portfolio: {}", segments.size(), portfolioId);
+        
         return MarketCapAllocation.builder()
             .portfolioId(portfolioId)
             .timestamp(Instant.now())
@@ -163,6 +165,7 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
             Map<String, String> marketCapTypeToSegmentName,
             Map<String, Double> stockMarketValues,
             Map<String, String> symbolToSegment) {
+        log.debug("Calculating market values and assigning segments for {} symbols", portfolioSymbols.size());
         
         double totalPortfolioValue = 0.0;
         
@@ -236,6 +239,7 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
      * Group symbols by their assigned segment
      */
     private Map<String, List<String>> groupSymbolsBySegment(Map<String, String> symbolToSegment) {
+        log.debug("Grouping {} symbols by segment", symbolToSegment.size());
         Map<String, List<String>> segmentToSymbols = new HashMap<>();
         
         for (Map.Entry<String, String> entry : symbolToSegment.entrySet()) {
@@ -254,6 +258,7 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
             Map<String, List<String>> segmentToSymbols,
             Map<String, Double> stockMarketValues,
             double totalPortfolioValue) {
+        log.debug("Creating cap segments for {} market cap groups", segmentToSymbols.size());
         
         List<MarketCapAllocation.CapSegment> segments = new ArrayList<>();
         
@@ -280,6 +285,8 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
         
         // Sort segments by weight percentage (highest to lowest)
         segments.sort(Comparator.comparing(MarketCapAllocation.CapSegment::getWeightPercentage).reversed());
+        
+        log.info("Created {} market cap segments", segments.size());
         
         return segments;
     }

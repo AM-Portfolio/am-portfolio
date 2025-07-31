@@ -31,8 +31,3 @@ springdoc:
     operationsSorter: method
     tagsSorter: alpha
 
-# Logging Configuration
-logging:
-  level:
-    com.portfolio.api: INFO
-    org.springframework: WARN

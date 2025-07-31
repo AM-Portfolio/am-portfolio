@@ -138,7 +138,7 @@ public class MarketDataApiClient extends AbstractApiClient {
      * @return the MarketDataResponseWrapper
      */
     public MarketDataResponseWrapper getOhlcDataSync(List<String> symbols) {
-        return getOhlcDataSync(symbols, true);
+        return getOhlcDataSync(symbols, false);
     }
     
     /**
