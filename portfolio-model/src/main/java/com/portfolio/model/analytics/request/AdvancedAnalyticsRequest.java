@@ -6,6 +6,11 @@ import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+
 /**
  * Request object for advanced analytics that combines multiple analytics features
  * with timeframe support.
@@ -18,49 +23,101 @@ import lombok.experimental.SuperBuilder;
 public class AdvancedAnalyticsRequest extends TimeFrameRequest {
 
     /**
-     * 
-     * The portfolio ID to analyze
+     * Core identifiers for the analytics request
      */
-    private String portfolioId;
-    
-    /**
-     * 
-     * The index symbol to analyze (e.g., "NIFTY 50", "NIFTY BANK")
-     */
-    private String indexSymbol;
+    @Valid
+    @lombok.Builder.Default
+    private CoreIdentifiers coreIdentifiers = new CoreIdentifiers();
     
     /**
      * Pagination parameters for the results
      */
+    @Valid
     private PaginationRequest pagination;
     
     /**
-     * Whether to include heatmap data in the response
+     * Feature toggles for controlling which analytics to include
      */
-    private boolean includeHeatmap;
+    @Valid
+    @lombok.Builder.Default
+    private FeatureToggles featureToggles = new FeatureToggles();
     
     /**
-     * Whether to include top movers (gainers/losers) in the response
+     * Configuration parameters for the requested features
      */
-    private boolean includeMovers;
+    @Valid
+    @lombok.Builder.Default
+    private FeatureConfiguration featureConfiguration = new FeatureConfiguration();
     
     /**
-     * Whether to include sector allocation data in the response
+     * Core identifiers for the analytics request
      */
-    private boolean includeSectorAllocation;
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @SuperBuilder
+    public static class CoreIdentifiers {
+        /**
+         * The portfolio ID to analyze
+         */
+        @NotBlank(message = "Portfolio ID is required")
+        private String portfolioId;
+        
+        /**
+         * The index symbol to analyze (e.g., "NIFTY 50", "NIFTY BANK")
+         */
+        @Pattern(regexp = "^[A-Za-z0-9 ]+$", message = "Index symbol must contain only alphanumeric characters and spaces")
+        private String indexSymbol;
+        
+        /**
+         * Optional comparison index symbol for relative performance analysis
+         */
+        @Pattern(regexp = "^[A-Za-z0-9 ]*$", message = "Comparison index symbol must contain only alphanumeric characters and spaces")
+        private String comparisonIndexSymbol;
+    }
     
     /**
-     * Whether to include market cap allocation data in the response
+     * Feature toggles for controlling which analytics to include
      */
-    private boolean includeMarketCapAllocation;
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @SuperBuilder
+    public static class FeatureToggles {
+        /**
+         * Whether to include heatmap data in the response
+         */
+        private boolean includeHeatmap;
+        
+        /**
+         * Whether to include top movers (gainers/losers) in the response
+         */
+        private boolean includeMovers;
+        
+        /**
+         * Whether to include sector allocation data in the response
+         */
+        private boolean includeSectorAllocation;
+        
+        /**
+         * Whether to include market cap allocation data in the response
+         */
+        private boolean includeMarketCapAllocation;
+    }
     
     /**
-     * Number of top movers to return (default will be applied if not specified)
+     * Configuration parameters for the requested features
      */
-    private Integer moversLimit;
-    
-    /**
-     * Optional comparison index symbol for relative performance analysis
-     */
-    private String comparisonIndexSymbol;
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @SuperBuilder
+    public static class FeatureConfiguration {
+        /**
+         * Number of top movers to return (default will be applied if not specified)
+         */
+        @Min(value = 1, message = "Movers limit must be at least 1")
+        private Integer moversLimit;
+    }
+
 }

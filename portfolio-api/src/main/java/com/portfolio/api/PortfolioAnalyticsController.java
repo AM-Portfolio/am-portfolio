@@ -86,7 +86,11 @@ public class PortfolioAnalyticsController {
                 portfolioId, request.getTimeFrame());
         
         // Set the portfolio ID from the path parameter (overriding any value in the request)
-        request.setPortfolioId(portfolioId);
+        if (request.getCoreIdentifiers() == null) {
+            // Initialize CoreIdentifiers if it's null
+            request.setCoreIdentifiers(new AdvancedAnalyticsRequest.CoreIdentifiers());
+        }
+        request.getCoreIdentifiers().setPortfolioId(portfolioId);
         
         return ResponseEntity.ok(portfolioAnalyticsFacade.calculateAdvancedAnalytics(request));
     }

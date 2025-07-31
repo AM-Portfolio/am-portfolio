@@ -167,7 +167,11 @@ public class IndexAnalyticsController {
                 indexSymbol, request.getFromDate(), request.getToDate(), request.getTimeFrame());
         
         // Set the index symbol from the path parameter (overriding any value in the request)
-        request.setIndexSymbol(indexSymbol);
+        if (request.getCoreIdentifiers() == null) {
+            // Initialize CoreIdentifiers if it's null
+            request.setCoreIdentifiers(new AdvancedAnalyticsRequest.CoreIdentifiers());
+        }
+        request.getCoreIdentifiers().setIndexSymbol(indexSymbol);
         
         // Log pagination information if provided
         if (request.getPagination() != null) {

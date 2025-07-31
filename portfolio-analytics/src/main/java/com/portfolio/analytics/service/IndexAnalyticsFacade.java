@@ -127,42 +127,43 @@ public class IndexAnalyticsFacade {
      */
     public AdvancedAnalyticsResponse calculateAdvancedAnalytics(AdvancedAnalyticsRequest request) {
         log.info("Calculating advanced analytics for index: {} from {} to {}", 
-                request.getIndexSymbol(), request.getFromDate(), request.getToDate());
+                request.getCoreIdentifiers().getIndexSymbol(), request.getFromDate(), request.getToDate());
         
         // Start building the response
         AdvancedAnalyticsResponse.AdvancedAnalyticsResponseBuilder responseBuilder = AdvancedAnalyticsResponse.builder()
-                .indexSymbol(request.getIndexSymbol())
+                .indexSymbol(request.getCoreIdentifiers().getIndexSymbol())
                 .startDate(request.getFromDate())
                 .endDate(request.getToDate())
                 .timestamp(java.time.Instant.now());
         
         // Add comparison index if provided
-        if (request.getComparisonIndexSymbol() != null && !request.getComparisonIndexSymbol().isEmpty()) {
-            responseBuilder.comparisonIndexSymbol(request.getComparisonIndexSymbol());
+        if (request.getCoreIdentifiers().getComparisonIndexSymbol() != null && !request.getCoreIdentifiers().getComparisonIndexSymbol().isEmpty()) {
+            responseBuilder.comparisonIndexSymbol(request.getCoreIdentifiers().getComparisonIndexSymbol());
         }
         
         // Include heatmap if requested
-        if (request.isIncludeHeatmap()) {
-            Heatmap heatmap = generateSectorHeatmap(request.getIndexSymbol());
+        if (request.getFeatureToggles().isIncludeHeatmap()) {
+            Heatmap heatmap = generateSectorHeatmap(request.getCoreIdentifiers().getIndexSymbol());
             responseBuilder.heatmap(heatmap);
         }
         
         // Include top movers if requested
-        if (request.isIncludeMovers()) {
-            int limit = request.getMoversLimit() > 0 ? request.getMoversLimit() : 5; // Default to 5 if not specified
-            GainerLoser movers = getTopGainersLosers(request.getIndexSymbol(), limit);
+        if (request.getFeatureToggles().isIncludeMovers()) {
+            int limit = request.getFeatureConfiguration().getMoversLimit() != null && request.getFeatureConfiguration().getMoversLimit() > 0 
+                    ? request.getFeatureConfiguration().getMoversLimit() : 5; // Default to 5 if not specified
+            GainerLoser movers = getTopGainersLosers(request.getCoreIdentifiers().getIndexSymbol(), limit);
             responseBuilder.movers(movers);
         }
         
         // Include sector allocation if requested
-        if (request.isIncludeSectorAllocation()) {
-            SectorAllocation sectorAllocation = calculateSectorAllocations(request.getIndexSymbol());
+        if (request.getFeatureToggles().isIncludeSectorAllocation()) {
+            SectorAllocation sectorAllocation = calculateSectorAllocations(request.getCoreIdentifiers().getIndexSymbol());
             responseBuilder.sectorAllocation(sectorAllocation);
         }
         
         // Include market cap allocation if requested
-        if (request.isIncludeMarketCapAllocation()) {
-            MarketCapAllocation marketCapAllocation = calculateMarketCapAllocations(request.getIndexSymbol());
+        if (request.getFeatureToggles().isIncludeMarketCapAllocation()) {
+            MarketCapAllocation marketCapAllocation = calculateMarketCapAllocations(request.getCoreIdentifiers().getIndexSymbol());
             responseBuilder.marketCapAllocation(marketCapAllocation);
         }
         
