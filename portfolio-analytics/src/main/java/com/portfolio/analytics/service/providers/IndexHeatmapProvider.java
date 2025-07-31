@@ -58,12 +58,17 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
             return createEmptyHeatmap(indexSymbol);
         }
         
+        log.info("Found {} stock symbols for index: {}", indexStockSymbols.size(), indexSymbol);
+        
         // Fetch market data using AnalyticsUtils
         Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, indexStockSymbols, timeFrameRequest);
         if (marketData.isEmpty()) {
             log.warn("No market data available for index: {}", indexSymbol);
             return createEmptyHeatmap(indexSymbol);
         }
+        
+        log.info("Successfully fetched market data for {} out of {} symbols for index: {}", 
+                marketData.size(), indexStockSymbols.size(), indexSymbol);
         
         // Group stocks by sector
         Map<String, List<MarketData>> sectorMap = groupStocksBySector(marketData);
@@ -98,7 +103,7 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
      * Group stocks by sector
      */
     private Map<String, List<MarketData>> groupStocksBySector(Map<String, MarketData> marketData) {
-        log.debug("Grouping {} stocks by sector", marketData.size());
+        log.info("Grouping {} stocks by sector", marketData.size());
         Map<String, List<MarketData>> sectorMap = new HashMap<>();
         
         if (marketData.isEmpty()) {
@@ -143,7 +148,12 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
      * Used when SecurityDetailsService doesn't return sector information
      */
     private Map<String, List<MarketData>> fallbackGroupStocksBySector(Map<String, MarketData> marketData) {
+        log.info("Using fallback method to group {} stocks by sector", marketData.size());
         Map<String, List<MarketData>> sectorMap = new HashMap<>();
+        
+        if (marketData.isEmpty()) {
+            return sectorMap;
+        }
         
         for (Map.Entry<String, MarketData> entry : marketData.entrySet()) {
             String symbol = entry.getKey();
@@ -154,8 +164,9 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
             
             // Add to sector group
             sectorMap.computeIfAbsent(sector, k -> new ArrayList<>()).add(data);
-        }
-        
+}
+            
+            log.info("Found {} sectors from security details service", sectorMap.size());      
         return sectorMap;
     }
     
@@ -163,17 +174,18 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
      * Calculate performance metrics for each sector
      */
     private List<Heatmap.SectorPerformance> calculateSectorPerformances(Map<String, List<MarketData>> sectorMap) {
-        log.debug("Calculating performance metrics for {} sectors", sectorMap.size());
+        log.info("Calculating performance metrics for {} sectors", sectorMap.size());
         List<Heatmap.SectorPerformance> sectorPerformances = new ArrayList<>();
         
         for (Map.Entry<String, List<MarketData>> entry : sectorMap.entrySet()) {
             String sectorName = entry.getKey();
             List<MarketData> sectorStocks = entry.getValue();
             
-            // Calculate sector metrics
+            // Calculate metrics for this sector
+            log.debug("Calculating metrics for sector '{}' with {} stocks", sectorName, sectorStocks.size());
             SectorMetrics metrics = calculateSectorMetrics(sectorStocks);
             
-            // Assign color based on performance
+            // Get color based on performance
             String color = getColorForPerformance(metrics.getPerformance());
             
             // Create sector performance object
@@ -183,8 +195,12 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
                 .changePercent(metrics.getChangePercent())
                 .color(color)
                 .build());
+            
+            log.debug("Sector '{}' performance: {}, change: {}%, color: {}", 
+                    sectorName, metrics.getPerformance(), metrics.getChangePercent(), color);
         }
         
+        log.info("Calculated performance metrics for {} sectors", sectorPerformances.size());
         return sectorPerformances;
     }
     
@@ -192,6 +208,7 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
      * Calculate performance metrics for a list of stocks
      */
     private SectorMetrics calculateSectorMetrics(List<MarketData> stocks) {
+        log.debug("Calculating sector metrics for {} stocks", stocks.size());
         double totalPerformance = 0.0;
         double totalChangePercent = 0.0;
         int validStockCount = 0;
@@ -218,6 +235,9 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
         // Calculate averages
         double avgPerformance = validStockCount > 0 ? totalPerformance / validStockCount : 0;
         double avgChangePercent = validStockCount > 0 ? totalChangePercent / validStockCount : 0;
+        
+        log.debug("Calculated metrics from {} valid stocks out of {} total stocks", 
+                validStockCount, stocks.size());
         
         return new SectorMetrics(avgPerformance, avgChangePercent);
     }

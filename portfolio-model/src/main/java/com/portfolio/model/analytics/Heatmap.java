@@ -30,8 +30,12 @@ public class Heatmap {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class SectorPerformance {
         private String sectorName;
-        private double performance;
-        private double changePercent;
+        @Builder.Default
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private double performance = 0.0;
+        @Builder.Default
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private double changePercent = 0.0;
         private String color; // For UI representation (e.g., "green", "red", or hex code)
     }
 }

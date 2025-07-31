@@ -1,10 +1,12 @@
+#mongo
+MONGO_URL: mongodb://admin:password@localhost:27017/portfolio?authSource=admin
+MONGO_DATABASE: portfolio
+MONGO_USERNAME: admin
+MONGO_PASSWORD: password
+
 spring:
   application:
     name: portfolio-app
-  # Disable JDBC auto-configuration since we're using MongoDB
-  autoconfigure:
-    exclude:
-      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
   kafka:
     bootstrap-servers: localhost:9092
     consumer:
@@ -47,6 +49,16 @@ spring:
         historical:
           key-prefix: "stock-indices:historical-data:"
           ttl: 129600  # 30 Days in seconds
+    mongodb:
+      uri: ${MONGO_URL}
+      database: ${MONGO_DATABASE}
+      username: ${MONGO_USERNAME}
+      password: ${MONGO_PASSWORD}
+      authentication-database: admin
+  # Disable JDBC auto-configuration since we're using MongoDB
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
 
 nse:
   broad-market-indices:
@@ -75,8 +87,11 @@ nse:
 app:
   persistence:
     mongodb:
-      uri: mongodb://admin:password@localhost:27017/portfolio?authSource=admin
-      database: portfolio
+      uri: ${MONGO_URL}
+      database: ${MONGO_DATABASE}
+      username: ${MONGO_USERNAME}
+      password: ${MONGO_PASSWORD}
+      authentication-database: admin
   kafka:
     portfolio:
       consumer:
@@ -114,11 +129,11 @@ springdoc:
 
 logging:
   level:
-    com.portfolio: DEBUG
-    com.portfolio.analytics: DEBUG
-    com.portfolio.api: DEBUG
-    com.portfolio.marketdata: DEBUG
-    com.portfolio.model: DEBUG
-    com.am.common: DEBUG
-    com.am.common.amcommondata: DEBUG
+    "[com.portfolio]": DEBUG
+    "[com.portfolio.analytics]": DEBUG
+    "[com.portfolio.api]": DEBUG
+    "[com.portfolio.marketdata]": DEBUG
+    "[com.portfolio.model]": DEBUG
+    "[com.am.common]": DEBUG
+    "[com.am.common.amcommondata]": DEBUG
     org.springframework.kafka: INFO

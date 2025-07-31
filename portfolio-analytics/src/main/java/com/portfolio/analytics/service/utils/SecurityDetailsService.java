@@ -33,13 +33,15 @@ public class SecurityDetailsService {
      * @param symbols List of security symbols to retrieve details for
      * @return Map of symbols to their corresponding SecurityModel objects
      */
-    @Cacheable(value = "securityDetails", key = "#symbols.toString()")
+    //@Cacheable(value = "securityDetails", key = "#symbols.toString()")
     public Map<String, SecurityModel> getSecurityDetails(List<String> symbols) {
         if (symbols == null || symbols.isEmpty()) {
+            log.info("No symbols provided for security details lookup");
             return Collections.emptyMap();
         }
         
-        log.debug("Fetching security details for {} symbols", symbols.size());
+        log.info("Fetching security details for {} symbols", symbols.size());
+        log.debug("Symbols to fetch: {}", symbols);
         
         try {
             // Attempt to retrieve security details from the service
@@ -52,6 +54,9 @@ public class SecurityDetailsService {
                             Function.identity(),    
                             (existing, replacement) -> existing
                     ));
+            
+            log.info("Successfully retrieved {} security models out of {} requested symbols", 
+                    resultMap.size(), symbols.size());
             
             // Check for missing symbols and log them
             List<String> missingSymbols = new ArrayList<>(symbols);
@@ -103,13 +108,14 @@ public class SecurityDetailsService {
      * @param symbols List of security symbols to group
      * @return Map of sectors to lists of symbols in each sector
      */
-    @Cacheable(value = "sectorGroupings", key = "#symbols.toString()")
+    //@Cacheable(value = "sectorGroupings", key = "#symbols.toString()")
     public Map<String, List<String>> groupSymbolsBySector(List<String> symbols) {
         if (symbols == null || symbols.isEmpty()) {
+            log.info("No symbols provided for sector grouping");
             return Collections.emptyMap();
         }
         
-        log.debug("Grouping {} symbols by sector", symbols.size());
+        log.info("Grouping {} symbols by sector", symbols.size());
         Map<String, SecurityModel> securityDetails = getSecurityDetails(symbols);
         
         Map<String, List<String>> sectorToSymbols = new HashMap<>();
@@ -118,9 +124,15 @@ public class SecurityDetailsService {
             String sector = securityModel.getMetadata().getSector();
             if (sector == null) {
                 sector = "Unknown";
+                log.debug("Symbol {} has no sector information, using 'Unknown'", symbol);
             }
             
             sectorToSymbols.computeIfAbsent(sector, k -> new ArrayList<>()).add(symbol);
+        });
+        
+        log.info("Identified {} unique sectors across {} symbols", sectorToSymbols.size(), symbols.size());
+        sectorToSymbols.forEach((sector, sectorSymbols) -> {
+            log.debug("Sector '{}' contains {} symbols", sector, sectorSymbols.size());
         });
         
         return sectorToSymbols;
@@ -132,13 +144,14 @@ public class SecurityDetailsService {
      * @param symbols List of security symbols to group
      * @return Map of industries to lists of symbols in each industry
      */
-    @Cacheable(value = "industryGroupings", key = "#symbols.toString()")
+    //@Cacheable(value = "industryGroupings", key = "#symbols.toString()")
     public Map<String, List<String>> groupSymbolsByIndustry(List<String> symbols) {
         if (symbols == null || symbols.isEmpty()) {
+            log.info("No symbols provided for industry grouping");
             return Collections.emptyMap();
         }
         
-        log.debug("Grouping {} symbols by industry", symbols.size());
+        log.info("Grouping {} symbols by industry", symbols.size());
         Map<String, SecurityModel> securityDetails = getSecurityDetails(symbols);
         
         Map<String, List<String>> industryToSymbols = new HashMap<>();
@@ -147,9 +160,15 @@ public class SecurityDetailsService {
             String industry = securityModel.getMetadata().getIndustry();
             if (industry == null) {
                 industry = "Unknown";
+                log.debug("Symbol {} has no industry information, using 'Unknown'", symbol);
             }
             
             industryToSymbols.computeIfAbsent(industry, k -> new ArrayList<>()).add(symbol);
+        });
+        
+        log.info("Identified {} unique industries across {} symbols", industryToSymbols.size(), symbols.size());
+        industryToSymbols.forEach((industry, industrySymbols) -> {
+            log.debug("Industry '{}' contains {} symbols", industry, industrySymbols.size());
         });
         
         return industryToSymbols;
@@ -161,24 +180,34 @@ public class SecurityDetailsService {
      * @param symbols List of security symbols to group
      * @return Map of market types to lists of symbols in each market type
      */
-    @Cacheable(value = "marketTypeGroupings", key = "#symbols.toString()")
+    //@Cacheable(value = "marketTypeGroupings", key = "#symbols.toString()")
     public Map<String, List<String>> groupSymbolsByMarketType(List<String> symbols) {
         if (symbols == null || symbols.isEmpty()) {
+            log.info("No symbols provided for market type grouping");
             return Collections.emptyMap();
         }
         
-        log.debug("Grouping {} symbols by market type", symbols.size());
+        log.info("Grouping {} symbols by market type", symbols.size());
         Map<String, SecurityModel> securityDetails = getSecurityDetails(symbols);
         
         Map<String, List<String>> marketTypeToSymbols = new HashMap<>();
         
         securityDetails.forEach((symbol, securityModel) -> {
             MarketCapType marketCapType = securityModel.getMetadata().getMarketCapType();
-            if (marketCapType == null) {
-                marketCapType = null;
+            String marketCapName = "UNKNOWN";
+            
+            if (marketCapType != null) {
+                marketCapName = marketCapType.name();
+            } else {
+                log.debug("Symbol {} has no market cap type information, using 'UNKNOWN'", symbol);
             }
             
-            marketTypeToSymbols.computeIfAbsent(marketCapType.name(), k -> new ArrayList<>()).add(symbol);
+            marketTypeToSymbols.computeIfAbsent(marketCapName, k -> new ArrayList<>()).add(symbol);
+        });
+        
+        log.info("Identified {} unique market cap types across {} symbols", marketTypeToSymbols.size(), symbols.size());
+        marketTypeToSymbols.forEach((marketType, marketTypeSymbols) -> {
+            log.debug("Market cap type '{}' contains {} symbols", marketType, marketTypeSymbols.size());
         });
         
         return marketTypeToSymbols;

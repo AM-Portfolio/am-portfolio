@@ -17,6 +17,8 @@ import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.Comparator;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 /**
  * Provider for top movers (gainers and losers) analytics
@@ -111,7 +113,10 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
             Map<String, MarketData> marketData, 
             Map<String, Double> symbolToPerformance, 
             Map<String, Double> symbolToChangePercent) {
+        log.debug("Calculating performance metrics for {} symbols", marketData.size());
         
+        int processedCount = 0;
+        int validDataCount = 0;
         for (Map.Entry<String, MarketData> entry : marketData.entrySet()) {
             String symbol = entry.getKey();
             MarketData data = entry.getValue();
@@ -120,16 +125,30 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
             double openPrice = data.getOhlc().getOpen();
             double lastPrice = data.getLastPrice();
             
-            if (openPrice > 0) {
-                // Calculate intraday change percentage
-                double changePercent = ((lastPrice - openPrice) / openPrice) * 100;
-                symbolToChangePercent.put(symbol, changePercent);
-                
-                // Performance score based on price movement relative to previous close
-                double performanceScore = ((lastPrice - closePrice) / closePrice) * 100;
-                symbolToPerformance.put(symbol, performanceScore);
+            if (closePrice <= 0) {
+                log.warn("Invalid close price ({}<=0) for symbol: {}", closePrice, symbol);
+                continue;
             }
+            validDataCount++;
+            
+            // Calculate intraday change percentage
+            double changePercent = ((lastPrice - openPrice) / openPrice) * 100;
+            symbolToChangePercent.put(symbol, changePercent);
+            
+            // Performance score based on price movement relative to previous close
+            double performance = (lastPrice - closePrice) / closePrice;
+            double changePercentPerformance = performance * 100;
+            
+            symbolToPerformance.put(symbol, performance);
+            symbolToChangePercent.put(symbol, changePercentPerformance);
+            
+            processedCount++;
+            
+            log.trace("Symbol: {}, Close: {}, Last: {}, Performance: {}, Change%: {}%", 
+                    symbol, closePrice, lastPrice, String.format("%.4f", performance), String.format("%.2f", changePercentPerformance));
         }
+        
+        log.debug("Processed {} symbols, valid data for {} symbols", processedCount, validDataCount);
     }
     
     /**
@@ -140,17 +159,20 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
             Map<String, Double> symbolToPerformance, 
             Map<String, Double> symbolToChangePercent, 
             int limit) {
+        log.debug("Finding top {} gainers from {} symbols", limit, symbolToPerformance.size());
         
-        // Sort stocks by performance (descending)
-        List<String> topPerformers = symbolToPerformance.entrySet().stream()
+        // Get top gainers (highest positive performance)
+        List<String> topGainerSymbols = symbolToPerformance.entrySet().stream()
             .filter(entry -> entry.getValue() > 0) // Only positive performers
             .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
             .limit(limit)
             .map(Map.Entry::getKey)
             .collect(Collectors.toList());
+            
+        log.debug("Found {} top gainers: {}", topGainerSymbols.size(), topGainerSymbols);
         
         // Create stock movement objects
-        return createStockMovements(topPerformers, marketData, symbolToChangePercent);
+        return createStockMovements(topGainerSymbols, marketData, symbolToChangePercent);
     }
     
     /**
@@ -161,6 +183,7 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
             Map<String, Double> symbolToPerformance, 
             Map<String, Double> symbolToChangePercent, 
             int limit) {
+        log.debug("Finding top {} losers from {} symbols", limit, symbolToPerformance.size());
         
         // Sort stocks by performance (ascending)
         List<String> worstPerformers = symbolToPerformance.entrySet().stream()
@@ -181,6 +204,7 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
             List<String> symbols, 
             Map<String, MarketData> marketData, 
             Map<String, Double> symbolToChangePercent) {
+        log.debug("Creating stock movement objects for {} symbols", symbols.size());
         
         // Get security details for all symbols
         Map<String, SecurityModel> securityDetails = securityDetailsService.getSecurityDetails(symbols);
@@ -201,9 +225,15 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
                     }
                 }
                 
+                MarketData data = marketData.get(symbol);
+                if (data.getOhlc() == null) {
+                    log.warn("Missing OHLC data for symbol: {}", symbol);
+                    return null;
+                }
+                
                 // Calculate change amount with precision
-                double lastPrice = marketData.get(symbol).getLastPrice();
-                double closePrice = marketData.get(symbol).getOhlc().getClose();
+                double lastPrice = data.getLastPrice();
+                double closePrice = data.getOhlc().getClose();
                 Double changeAmount = Math.round((lastPrice - closePrice) * 100.0) / 100.0;
                 Double changePercent = Math.round(symbolToChangePercent.getOrDefault(symbol, 0.0) * 100.0) / 100.0;
                 
@@ -228,12 +258,14 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
             Map<String, MarketData> marketData,
             Map<String, Double> symbolToPerformance,
             Map<String, Double> symbolToChangePercent) {
+        log.debug("Calculating sector movements for {} symbols", symbols.size());
         
         // Group symbols by sector
         Map<String, List<String>> sectorToSymbols = securityDetailsService.groupSymbolsBySector(symbols);
+        log.debug("Found {} sectors: {}", sectorToSymbols.size(), sectorToSymbols.keySet());
         
         // Calculate sector movements
-        return sectorToSymbols.entrySet().stream()
+        List<GainerLoser.SectorMovement> sectorMovements = sectorToSymbols.entrySet().stream()
             .map(entry -> {
                 String sectorName = entry.getKey();
                 List<String> sectorSymbols = entry.getValue();
@@ -244,6 +276,9 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
                     .mapToDouble(symbol -> symbolToChangePercent.getOrDefault(symbol, 0.0))
                     .average()
                     .orElse(0.0);
+                
+                // Round to 2 decimal places
+                avgChangePercent = roundToTwoDecimals(avgChangePercent);
                 
                 // Get top gainers in this sector
                 List<String> topGainerSymbols = sectorSymbols.stream()
@@ -259,12 +294,12 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
                     .limit(3) // Top 3 losers per sector
                     .collect(Collectors.toList());
                 
-                // Create stock performance map
+                // Create stock performance map with values rounded to 2 decimal places
                 Map<String, Double> stockPerformance = sectorSymbols.stream()
                     .filter(symbol -> symbolToPerformance.containsKey(symbol))
                     .collect(Collectors.toMap(
                         Function.identity(),
-                        symbol -> symbolToPerformance.getOrDefault(symbol, 0.0)
+                        symbol -> roundToTwoDecimals(symbolToPerformance.getOrDefault(symbol, 0.0))
                     ));
                 
                 // Build sector movement object
@@ -279,5 +314,17 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
             })
             .sorted(Comparator.comparing(GainerLoser.SectorMovement::getAverageChangePercent).reversed())
                 .collect(Collectors.toList());
+        
+        log.info("Generated sector movements for {} sectors", sectorMovements.size());  
+        return sectorMovements;
+    }
+    
+    /**
+     * Helper method to round a double value to 2 decimal places
+     */
+    private double roundToTwoDecimals(double value) {
+        BigDecimal bd = BigDecimal.valueOf(value);
+        bd = bd.setScale(2, RoundingMode.HALF_UP);
+        return bd.doubleValue();
     }
 }

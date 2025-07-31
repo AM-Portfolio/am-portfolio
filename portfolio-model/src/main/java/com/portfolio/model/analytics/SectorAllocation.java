@@ -31,7 +31,9 @@ public class SectorAllocation {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class SectorWeight {
         private String sectorName;
-        private double weightPercentage;
+        @Builder.Default
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private double weightPercentage = 0.0;
         private double marketCap;
         private List<String> topStocks; // Top stocks in this sector
     }
@@ -44,7 +46,9 @@ public class SectorAllocation {
     public static class IndustryWeight {
         private String industryName;
         private String parentSector;
-        private double weightPercentage;
+        @Builder.Default
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private double weightPercentage = 0.0;
         private double marketCap;
         private List<String> topStocks; // Top stocks in this industry
     }

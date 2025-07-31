@@ -66,7 +66,8 @@ public class GainerLoser {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class SectorMovement {
         private String sectorName;
-        private double averageChangePercent;
+        @Builder.Default
+        private double averageChangePercent = 0.0;
         private int stockCount;
         private double marketCapWeight; // Market capitalization weight of the sector
         private List<String> topGainerSymbols; // Top gainers in this sector
