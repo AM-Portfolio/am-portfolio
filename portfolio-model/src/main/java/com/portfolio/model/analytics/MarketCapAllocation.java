@@ -1,5 +1,9 @@
 package com.portfolio.model.analytics;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.portfolio.model.serializer.DecimalPrecisionSerializer;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -15,6 +19,7 @@ import java.util.List;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class MarketCapAllocation {
     private String portfolioId;
     private String indexSymbol;
@@ -25,6 +30,7 @@ public class MarketCapAllocation {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class CapSegment {
         private String segmentName; // e.g., "Large Cap", "Mid Cap", "Small Cap"
         private double weightPercentage;

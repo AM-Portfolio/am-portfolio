@@ -6,6 +6,7 @@ import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.analytics.service.AbstractPortfolioAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
 import com.portfolio.analytics.service.utils.AnalyticsUtils;
+import com.portfolio.analytics.service.utils.AllocationUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.SectorAllocation;
@@ -176,21 +177,16 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
             Map<String, MarketData> marketData, 
             Map<String, Double> symbolToQuantity, 
             Map<String, Double> stockToMarketValue) {
-        log.debug("Calculating market values for {} stocks", marketData.size());
         
-        double totalPortfolioValue = 0.0;
+        // Use AllocationUtils to calculate market values
+        Map<String, Double> calculatedValues = AllocationUtils.calculateMarketValues(marketData, symbolToQuantity);
         
-        for (String symbol : marketData.keySet()) {
-            MarketData data = marketData.get(symbol);
-            double quantity = symbolToQuantity.getOrDefault(symbol, 0.0);
-            
-            // Calculate market value (price * quantity)
-            double marketValue = data.getLastPrice() * quantity;
-            
-            stockToMarketValue.put(symbol, marketValue);
-            totalPortfolioValue += marketValue;
-        }
+        // Copy values to the provided map
+        stockToMarketValue.putAll(calculatedValues);
         
+        // Calculate and return total portfolio value
+        double totalPortfolioValue = AllocationUtils.calculateTotalValue(calculatedValues);
+        log.debug("Total portfolio value: {}", totalPortfolioValue);
         return totalPortfolioValue;
     }
     
@@ -202,31 +198,9 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
             Map<String, Double> stockToMarketValue, 
             double totalPortfolioValue) {
         
-        List<SectorAllocation.SectorWeight> sectorWeights = new ArrayList<>();
-        
-        for (Map.Entry<String, List<String>> entry : sectorToStocks.entrySet()) {
-            String sectorName = entry.getKey();
-            List<String> stocks = entry.getValue();
-            
-            // Calculate total market value for this sector
-            double sectorMarketValue = calculateGroupMarketValue(stocks, stockToMarketValue);
-            
-            // Calculate weight percentage
-            double weightPercentage = calculateWeightPercentage(sectorMarketValue, totalPortfolioValue);
-            
-            // Get top stocks by market value
-            List<String> topStocks = getTopStocksByValue(stocks, stockToMarketValue, 5);
-            
-            sectorWeights.add(SectorAllocation.SectorWeight.builder()
-                .sectorName(sectorName)
-                .weightPercentage(weightPercentage)
-                .marketCap(sectorMarketValue)  // This is actually market value, not market cap
-                .topStocks(topStocks)
-                .build());
-        }
-        
-        // Sort by weight percentage (highest to lowest)
-        sectorWeights.sort(Comparator.comparing(SectorAllocation.SectorWeight::getWeightPercentage).reversed());
+        // Use AllocationUtils to calculate sector weights
+        List<SectorAllocation.SectorWeight> sectorWeights = 
+            AllocationUtils.calculateSectorWeights(sectorToStocks, stockToMarketValue, totalPortfolioValue);
         
         log.info("Generated sector weights with {} sectors", sectorWeights.size());
         
@@ -242,60 +216,10 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
             Map<String, Double> stockToMarketValue, 
             double totalPortfolioValue) {
         
-        List<SectorAllocation.IndustryWeight> industryWeights = new ArrayList<>();
-        
-        for (Map.Entry<String, List<String>> entry : industryToStocks.entrySet()) {
-            String industryName = entry.getKey();
-            List<String> stocks = entry.getValue();
-            String parentSector = industryToSector.get(industryName);
-            
-            // Calculate total market value for this industry
-            double industryMarketValue = calculateGroupMarketValue(stocks, stockToMarketValue);
-            
-            // Calculate weight percentage
-            double weightPercentage = calculateWeightPercentage(industryMarketValue, totalPortfolioValue);
-            
-            // Get top stocks by market value
-            List<String> topStocks = getTopStocksByValue(stocks, stockToMarketValue, 3);
-            
-            industryWeights.add(SectorAllocation.IndustryWeight.builder()
-                .industryName(industryName)
-                .parentSector(parentSector)
-                .weightPercentage(weightPercentage)
-                .marketCap(industryMarketValue)  // This is actually market value, not market cap
-                .topStocks(topStocks)
-                .build());
-        }
-        
-        // Sort by weight percentage (highest to lowest)
-        industryWeights.sort(Comparator.comparing(SectorAllocation.IndustryWeight::getWeightPercentage).reversed());
-        
-        return industryWeights;
+        // Use AllocationUtils to calculate industry weights
+        return AllocationUtils.calculateIndustryWeights(
+            industryToStocks, industryToSector, stockToMarketValue, totalPortfolioValue);
     }
     
-    /**
-     * Calculate total market value for a group of stocks
-     */
-    private double calculateGroupMarketValue(List<String> stocks, Map<String, Double> stockToMarketValue) {
-        return stocks.stream()
-            .mapToDouble(symbol -> stockToMarketValue.getOrDefault(symbol, 0.0))
-            .sum();
-    }
-    
-    /**
-     * Calculate weight percentage
-     */
-    private double calculateWeightPercentage(double groupValue, double totalValue) {
-        return totalValue > 0 ? (groupValue / totalValue) * 100 : 0;
-    }
-    
-    /**
-     * Get top stocks by market value
-     */
-    private List<String> getTopStocksByValue(List<String> stocks, Map<String, Double> stockToMarketValue, int limit) {
-        return stocks.stream()
-            .sorted(Comparator.comparing(symbol -> stockToMarketValue.getOrDefault(symbol, 0.0)).reversed())
-            .limit(limit)
-            .collect(Collectors.toList());
-    }
+    // Removed unused methods as they've been replaced by direct calls to AllocationUtils
 }

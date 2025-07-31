@@ -3,6 +3,7 @@ package com.portfolio.analytics.service.providers;
 import com.portfolio.analytics.service.AbstractIndexAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
 import com.portfolio.analytics.service.utils.AnalyticsUtils;
+import com.portfolio.analytics.service.utils.AllocationUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
@@ -15,7 +16,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
-import java.util.stream.Collectors;
+
 
 /**
  * Provider for sector allocation analytics
@@ -164,33 +165,8 @@ public class IndexAllocationProvider extends AbstractIndexAnalyticsProvider<Sect
      * Calculate market caps for all stocks
      */
     private Map<String, Double> calculateMarketCaps(Map<String, MarketData> marketData) {
-        Map<String, Double> marketCaps = new HashMap<>();
-        
-        for (Map.Entry<String, MarketData> entry : marketData.entrySet()) {
-            String symbol = entry.getKey();
-            MarketData data = entry.getValue();
-            
-            // Calculate market cap (price * shares outstanding)
-            // In a real implementation, would use actual shares outstanding
-            // For demonstration, using a multiplier based on price range
-            double sharesMultiplier;
-            double price = data.getLastPrice();
-            
-            if (price < 100) {
-                sharesMultiplier = 10_000_000; // 10M shares
-            } else if (price < 500) {
-                sharesMultiplier = 5_000_000; // 5M shares
-            } else if (price < 1000) {
-                sharesMultiplier = 2_000_000; // 2M shares
-            } else {
-                sharesMultiplier = 1_000_000; // 1M shares
-            }
-            
-            double marketCap = AnalyticsUtils.calculateMarketCap(data, sharesMultiplier);
-            marketCaps.put(symbol, marketCap);
-        }
-        
-        return marketCaps;
+        log.debug("Calculating market caps for {} stocks", marketData.size());
+        return AllocationUtils.calculateMarketCaps(marketData);
     }
     
     /**
@@ -201,26 +177,23 @@ public class IndexAllocationProvider extends AbstractIndexAnalyticsProvider<Sect
             Map<String, Double> stockMarketCaps, 
             double totalMarketCap) {
         
-        Map<String, Double> sectorWeights = new HashMap<>();
-        Map<String, List<String>> sectorToStocks = stockToSector.entrySet().stream()
-            .collect(Collectors.groupingBy(
-                Map.Entry::getValue,
-                Collectors.mapping(Map.Entry::getKey, Collectors.toList())
-            ));
+        Map<String, List<String>> sectorToStocks = new HashMap<>();
         
-        for (Map.Entry<String, List<String>> entry : sectorToStocks.entrySet()) {
-            String sector = entry.getKey();
-            List<String> stocks = entry.getValue();
+        // Group stocks by sector
+        for (Map.Entry<String, String> entry : stockToSector.entrySet()) {
+            String symbol = entry.getKey();
+            String sector = entry.getValue();
             
-            // Calculate total market cap for this sector
-            double sectorMarketCap = stocks.stream()
-                .mapToDouble(symbol -> stockMarketCaps.getOrDefault(symbol, 0.0))
-                .sum();
-            
-            // Calculate weight percentage
-            double weightPercentage = totalMarketCap > 0 ? (sectorMarketCap / totalMarketCap) * 100 : 0;
-            sectorWeights.put(sector, weightPercentage);
+            sectorToStocks.computeIfAbsent(sector, k -> new ArrayList<>()).add(symbol);
         }
+        
+        // Use AllocationUtils to calculate sector weights
+        List<SectorAllocation.SectorWeight> sectorWeightsList = 
+            AllocationUtils.calculateSectorWeights(sectorToStocks, stockMarketCaps, totalMarketCap);
+        
+        // Convert to Map<String, Double> for backward compatibility
+        Map<String, Double> sectorWeights = new HashMap<>();
+        sectorWeightsList.forEach(sw -> sectorWeights.put(sw.getSectorName(), sw.getWeightPercentage()));
         
         return sectorWeights;
     }
@@ -233,40 +206,19 @@ public class IndexAllocationProvider extends AbstractIndexAnalyticsProvider<Sect
             Map<String, String> stockToSector, 
             Map<String, Double> stockMarketCaps) {
         
-        List<SectorAllocation.SectorWeight> sectorWeightsList = new ArrayList<>();
+        Map<String, List<String>> sectorToStocks = new HashMap<>();
         
         // Group stocks by sector
-        Map<String, List<String>> sectorToStocks = stockToSector.entrySet().stream()
-            .collect(Collectors.groupingBy(
-                Map.Entry::getValue,
-                Collectors.mapping(Map.Entry::getKey, Collectors.toList())
-            ));
-        
-        for (Map.Entry<String, Double> entry : sectorWeights.entrySet()) {
-            String sectorName = entry.getKey();
-            double weightPercentage = entry.getValue();
+        for (Map.Entry<String, String> entry : stockToSector.entrySet()) {
+            String symbol = entry.getKey();
+            String sector = entry.getValue();
             
-            // Get stocks in this sector
-            List<String> sectorStocks = sectorToStocks.getOrDefault(sectorName, Collections.emptyList());
-            
-            // Calculate total market cap for this sector
-            double sectorMarketCap = sectorStocks.stream()
-                .mapToDouble(symbol -> stockMarketCaps.getOrDefault(symbol, 0.0))
-                .sum();
-            
-            // Get top stocks by market cap
-            List<String> topStocks = getTopStocksByMarketCap(sectorStocks, stockMarketCaps, 5);
-            
-            // Create sector weight object
-            sectorWeightsList.add(SectorAllocation.SectorWeight.builder()
-                .sectorName(sectorName)
-                .weightPercentage(weightPercentage)
-                .marketCap(sectorMarketCap)
-                .topStocks(topStocks)
-                .build());
+            sectorToStocks.computeIfAbsent(sector, k -> new ArrayList<>()).add(symbol);
         }
         
-        return sectorWeightsList;
+        // Use AllocationUtils to calculate sector weights
+        double totalMarketCap = AllocationUtils.calculateTotalValue(stockMarketCaps);
+        return AllocationUtils.calculateSectorWeights(sectorToStocks, stockMarketCaps, totalMarketCap);
     }
     
     /**
