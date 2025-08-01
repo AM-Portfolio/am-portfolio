@@ -176,6 +176,7 @@ public class MarketDataApiClient extends AbstractApiClient {
                 .append("?symbols=").append(symbolsParam)
                 .append("&from=").append(request.getFromDate())
                 .append("&to=").append(request.getToDate())
+                .append("&continuous=").append(request.getContinuous())
                 .append("&interval=").append(request.getTimeFrame().getValue())
                 .append("&instrumentType=").append(request.getInstrumentType().getValue())
                 .append("&filterType=").append(request.getFilterType().getValue());

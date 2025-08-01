@@ -1,10 +1,11 @@
 package com.portfolio.analytics.service;
 
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
+import com.portfolio.marketdata.model.FilterType;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
+import com.portfolio.marketdata.model.InstrumentType;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
-import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest.FeatureConfiguration;
 import com.portfolio.model.analytics.request.PaginationRequest;
 import com.portfolio.model.analytics.request.TimeFrameRequest;
 import com.portfolio.model.market.MarketData;
@@ -93,6 +94,9 @@ public abstract class AbstractAnalyticsProvider<T, I> {
                     .symbols(symbols)
                     .fromDate(timeFrameRequest.getFromDate())
                     .toDate(timeFrameRequest.getToDate())
+                    .filterType(FilterType.START_END)
+                    .instrumentType(InstrumentType.STOCK)
+                    .continuous(false)
                     .timeFrame(timeFrameRequest.getTimeFrame())
                     .build();
             
