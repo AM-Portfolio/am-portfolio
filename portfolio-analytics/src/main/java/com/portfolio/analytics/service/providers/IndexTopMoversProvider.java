@@ -2,6 +2,7 @@ package com.portfolio.analytics.service.providers;
 
 import com.portfolio.analytics.service.AbstractIndexAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
+import com.portfolio.analytics.service.utils.AnalyticsUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.analytics.service.utils.TopMoverUtils;
 import com.portfolio.marketdata.service.MarketDataService;
@@ -43,12 +44,12 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
         // Get index symbols and market data
         List<String> indexStockSymbols = getIndexSymbols(indexSymbol);
         if (indexStockSymbols.isEmpty()) {
-            return createEmptyResult(indexSymbol);
+            return createEmptyResult();
         }
         
-        Map<String, MarketData> marketData = getMarketData(indexStockSymbols);
+        Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, indexStockSymbols, request.getTimeFrameRequest());
         if (marketData.isEmpty()) {
-            return createEmptyResult(indexSymbol);
+            return createEmptyResult();
         }
         
         // Use TopMoverUtils to build the response with top gainers and losers
@@ -67,7 +68,6 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
         
         // Add sector movements to the response
         return GainerLoser.builder()
-            .indexSymbol(indexSymbol)
             .timestamp(gainerLoser.getTimestamp())
             .topGainers(gainerLoser.getTopGainers())
             .topLosers(gainerLoser.getTopLosers())
@@ -76,21 +76,11 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
     }
     
     /**
-     * Extract limit parameter from varargs
-     */
-    private int extractLimit(Object... params) {
-        if (params.length > 0 && params[0] instanceof Integer) {
-            return (Integer) params[0];
-        }
-        return 5; // Default limit
-    }
-    
-    /**
      * Create empty result when no data is available
      */
-    private GainerLoser createEmptyResult(String indexSymbol) {
+    private GainerLoser createEmptyResult() {
         return GainerLoser.builder()
-            .indexSymbol(indexSymbol)
+          
             .timestamp(Instant.now())
             .topGainers(Collections.emptyList())
             .topLosers(Collections.emptyList())
@@ -103,5 +93,4 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
         return generateAnalytics(request.getCoreIdentifiers().getIndexSymbol(), request);
     }
     
-    // Performance metrics, top gainers/losers, and stock movement methods have been moved to TopMoverUtils
 }

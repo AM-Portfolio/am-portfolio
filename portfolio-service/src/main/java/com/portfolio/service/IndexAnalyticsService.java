@@ -5,10 +5,8 @@ import com.portfolio.model.analytics.Heatmap;
 import com.portfolio.model.analytics.MarketCapAllocation;
 import com.portfolio.model.analytics.SectorAllocation;
 import com.portfolio.model.market.MarketData;
-import com.portfolio.redis.service.StockIndicesRedisService;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
-import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.model.indices.IndexConstituent;
 
 import lombok.RequiredArgsConstructor;
@@ -64,7 +62,6 @@ public class IndexAnalyticsService {
         if (indexStockSymbols.isEmpty()) {
             log.warn("No stock symbols found for index: {}", indexSymbol);
             return Heatmap.builder()
-                .indexSymbol(indexSymbol)
                 .timestamp(Instant.now())
                 .sectors(Collections.emptyList())
                 .build();
@@ -75,7 +72,6 @@ public class IndexAnalyticsService {
         if (marketData.isEmpty()) {
             log.warn("No market data available for index: {}", indexSymbol);
             return Heatmap.builder()
-                .indexSymbol(indexSymbol)
                 .timestamp(Instant.now())
                 .sectors(Collections.emptyList())
                 .build();
@@ -137,7 +133,6 @@ public class IndexAnalyticsService {
         sectorPerformances.sort(Comparator.comparing(Heatmap.SectorPerformance::getPerformance).reversed());
         
         return Heatmap.builder()
-            .indexSymbol(indexSymbol)
             .timestamp(Instant.now())
             .sectors(sectorPerformances)
             .build();
@@ -199,7 +194,6 @@ public class IndexAnalyticsService {
         // 4. Take top/bottom N based on limit
         
         return GainerLoser.builder()
-            .indexSymbol(indexSymbol)
             .timestamp(Instant.now())
             .topGainers(gainers)
             .topLosers(losers)
@@ -226,7 +220,6 @@ public class IndexAnalyticsService {
         // 4. Find top stocks in each sector/industry
         
         return SectorAllocation.builder()
-            .indexSymbol(indexSymbol)
             .timestamp(Instant.now())
             .sectorWeights(sectorWeights)
             .industryWeights(industryWeights)
@@ -245,7 +238,6 @@ public class IndexAnalyticsService {
         if (indexStockSymbols.isEmpty()) {
             log.warn("No stock symbols found for index: {}", indexSymbol);
             return MarketCapAllocation.builder()
-                .indexSymbol(indexSymbol)
                 .timestamp(Instant.now())
                 .segments(Collections.emptyList())
                 .build();
@@ -256,7 +248,6 @@ public class IndexAnalyticsService {
         if (marketData.isEmpty()) {
             log.warn("No market data available for index: {}", indexSymbol);
             return MarketCapAllocation.builder()
-                .indexSymbol(indexSymbol)
                 .timestamp(Instant.now())
                 .segments(Collections.emptyList())
                 .build();
@@ -343,7 +334,6 @@ public class IndexAnalyticsService {
         segments.sort(Comparator.comparing(MarketCapAllocation.CapSegment::getWeightPercentage).reversed());
         
         return MarketCapAllocation.builder()
-            .indexSymbol(indexSymbol)
             .timestamp(Instant.now())
             .segments(segments)
             .build();

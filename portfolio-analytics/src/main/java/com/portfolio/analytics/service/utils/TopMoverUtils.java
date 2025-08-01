@@ -380,14 +380,12 @@ public class TopMoverUtils {
         // Build and return the response
         if (isPortfolio) {
             return GainerLoser.builder()
-                .portfolioId(id)
                 .topGainers(gainers)
                 .topLosers(losers)
                 .timestamp(Instant.now())
                 .build();
         } else {
             return GainerLoser.builder()
-                .indexSymbol(id)
                 .topGainers(gainers)
                 .topLosers(losers)
                 .timestamp(Instant.now())

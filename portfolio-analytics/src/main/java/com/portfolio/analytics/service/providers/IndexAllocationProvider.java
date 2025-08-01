@@ -53,13 +53,13 @@ public class IndexAllocationProvider extends AbstractIndexAnalyticsProvider<Sect
         var indexStockSymbols = getIndexSymbols(indexSymbol);
         if (indexStockSymbols.isEmpty()) {
             log.warn("No stock symbols found for index: {}", indexSymbol);
-            return createEmptyAllocation(indexSymbol);
+            return createEmptyAllocation();
         }
         
         // Use the utility method to fetch market data with or without time frame
         var marketData = AnalyticsUtils.fetchMarketData(this, indexStockSymbols, request.getTimeFrameRequest());
         if (marketData.isEmpty()) {
-            return createEmptyAllocation(indexSymbol);
+            return createEmptyAllocation();
         }
 
         // Map stocks to sectors and industries
@@ -85,7 +85,6 @@ public class IndexAllocationProvider extends AbstractIndexAnalyticsProvider<Sect
         sectorWeightsList.sort(Comparator.comparing(SectorAllocation.SectorWeight::getWeightPercentage).reversed());
 
         return SectorAllocation.builder()
-                .indexSymbol(indexSymbol)
                 .timestamp(Instant.now())
                 .sectorWeights(sectorWeightsList)
                 .industryWeights(industryWeights)
@@ -95,9 +94,8 @@ public class IndexAllocationProvider extends AbstractIndexAnalyticsProvider<Sect
     /**
      * Create empty result when no data is available
      */
-    private SectorAllocation createEmptyAllocation(String indexSymbol) {
+    private SectorAllocation createEmptyAllocation() {
         return SectorAllocation.builder()
-                .indexSymbol(indexSymbol)
                 .timestamp(Instant.now())
                 .sectorWeights(Collections.emptyList())
                 .industryWeights(Collections.emptyList())

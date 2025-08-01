@@ -18,8 +18,6 @@ import java.util.List;
 @AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class MarketCapAllocation {
-    private String portfolioId;
-    private String indexSymbol;
     private Instant timestamp;
     private List<CapSegment> segments;
     

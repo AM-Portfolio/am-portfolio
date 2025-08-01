@@ -59,14 +59,14 @@ public class IndexMarketCapAllocationProvider extends AbstractIndexAnalyticsProv
         List<String> indexStockSymbols = getIndexSymbols(indexSymbol);
         if (indexStockSymbols.isEmpty()) {
             log.warn("No stock symbols found for index: {}", indexSymbol);
-            return createEmptyAllocation(indexSymbol);
+            return createEmptyAllocation();
         }
         
         // Fetch market data using AnalyticsUtils
         Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, indexStockSymbols, timeFrameRequest);
         if (marketData.isEmpty()) {
             log.warn("No market data available for index: {}", indexSymbol);
-            return createEmptyAllocation(indexSymbol);
+            return createEmptyAllocation();
         }
         
         // Process market data and create segments using MarketCapUtils
@@ -84,7 +84,7 @@ public class IndexMarketCapAllocationProvider extends AbstractIndexAnalyticsProv
         log.info("Generated market cap allocation with {} segments for index: {}", segments.size(), indexSymbol);
         
         return MarketCapAllocation.builder()
-            .indexSymbol(indexSymbol)
+          
             .timestamp(Instant.now())
             .segments(segments)
             .build();
@@ -93,9 +93,9 @@ public class IndexMarketCapAllocationProvider extends AbstractIndexAnalyticsProv
     /**
      * Create an empty allocation when no data is available
      */
-    private MarketCapAllocation createEmptyAllocation(String indexSymbol) {
+    private MarketCapAllocation createEmptyAllocation() {
         return MarketCapAllocation.builder()
-            .indexSymbol(indexSymbol)
+          
             .timestamp(Instant.now())
             .segments(Collections.emptyList())
             .build();

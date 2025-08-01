@@ -22,8 +22,6 @@ import java.util.Map;
 @AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class GainerLoser {
-    private String indexSymbol; // Used for index analytics
-    private String portfolioId; // Used for portfolio analytics
     private Instant timestamp;
     private List<StockMovement> topGainers;
     private List<StockMovement> topLosers;

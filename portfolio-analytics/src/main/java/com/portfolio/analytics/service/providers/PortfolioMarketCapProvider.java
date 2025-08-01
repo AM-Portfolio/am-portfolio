@@ -57,27 +57,23 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
         PortfolioModelV1 portfolio = getPortfolio(portfolioId);
         if (portfolio == null || portfolio.getEquityModels() == null || portfolio.getEquityModels().isEmpty()) {
             log.warn("No portfolio or holdings found for ID: {}", portfolioId);
-            return createEmptyResult(portfolioId);
+            return createEmptyResult();
         }
         
         // Get symbols from portfolio holdings
         List<String> portfolioSymbols = getPortfolioSymbols(portfolio);
         if (portfolioSymbols.isEmpty()) {
             log.warn("No stock symbols found in portfolio: {}", portfolioId);
-            return createEmptyResult(portfolioId);
+            return createEmptyResult();
         }
         
         // Fetch market data for all stocks in the portfolio
-        Map<String, MarketData> marketData;
-        if (timeFrameRequest != null) {
-            marketData = getHistoricalData(portfolioSymbols, timeFrameRequest);
-        } else {
-            marketData = getMarketData(portfolioSymbols);
-        }
+        Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, timeFrameRequest);
+       
         
         if (marketData.isEmpty()) {
             log.warn("No market data available for portfolio: {}", portfolioId);
-            return createEmptyResult(portfolioId);
+            return createEmptyResult();
         }
         
         // Create a map of symbol to holding quantity
@@ -107,7 +103,7 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
         log.info("Generated market cap allocation with {} segments for portfolio: {}", segments.size(), portfolioId);
         
         return MarketCapAllocation.builder()
-            .portfolioId(portfolioId)
+           
             .timestamp(Instant.now())
             .segments(segments)
             .build();
@@ -116,9 +112,9 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
     /**
      * Create empty result when no data is available
      */
-    private MarketCapAllocation createEmptyResult(String portfolioId) {
+    private MarketCapAllocation createEmptyResult() {
         return MarketCapAllocation.builder()
-            .portfolioId(portfolioId)
+         
             .timestamp(Instant.now())
             .segments(Collections.emptyList())
             .build();

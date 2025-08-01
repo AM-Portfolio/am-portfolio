@@ -18,8 +18,6 @@ import java.util.List;
 @AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class Heatmap {
-    private String indexSymbol; // Used for index analytics
-    private String portfolioId; // Used for portfolio analytics
     private Instant timestamp;
     private List<SectorPerformance> sectors;
     

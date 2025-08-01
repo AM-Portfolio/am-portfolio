@@ -5,6 +5,7 @@ import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.analytics.service.AbstractPortfolioAnalyticsProvider;
 import com.portfolio.analytics.service.AnalyticsType;
+import com.portfolio.analytics.service.utils.AnalyticsUtils;
 import com.portfolio.analytics.service.utils.HeatmapUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
@@ -43,21 +44,21 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         PortfolioModelV1 portfolio = getPortfolio(portfolioId);
         if (portfolio == null || portfolio.getEquityModels() == null || portfolio.getEquityModels().isEmpty()) {
             log.warn("No portfolio or holdings found for ID: {}", portfolioId);
-            return createEmptyResult(portfolioId);
+            return createEmptyResult();
         }
         
         // Get symbols from portfolio holdings
         List<String> portfolioSymbols = getPortfolioSymbols(portfolio);
         if (portfolioSymbols.isEmpty()) {
             log.warn("No stock symbols found in portfolio: {}", portfolioId);
-            return createEmptyResult(portfolioId);
+            return createEmptyResult();
         }
         
         // Fetch market data for all stocks in the portfolio
-        Map<String, MarketData> marketData = getMarketData(portfolioSymbols);
+        Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, request.getTimeFrameRequest());
         if (marketData.isEmpty()) {
             log.warn("No market data available for portfolio: {}", portfolioId);
-            return createEmptyResult(portfolioId);
+            return createEmptyResult();
         }
         
         // Create a map of symbol to holding quantity
@@ -80,7 +81,6 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         log.info("Generated heatmap with {} sectors for portfolio: {}", sectorPerformances.size(), portfolioId);
         
         return Heatmap.builder()
-            .portfolioId(portfolioId)
             .timestamp(Instant.now())
             .sectors(sectorPerformances)
             .build();
@@ -89,9 +89,9 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
     /**
      * Create empty result when no data is available
      */
-    private Heatmap createEmptyResult(String portfolioId) {
+    private Heatmap createEmptyResult() {
         return Heatmap.builder()
-            .portfolioId(portfolioId)
+        
             .timestamp(Instant.now())
             .sectors(Collections.emptyList())
             .build();

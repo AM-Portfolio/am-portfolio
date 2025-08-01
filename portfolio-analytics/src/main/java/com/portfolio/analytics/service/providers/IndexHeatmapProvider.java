@@ -52,7 +52,7 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
         List<String> indexStockSymbols = getIndexSymbols(indexSymbol);
         if (indexStockSymbols.isEmpty()) {
             log.warn("No stock symbols found for index: {}", indexSymbol);
-            return createEmptyHeatmap(indexSymbol);
+            return createEmptyHeatmap();
         }
         
         log.info("Found {} stock symbols for index: {}", indexStockSymbols.size(), indexSymbol);
@@ -61,7 +61,7 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
         Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, indexStockSymbols, timeFrameRequest);
         if (marketData.isEmpty()) {
             log.warn("No market data available for index: {}", indexSymbol);
-            return createEmptyHeatmap(indexSymbol);
+            return createEmptyHeatmap();
         }
         
         log.info("Successfully fetched market data for {} out of {} symbols for index: {}", 
@@ -79,7 +79,6 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
         log.info("Generated heatmap with {} sectors for index: {}", sectorPerformances.size(), indexSymbol);
         
         return Heatmap.builder()
-            .indexSymbol(indexSymbol)
             .timestamp(Instant.now())
             .sectors(sectorPerformances)
             .build();
@@ -88,9 +87,8 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
     /**
      * Create an empty heatmap result when no data is available
      */
-    private Heatmap createEmptyHeatmap(String indexSymbol) {
+    private Heatmap createEmptyHeatmap() {
         return Heatmap.builder()
-            .indexSymbol(indexSymbol)
             .timestamp(Instant.now())
             .sectors(Collections.emptyList())
             .build();

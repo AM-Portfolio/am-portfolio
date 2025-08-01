@@ -53,21 +53,21 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
         PortfolioModelV1 portfolio = getPortfolio(portfolioId);
         if (portfolio == null || portfolio.getEquityModels() == null || portfolio.getEquityModels().isEmpty()) {
             log.warn("No portfolio or holdings found for ID: {}", portfolioId);
-            return createEmptyResult(portfolioId);
+            return createEmptyResult();
         }
         
         // Get symbols from portfolio holdings
         List<String> portfolioSymbols = getPortfolioSymbols(portfolio);
         if (portfolioSymbols.isEmpty()) {
             log.warn("No stock symbols found in portfolio: {}", portfolioId);
-            return createEmptyResult(portfolioId);
+            return createEmptyResult();
         }
         
         // Fetch market data for all stocks in the portfolio using AnalyticsUtils
         Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, timeFrameRequest);
         if (marketData.isEmpty()) {
             log.warn("No market data available for portfolio: {}", portfolioId);
-            return createEmptyResult(portfolioId);
+            return createEmptyResult();
         }
         
         // Create a map of symbol to holding quantity
@@ -95,7 +95,7 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
                 industryToStocks, industryToSector, stockToMarketValue, totalPortfolioValue);
         
         return SectorAllocation.builder()
-            .portfolioId(portfolioId)
+            
             .timestamp(Instant.now())
             .sectorWeights(sectorWeights)
             .industryWeights(industryWeights)
@@ -105,9 +105,9 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
     /**
      * Create empty result when no data is available
      */
-    private SectorAllocation createEmptyResult(String portfolioId) {
+    private SectorAllocation createEmptyResult() {
         return SectorAllocation.builder()
-            .portfolioId(portfolioId)
+            
             .timestamp(Instant.now())
             .sectorWeights(Collections.emptyList())
             .industryWeights(Collections.emptyList())
