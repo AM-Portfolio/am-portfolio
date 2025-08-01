@@ -333,7 +333,7 @@ public class IndexAnalyticsService {
             segments.add(MarketCapAllocation.CapSegment.builder()
                 .segmentName(segmentName)
                 .weightPercentage(weightPercentage)
-                .totalMarketCap(segmentMarketCap)
+                .segmentValue(segmentMarketCap)
                 .numberOfStocks(segmentStocks.size())
                 .topStocks(topStocks)
                 .build());

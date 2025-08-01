@@ -223,7 +223,7 @@ public class MarketCapUtils {
         return MarketCapAllocation.CapSegment.builder()
             .segmentName(segmentName)
             .weightPercentage(roundToTwoDecimals(weightPercentage))
-            .totalMarketCap(roundToTwoDecimals(segmentMarketCap))
+            .segmentValue(roundToTwoDecimals(segmentMarketCap))
             .numberOfStocks(segmentStocks.size())
             .topStocks(topStocks)
             .build();

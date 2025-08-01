@@ -277,7 +277,7 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
             segments.add(MarketCapAllocation.CapSegment.builder()
                 .segmentName(segmentName)
                 .weightPercentage(metrics.weightPercentage)
-                .totalMarketCap(metrics.segmentMarketValue)
+                .segmentValue(metrics.segmentMarketValue)
                 .numberOfStocks(segmentSymbols.size())
                 .topStocks(metrics.topStocks)
                 .build());
