@@ -1,5 +1,6 @@
 package com.portfolio.analytics.service;
 
+import com.portfolio.model.analytics.AnalyticsComponent;
 import com.portfolio.model.analytics.GainerLoser;
 import com.portfolio.model.analytics.Heatmap;
 import com.portfolio.model.analytics.MarketCapAllocation;
@@ -83,29 +84,35 @@ public class IndexAnalyticsFacade {
             responseBuilder.comparisonIndexSymbol(request.getCoreIdentifiers().getComparisonIndexSymbol());
         }
         
+        // Build analytics component with requested features
+        AnalyticsComponent.AnalyticsComponentBuilder analyticsBuilder = AnalyticsComponent.builder();
+        
         // Include heatmap if requested
         if (request.getFeatureToggles().isIncludeHeatmap()) {
             Heatmap heatmap = calculateIndexHeatmap(request);
-            responseBuilder.heatmap(heatmap);
+            analyticsBuilder.heatmap(heatmap);
         }
         
         // Include top movers if requested
         if (request.getFeatureToggles().isIncludeMovers()) {
             GainerLoser movers = calculateIndexTopGainersLosers(request);
-            responseBuilder.movers(movers);
+            analyticsBuilder.movers(movers);
         }
         
         // Include sector allocation if requested
         if (request.getFeatureToggles().isIncludeSectorAllocation()) {
             SectorAllocation sectorAllocation = calculateIndexSectorAllocations(request);
-            responseBuilder.sectorAllocation(sectorAllocation);
+            analyticsBuilder.sectorAllocation(sectorAllocation);
         }
         
         // Include market cap allocation if requested
         if (request.getFeatureToggles().isIncludeMarketCapAllocation()) {
             MarketCapAllocation marketCapAllocation = calculateIndexMarketCapAllocations(request);
-            responseBuilder.marketCapAllocation(marketCapAllocation);
+            analyticsBuilder.marketCapAllocation(marketCapAllocation);
         }
+        
+        // Add the analytics component to the response
+        responseBuilder.analytics(analyticsBuilder.build());
         
         return responseBuilder.build();
     }
