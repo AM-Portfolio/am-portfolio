@@ -103,6 +103,26 @@ public class SecurityDetailsService {
     }
     
     /**
+     * Gets a map of symbols to their sector names
+     * 
+     * @param symbols List of security symbols
+     * @return Map of symbol to sector name
+     */
+    @Cacheable(value = "symbolSectors", key = "#symbols.toString()")
+    public Map<String, String> getSymbolMapSectors(List<String> symbols) {
+        Map<String, SecurityModel> securityDetails = getSecurityDetails(symbols);
+        Map<String, String> sectorMap = new HashMap<>();
+        
+        securityDetails.forEach((symbol, security) -> {
+            String sector = security != null && security.getMetadata() != null && security.getMetadata().getSector() != null ? 
+                    security.getMetadata().getSector() : "Unknown";
+            sectorMap.put(symbol, sector);
+        });
+        
+        return sectorMap;
+    }
+    
+    /**
      * Groups symbols by their sectors
      * 
      * @param symbols List of security symbols to group

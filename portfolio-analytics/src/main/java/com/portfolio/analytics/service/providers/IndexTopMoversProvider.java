@@ -51,9 +51,11 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
         if (marketData.isEmpty()) {
             return createEmptyResult();
         }
+
+        Map<String, String> symbolSectors = securityDetailsService.getSymbolMapSectors(indexStockSymbols);
         
         // Use TopMoverUtils to build the response with top gainers and losers
-        GainerLoser gainerLoser = TopMoverUtils.buildTopMoversResponse(marketData, limit, indexSymbol, false);
+        GainerLoser gainerLoser = TopMoverUtils.buildTopMoversResponse(marketData, limit, indexSymbol, false, symbolSectors);
         
         // Create maps for performance metrics (already calculated in buildTopMoversResponse)
         Map<String, Double> symbolToPerformance = new HashMap<>();

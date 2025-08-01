@@ -72,9 +72,11 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
             log.warn("No historical market data available for portfolio: {}", portfolioId);
             return createEmptyResponse();
         }
+
+        Map<String, String> symbolSectors = securityDetailsService.getSymbolMapSectors(portfolioSymbols);
         
-        // Calculate top movers using the determined limit
-        return TopMoverUtils.buildTopMoversResponse(marketData, limit, portfolioId, true);
+        // Calculate top movers using the determined limit and include sector information
+        return TopMoverUtils.buildTopMoversResponse(marketData, limit, portfolioId, true, symbolSectors);
     }
 
     

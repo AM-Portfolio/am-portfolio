@@ -1,5 +1,6 @@
 package com.portfolio.analytics.service.utils;
 
+
 import com.portfolio.model.analytics.GainerLoser;
 import com.portfolio.model.market.MarketData;
 import lombok.extern.slf4j.Slf4j;
@@ -145,7 +146,6 @@ public class TopMoverUtils {
                     
                     // Get security details for company name and sector
                     String companyName = symbol; // Default to symbol if company name not available
-                    String sector = "Unknown"; // Default sector
                     
                     return GainerLoser.StockMovement.builder()
                             .symbol(symbol)
@@ -154,7 +154,6 @@ public class TopMoverUtils {
                             .ohlcData(data.getOhlc())
                             .changeAmount(changeAmount)
                             .changePercent(changePercent)
-                            .sector(sector)
                             .build();
                 })
                 .filter(Objects::nonNull)
@@ -256,6 +255,7 @@ public class TopMoverUtils {
             Map<String, Double> symbolToChangePercent,
             Map<String, Double> symbolToQuantity,
             SecurityDetailsService securityDetailsService,
+            Map<String, String> symbolSectors,
             int limit) {
         
         log.debug("Calculating weighted sector movements for {} symbols", symbols.size());
@@ -363,7 +363,8 @@ public class TopMoverUtils {
      * @param isPortfolio True if this is for a portfolio, false for an index
      * @return GainerLoser response with top gainers and losers
      */
-    public static GainerLoser buildTopMoversResponse(Map<String, MarketData> marketData, int limit, String id, boolean isPortfolio) {
+    public static GainerLoser buildTopMoversResponse(Map<String, MarketData> marketData, int limit, String id, boolean isPortfolio, Map<String, String> symbolSectors) {
+
         log.debug("Building top movers response for {} {}", isPortfolio ? "portfolio" : "index", id);
         
         // Create maps to store performance metrics
@@ -377,19 +378,24 @@ public class TopMoverUtils {
         List<GainerLoser.StockMovement> gainers = getTopGainers(marketData, symbolToPerformance, symbolToChangePercent, limit);
         List<GainerLoser.StockMovement> losers = getTopLosers(marketData, symbolToPerformance, symbolToChangePercent, limit);
         
-        // Build and return the response
-        if (isPortfolio) {
-            return GainerLoser.builder()
-                .topGainers(gainers)
-                .topLosers(losers)
-                .timestamp(Instant.now())
-                .build();
-        } else {
-            return GainerLoser.builder()
-                .topGainers(gainers)
-                .topLosers(losers)
-                .timestamp(Instant.now())
-                .build();
+        // Add sector information if available
+        if (symbolSectors != null) {
+            gainers.forEach(gainer -> {
+                String sector = symbolSectors.getOrDefault(gainer.getSymbol(), "Unknown");
+                gainer.setSector(sector);
+            });
+            
+            losers.forEach(loser -> {
+                String sector = symbolSectors.getOrDefault(loser.getSymbol(), "Unknown");
+                loser.setSector(sector);
+            });
         }
+        
+        // Build and return the response
+        return GainerLoser.builder()
+            .topGainers(gainers)
+            .topLosers(losers)
+            .timestamp(Instant.now())
+            .build();
     }
 }
