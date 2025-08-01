@@ -5,6 +5,7 @@ import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Collections;
@@ -86,6 +87,14 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
             return Collections.emptyList();
         }
         return getPortfolioSymbols(portfolio);
+    }
+    
+    @Override
+    public T generateAnalytics(String portfolioId, AdvancedAnalyticsRequest request) {
+        log.info("Generating {} analytics for portfolio {} with time frame: {} to {}, interval: {}", 
+                getType(), portfolioId, request.getFromDate(), 
+                request.getToDate(), request.getTimeFrame());
+        return generateAnalytics(portfolioId, request);
     }
 
 }

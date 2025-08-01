@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import com.portfolio.model.analytics.request.TimeFrameRequest;
+import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 
 /**
  * Factory for creating and managing analytics providers for both index and portfolio analytics
@@ -16,7 +16,7 @@ import com.portfolio.model.analytics.request.TimeFrameRequest;
 public class AnalyticsFactory {
     
     // Use type-safe maps with explicit generic type parameters
-    private final Map<AnalyticsType, AnalyticsProvider<?>> providers = new HashMap<>();
+    private final Map<AnalyticsType, IndexAnalyticsProvider<?>> providers = new HashMap<>();
     private final Map<AnalyticsType, PortfolioAnalyticsProvider<?>> portfolioProviders = new HashMap<>();
     
     /**
@@ -24,7 +24,7 @@ public class AnalyticsFactory {
      * @param analyticsProviders List of all index analytics providers in the application context
      * @param portfolioAnalyticsProviders List of all portfolio analytics providers in the application context
      */
-    public AnalyticsFactory(List<AnalyticsProvider<?>> analyticsProviders, 
+    public AnalyticsFactory(List<IndexAnalyticsProvider<?>> analyticsProviders, 
                           List<PortfolioAnalyticsProvider<?>> portfolioAnalyticsProviders) {
         analyticsProviders.forEach(provider -> providers.put(provider.getType(), provider));
         portfolioAnalyticsProviders.forEach(provider -> portfolioProviders.put(provider.getType(), provider));
@@ -37,8 +37,8 @@ public class AnalyticsFactory {
      * @param <T> The type of analytics data returned by the provider
      */
     @SuppressWarnings("unchecked") // Safe cast as we control the provider registration
-    public <T> AnalyticsProvider<T> getProvider(AnalyticsType type) {
-        return (AnalyticsProvider<T>) Optional.ofNullable(providers.get(type))
+    public <T> IndexAnalyticsProvider<T> getIndexProvider(AnalyticsType type) {
+        return (IndexAnalyticsProvider<T>) Optional.ofNullable(providers.get(type))
                 .orElseThrow(() -> new IllegalArgumentException("No provider found for analytics type: " + type));
     }
     
@@ -55,74 +55,6 @@ public class AnalyticsFactory {
     }
     
     /**
-     * Generate analytics data using the appropriate provider
-     * @param type The analytics type
-     * @param symbol The symbol to generate analytics for
-     * @return The analytics data
-     * @param <T> The type of analytics data returned
-     */
-    public <T> T generateAnalytics(AnalyticsType type, String symbol) {
-        AnalyticsProvider<T> provider = getProvider(type);
-        return provider.generateAnalytics(symbol);
-    }
-    
-    /**
-     * Generate analytics data using the appropriate provider with additional parameters
-     * @param type The analytics type
-     * @param symbol The symbol to generate analytics for
-     * @param params Additional parameters for analytics generation
-     * @return The analytics data
-     * @param <T> The type of analytics data returned
-     */
-    public <T> T generateAnalytics(AnalyticsType type, String symbol, Object... params) {
-        AnalyticsProvider<T> provider = getProvider(type);
-        return provider.generateAnalytics(symbol, params);
-    }
-    
-    /**
-     * Generate analytics data using the appropriate provider with time frame parameters
-     * @param type The analytics type
-     * @param symbol The symbol to generate analytics for
-     * @param timeFrameRequest Time frame parameters (fromDate, toDate, timeFrame)
-     * @return The analytics data
-     * @param <T> The type of analytics data returned
-     */
-    public <T> T generateAnalytics(AnalyticsType type, String symbol, TimeFrameRequest timeFrameRequest) {
-        AnalyticsProvider<T> provider = getProvider(type);
-        // For now, delegate to the simple version until providers are updated to support time frame
-        // TODO: Update providers to handle TimeFrameRequest directly
-        return provider.generateAnalytics(symbol);
-    }
-    
-    /**
-     * Generate analytics data using the appropriate provider with time frame parameters and additional parameters
-     * @param type The analytics type
-     * @param symbol The symbol to generate analytics for
-     * @param timeFrameRequest Time frame parameters (fromDate, toDate, timeFrame)
-     * @param params Additional parameters for analytics generation
-     * @return The analytics data
-     * @param <T> The type of analytics data returned
-     */
-    public <T> T generateAnalytics(AnalyticsType type, String symbol, TimeFrameRequest timeFrameRequest, Object... params) {
-        AnalyticsProvider<T> provider = getProvider(type);
-        // For now, delegate to the version with params until providers are updated to support time frame
-        // TODO: Update providers to handle TimeFrameRequest directly
-        return provider.generateAnalytics(symbol, params);
-    }
-    
-    /**
-     * Generate portfolio analytics data using the appropriate provider
-     * @param type The analytics type
-     * @param portfolioId The portfolio ID to generate analytics for
-     * @return The analytics data
-     * @param <T> The type of analytics data returned
-     */
-    public <T> T generatePortfolioAnalytics(AnalyticsType type, String portfolioId) {
-        PortfolioAnalyticsProvider<T> provider = getPortfolioProvider(type);
-        return provider.generateAnalytics(portfolioId);
-    }
-    
-    /**
      * Generate portfolio analytics data using the appropriate provider with additional parameters
      * @param type The analytics type
      * @param portfolioId The portfolio ID to generate analytics for
@@ -130,8 +62,21 @@ public class AnalyticsFactory {
      * @return The analytics data
      * @param <T> The type of analytics data returned
      */
-    public <T> T generatePortfolioAnalytics(AnalyticsType type, String portfolioId, Object... params) {
+    public <T> T generatePortfolioAnalytics(AnalyticsType type, AdvancedAnalyticsRequest request) {
         PortfolioAnalyticsProvider<T> provider = getPortfolioProvider(type);
-        return provider.generateAnalytics(portfolioId, params);
+        return provider.generateAnalytics(request);
+    }
+
+    /**
+     * Generate index analytics data using the appropriate provider with additional parameters
+     * @param type The analytics type
+     * @param indexSymbol The index symbol to generate analytics for
+     * @param params Additional parameters for analytics generation
+     * @return The analytics data
+     * @param <T> The type of analytics data returned
+     */
+    public <T> T generateIndexAnalytics(AnalyticsType type, AdvancedAnalyticsRequest request) {
+        IndexAnalyticsProvider<T> provider = getIndexProvider(type);
+        return provider.generateAnalytics(request);
     }
 }

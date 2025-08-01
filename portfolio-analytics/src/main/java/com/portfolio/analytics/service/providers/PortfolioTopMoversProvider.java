@@ -11,6 +11,10 @@ import com.portfolio.analytics.service.utils.TopMoverUtils;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.GainerLoser;
 import com.portfolio.model.analytics.GainerLoser.StockMovement;
+import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
+import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest.FeatureConfiguration;
+import com.portfolio.model.analytics.request.PaginationRequest;
+import com.portfolio.model.analytics.request.TimeFrameRequest;
 import com.portfolio.model.market.MarketData;
 
 import lombok.extern.slf4j.Slf4j;
@@ -18,10 +22,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
-import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
-import java.util.Comparator;
 
 /**
  * Provider for portfolio top movers (gainers and losers) analytics
@@ -29,6 +31,8 @@ import java.util.Comparator;
 @Service
 @Slf4j
 public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvider<GainerLoser> {
+
+    public static final int DEFAULT_LIMIT = 5;
 
     public PortfolioTopMoversProvider(PortfolioService portfolioService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService) {
         super(portfolioService, marketDataService, securityDetailsService);
@@ -40,16 +44,20 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
     }
 
     @Override
-    public GainerLoser generateAnalytics(String portfolioId) {
+    public GainerLoser generateAnalytics(AdvancedAnalyticsRequest request) {
         // Default to the default limit from TopMoverUtils
-        return generateAnalytics(portfolioId, TopMoverUtils.DEFAULT_LIMIT);
+        return generateAnalytics(request.getCoreIdentifiers().getPortfolioId(), request);
     }
-
+    
     @Override
-    public GainerLoser generateAnalytics(String portfolioId, Object... params) {
-        // Extract limit parameter if provided
-        int limit = extractLimitParameter(params);
-        log.info("Getting top {} gainers and losers for portfolio: {}", limit, portfolioId);
+    public GainerLoser generateAnalytics(String portfolioId, AdvancedAnalyticsRequest request) {
+        // Extract movers limit from feature configuration
+        Integer moversLimit = request.getFeatureConfiguration().getMoversLimit();
+        int limit = moversLimit != null ? moversLimit : 
+                    (request.getPagination().isReturnAllData() ? DEFAULT_LIMIT : request.getPagination().getSize());
+        
+        log.info("Generating top {} movers for portfolio {} with time frame, pagination, and feature configuration", 
+                limit, portfolioId);
         
         // Get portfolio data
         PortfolioModelV1 portfolio = getPortfolio(portfolioId);
@@ -64,47 +72,23 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
             return createEmptyResponse(portfolioId);
         }
         
-        // Fetch market data for all stocks in the portfolio
-        Map<String, MarketData> marketData = getMarketData(portfolioSymbols);
+        // Fetch historical market data for all stocks in the portfolio using time frame
+        Map<String, MarketData> marketData = getHistoricalData(portfolioSymbols, request.getTimeFrameRequest());
         if (marketData.isEmpty()) {
-            log.warn("No market data available for portfolio: {}", portfolioId);
+            log.warn("No historical market data available for portfolio: {}", portfolioId);
             return createEmptyResponse(portfolioId);
         }
         
-        // Create a map of symbol to holding quantity
-        Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
-        
-        // Calculate performance metrics for each stock
-        PerformanceMetrics metrics = calculatePerformanceMetrics(marketData, symbolToQuantity);
-        
-        // Get top gainers and losers
-        List<StockMovement> gainers = getTopMovers(
-                metrics, limit, marketData, symbolToQuantity, performance -> performance > 0);
-        
-        List<StockMovement> losers = getTopMovers(
-                metrics, limit, marketData, symbolToQuantity, performance -> performance < 0);
-        
-        // Calculate sector movements
-        List<GainerLoser.SectorMovement> sectorMovements = calculateSectorMovements(
-                portfolioSymbols, marketData, metrics.symbolToPerformance, metrics.symbolToChangePercent);
-        
-        log.info("Generated top movers analytics with {} gainers and {} losers for portfolio: {}", 
-            gainers.size(), losers.size(), portfolioId);
-            
-        return GainerLoser.builder()
-            .portfolioId(portfolioId)
-            .timestamp(Instant.now())
-            .topGainers(gainers)
-            .topLosers(losers)
-            .sectorMovements(sectorMovements)
-            .build();
+        // Calculate top movers using the determined limit
+        return TopMoverUtils.buildTopMoversResponse(marketData, limit, portfolioId, true);
     }
+
     
     /**
      * Extracts the limit parameter from the variable arguments
      */
     private int extractLimitParameter(Object... params) {
-        int limit = 5; // Default
+        int limit = DEFAULT_LIMIT; // Default
         if (params.length > 0 && params[0] instanceof Integer) {
             limit = (Integer) params[0];
         }
@@ -278,16 +262,20 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
             List<String> symbols,
             Map<String, MarketData> marketData,
             Map<String, Double> symbolToPerformance,
-            Map<String, Double> symbolToChangePercent) {
+            Map<String, Double> symbolToChangePercent,
+            int limit) {
         log.debug("Calculating sector movements for {} symbols", symbols.size());
         
-        // Use TopMoverUtils to calculate sector movements
+        // Use TopMoverUtils to calculate sector movements with default limit of 3 for top gainers/losers per sector
         return TopMoverUtils.calculateSectorMovements(
             symbols, 
             marketData, 
             symbolToPerformance, 
             symbolToChangePercent, 
-            securityDetailsService
+            securityDetailsService,
+            limit // Default limit for top gainers/losers per sector
         );
     }
+    
+
 }

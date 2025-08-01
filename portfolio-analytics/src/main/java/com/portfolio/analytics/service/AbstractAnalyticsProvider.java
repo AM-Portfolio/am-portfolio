@@ -3,6 +3,9 @@ package com.portfolio.analytics.service;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
 import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
+import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest.FeatureConfiguration;
+import com.portfolio.model.analytics.request.PaginationRequest;
 import com.portfolio.model.analytics.request.TimeFrameRequest;
 import com.portfolio.model.market.MarketData;
 
@@ -36,47 +39,7 @@ public abstract class AbstractAnalyticsProvider<T, I> {
      * @param identifier The identifier (index symbol or portfolio ID)
      * @return Analytics data
      */
-    public abstract T generateAnalytics(I identifier);
-    
-    /**
-     * Generate analytics with additional parameters
-     * @param identifier The identifier (index symbol or portfolio ID)
-     * @param params Additional parameters
-     * @return Analytics data
-     */
-    public T generateAnalytics(I identifier, Object... params) {
-        // Default implementation delegates to the simpler method
-        // Subclasses should override this if they need to handle additional parameters
-        return generateAnalytics(identifier);
-    }
-    
-    /**
-     * Generate analytics with time frame parameters
-     * @param identifier The identifier (index symbol or portfolio ID)
-     * @param timeFrameRequest Time frame parameters (fromDate, toDate, timeFrame)
-     * @return Analytics data
-     */
-    public T generateAnalytics(I identifier, TimeFrameRequest timeFrameRequest) {
-        // Default implementation delegates to the simpler method
-        // Subclasses should override this if they need to handle time frame parameters
-        log.info("Generating analytics for {} with time frame: {} to {}, interval: {}", 
-                identifier, timeFrameRequest.getFromDate(), timeFrameRequest.getToDate(), 
-                timeFrameRequest.getTimeFrame());
-        return generateAnalytics(identifier);
-    }
-    
-    /**
-     * Generate analytics with time frame parameters and additional parameters
-     * @param identifier The identifier (index symbol or portfolio ID)
-     * @param timeFrameRequest Time frame parameters (fromDate, toDate, timeFrame)
-     * @param params Additional parameters
-     * @return Analytics data
-     */
-    public T generateAnalytics(I identifier, TimeFrameRequest timeFrameRequest, Object... params) {
-        // Default implementation delegates to the time frame method
-        // Subclasses should override this if they need to handle additional parameters
-        return generateAnalytics(identifier, timeFrameRequest);
-    }
+    public abstract T generateAnalytics(I identifier, AdvancedAnalyticsRequest request);
     
     /**
      * Get symbols for the given identifier

@@ -9,6 +9,7 @@ import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
 import com.portfolio.model.analytics.MarketCapAllocation;
+import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.analytics.request.TimeFrameRequest;
 import com.portfolio.model.market.MarketData;
 
@@ -35,19 +36,12 @@ public class IndexMarketCapAllocationProvider extends AbstractIndexAnalyticsProv
     }
 
     
-    // Using constants from MarketCapUtils
-    
     @Override
-    public MarketCapAllocation generateAnalytics(String indexSymbol) {
-        log.info("Generating market cap allocation for index: {}", indexSymbol);
-        return generateMarketCapAllocation(indexSymbol, null);
+    public MarketCapAllocation generateAnalytics(AdvancedAnalyticsRequest request) {
+        log.info("Generating market cap allocation for index: {}", request.getCoreIdentifiers().getIndexSymbol());
+        return generateMarketCapAllocation(request.getCoreIdentifiers().getIndexSymbol(), request.getTimeFrameRequest());
     }
-    
-    @Override
-    public MarketCapAllocation generateAnalytics(String indexSymbol, TimeFrameRequest timeFrameRequest) {
-        log.info("Generating market cap allocation for index: {} with timeFrame parameters", indexSymbol);
-        return generateMarketCapAllocation(indexSymbol, timeFrameRequest);
-    }
+
     
     /**
      * Common implementation for generating market cap allocation analytics
@@ -57,6 +51,8 @@ public class IndexMarketCapAllocationProvider extends AbstractIndexAnalyticsProv
      * @return Market cap allocation analytics
      */
     private MarketCapAllocation generateMarketCapAllocation(String indexSymbol, TimeFrameRequest timeFrameRequest) {
+        // Default limit for top stocks per segment
+        int limit = 5;
         log.info("Generating market cap allocation for index: {} with timeFrame: {}", indexSymbol, timeFrameRequest);
         
         // Get index symbols
@@ -80,7 +76,7 @@ public class IndexMarketCapAllocationProvider extends AbstractIndexAnalyticsProv
         
         // Group stocks by segment and calculate allocation
         Map<String, List<MarketData>> segmentMap = MarketCapUtils.groupMarketDataBySegment(marketData, symbolToSegment);
-        List<MarketCapAllocation.CapSegment> segments = MarketCapUtils.createSegments(segmentMap, stockMarketCaps, totalMarketCap, indexStockSymbols, marketData);
+        List<MarketCapAllocation.CapSegment> segments = MarketCapUtils.createSegments(segmentMap, stockMarketCaps, totalMarketCap, indexStockSymbols, marketData, limit);
         
         // Sort segments by weight percentage (highest to lowest)
         segments.sort(Comparator.comparing(MarketCapAllocation.CapSegment::getWeightPercentage).reversed());

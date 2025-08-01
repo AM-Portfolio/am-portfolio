@@ -10,6 +10,7 @@ import com.portfolio.analytics.service.utils.AllocationUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.SectorAllocation;
+import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.analytics.request.TimeFrameRequest;
 import com.portfolio.model.market.MarketData;
 
@@ -37,15 +38,9 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
     }
 
     @Override
-    public SectorAllocation generateAnalytics(String portfolioId) {
-        log.info("Generating sector allocation for portfolio: {}", portfolioId);
-        return generateSectorAllocation(portfolioId, null);
-    }
-    
-    @Override
-    public SectorAllocation generateAnalytics(String portfolioId, TimeFrameRequest timeFrameRequest) {
-        log.info("Generating sector allocation for portfolio: {} with time frame parameters", portfolioId);
-        return generateSectorAllocation(portfolioId, timeFrameRequest);
+    public SectorAllocation generateAnalytics(AdvancedAnalyticsRequest request) {
+        log.info("Generating sector allocation for portfolio: {}", request.getCoreIdentifiers().getPortfolioId());
+        return generateSectorAllocation(request.getCoreIdentifiers().getPortfolioId(), request);
     }
     
     /**

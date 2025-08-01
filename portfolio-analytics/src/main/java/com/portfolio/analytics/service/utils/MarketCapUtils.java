@@ -20,7 +20,6 @@ public class MarketCapUtils {
     public static final double LARGE_CAP_THRESHOLD = 50000000000.0; // 50B
     public static final double MID_CAP_THRESHOLD = 10000000000.0;   // 10B
     public static final double DEFAULT_SHARES_MULTIPLIER = 1000000000.0; // 1B shares
-    public static final int TOP_STOCKS_LIMIT = 5;
     
     /**
      * Calculate market caps for all stocks
@@ -162,7 +161,7 @@ public class MarketCapUtils {
             Map<String, Double> stockMarketCaps, 
             double totalMarketCap,
             List<String> indexStockSymbols,
-            Map<String, MarketData> marketData) {
+            Map<String, MarketData> marketData, int limit) {
         
         List<MarketCapAllocation.CapSegment> segments = new ArrayList<>();
         
@@ -177,7 +176,7 @@ public class MarketCapUtils {
             
             // Create segment object
             MarketCapAllocation.CapSegment segment = createSegment(
-                segmentName, segmentStocks, stockMarketCaps, totalMarketCap, indexStockSymbols, marketData);
+                segmentName, segmentStocks, stockMarketCaps, totalMarketCap, indexStockSymbols, marketData, limit);
             
             segments.add(segment);
         }
@@ -201,7 +200,7 @@ public class MarketCapUtils {
             Map<String, Double> stockMarketCaps,
             double totalMarketCap,
             List<String> indexStockSymbols,
-            Map<String, MarketData> marketData) {
+            Map<String, MarketData> marketData, int limit) {
         
         // Calculate segment data
         Map<String, Double> symbolToMarketCap = calculateSegmentMarketCaps(
@@ -214,7 +213,7 @@ public class MarketCapUtils {
         double weightPercentage = calculateWeightPercentage(segmentMarketCap, totalMarketCap);
         
         // Get top stocks by market cap
-        List<String> topStocks = getTopStocksByMarketCap(symbolToMarketCap, TOP_STOCKS_LIMIT);
+        List<String> topStocks = getTopStocksByMarketCap(symbolToMarketCap, limit);
         
         log.debug("Segment {} has {} stocks with total market cap {} and weight {}%", 
             segmentName, segmentStocks.size(), segmentMarketCap, weightPercentage);

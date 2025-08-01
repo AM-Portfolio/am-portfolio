@@ -5,7 +5,6 @@ import com.portfolio.model.analytics.Heatmap;
 import com.portfolio.model.analytics.MarketCapAllocation;
 import com.portfolio.model.analytics.SectorAllocation;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
-import com.portfolio.model.analytics.request.TimeFrameRequest;
 import com.portfolio.model.analytics.response.AdvancedAnalyticsResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,73 +26,20 @@ public class IndexAnalyticsFacade {
      * @param indexSymbol The index symbol to generate heatmap for
      * @return Heatmap containing sector performances
      */
-    public Heatmap generateSectorHeatmap(String indexSymbol) {
-        log.info("Generating sector heatmap for index: {}", indexSymbol);
-        return analyticsFactory.generateAnalytics(AnalyticsType.SECTOR_HEATMAP, indexSymbol);
+    public Heatmap calculateIndexHeatmap(AdvancedAnalyticsRequest request) {
+        log.info("Generating sector heatmap for index: {}", request.getCoreIdentifiers().getIndexSymbol());
+        return analyticsFactory.generateIndexAnalytics(AnalyticsType.SECTOR_HEATMAP, request);
     }
-    
-    /**
-     * Generate sector heatmap for an index with time frame parameters
-     * @param indexSymbol The index symbol to generate heatmap for
-     * @param timeFrameRequest Time frame parameters (fromDate, toDate, timeFrame)
-     * @return Heatmap containing sector performances
-     */
-    public Heatmap generateSectorHeatmap(String indexSymbol, TimeFrameRequest timeFrameRequest) {
-        log.info("Generating sector heatmap for index: {} with time frame: {} to {}, interval: {}", 
-                indexSymbol, timeFrameRequest.getFromDate(), timeFrameRequest.getToDate(), 
-                timeFrameRequest.getTimeFrame());
-        
-        return analyticsFactory.generateAnalytics(AnalyticsType.SECTOR_HEATMAP, indexSymbol, timeFrameRequest);
-    }
-    
-    /**
-     * Get top gainers and losers for an index
-     * @param indexSymbol The index symbol
-     * @param limit Number of top gainers/losers to return
-     * @return GainerLoser object containing top performers and underperformers
-     */
-    public GainerLoser getTopGainersLosers(String indexSymbol, int limit) {
-        log.info("Getting top {} gainers and losers for index: {}", limit, indexSymbol);
-        return analyticsFactory.generateAnalytics(AnalyticsType.TOP_MOVERS, indexSymbol, limit);
-    }
-    
-    /**
-     * Get top gainers and losers for an index with time frame parameters
-     * @param indexSymbol The index symbol
-     * @param limit Number of top gainers/losers to return
-     * @param timeFrameRequest Time frame parameters (fromDate, toDate, timeFrame)
-     * @return GainerLoser object containing top performers and underperformers
-     */
-    public GainerLoser getTopGainersLosers(String indexSymbol, int limit, TimeFrameRequest timeFrameRequest) {
-        log.info("Getting top {} gainers and losers for index: {} with time frame: {} to {}, interval: {}", 
-                limit, indexSymbol, timeFrameRequest.getFromDate(), timeFrameRequest.getToDate(), 
-                timeFrameRequest.getTimeFrame());
-        
-        return analyticsFactory.generateAnalytics(AnalyticsType.TOP_MOVERS, indexSymbol, timeFrameRequest, limit);
-    }
+
     
     /**
      * Calculate sector and industry allocation percentages for an index
      * @param indexSymbol The index symbol
      * @return SectorAllocation containing sector and industry weights
      */
-    public SectorAllocation calculateSectorAllocations(String indexSymbol) {
-        log.info("Calculating sector allocations for index: {}", indexSymbol);
-        return analyticsFactory.generateAnalytics(AnalyticsType.SECTOR_ALLOCATION, indexSymbol);
-    }
-    
-    /**
-     * Calculate sector and industry allocation percentages for an index with time frame parameters
-     * @param indexSymbol The index symbol
-     * @param timeFrameRequest Time frame parameters (fromDate, toDate, timeFrame)
-     * @return SectorAllocation containing sector and industry weights
-     */
-    public SectorAllocation calculateSectorAllocations(String indexSymbol, TimeFrameRequest timeFrameRequest) {
-        log.info("Calculating sector allocations for index: {} with time frame: {} to {}, interval: {}", 
-                indexSymbol, timeFrameRequest.getFromDate(), timeFrameRequest.getToDate(), 
-                timeFrameRequest.getTimeFrame());
-        
-        return analyticsFactory.generateAnalytics(AnalyticsType.SECTOR_ALLOCATION, indexSymbol, timeFrameRequest);
+    public SectorAllocation calculateIndexSectorAllocations(AdvancedAnalyticsRequest request) {
+        log.info("Calculating sector allocations for index: {}", request.getCoreIdentifiers().getIndexSymbol());
+        return analyticsFactory.generateIndexAnalytics(AnalyticsType.SECTOR_ALLOCATION, request);
     }
     
     /**
@@ -101,25 +47,21 @@ public class IndexAnalyticsFacade {
      * @param indexSymbol The index symbol
      * @return MarketCapAllocation containing breakdown by market cap segments
      */
-    public MarketCapAllocation calculateMarketCapAllocations(String indexSymbol) {
-        log.info("Calculating market cap allocations for index: {}", indexSymbol);
-        return analyticsFactory.generateAnalytics(AnalyticsType.MARKET_CAP_ALLOCATION, indexSymbol);
+    public MarketCapAllocation calculateIndexMarketCapAllocations(AdvancedAnalyticsRequest request) {
+        log.info("Calculating market cap allocations for index: {}", request.getCoreIdentifiers().getIndexSymbol());
+        return analyticsFactory.generateIndexAnalytics(AnalyticsType.MARKET_CAP_ALLOCATION, request);
     }
-    
+
     /**
-     * Calculate market capitalization allocation for an index with time frame parameters
+     * Calculate top gainers and losers for an index
      * @param indexSymbol The index symbol
-     * @param timeFrameRequest Time frame parameters (fromDate, toDate, timeFrame)
-     * @return MarketCapAllocation containing breakdown by market cap segments
+     * @return GainerLoser containing top gainers and losers
      */
-    public MarketCapAllocation calculateMarketCapAllocations(String indexSymbol, TimeFrameRequest timeFrameRequest) {
-        log.info("Calculating market cap allocations for index: {} with time frame: {} to {}, interval: {}", 
-                indexSymbol, timeFrameRequest.getFromDate(), timeFrameRequest.getToDate(), 
-                timeFrameRequest.getTimeFrame());
-        
-        return analyticsFactory.generateAnalytics(AnalyticsType.MARKET_CAP_ALLOCATION, indexSymbol, timeFrameRequest);
+    public GainerLoser calculateIndexTopGainersLosers(AdvancedAnalyticsRequest request) {
+        log.info("Calculating top gainers and losers for index: {}", request.getCoreIdentifiers().getIndexSymbol());
+        return analyticsFactory.generateIndexAnalytics(AnalyticsType.TOP_MOVERS, request);
     }
-    
+
     /**
      * Calculate advanced analytics combining multiple data points based on request parameters
      * @param request The advanced analytics request containing parameters and flags
@@ -143,27 +85,25 @@ public class IndexAnalyticsFacade {
         
         // Include heatmap if requested
         if (request.getFeatureToggles().isIncludeHeatmap()) {
-            Heatmap heatmap = generateSectorHeatmap(request.getCoreIdentifiers().getIndexSymbol());
+            Heatmap heatmap = calculateIndexHeatmap(request);
             responseBuilder.heatmap(heatmap);
         }
         
         // Include top movers if requested
         if (request.getFeatureToggles().isIncludeMovers()) {
-            int limit = request.getFeatureConfiguration().getMoversLimit() != null && request.getFeatureConfiguration().getMoversLimit() > 0 
-                    ? request.getFeatureConfiguration().getMoversLimit() : 5; // Default to 5 if not specified
-            GainerLoser movers = getTopGainersLosers(request.getCoreIdentifiers().getIndexSymbol(), limit);
+            GainerLoser movers = calculateIndexTopGainersLosers(request);
             responseBuilder.movers(movers);
         }
         
         // Include sector allocation if requested
         if (request.getFeatureToggles().isIncludeSectorAllocation()) {
-            SectorAllocation sectorAllocation = calculateSectorAllocations(request.getCoreIdentifiers().getIndexSymbol());
+            SectorAllocation sectorAllocation = calculateIndexSectorAllocations(request);
             responseBuilder.sectorAllocation(sectorAllocation);
         }
         
         // Include market cap allocation if requested
         if (request.getFeatureToggles().isIncludeMarketCapAllocation()) {
-            MarketCapAllocation marketCapAllocation = calculateMarketCapAllocations(request.getCoreIdentifiers().getIndexSymbol());
+            MarketCapAllocation marketCapAllocation = calculateIndexMarketCapAllocations(request);
             responseBuilder.marketCapAllocation(marketCapAllocation);
         }
         

@@ -6,6 +6,8 @@ import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -119,5 +121,42 @@ public class AdvancedAnalyticsRequest extends TimeFrameRequest {
         @Min(value = 1, message = "Movers limit must be at least 1")
         private Integer moversLimit;
     }
+
+    @JsonIgnore
+    public TimeFrameRequest getTimeFrameRequest() {
+        return TimeFrameRequest.builder()
+                .fromDate(getFromDate())
+                .toDate(getToDate())
+                .timeFrame(getTimeFrame())
+                .build();
+    }
+
+    @JsonIgnore
+    public PaginationRequest getPaginationRequest() {
+        return PaginationRequest.builder()
+                .page(getPagination().getPage())
+                .size(getPagination().getSize())
+                .sortBy(getPagination().getSortBy())
+                .sortDirection(getPagination().getSortDirection())
+                .returnAllData(getPagination().isReturnAllData())
+                .build();
+    }
+
+    @JsonIgnore
+    public FeatureConfiguration getFeatureConfiguration() {
+        return FeatureConfiguration.builder()
+                .moversLimit(getFeatureConfiguration().getMoversLimit())
+                .build();
+    }
+
+    @JsonIgnore
+    public CoreIdentifiers getCoreIdentifiers() {
+        return CoreIdentifiers.builder()
+                .portfolioId(getCoreIdentifiers().getPortfolioId())
+                .indexSymbol(getCoreIdentifiers().getIndexSymbol())
+                .comparisonIndexSymbol(getCoreIdentifiers().getComparisonIndexSymbol())
+                .build();
+    }
+    
 
 }

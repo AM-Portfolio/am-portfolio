@@ -9,6 +9,7 @@ import com.portfolio.analytics.service.utils.HeatmapUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.Heatmap;
+import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.market.MarketData;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -34,9 +35,10 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
     }
 
     @Override
-    public Heatmap generateAnalytics(String portfolioId) {
-        log.info("Generating sector heatmap for portfolio: {}", portfolioId);
+    public Heatmap generateAnalytics(AdvancedAnalyticsRequest request) {
+        log.info("Generating sector heatmap for portfolio: {}", request.getCoreIdentifiers().getPortfolioId());
         
+        String portfolioId = request.getCoreIdentifiers().getPortfolioId();
         // Get portfolio data
         PortfolioModelV1 portfolio = getPortfolio(portfolioId);
         if (portfolio == null || portfolio.getEquityModels() == null || portfolio.getEquityModels().isEmpty()) {

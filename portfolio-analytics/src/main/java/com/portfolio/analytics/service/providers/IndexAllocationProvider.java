@@ -8,6 +8,7 @@ import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
 import com.portfolio.model.analytics.SectorAllocation;
+import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.analytics.request.TimeFrameRequest;
 import com.portfolio.model.market.MarketData;
 
@@ -35,17 +36,12 @@ public class IndexAllocationProvider extends AbstractIndexAnalyticsProvider<Sect
     }
 
     @Override
-    public SectorAllocation generateAnalytics(String indexSymbol) {
-        log.info("Calculating sector allocations for index: {}", indexSymbol);
-        return generateSectorAllocation(indexSymbol, null);
+    public SectorAllocation generateAnalytics(AdvancedAnalyticsRequest request) {
+        log.info("Calculating sector allocations for index: {}", request.getCoreIdentifiers().getIndexSymbol());
+        return generateSectorAllocation(request.getCoreIdentifiers().getIndexSymbol(), request);
     }
     
-    @Override
-    public SectorAllocation generateAnalytics(String indexSymbol, TimeFrameRequest timeFrameRequest) {
-        log.info("Calculating sector allocations for index: {} with time frame", indexSymbol);
-        return generateSectorAllocation(indexSymbol, timeFrameRequest);
-    }
-    
+
     /**
      * Common method to generate sector allocation with or without time frame
      * 
@@ -53,7 +49,7 @@ public class IndexAllocationProvider extends AbstractIndexAnalyticsProvider<Sect
      * @param timeFrameRequest Optional time frame parameters (can be null)
      * @return Sector allocation analytics
      */
-    private SectorAllocation generateSectorAllocation(String indexSymbol, TimeFrameRequest timeFrameRequest) {
+    private SectorAllocation generateSectorAllocation(String indexSymbol, AdvancedAnalyticsRequest request) {
         var indexStockSymbols = getIndexSymbols(indexSymbol);
         if (indexStockSymbols.isEmpty()) {
             log.warn("No stock symbols found for index: {}", indexSymbol);
@@ -61,7 +57,7 @@ public class IndexAllocationProvider extends AbstractIndexAnalyticsProvider<Sect
         }
         
         // Use the utility method to fetch market data with or without time frame
-        var marketData = AnalyticsUtils.fetchMarketData(this, indexStockSymbols, timeFrameRequest);
+        var marketData = AnalyticsUtils.fetchMarketData(this, indexStockSymbols, request.getTimeFrameRequest());
         if (marketData.isEmpty()) {
             return createEmptyAllocation(indexSymbol);
         }

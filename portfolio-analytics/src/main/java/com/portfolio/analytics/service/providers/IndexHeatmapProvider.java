@@ -8,6 +8,7 @@ import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
 import com.portfolio.model.analytics.Heatmap;
+import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.analytics.request.TimeFrameRequest;
 import com.portfolio.model.market.MarketData;
 
@@ -35,17 +36,12 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
     }
 
     @Override
-    public Heatmap generateAnalytics(String indexSymbol) {
-        log.info("Generating sector heatmap for index: {}", indexSymbol);
-        return generateHeatmap(indexSymbol, null);
+    public Heatmap generateAnalytics(AdvancedAnalyticsRequest request) {
+        log.info("Generating sector heatmap for index: {}", request.getCoreIdentifiers().getIndexSymbol());
+        return generateHeatmap(request.getCoreIdentifiers().getIndexSymbol(), request.getTimeFrameRequest());
     }
     
-    @Override
-    public Heatmap generateAnalytics(String indexSymbol, TimeFrameRequest timeFrameRequest) {
-        log.info("Generating sector heatmap for index: {} with time frame parameters", indexSymbol);
-        return generateHeatmap(indexSymbol, timeFrameRequest);
-    }
-    
+
     /**
      * Common method to generate heatmap with or without time frame
      */

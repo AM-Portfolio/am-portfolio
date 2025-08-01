@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -16,9 +17,6 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 public class TopMoverUtils {
-
-    // Default limit for top movers
-    public static final int DEFAULT_LIMIT = 5;
 
     /**
      * Calculate performance metrics for each stock
@@ -177,7 +175,8 @@ public class TopMoverUtils {
             Map<String, MarketData> marketData,
             Map<String, Double> symbolToPerformance,
             Map<String, Double> symbolToChangePercent,
-            SecurityDetailsService securityDetailsService) {
+            SecurityDetailsService securityDetailsService,
+            int limit) {
         
         log.debug("Calculating sector movements for {} symbols", symbols.size());
         
@@ -256,7 +255,8 @@ public class TopMoverUtils {
             Map<String, Double> symbolToPerformance,
             Map<String, Double> symbolToChangePercent,
             Map<String, Double> symbolToQuantity,
-            SecurityDetailsService securityDetailsService) {
+            SecurityDetailsService securityDetailsService,
+            int limit) {
         
         log.debug("Calculating weighted sector movements for {} symbols", symbols.size());
         
@@ -353,5 +353,45 @@ public class TopMoverUtils {
         BigDecimal bd = BigDecimal.valueOf(value);
         bd = bd.setScale(2, RoundingMode.HALF_UP);
         return bd.doubleValue();
+    }
+    
+    /**
+     * Build a complete GainerLoser response with top gainers and losers
+     * @param marketData Market data for symbols
+     * @param limit Number of top gainers/losers to include
+     * @param id Portfolio or index ID
+     * @param isPortfolio True if this is for a portfolio, false for an index
+     * @return GainerLoser response with top gainers and losers
+     */
+    public static GainerLoser buildTopMoversResponse(Map<String, MarketData> marketData, int limit, String id, boolean isPortfolio) {
+        log.debug("Building top movers response for {} {}", isPortfolio ? "portfolio" : "index", id);
+        
+        // Create maps to store performance metrics
+        Map<String, Double> symbolToPerformance = new HashMap<>();
+        Map<String, Double> symbolToChangePercent = new HashMap<>();
+        
+        // Calculate performance metrics
+        calculatePerformanceMetrics(marketData, symbolToPerformance, symbolToChangePercent);
+        
+        // Get top gainers and losers
+        List<GainerLoser.StockMovement> gainers = getTopGainers(marketData, symbolToPerformance, symbolToChangePercent, limit);
+        List<GainerLoser.StockMovement> losers = getTopLosers(marketData, symbolToPerformance, symbolToChangePercent, limit);
+        
+        // Build and return the response
+        if (isPortfolio) {
+            return GainerLoser.builder()
+                .portfolioId(id)
+                .topGainers(gainers)
+                .topLosers(losers)
+                .timestamp(Instant.now())
+                .build();
+        } else {
+            return GainerLoser.builder()
+                .indexSymbol(id)
+                .topGainers(gainers)
+                .topLosers(losers)
+                .timestamp(Instant.now())
+                .build();
+        }
     }
 }

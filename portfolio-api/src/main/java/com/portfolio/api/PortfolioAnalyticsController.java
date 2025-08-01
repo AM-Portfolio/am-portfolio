@@ -26,53 +26,6 @@ public class PortfolioAnalyticsController {
     private final PortfolioAnalyticsFacade portfolioAnalyticsFacade;
     
     /**
-     * Get sector heatmap for a portfolio
-     * @param portfolioId The portfolio ID
-     * @return Heatmap data
-     */
-    @GetMapping("/{portfolioId}/heatmap")
-    public ResponseEntity<Heatmap> getSectorHeatmap(@PathVariable String portfolioId) {
-        log.info("REST request to get sector heatmap for portfolio: {}", portfolioId);
-        return ResponseEntity.ok(portfolioAnalyticsFacade.generateSectorHeatmap(portfolioId));
-    }
-    
-    /**
-     * Get top gainers and losers for a portfolio
-     * @param portfolioId The portfolio ID
-     * @param limit Number of top gainers/losers to return (default: 5)
-     * @return GainerLoser data
-     */
-    @GetMapping("/{portfolioId}/movers")
-    public ResponseEntity<GainerLoser> getTopMovers(
-            @PathVariable String portfolioId,
-            @RequestParam(defaultValue = "5") int limit) {
-        log.info("REST request to get top {} movers for portfolio: {}", limit, portfolioId);
-        return ResponseEntity.ok(portfolioAnalyticsFacade.getTopGainersLosers(portfolioId, limit));
-    }
-    
-    /**
-     * Get sector and industry allocation percentages for a portfolio
-     * @param portfolioId The portfolio ID
-     * @return SectorAllocation data
-     */
-    @GetMapping("/{portfolioId}/allocation")
-    public ResponseEntity<SectorAllocation> getSectorAllocation(@PathVariable String portfolioId) {
-        log.info("REST request to get sector allocation for portfolio: {}", portfolioId);
-        return ResponseEntity.ok(portfolioAnalyticsFacade.calculateSectorAllocations(portfolioId));
-    }
-    
-    /**
-     * Get market capitalization allocation breakdown for a portfolio
-     * @param portfolioId The portfolio ID
-     * @return MarketCapAllocation data
-     */
-    @GetMapping("/{portfolioId}/market-cap")
-    public ResponseEntity<MarketCapAllocation> getMarketCapAllocation(@PathVariable String portfolioId) {
-        log.info("REST request to get market cap allocation for portfolio: {}", portfolioId);
-        return ResponseEntity.ok(portfolioAnalyticsFacade.calculateMarketCapAllocations(portfolioId));
-    }
-    
-    /**
      * Advanced analytics endpoint that combines multiple analytics features with timeframe support
      * @param portfolioId The portfolio ID to analyze
      * @param request The advanced analytics request parameters

@@ -4,6 +4,7 @@ import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
 import com.portfolio.marketdata.model.indices.IndexConstituent;
+import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Collections;
@@ -14,7 +15,7 @@ import java.util.List;
  * @param <T> The type of analytics data returned
  */
 @Slf4j
-public abstract class AbstractIndexAnalyticsProvider<T> extends AbstractAnalyticsProvider<T, String> implements AnalyticsProvider<T> {
+public abstract class AbstractIndexAnalyticsProvider<T> extends AbstractAnalyticsProvider<T, String> implements IndexAnalyticsProvider<T> {
     
     protected final NseIndicesService nseIndicesService;
     
@@ -30,6 +31,14 @@ public abstract class AbstractIndexAnalyticsProvider<T> extends AbstractAnalytic
                                          SecurityDetailsService securityDetailsService) {
         super(marketDataService, securityDetailsService);
         this.nseIndicesService = nseIndicesService;
+    }
+
+        
+    @Override
+    public T generateAnalytics(String indexSymbol, AdvancedAnalyticsRequest request) {
+        log.info("Generating {} analytics for index {} with time frame, pagination, and feature configuration", 
+                getType(), indexSymbol);
+        return generateAnalytics(indexSymbol, request);
     }
     
     /**
@@ -61,4 +70,5 @@ public abstract class AbstractIndexAnalyticsProvider<T> extends AbstractAnalytic
         // Delegate to the existing method
         return getIndexSymbols(indexSymbol);
     }
+
 }

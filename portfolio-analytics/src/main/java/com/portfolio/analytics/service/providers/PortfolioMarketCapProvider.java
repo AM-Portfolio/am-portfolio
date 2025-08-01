@@ -10,6 +10,7 @@ import com.portfolio.analytics.service.utils.AnalyticsUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.MarketCapAllocation;
+import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.analytics.request.TimeFrameRequest;
 import com.portfolio.model.market.MarketData;
 
@@ -39,15 +40,9 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
     
 
     @Override
-    public MarketCapAllocation generateAnalytics(String portfolioId) {
-        log.info("Calculating market cap allocations for portfolio: {}", portfolioId);
-        return generateMarketCapAllocation(portfolioId, null);
-    }
-    
-    @Override
-    public MarketCapAllocation generateAnalytics(String portfolioId, TimeFrameRequest timeFrameRequest) {
-        log.info("Calculating market cap allocations for portfolio: {} with time frame", portfolioId);
-        return generateMarketCapAllocation(portfolioId, timeFrameRequest);
+    public MarketCapAllocation generateAnalytics(AdvancedAnalyticsRequest request) {
+        log.info("Calculating market cap allocations for portfolio: {}", request.getCoreIdentifiers().getPortfolioId());
+        return generateMarketCapAllocation(request.getCoreIdentifiers().getPortfolioId(), null);
     }
     
     /**

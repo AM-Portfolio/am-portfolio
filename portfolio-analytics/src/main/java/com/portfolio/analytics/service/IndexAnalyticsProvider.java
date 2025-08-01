@@ -3,10 +3,10 @@ package com.portfolio.analytics.service;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 
 /**
- * Interface for portfolio analytics providers that generate analytics data for portfolios
+ * Interface for analytics providers that generate analytics data
  * @param <T> The type of analytics data returned
  */
-public interface PortfolioAnalyticsProvider<T> {
+public interface IndexAnalyticsProvider<T> {
     
     /**
      * Get the type of analytics this provider generates
@@ -15,10 +15,11 @@ public interface PortfolioAnalyticsProvider<T> {
     AnalyticsType getType();
     
     /**
-     * Generate analytics data for the given portfolio with additional parameters
-     * @param portfolioId The portfolio ID to generate analytics for
-     * @param params Additional parameters for analytics generation
+     * Generate analytics data for the given symbol with additional parameters
+     * @param symbol The symbol to generate analytics for
+     * @param request Additional parameters for analytics generation
      * @return The analytics data
      */
     T generateAnalytics(AdvancedAnalyticsRequest request);
+    
 }

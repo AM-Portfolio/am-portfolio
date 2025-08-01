@@ -7,6 +7,7 @@ import com.portfolio.analytics.service.utils.TopMoverUtils;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
 import com.portfolio.model.analytics.GainerLoser;
+import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.market.MarketData;
 
 import lombok.extern.slf4j.Slf4j;
@@ -31,20 +32,13 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
         return AnalyticsType.TOP_MOVERS;
     }
 
-    @Override
-    public GainerLoser generateAnalytics(String indexSymbol) {
-        // Default to 5 top movers
-        return generateAnalytics(indexSymbol, 5);
-    }
-
     // Default limit for top movers is defined in TopMoverUtils
     
     @Override
-    public GainerLoser generateAnalytics(String indexSymbol, Object... params) {
-        // Extract limit parameter if provided
-        int limit = extractLimit(params);
-        
-        log.info("Getting top {} gainers and losers for index: {}", limit, indexSymbol);
+    public GainerLoser generateAnalytics(String indexSymbol, AdvancedAnalyticsRequest request) {
+        log.info("Getting top {} gainers and losers for index: {}", request.getFeatureConfiguration().getMoversLimit(), indexSymbol);
+
+        Integer limit = request.getFeatureConfiguration().getMoversLimit();
         
         // Get index symbols and market data
         List<String> indexStockSymbols = getIndexSymbols(indexSymbol);
@@ -57,24 +51,26 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
             return createEmptyResult(indexSymbol);
         }
         
-        // Calculate performance metrics using utility
+        // Use TopMoverUtils to build the response with top gainers and losers
+        GainerLoser gainerLoser = TopMoverUtils.buildTopMoversResponse(marketData, limit, indexSymbol, false);
+        
+        // Create maps for performance metrics (already calculated in buildTopMoversResponse)
         Map<String, Double> symbolToPerformance = new HashMap<>();
         Map<String, Double> symbolToChangePercent = new HashMap<>();
-        TopMoverUtils.calculatePerformanceMetrics(marketData, symbolToPerformance, symbolToChangePercent);
         
-        // Get top gainers and losers using utility
-        List<GainerLoser.StockMovement> gainers = TopMoverUtils.getTopGainers(marketData, symbolToPerformance, symbolToChangePercent, limit);
-        List<GainerLoser.StockMovement> losers = TopMoverUtils.getTopLosers(marketData, symbolToPerformance, symbolToChangePercent, limit);
+        // Calculate performance metrics to use for sector movements
+        TopMoverUtils.calculatePerformanceMetrics(marketData, symbolToPerformance, symbolToChangePercent);
         
         // Calculate sector movements using utility
         List<GainerLoser.SectorMovement> sectorMovements = TopMoverUtils.calculateSectorMovements(
-            indexStockSymbols, marketData, symbolToPerformance, symbolToChangePercent, securityDetailsService);
+            indexStockSymbols, marketData, symbolToPerformance, symbolToChangePercent, securityDetailsService, limit);
         
+        // Add sector movements to the response
         return GainerLoser.builder()
             .indexSymbol(indexSymbol)
-            .timestamp(Instant.now())
-            .topGainers(gainers)
-            .topLosers(losers)
+            .timestamp(gainerLoser.getTimestamp())
+            .topGainers(gainerLoser.getTopGainers())
+            .topLosers(gainerLoser.getTopLosers())
             .sectorMovements(sectorMovements)
             .build();
     }
@@ -86,7 +82,7 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
         if (params.length > 0 && params[0] instanceof Integer) {
             return (Integer) params[0];
         }
-        return TopMoverUtils.DEFAULT_LIMIT;
+        return 5; // Default limit
     }
     
     /**
@@ -100,6 +96,11 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
             .topLosers(Collections.emptyList())
             .sectorMovements(Collections.emptyList())
             .build();
+    }
+
+    @Override
+    public GainerLoser generateAnalytics(AdvancedAnalyticsRequest request) {
+        return generateAnalytics(request.getCoreIdentifiers().getIndexSymbol(), request);
     }
     
     // Performance metrics, top gainers/losers, and stock movement methods have been moved to TopMoverUtils

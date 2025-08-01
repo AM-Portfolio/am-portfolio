@@ -26,9 +26,9 @@ public class PortfolioAnalyticsFacade {
      * @param portfolioId The portfolio ID to generate heatmap for
      * @return Heatmap containing sector performances
      */
-    public Heatmap generateSectorHeatmap(String portfolioId) {
-        log.info("Generating sector heatmap for portfolio: {}", portfolioId);
-        return analyticsFactory.generatePortfolioAnalytics(AnalyticsType.SECTOR_HEATMAP, portfolioId);
+    public Heatmap generateSectorHeatmap(AdvancedAnalyticsRequest request) {
+        log.info("Generating sector heatmap for portfolio: {}", request.getCoreIdentifiers().getPortfolioId());
+        return analyticsFactory.generatePortfolioAnalytics(AnalyticsType.SECTOR_HEATMAP, request);
     }
     
     /**
@@ -37,19 +37,19 @@ public class PortfolioAnalyticsFacade {
      * @param limit Number of top gainers/losers to return
      * @return GainerLoser object containing top performers and underperformers
      */
-    public GainerLoser getTopGainersLosers(String portfolioId, int limit) {
-        log.info("Getting top {} gainers and losers for portfolio: {}", limit, portfolioId);
-        return analyticsFactory.generatePortfolioAnalytics(AnalyticsType.TOP_MOVERS, portfolioId, limit);
+    public GainerLoser getTopGainersLosers(AdvancedAnalyticsRequest request) {
+        log.info("Getting top {} gainers and losers for portfolio: {}", request.getFeatureConfiguration().getMoversLimit(), request.getCoreIdentifiers().getPortfolioId());
+        return analyticsFactory.generatePortfolioAnalytics(AnalyticsType.TOP_MOVERS, request);
     }
     
     /**
-     * Calculate sector and industry allocation percentages for a portfolio
+     * Calculate sector and industry allocation percentages for a portfolio`
      * @param portfolioId The portfolio ID
      * @return SectorAllocation containing sector and industry weights
      */
-    public SectorAllocation calculateSectorAllocations(String portfolioId) {
-        log.info("Calculating sector allocations for portfolio: {}", portfolioId);
-        return analyticsFactory.generatePortfolioAnalytics(AnalyticsType.SECTOR_ALLOCATION, portfolioId);
+    public SectorAllocation calculateSectorAllocations(AdvancedAnalyticsRequest request) {
+        log.info("Calculating sector allocations for portfolio: {}", request.getCoreIdentifiers().getPortfolioId());
+        return analyticsFactory.generatePortfolioAnalytics(AnalyticsType.SECTOR_ALLOCATION, request);
     }
     
     /**
@@ -57,9 +57,9 @@ public class PortfolioAnalyticsFacade {
      * @param portfolioId The portfolio ID
      * @return MarketCapAllocation containing breakdown by market cap segments
      */
-    public MarketCapAllocation calculateMarketCapAllocations(String portfolioId) {
-        log.info("Calculating market cap allocations for portfolio: {}", portfolioId);
-        return analyticsFactory.generatePortfolioAnalytics(AnalyticsType.MARKET_CAP_ALLOCATION, portfolioId);
+    public MarketCapAllocation calculateMarketCapAllocations(AdvancedAnalyticsRequest request) {
+        log.info("Calculating market cap allocations for portfolio: {}", request.getCoreIdentifiers().getPortfolioId());
+        return analyticsFactory.generatePortfolioAnalytics(AnalyticsType.MARKET_CAP_ALLOCATION, request);
     }
     
     /**
@@ -85,7 +85,7 @@ public class PortfolioAnalyticsFacade {
         
         // Include heatmap if requested
         if (request.getFeatureToggles().isIncludeHeatmap()) {
-            Heatmap heatmap = generateSectorHeatmap(request.getCoreIdentifiers().getPortfolioId());
+            Heatmap heatmap = generateSectorHeatmap(request);
             responseBuilder.heatmap(heatmap);
         }
         
@@ -93,19 +93,19 @@ public class PortfolioAnalyticsFacade {
         if (request.getFeatureToggles().isIncludeMovers()) {
             int limit = request.getFeatureConfiguration().getMoversLimit() != null && request.getFeatureConfiguration().getMoversLimit() > 0 
                     ? request.getFeatureConfiguration().getMoversLimit() : 5; // Default to 5 if not specified
-            GainerLoser movers = getTopGainersLosers(request.getCoreIdentifiers().getPortfolioId(), limit);
+            GainerLoser movers = getTopGainersLosers(request);
             responseBuilder.movers(movers);
         }
         
         // Include sector allocation if requested
         if (request.getFeatureToggles().isIncludeSectorAllocation()) {
-            SectorAllocation sectorAllocation = calculateSectorAllocations(request.getCoreIdentifiers().getPortfolioId());
+            SectorAllocation sectorAllocation = calculateSectorAllocations(request);
             responseBuilder.sectorAllocation(sectorAllocation);
         }
         
         // Include market cap allocation if requested
         if (request.getFeatureToggles().isIncludeMarketCapAllocation()) {
-            MarketCapAllocation marketCapAllocation = calculateMarketCapAllocations(request.getCoreIdentifiers().getPortfolioId());
+            MarketCapAllocation marketCapAllocation = calculateMarketCapAllocations(request);
             responseBuilder.marketCapAllocation(marketCapAllocation);
         }
         
