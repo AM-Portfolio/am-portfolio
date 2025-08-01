@@ -1,5 +1,6 @@
 package com.portfolio.model.analytics;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -18,6 +19,11 @@ import java.util.List;
 @AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class Heatmap {
+    @JsonIgnore
+    private String indexSymbol; // Used for index analytics
+    @JsonIgnore
+    private String portfolioId; // Used for portfolio analytics
+    @JsonIgnore
     private Instant timestamp;
     private List<SectorPerformance> sectors;
     

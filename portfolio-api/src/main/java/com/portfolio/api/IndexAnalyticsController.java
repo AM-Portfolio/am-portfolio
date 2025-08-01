@@ -1,24 +1,15 @@
 package com.portfolio.api;
 
-import com.portfolio.model.analytics.GainerLoser;
-import com.portfolio.model.analytics.Heatmap;
-import com.portfolio.model.analytics.MarketCapAllocation;
-import com.portfolio.model.analytics.SectorAllocation;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
-import com.portfolio.model.analytics.request.TimeFrameRequest;
+import com.portfolio.model.analytics.request.CoreIdentifiers;
 import com.portfolio.model.analytics.response.AdvancedAnalyticsResponse;
 import com.portfolio.analytics.service.IndexAnalyticsFacade;
-import com.portfolio.model.market.TimeFrame;
-
-import org.springframework.format.annotation.DateTimeFormat;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import java.time.LocalDate;
 
 /**
  * REST controller for index analytics
@@ -44,11 +35,6 @@ public class IndexAnalyticsController {
         log.info("REST request for advanced analytics on index: {} with timeframe: {} to {}, timeFrame: {}", 
                 indexSymbol, request.getFromDate(), request.getToDate(), request.getTimeFrame());
         
-        // Set the index symbol from the path parameter (overriding any value in the request)
-        if (request.getCoreIdentifiers() == null) {
-            // Initialize CoreIdentifiers if it's null
-            request.setCoreIdentifiers(new AdvancedAnalyticsRequest.CoreIdentifiers());
-        }
         request.getCoreIdentifiers().setIndexSymbol(indexSymbol);
         
         // Log pagination information if provided

@@ -47,7 +47,7 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
             UUID portfolioUuid = UUID.fromString(portfolioId);
             PortfolioModelV1 portfolio = portfolioService.getPortfolioById(portfolioUuid);
             if (portfolio != null) {
-                log.info("Found portfolio: {} with {} holdings", portfolio.getName(), 
+                log.info("Found portfolio: {} with {} holdings", portfolioId, 
                         portfolio.getEquityModels() != null ? portfolio.getEquityModels().size() : 0);
                 return portfolio;
             } else {

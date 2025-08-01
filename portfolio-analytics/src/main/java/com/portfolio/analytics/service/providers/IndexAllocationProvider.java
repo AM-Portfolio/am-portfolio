@@ -9,7 +9,6 @@ import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
 import com.portfolio.model.analytics.SectorAllocation;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
-import com.portfolio.model.analytics.request.TimeFrameRequest;
 import com.portfolio.model.market.MarketData;
 
 import lombok.extern.slf4j.Slf4j;

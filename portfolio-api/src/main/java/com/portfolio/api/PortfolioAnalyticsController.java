@@ -5,6 +5,7 @@ import com.portfolio.model.analytics.Heatmap;
 import com.portfolio.model.analytics.MarketCapAllocation;
 import com.portfolio.model.analytics.SectorAllocation;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
+import com.portfolio.model.analytics.request.CoreIdentifiers;
 import com.portfolio.model.analytics.response.AdvancedAnalyticsResponse;
 import com.portfolio.analytics.service.PortfolioAnalyticsFacade;
 
@@ -37,12 +38,7 @@ public class PortfolioAnalyticsController {
             @RequestBody AdvancedAnalyticsRequest request) {
         log.info("REST request for advanced analytics on portfolio: {} with timeframe: {} to {}", 
                 portfolioId, request.getTimeFrame());
-        
-        // Set the portfolio ID from the path parameter (overriding any value in the request)
-        if (request.getCoreIdentifiers() == null) {
-            // Initialize CoreIdentifiers if it's null
-            request.setCoreIdentifiers(new AdvancedAnalyticsRequest.CoreIdentifiers());
-        }
+
         request.getCoreIdentifiers().setPortfolioId(portfolioId);
         
         return ResponseEntity.ok(portfolioAnalyticsFacade.calculateAdvancedAnalytics(request));
