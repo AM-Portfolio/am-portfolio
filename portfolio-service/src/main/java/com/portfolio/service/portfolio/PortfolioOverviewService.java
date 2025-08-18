@@ -10,12 +10,12 @@ import org.springframework.stereotype.Service;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.service.PortfolioService;
-import com.portfolio.mapper.PortfolioMapperv1;
+import com.portfolio.kafka.mapper.PortfolioMapperv1;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.v1.BrokerPortfolioSummary;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
-import com.portfolio.rediscache.service.PortfolioSummaryRedisService;
+import com.portfolio.redis.service.PortfolioSummaryRedisService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

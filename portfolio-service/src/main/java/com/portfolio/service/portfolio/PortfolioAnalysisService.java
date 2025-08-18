@@ -15,7 +15,7 @@ import com.portfolio.builder.PortfolioAnalysisBuilder;
 import com.portfolio.model.StockPerformance;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.PortfolioAnalysis;
-import com.portfolio.rediscache.service.PortfolioAnalysisRedisService;
+import com.portfolio.redis.service.PortfolioAnalysisRedisService;
 import com.portfolio.service.StockPerformanceService;
 
 import lombok.RequiredArgsConstructor;

@@ -13,9 +13,9 @@ import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.portfolio.model.PaginatedStockPerformance;
 import com.portfolio.model.StockPerformance;
 import com.portfolio.model.StockPerformanceGroup;
-import com.portfolio.model.StockPriceCache;
+import com.portfolio.model.cache.StockPriceCache;
 import com.portfolio.model.TimeInterval;
-import com.portfolio.rediscache.service.StockPriceRedisService;
+import com.portfolio.redis.service.StockIndicesRedisService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 @Slf4j
 public class StockPerformanceService {
-    private final StockPriceRedisService stockPriceRedisService;
+    private final StockIndicesRedisService stockPriceRedisService;
     private static final int DEFAULT_TOP_N = 5;
     private static final int DEFAULT_PAGE_SIZE = 5;
 

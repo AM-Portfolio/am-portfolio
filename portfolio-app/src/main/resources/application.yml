@@ -1,0 +1,139 @@
+#mongo
+MONGO_URL: mongodb://admin:password@localhost:27017/portfolio?authSource=admin
+MONGO_DATABASE: portfolio
+MONGO_USERNAME: admin
+MONGO_PASSWORD: password
+
+spring:
+  application:
+    name: portfolio-app
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: am-portfolio-group-1
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        fetch.max.bytes: 1048576
+        max.partition.fetch.bytes: 524288
+        fetch.max.wait.ms: 500
+        max.poll.records: 100
+  data:
+    redisendpoint: localhost:6379
+    redis:
+      portfolio-mover:
+        ttl: 900  # 15 minutes in seconds
+        key-prefix: "portfolio:analysis:"
+      portfolio-summary:
+        ttl: 900  # 15 minutes in seconds
+        key-prefix: "portfolio:summary:"
+      portfolio-holdings:
+        ttl: 900  # 15 minutes in seconds
+        key-prefix: "portfolio:holdings:"
+      market-indices:
+        ttl: 129600  # 30 Days in seconds
+        key-prefix: "market-indices:indices:"
+        historical:
+          key-prefix: "market-indices:historical-indices:"
+          ttl: 129600  # 30 Days in seconds
+      stock:
+        ttl: 129600  # 30 Days in seconds
+        key-prefix: "stock:price:"
+        historical:
+          key-prefix: "stock:historical-price:"
+          ttl: 129600  # 30 Days in seconds
+      stock-indices:
+        ttl: 129600  # 30 Days in seconds
+        key-prefix: "stock-indices:data:"
+        historical:
+          key-prefix: "stock-indices:historical-data:"
+          ttl: 129600  # 30 Days in seconds
+    mongodb:
+      uri: ${MONGO_URL}
+      database: ${MONGO_DATABASE}
+      username: ${MONGO_USERNAME}
+      password: ${MONGO_PASSWORD}
+      authentication-database: admin
+  # Disable JDBC auto-configuration since we're using MongoDB
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+
+nse:
+  broad-market-indices:
+    - NIFTY 50
+    - NIFTY NEXT 50
+    - NIFTY MIDCAP 50
+    - NIFTY MIDCAP 100
+    - NIFTY MIDCAP 150
+    - NIFTY MIDCAP 250
+    - NIFTY MIDCAP 500
+    - NIFTY SMLCAP 100
+    - NIFTY SMLCAP 250
+    - NIFTY SMLCAP 500
+  sector-indices:
+    - NIFTY BANK
+    - NIFTY IT
+    - NIFTY PHARMA
+    - NIFTY AUTO
+    - NIFTY METAL
+    - NIFTY ENERGY
+    - NIFTY FMCG
+    - NIFTY MEDIA
+    - NIFTY REALTY
+    - NIFTY PSU BANK
+
+app:
+  persistence:
+    mongodb:
+      uri: ${MONGO_URL}
+      database: ${MONGO_DATABASE}
+      username: ${MONGO_USERNAME}
+      password: ${MONGO_PASSWORD}
+      authentication-database: admin
+  kafka:
+    portfolio:
+      consumer:
+        id: am-portfolio-group-1
+        enabled: true
+      topic: am-portfolio
+    stock:
+      consumer:
+        id: am-stock-group.v2
+        enabled: true
+      topic: am-stock-price-update
+    market-index:
+      consumer:
+        id: am-market-index-group-1
+        enabled: true
+      topic: nse-stock-indices-update
+
+server:
+  port: 8070
+  servlet:
+    context-path: /
+  tomcat:
+    max-threads: 20
+    min-spare-threads: 10
+    max-connections: 200
+
+# OpenAPI Documentation
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: method
+    tagsSorter: alpha
+
+logging:
+  level:
+    "[com.portfolio]": DEBUG
+    "[com.portfolio.analytics]": DEBUG
+    "[com.portfolio.api]": DEBUG
+    "[com.portfolio.marketdata]": DEBUG
+    "[com.portfolio.model]": DEBUG
+    "[com.am.common]": DEBUG
+    "[com.am.common.amcommondata]": DEBUG
+    org.springframework.kafka: INFO
