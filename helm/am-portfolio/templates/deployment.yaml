@@ -1,14 +1,14 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "am-market-data.fullname" . }}
+  name: {{ include "am-portfolio.fullname" . }}
   labels:
-    {{- include "am-market-data.labels" . | nindent 4 }}
+    {{- include "am-portfolio.labels" . | nindent 4 }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      {{- include "am-market-data.selectorLabels" . | nindent 6 }}
+      {{- include "am-portfolio.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
@@ -86,15 +86,15 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       labels:
-        {{- include "am-market-data.selectorLabels" . | nindent 8 }}
+        {{- include "am-portfolio.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: vault-auth
       imagePullSecrets:
       - name: ghcr-secret
       containers:
         - name: {{ .Chart.Name }}
-          image: "ghcr.io/am-portfolio/am-market-data/market-data-service:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: Always
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
           # Command to load Vault secrets before starting the application
           command: ["/bin/sh", "-c"]
           args:
@@ -205,7 +205,7 @@ spec:
           # Load environment variables from ConfigMap
           envFrom:
             - configMapRef:
-                name: {{ include "am-market-data.fullname" . }}-config
+                name: {{ include "am-portfolio.fullname" . }}-config
           env:
             # Thread Pool Configuration (from memory)
             - name: MARKET_DATA_THREAD_POOL_SIZE
@@ -235,7 +235,7 @@ spec:
             - name: MANAGEMENT_HEALTH_READINESSSTATE_ENABLED
               value: "true"
             - name: MANAGEMENT_METRICS_TAGS_APPLICATION
-              value: "market-data-{{ .Values.environment }}"
+              value: "am-portfolio-{{ .Values.environment }}"
             - name: DEPLOYMENT_VERSION
               value: "{{ .Values.deployment.version }}"
           ports:
