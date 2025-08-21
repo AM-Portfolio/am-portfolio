@@ -19,11 +19,12 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: am-portfolio/am-portfolio/portfolio-service
-  HELM_CHART_PATH: ./helm/portfolio
+  IMAGE_NAME: ${{ github.repository }}/am-portfolio
+  HELM_CHART_PATH: ./helm/am-portfolio
 
 jobs:
   deploy:
+    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || 'preprod' }}
     name: Deploy to AKS
     runs-on: ubuntu-latest
     permissions:
@@ -64,9 +65,7 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v1
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
       
       # Set AKS context
       - name: Set AKS context
@@ -104,12 +103,12 @@ jobs:
           fi
           
           # Check for and remove any Helm locks
-          if kubectl get secret -n ${{ env.NAMESPACE }} | grep -q "sh.helm.release.v1.portfolio-service"; then
+          if kubectl get secret -n ${{ env.NAMESPACE }} | grep -q "sh.helm.release.v1.am-portfolio"; then
             echo "Found existing Helm release, checking for locks..."
             # Get all Helm secrets and check for pending operations
             HELM_SECRETS=$(kubectl get secrets -n ${{ env.NAMESPACE }} -l owner=helm -o name)
             for secret in $HELM_SECRETS; do
-              if [[ $secret == *"portfolio-service"* ]]; then
+              if [[ $secret == *"am-portfolio"* ]]; then
                 echo "Examining $secret for locks"
                 # Check if the secret contains a lock
                 LOCK_STATUS=$(kubectl get $secret -n ${{ env.NAMESPACE }} -o jsonpath='{.metadata.labels.status}' 2>/dev/null || echo "")
@@ -124,20 +123,20 @@ jobs:
           else
             echo "No existing Helm release found, proceeding with installation"
           fi
-          
+
           # Also check using helm status as a backup method
-          RELEASE_STATUS=$(helm status portfolio-service -n ${{ env.NAMESPACE }} -o json 2>/dev/null | jq -r '.info.status' 2>/dev/null || echo "not_found")
+          RELEASE_STATUS=$(helm status am-portfolio -n ${{ env.NAMESPACE }} -o json 2>/dev/null | jq -r '.info.status' 2>/dev/null || echo "not_found")
           echo "Current release status: $RELEASE_STATUS"
-          
+
           if [[ "$RELEASE_STATUS" == "pending-install" || "$RELEASE_STATUS" == "pending-upgrade" || "$RELEASE_STATUS" == "pending-rollback" ]]; then
             echo "Found in-progress release. Attempting to roll back..."
-            helm rollback portfolio-service -n ${{ env.NAMESPACE }} || true
+            helm rollback am-portfolio -n ${{ env.NAMESPACE }} || true
             sleep 10
           fi
-          
+
           # Deploy using Helm with the appropriate values file
           echo "Deploying with Helm..."
-          helm upgrade --install portfolio-service ${{ env.HELM_CHART_PATH }} \
+          helm upgrade --install am-portfolio ${{ env.HELM_CHART_PATH }} \
             --namespace ${{ env.NAMESPACE }} \
             -f $VALUES_FILE \
             --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
@@ -145,9 +144,3 @@ jobs:
             --set deployment.version="${{ env.IMAGE_TAG }}" \
             --wait --timeout 5m \
             --atomic
-      
-      # Verify deployment
-      - name: Verify deployment
-        run: |
-          kubectl rollout status deployment/portfolio-service -n ${{ env.NAMESPACE }}
-          echo "Deployment to ${{ github.event.inputs.environment }} completed successfully!"

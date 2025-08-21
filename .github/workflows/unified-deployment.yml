@@ -27,8 +27,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/portfolio-service
-  HELM_CHART_PATH: ./helm/portfolio
+  IMAGE_NAME: ${{ github.repository }}/am-portfolio
+  HELM_CHART_PATH: ./helm/am-portfolio
   IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag || inputs.image_tag }}
 
 jobs:
@@ -93,12 +93,12 @@ jobs:
       - name: Check and remove Helm locks
         run: |
           # Check if there's a release with pending operations
-          if kubectl get secret -n ${{ env.NAMESPACE }} | grep -q "sh.helm.release.v1.portfolio-service"; then
+          if kubectl get secret -n ${{ env.NAMESPACE }} | grep -q "sh.helm.release.v1.am-portfolio"; then
             echo "Found existing Helm release, checking for locks..."
             # Get all Helm secrets and check for pending operations
             HELM_SECRETS=$(kubectl get secrets -n ${{ env.NAMESPACE }} -l owner=helm -o name)
             for secret in $HELM_SECRETS; do
-              if [[ $secret == *"portfolio-service"* ]]; then
+              if [[ $secret == *"am-portfolio"* ]]; then
                 echo "Examining $secret for locks"
                 # Check if the secret contains a lock
                 LOCK_STATUS=$(kubectl get $secret -n ${{ env.NAMESPACE }} -o jsonpath='{.metadata.labels.status}')
@@ -127,16 +127,10 @@ jobs:
           echo "Namespace: ${{ env.NAMESPACE }}"
           
           # Deploy using Helm with the appropriate values file
-          helm upgrade --install portfolio-service ${{ env.HELM_CHART_PATH }} \
+          helm upgrade --install am-portfolio ${{ env.HELM_CHART_PATH }} \
             --namespace ${{ env.NAMESPACE }} \
             -f ${{ env.HELM_CHART_PATH }}/values/${{ env.ENVIRONMENT }}.yaml \
             --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
             --set image.tag=${{ env.IMAGE_TAG }} \
             --set deployment.version="${{ env.IMAGE_TAG }}" \
             --wait --timeout 5m
-      
-      # Verify deployment
-      - name: Verify deployment
-        run: |
-          kubectl rollout status deployment/portfolio-service -n ${{ env.NAMESPACE }}
-          echo "Deployment to ${{ env.ENVIRONMENT }} completed successfully!"

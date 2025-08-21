@@ -1,5 +1,5 @@
 apiVersion: v2
-name: am-portfolio
+name: am-market-data
 description: A Helm chart for Market Data Service deployment on AKS
 type: application
 version: 0.1.0
