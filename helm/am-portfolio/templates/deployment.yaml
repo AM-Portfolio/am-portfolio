@@ -236,6 +236,8 @@ spec:
               value: "true"
             - name: MANAGEMENT_METRICS_TAGS_APPLICATION
               value: "market-data-{{ .Values.environment }}"
+            - name: DEPLOYMENT_VERSION
+              value: "{{ .Values.deployment.version }}"
           ports:
             - name: http
               containerPort: 8080

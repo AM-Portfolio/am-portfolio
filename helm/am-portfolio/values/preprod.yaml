@@ -10,6 +10,14 @@ config:
     threadQueueCapacity: 10
     maxAgeMinutes: 15
 
+image:
+  repository: ghcr.io/am-portfolio/am-portfolio
+  tag: preprod
+  pullPolicy: IfNotPresent
+
+deployment:
+  version: preprod
+
 # Service Configuration
 service:
   type: ClusterIP

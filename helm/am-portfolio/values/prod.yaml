@@ -56,3 +56,11 @@ monitoring:
     scrape: true
     port: "8080"
     path: "/actuator/prometheus"
+
+image:
+  repository: ghcr.io/am-portfolio/am-portfolio
+  tag: prod
+  pullPolicy: IfNotPresent
+
+deployment:
+  version: prod
