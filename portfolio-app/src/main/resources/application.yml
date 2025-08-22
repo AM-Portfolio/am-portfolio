@@ -112,7 +112,7 @@ app:
       topic: nse-stock-indices-update
 
 server:
-  port: 8070
+  port: 8080
   servlet:
     context-path: /
   tomcat:
