@@ -71,7 +71,9 @@ public class KafkaConfig {
     public ConsumerFactory<String, String> consumerFactory() {
         Map<String, Object> props = kafkaConfigs();
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        
 
         return new DefaultKafkaConsumerFactory<>(props);
     }
