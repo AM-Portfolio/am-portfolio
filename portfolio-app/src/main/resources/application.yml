@@ -1,5 +1,5 @@
 #mongo
-MONGODB_URL: mongodb://admin:password@localhost:27017/portfolio?authSource=admin
+MONGODB_URL: mongodb://admin:password@mongodb.dev.svc.cluster.local:27017/market_data?authSource=admin
 MONGODB_DATABASE: portfolio
 MONGODB_USERNAME: admin
 MONGODB_PASSWORD: password
@@ -73,7 +73,7 @@ spring:
           key-prefix: "stock-indices:historical-data:"
           ttl: 129600  # 30 Days in seconds
     mongodb:
-      uri: ${MONGODB_URL}
+      uri: '${MONGODB_URL}'
       database: ${MONGODB_DATABASE}
       username: ${MONGODB_USERNAME}
       password: ${MONGODB_PASSWORD}
