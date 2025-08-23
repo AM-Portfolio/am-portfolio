@@ -165,7 +165,10 @@ spec:
               echo "REDIS_PASSWORD is set to: ${REDIS_PASSWORD:-not set}"
               echo "INFLUXDB_URL is set to: ${INFLUXDB_URL:-not set}"
               echo "SPRING_PROFILES_ACTIVE is set to: ${SPRING_PROFILES_ACTIVE:-not set}"
-              
+              echo "KAFKA_BOOTSTRAP_SERVERS is set to: ${KAFKA_BOOTSTRAP_SERVERS:-not set}"
+              echo "KAFKA_JAAS_CONFIG is set to: ${KAFKA_JAAS_CONFIG:-not set}"
+
+                          
               # Check if Kafka is available
               if [ ! -z "${KAFKA_BOOTSTRAP_SERVERS}" ]; then
                 echo "Checking Kafka availability at ${KAFKA_BOOTSTRAP_SERVERS}..."
