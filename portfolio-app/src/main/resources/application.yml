@@ -1,11 +1,11 @@
 #mongo
-MONGODB_URL: mongodb://admin:password@mongodb.dev.svc.cluster.local:27017/market_data?authSource=admin
+MONGODB_URL: mongodb://admin:password@localhost:27017/portfolio?authSource=admin
 MONGODB_DATABASE: portfolio
 MONGODB_USERNAME: admin
 MONGODB_PASSWORD: password
 
 #Kafka
-# KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+KAFKA_BOOTSTRAP_SERVERS: localhost:9092
 KAFKA_USERNAME: kafkaUser
 KAFKA_PASSWORD: kafkaPassword123!
 # KAFKA_JAAS_CONFIG:  org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME}" password="${KAFKA_PASSWORD}";
@@ -36,15 +36,15 @@ spring:
       enable-auto-commit: false
       max-poll-records: 100
     properties:
-      security-protocol: SASL_PLAINTEXT
-      sasl-mechanism: PLAIN
-      sasl-jaas-config: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME}" password="${KAFKA_PASSWORD}";
+      security-protocol:
+      sasl-mechanism:
+      sasl-jaas-config:
       ssl-endpoint-identification-algorithm: ""
       ssl-truststore-location: /etc/ssl/certs/java/cacerts
       ssl-truststore-password: changeit
   data:
     redis:
-      host: redis.dev.svc.cluster.local
+      host: localhost
       port: 6379
       password: RedisPassword123!
       portfolio-mover:
@@ -128,7 +128,7 @@ app:
       topic: ${MARKET_INDEX_TOPIC}
 
 server:
-  port: 8080
+  port: 8091
   servlet:
     context-path: /
   tomcat:
