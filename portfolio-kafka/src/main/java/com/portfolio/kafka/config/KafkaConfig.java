@@ -27,13 +27,13 @@ public class KafkaConfig {
     @Value("${spring.kafka.consumer.group-id}")
     private String groupId;
 
-    @Value("${spring.kafka.properties.security.protocol}")
+    @Value("${spring.kafka.properties.security-protocol}")
     private String securityProtocol;
     
-    @Value("${spring.kafka.properties.sasl.mechanism}")
+    @Value("${spring.kafka.properties.sasl-mechanism}")
     private String saslMechanism;
     
-    @Value("${spring.kafka.properties.sasl.jaas.config}")
+    @Value("${spring.kafka.properties.sasl-jaas-config}")
     private String jaasConfig;
 
     // @Value("${app.kafka.topic}")
