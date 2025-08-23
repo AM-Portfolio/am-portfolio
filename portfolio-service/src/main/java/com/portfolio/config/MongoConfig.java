@@ -1,5 +1,6 @@
 // package com.portfolio.config;
 
+// import org.springframework.beans.factory.annotation.Value;
 // import org.springframework.context.annotation.Bean;
 // import org.springframework.context.annotation.Configuration;
 // import org.springframework.data.mongodb.config.AbstractMongoClientConfiguration;
@@ -9,28 +10,31 @@
 
 // import com.mongodb.client.MongoClient;
 // import com.mongodb.client.MongoClients;
-// import com.portfolio.config.properties.PersistenceProperties;
 
 // import lombok.RequiredArgsConstructor;
 
 // @Configuration
-// @EnableMongoRepositories(basePackages = "com.am.common.amcommondata.repository")
+// @EnableMongoRepositories(basePackages = "com.am.common.amcommondata.repository.*")
 // @RequiredArgsConstructor
 // public class MongoConfig extends AbstractMongoClientConfiguration {
 
-//     private final PersistenceProperties persistenceProperties;
+//     @Value("${spring.data.mongodb.uri}")
+//     private String mongodbUri;
+
+//     @Value("${spring.data.mongodb.database}")
+//     private String mongodbDatabase;
 
 //     @Override
 //     @NonNull
 //     protected String getDatabaseName() {
-//         return persistenceProperties.getMongodb().getDatabase();
+//         return mongodbDatabase;
 //     }
 
 //     @Override
 //     @Bean
 //     @NonNull
 //     public MongoClient mongoClient() {
-//         return MongoClients.create(persistenceProperties.getMongodb().getUri());
+//         return MongoClients.create(mongodbUri);
 //     }
 
 //     @Bean
