@@ -44,7 +44,7 @@ spring:
       "ssl.truststore.password": changeit
   data:
     redis:
-      hostname: redis.dev.svc.cluster.local
+      host: redis.dev.svc.cluster.local
       port: 6379
       password: RedisPassword123!
       portfolio-mover:
