@@ -1,8 +1,5 @@
 #mongo
-MONGODB_URL: mongodb://admin:password@mongodb.dev.svc.cluster.local:27017/market_data?authSource=admin
-MONGODB_DATABASE: portfolio
-MONGODB_USERNAME: admin
-MONGODB_PASSWORD: password
+MONGODB_URL: mongodb://ssd2658:ssd2658@mongodb.dev.svc.cluster.local:27017/portfolio?authSource=admin
 
 #Kafka
 # KAFKA_BOOTSTRAP_SERVERS: localhost:9092
@@ -76,9 +73,6 @@ spring:
           ttl: 129600  # 30 Days in seconds
     mongodb:
       uri: ${MONGODB_URL}
-      database: ${MONGODB_DATABASE}
-      username: ${MONGODB_USERNAME}
-      password: ${MONGODB_PASSWORD}
       authentication-database: admin
   # Disable JDBC auto-configuration since we're using MongoDB
   autoconfigure:

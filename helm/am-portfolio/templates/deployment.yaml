@@ -37,10 +37,8 @@ spec:
         vault.hashicorp.com/agent-inject-secret-mongodb: "kv/preprod/database/mongo"
         vault.hashicorp.com/agent-inject-template-mongodb: |
           {{`{{- with secret "kv/preprod/database/mongo" -}}
-          MONGODB_URL="{{ .Data.data.url }}"
-          MONGODB_DATABASE="{{ .Data.data.marketdtadatabase }}"
-          MONGODB_USERNAME="{{ .Data.data.username }}"
-          MONGODB_PASSWORD="{{ .Data.data.password }}"
+          MONGODB_DATABASE="{{ .Data.data.portfoliodatabase }}"
+          MONGODB_URL= {{ .Data.data.uri }}/{{ .Data.data.portfoliodatabase }}?authSource={{ .Data.data.authsource }}
           {{- end -}}`}}
         vault.hashicorp.com/agent-inject-secret-redis: "kv/preprod/database/redis"
         vault.hashicorp.com/agent-inject-template-redis: |
@@ -99,12 +97,12 @@ spec:
               if [ -f /vault/secrets/mongodb ]; then
                 echo "Loading MongoDB variables from Vault..."
                 cat /vault/secrets/mongodb | sed 's/$/\n/' >> $ENV_FILE
-                grep -q "MONGODB_URL" $ENV_FILE || echo "MONGODB_URL=mongodb://localhost:27017/market_data" >> $ENV_FILE
-                grep -q "MONGODB_DATABASE" $ENV_FILE || echo "MONGODB_DATABASE=market_data" >> $ENV_FILE
+                grep -q "MONGODB_URL" $ENV_FILE || echo "MONGODB_URL=mongodb://localhost:27017/portfolio" >> $ENV_FILE
+                grep -q "MONGODB_DATABASE" $ENV_FILE || echo "MONGODB_DATABASE=portfolio" >> $ENV_FILE
               else
                 echo "MongoDB secret file not found, using defaults"
-                echo "MONGODB_URL=mongodb://localhost:27017/market_data" >> $ENV_FILE
-                echo "MONGODB_DATABASE=market_data" >> $ENV_FILE
+                echo "MONGODB_URL=mongodb://localhost:27017/portfolio" >> $ENV_FILE
+                echo "MONGODB_DATABASE=portfolio" >> $ENV_FILE
               fi
               
               # Process Redis variables
