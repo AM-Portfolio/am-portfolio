@@ -27,13 +27,13 @@ public class KafkaConfig {
     @Value("${spring.kafka.consumer.group-id}")
     private String groupId;
 
-    @Value("${spring.kafka.properties.security.protocol}")
+    @Value("${spring.kafka.properties.security-protocol}")
     private String securityProtocol;
     
-    @Value("${spring.kafka.properties.sasl.mechanism}")
+    @Value("${spring.kafka.properties.sasl-mechanism}")
     private String saslMechanism;
     
-    @Value("${spring.kafka.properties.sasl.jaas.config}")
+    @Value("${spring.kafka.properties.sasl-jaas-config}")
     private String jaasConfig;
 
     // @Value("${app.kafka.topic}")
@@ -50,9 +50,11 @@ public class KafkaConfig {
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-        props.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, securityProtocol);
-        props.put(SaslConfigs.SASL_MECHANISM, saslMechanism);
-        props.put(SaslConfigs.SASL_JAAS_CONFIG, jaasConfig);
+        if(jaasConfig != null && !jaasConfig.isEmpty()) {
+            props.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, securityProtocol);
+            props.put(SaslConfigs.SASL_MECHANISM, saslMechanism);
+            props.put(SaslConfigs.SASL_JAAS_CONFIG, jaasConfig);
+        }
         return props;
     }
 
