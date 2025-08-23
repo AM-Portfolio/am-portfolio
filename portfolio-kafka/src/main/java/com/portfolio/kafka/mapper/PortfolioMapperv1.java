@@ -21,7 +21,7 @@ public class PortfolioMapperv1 {
 
         PortfolioModelV1 portfolioModel = PortfolioModelV1.builder()
         .id(portfolioEvent.getId())
-        .name("Default Portfolio")
+        .name(portfolioEvent.getPortfolioId())
         .owner(portfolioEvent.getUserId())
         .brokerType(portfolioEvent.getBrokerType())
         .fundType(FundType.DEFAULT)
