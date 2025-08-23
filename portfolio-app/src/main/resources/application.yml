@@ -8,7 +8,7 @@ MONGODB_PASSWORD: password
 KAFKA_BOOTSTRAP_SERVERS: localhost:9092
 KAFKA_USERNAME: kafkaUser
 KAFKA_PASSWORD: kafkaPassword123!
-KAFKA_JAAS_CONFIG: 
+KAFKA_JAAS_CONFIG:  org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME}" password="${KAFKA_PASSWORD}";
 KAFKA_SECURITY_PROTOCOL: SASL_PLAINTEXT
 KAFKA_SASL_MECHANISM: PLAIN
 
