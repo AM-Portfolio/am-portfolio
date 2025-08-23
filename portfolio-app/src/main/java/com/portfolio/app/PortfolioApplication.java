@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.ComponentScans;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.mongodb.repository.config.EnableMongoRepositories;
 import org.springframework.scheduling.annotation.EnableAsync;
 
 import com.am.common.amcommondata.config.SecurityServiceAutoConfiguration;
@@ -34,6 +35,7 @@ import com.portfolio.app.config.MarketDataApiConfigResolver;
 })
 @SpringBootApplication
 @EnableAsync
+@EnableMongoRepositories(basePackages = "com.am.common.amcommondata.repository")
 public class PortfolioApplication {
     public static void main(String[] args) {
         SpringApplication.run(PortfolioApplication.class, args);

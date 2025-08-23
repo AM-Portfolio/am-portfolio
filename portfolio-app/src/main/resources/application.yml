@@ -108,13 +108,6 @@ nse:
     - NIFTY PSU BANK
 
 app:
-  persistence:
-    mongodb:
-      uri: ${MONGODB_URL}
-      database: ${MONGODB_DATABASE}
-      username: ${MONGODB_USERNAME}
-      password: ${MONGODB_PASSWORD}
-      authentication-database: admin
   kafka:
     portfolio:
       consumer:
