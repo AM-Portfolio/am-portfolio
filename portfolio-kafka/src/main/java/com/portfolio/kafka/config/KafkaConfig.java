@@ -50,9 +50,11 @@ public class KafkaConfig {
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-        props.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, securityProtocol);
-        props.put(SaslConfigs.SASL_MECHANISM, saslMechanism);
-        props.put(SaslConfigs.SASL_JAAS_CONFIG, jaasConfig);
+        if(jaasConfig != null && !jaasConfig.isEmpty()) {
+            props.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, securityProtocol);
+            props.put(SaslConfigs.SASL_MECHANISM, saslMechanism);
+            props.put(SaslConfigs.SASL_JAAS_CONFIG, jaasConfig);
+        }
         return props;
     }
 
