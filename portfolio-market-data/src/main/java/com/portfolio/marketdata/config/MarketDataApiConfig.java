@@ -15,12 +15,14 @@ public class MarketDataApiConfig {
     /**
      * Base URL for the market data API.
      */
-    private String baseUrl = "http://localhost:8084";
+    private String baseUrl = "http://localhost:8092";
     
     /**
      * API path for OHLC data.
      */
     private String ohlcPath = "/api/v1/market-data/ohlc";
+
+    private String livePricesPath = "/api/v1/market-data/live-prices";
     
     /**
      * API path for historical data.

@@ -18,7 +18,9 @@ import com.portfolio.marketdata.model.FilterType;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
 import com.portfolio.marketdata.model.HistoricalDataResponseWrapper;
 import com.portfolio.marketdata.model.InstrumentType;
+import com.portfolio.marketdata.model.MarketDataLivePricesResponse;
 import com.portfolio.marketdata.model.MarketDataResponseWrapper;
+import com.portfolio.marketdata.model.StockPrice;
 import com.portfolio.model.market.TimeFrame;
 
 import lombok.extern.slf4j.Slf4j;
@@ -100,7 +102,7 @@ public class MarketDataApiClient extends AbstractApiClient {
                 .map(symbol -> URLEncoder.encode(symbol, StandardCharsets.UTF_8))
                 .collect(Collectors.joining(","));
                 
-        String path = config.getOhlcPath() + "?symbols=" + symbolsParam + "&refresh=" + refresh;
+        String path = config.getOhlcPath() + "?symbols=" + symbolsParam + "&refresh=" + refresh +"&isIndexSymbol=false";
         log.debug("Fetching OHLC data for {} from {} with refresh={}", String.join(",", symbols), path, refresh);
         
         // Deserialize to MarketDataResponseWrapper
@@ -108,6 +110,23 @@ public class MarketDataApiClient extends AbstractApiClient {
                 .doOnSuccess(data -> log.debug("Successfully fetched OHLC data for {} with {} entries", String.join(",", symbols), 
                         data.getData() != null ? data.getData().size() : 0))
                 .doOnError(e -> log.error("Failed to fetch OHLC data for {}: {}", String.join(",", symbols), e.getMessage()));
+    }
+
+    public Mono<MarketDataLivePricesResponse> getLivePrices(List<String> symbols, boolean refresh) {
+        // URL encode each symbol individually to handle special characters like &
+        String symbolsParam = symbols.stream()
+                .filter(symbol -> symbol != null && !symbol.isEmpty())
+                .map(symbol -> URLEncoder.encode(symbol, StandardCharsets.UTF_8))
+                .collect(Collectors.joining(","));
+                
+        String path = config.getLivePricesPath() + "?symbols=" + symbolsParam + "&refresh=" + refresh +"&isIndexSymbol=false";
+        log.debug("Fetching live prices data for {} from {} with refresh={}", String.join(",", symbols), path, refresh);
+        
+        // Deserialize to MarketDataLivePricesResponse
+        return get(path, MarketDataLivePricesResponse.class)
+                .doOnSuccess(data -> log.debug("Successfully fetched live prices data for {} with {} entries", String.join(",", symbols), 
+                        data.getPrices() != null ? data.getCount() : 0))
+                .doOnError(e -> log.error("Failed to fetch live prices data for {}: {}", String.join(",", symbols), e.getMessage()));
     }
     
     /**
@@ -140,6 +159,15 @@ public class MarketDataApiClient extends AbstractApiClient {
     public MarketDataResponseWrapper getOhlcDataSync(List<String> symbols) {
         return getOhlcDataSync(symbols, false);
     }
+
+    public Mono<MarketDataLivePricesResponse> getLivePrices(List<String> symbols) {
+        return getLivePrices(symbols, false);
+    }
+
+    public MarketDataLivePricesResponse getLivePricesSync(List<String> symbols) {
+        return getLivePrices(symbols, false).block();
+    }
+    
     
     /**
      * Gets the current prices for the specified symbols.
@@ -147,15 +175,15 @@ public class MarketDataApiClient extends AbstractApiClient {
      * @param symbols the symbols to get current prices for
      * @return a map of symbol to current price
      */
-    public Map<String, Double> getCurrentPrices(List<String> symbols) {
-        MarketDataResponseWrapper wrapper = getOhlcDataSync(symbols);
-        if (wrapper.getData() == null) {
+    public Map<String, Double> getSymbolsLivePrices(List<String> symbols) {
+        MarketDataLivePricesResponse response = getLivePricesSync(symbols);
+        if (response.getPrices() == null || response.getPrices().isEmpty()) {
             return Map.of();
         }
-        return wrapper.getData().entrySet().stream()
+        return response.getPrices().stream()
                 .collect(java.util.stream.Collectors.toMap(
-                        Map.Entry::getKey,
-                        entry -> entry.getValue().getLastPrice()
+                        StockPrice::getSymbol,
+                        StockPrice::getClose
                 ));
     }
     

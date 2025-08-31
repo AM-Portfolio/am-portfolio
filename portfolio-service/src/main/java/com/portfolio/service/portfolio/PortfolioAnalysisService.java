@@ -16,7 +16,7 @@ import com.portfolio.model.StockPerformance;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.PortfolioAnalysis;
 import com.portfolio.redis.service.PortfolioAnalysisRedisService;
-import com.portfolio.service.StockPerformanceService;
+import com.portfolio.service.PortfolioStockPerformanceService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,7 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 public class PortfolioAnalysisService {
     
     private final PortfolioService portfolioService;
-    private final StockPerformanceService stockPerformanceService;
+    private final PortfolioStockPerformanceService stockPerformanceService;
     private final PortfolioAnalysisBuilder portfolioAnalysisBuilder;
     private final PortfolioAnalysisRedisService portfolioAnalysisRedisService;
 
@@ -37,20 +37,22 @@ public class PortfolioAnalysisService {
             Integer pageNumber, 
             Integer pageSize,
             TimeInterval interval) {
+        // Use OVERALL as default if interval is null
+        TimeInterval effectiveInterval = interval != null ? interval : TimeInterval.OVERALL;
         log.debug("Analyzing portfolio - Portfolio: {}, User: {}, Interval: {}", 
-            portfolioId, userId, interval != null ? interval.getCode() : "null");
+            portfolioId, userId, effectiveInterval.getCode());
         
         try {
-            Optional<PortfolioAnalysis> cachedAnalysis = getCachedAnalysis(portfolioId, userId, interval);
+            Optional<PortfolioAnalysis> cachedAnalysis = getCachedAnalysis(portfolioId, userId, effectiveInterval);
             if (cachedAnalysis.isPresent()) {
                 return cachedAnalysis.get();
             }
 
             Instant startProcessing = Instant.now();
             log.info("Starting fresh portfolio analysis - Portfolio: {}, User: {}, Interval: {}", 
-                    portfolioId, userId, interval != null ? interval.getCode() : "null");
+                    portfolioId, userId, effectiveInterval.getCode());
             
-            List<StockPerformance> performances = getPortfolioPerformances(portfolioId, interval);
+            List<StockPerformance> performances = getPortfolioPerformances(portfolioId, effectiveInterval);
             if (performances == null) {
                 return null;
             }
@@ -60,11 +62,11 @@ public class PortfolioAnalysisService {
                 performances, 
                 pageNumber, 
                 pageSize, 
-                interval,
+                effectiveInterval,
                 startProcessing
             );
 
-            portfolioAnalysisRedisService.cachePortfolioAnalysis(analysis, portfolioId, userId, interval);
+            portfolioAnalysisRedisService.cachePortfolioAnalysis(analysis, portfolioId, userId, effectiveInterval);
             return analysis;
 
         } catch (Exception e) {
@@ -74,15 +76,17 @@ public class PortfolioAnalysisService {
     }
 
     private Optional<PortfolioAnalysis> getCachedAnalysis(String portfolioId, String userId, TimeInterval interval) {
+        // Use OVERALL as default if interval is null
+        TimeInterval effectiveInterval = interval != null ? interval : TimeInterval.OVERALL;
         log.debug("Checking cache for portfolio analysis - Portfolio: {}, User: {}, Interval: {}", 
-            portfolioId, userId, interval != null ? interval.getCode() : "null");
+            portfolioId, userId, effectiveInterval.getCode());
             
         Optional<PortfolioAnalysis> cachedAnalysis = 
-            portfolioAnalysisRedisService.getLatestAnalysis(portfolioId, userId, interval);
+            portfolioAnalysisRedisService.getLatestAnalysis(portfolioId, userId, effectiveInterval);
             
         if (cachedAnalysis.isPresent()) {
             log.info("Serving portfolio analysis from cache - Portfolio: {}, User: {}, Interval: {}", 
-                portfolioId, userId, interval != null ? interval.getCode() : "null");
+                portfolioId, userId, effectiveInterval.getCode());
         } else {
             log.debug("No cached analysis found for portfolio: {}, user: {}", portfolioId, userId);
         }
@@ -91,8 +95,10 @@ public class PortfolioAnalysisService {
     }
 
     private List<StockPerformance> getPortfolioPerformances(String portfolioId, TimeInterval interval) {
+        // Use OVERALL as default if interval is null
+        TimeInterval effectiveInterval = interval != null ? interval : TimeInterval.OVERALL;
         log.debug("Fetching portfolio performances - Portfolio: {}, Interval: {}", 
-            portfolioId, interval != null ? interval.getCode() : "null");
+            portfolioId, effectiveInterval.getCode());
             
         PortfolioModelV1 portfolio = portfolioService.getPortfolioById(UUID.fromString(portfolioId));
         if (portfolio == null) {
@@ -110,7 +116,7 @@ public class PortfolioAnalysisService {
         log.debug("Found {} equities in portfolio: {}", equities.size(), portfolioId);
         List<StockPerformance> performances = stockPerformanceService.calculateStockPerformances(
                 equities, 
-                interval);
+                effectiveInterval);
                 
         log.debug("Retrieved {} stock performances for portfolio: {}", 
             performances != null ? performances.size() : 0, portfolioId);
@@ -118,18 +124,38 @@ public class PortfolioAnalysisService {
     }
 
     private List<EquityModel> getEquitiesFromPortfolio(PortfolioModelV1 portfolio) {
-        log.debug("Extracting equities from portfolio: {}", portfolio.getId());
-        
-        if (portfolio.getEquityModels() == null) {
-            log.debug("No equity models found in portfolio: {}", portfolio.getId());
+        if (portfolio == null) {
+            log.warn("Null portfolio provided to getEquitiesFromPortfolio");
             return List.of();
         }
         
-        List<EquityModel> equities = portfolio.getEquityModels().stream()
-                .filter(equity -> equity.getAssetType() == AssetType.EQUITY)
+        String portfolioId = portfolio.getId() != null ? portfolio.getId().toString() : "unknown";
+        log.debug("Extracting equities from portfolio: {}", portfolioId);
+        
+        if (portfolio.getEquityModels() == null) {
+            log.debug("No equity models found in portfolio: {}", portfolioId);
+            return List.of();
+        }
+        
+        // Count invalid equities for logging
+        int totalEquities = (int) portfolio.getEquityModels().stream()
+                .filter(equity -> equity != null && equity.getAssetType() == AssetType.EQUITY)
+                .count();
+        
+        // Filter out null and invalid equities
+        List<EquityModel> validEquities = portfolio.getEquityModels().stream()
+                .filter(equity -> equity != null && equity.getAssetType() == AssetType.EQUITY)
+                .filter(equity -> equity.getSymbol() != null && !equity.getSymbol().isEmpty())
                 .toList();
+        
+        // Log only once with count of filtered equities
+        int invalidCount = totalEquities - validEquities.size();
+        if (invalidCount > 0) {
+            log.warn("Filtered out {} equities with null or empty symbols from portfolio: {}", 
+                    invalidCount, portfolioId);
+        }
                 
-        log.debug("Extracted {} equities from portfolio: {}", equities.size(), portfolio.getId());
-        return equities;
+        log.debug("Extracted {} valid equities from portfolio: {}", validEquities.size(), portfolioId);
+        return validEquities;
     }
 }

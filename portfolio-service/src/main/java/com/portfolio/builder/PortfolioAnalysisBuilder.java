@@ -15,7 +15,7 @@ import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.PerformanceMetrics;
 import com.portfolio.model.portfolio.PortfolioAnalysis;
 import com.portfolio.model.portfolio.PortfolioSummary;
-import com.portfolio.service.StockPerformanceService;
+import com.portfolio.service.PortfolioStockPerformanceService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 @Slf4j
 public class PortfolioAnalysisBuilder {
-    private final StockPerformanceService stockPerformanceService;
+    private final PortfolioStockPerformanceService stockPerformanceService;
 
     public PortfolioSummary buildSummary(List<StockPerformance> performances, String portfolioId, String userId) {
         double totalValue = stockPerformanceService.calculateCurrentValue(performances);

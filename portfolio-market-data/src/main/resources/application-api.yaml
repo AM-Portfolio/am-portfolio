@@ -1,0 +1,38 @@
+# Market Data API Configuration
+market-data:
+  api:
+    # Base URL for the market data API - AKS deployed service with Kubernetes FQDN and port
+    base-url: http://localhost:8092
+    
+    # API paths
+    ohlc-path: /api/v1/market-data/ohlc
+    historical-data-path: /api/v1/market-data/historical-data
+    
+    # Connection settings
+    connection-timeout: 5000
+    read-timeout: 5000
+    max-retry-attempts: 3
+
+# Logging configuration for API clients
+logging:
+  level:
+    com.portfolio.marketdata.client: INFO
+    # Set to DEBUG to see detailed API request/response logs
+    # com.portfolio.marketdata.client: DEBUG
+
+# Resilience settings
+resilience4j:
+  retry:
+    instances:
+      market-data-api:
+        max-attempts: 3
+        wait-duration: 1s
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+  circuitbreaker:
+    instances:
+      market-data-api:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 5
