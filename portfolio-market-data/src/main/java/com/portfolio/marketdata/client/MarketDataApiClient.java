@@ -100,7 +100,7 @@ public class MarketDataApiClient extends AbstractApiClient {
                 .map(symbol -> URLEncoder.encode(symbol, StandardCharsets.UTF_8))
                 .collect(Collectors.joining(","));
                 
-        String path = config.getOhlcPath() + "?symbols=" + symbolsParam + "&refresh=" + refresh;
+        String path = config.getOhlcEndpoint() + "?symbols=" + symbolsParam + "&refresh=" + refresh + "&isIndexSymbol=false";
         log.debug("Fetching OHLC data for {} from {} with refresh={}", String.join(",", symbols), path, refresh);
         
         // Deserialize to MarketDataResponseWrapper
@@ -172,7 +172,7 @@ public class MarketDataApiClient extends AbstractApiClient {
                 .map(symbol -> URLEncoder.encode(symbol, StandardCharsets.UTF_8))
                 .collect(Collectors.joining(","));
         
-        StringBuilder pathBuilder = new StringBuilder(config.getHistoricalDataPath())
+        StringBuilder pathBuilder = new StringBuilder(config.getHistoricalDataEndpoint())
                 .append("?symbols=").append(symbolsParam)
                 .append("&from=").append(request.getFromDate())
                 .append("&to=").append(request.getToDate())

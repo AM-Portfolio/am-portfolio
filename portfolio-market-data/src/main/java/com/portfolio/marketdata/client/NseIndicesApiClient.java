@@ -6,7 +6,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import com.portfolio.marketdata.client.base.AbstractApiClient;
-import com.portfolio.marketdata.config.NseIndicesApiConfig;
+import com.portfolio.marketdata.config.MarketDataApiConfig;
 import com.portfolio.marketdata.model.indices.IndexData;
 
 import lombok.extern.slf4j.Slf4j;
@@ -19,14 +19,14 @@ import reactor.core.publisher.Mono;
 @Component
 public class NseIndicesApiClient extends AbstractApiClient {
 
-    private final NseIndicesApiConfig config;
+    private final MarketDataApiConfig config;
 
     /**
      * Creates a new NseIndicesApiClient with the specified configuration.
      * 
      * @param config the NSE indices API configuration
      */
-    public NseIndicesApiClient(NseIndicesApiConfig config) {
+    public NseIndicesApiClient(MarketDataApiConfig config) {
         super(createWebClient(config));
         this.config = config;
     }
@@ -37,7 +37,7 @@ public class NseIndicesApiClient extends AbstractApiClient {
      * @param config the NSE indices API configuration
      * @return a WebClient
      */
-    private static WebClient createWebClient(NseIndicesApiConfig config) {
+    private static WebClient createWebClient(MarketDataApiConfig config) {
         return WebClient.builder()
                 .baseUrl(config.getBaseUrl())
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
@@ -82,7 +82,7 @@ public class NseIndicesApiClient extends AbstractApiClient {
      * @return a Mono of IndexData
      */
     public Mono<IndexData> getIndexData(String indexSymbol) {
-        String path = config.getIndicesPath() + "/" + indexSymbol;
+        String path = config.getNseIndicesEndpoint() + "/" + indexSymbol;
         log.debug("Fetching index data for {} from {}", indexSymbol, path);
         
         return get(path, IndexData.class)
