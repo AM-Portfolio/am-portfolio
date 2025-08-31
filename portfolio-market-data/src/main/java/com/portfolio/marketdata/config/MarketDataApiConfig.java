@@ -15,7 +15,7 @@ public class MarketDataApiConfig {
     /**
      * Base URL for the market data API.
      */
-    private String baseUrl = "http://localhost:8084";
+    private String baseUrl = "http://am-market-data.dev.svc.cluster.local:8080";
     
     /**
      * API path for OHLC data.

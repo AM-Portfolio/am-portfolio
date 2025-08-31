@@ -17,7 +17,7 @@ public class NseIndicesApiConfig {
     /**
      * Base URL for the NSE indices API.
      */
-    private String baseUrl = "http://localhost:8084";
+    private String baseUrl = "http://am-nse-indices.dev.svc.cluster.local:8080";
     
     /**
      * API path for NSE indices data.
