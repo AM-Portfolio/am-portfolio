@@ -61,7 +61,7 @@ public abstract class AbstractAnalyticsProvider<T, I> {
         
         log.info("Fetching market data for {} symbols", symbols.size());
         try {
-            Map<String, MarketData> marketData = marketDataService.getOhlcData(symbols);
+            Map<String, MarketData> marketData = marketDataService.getOhlcData(symbols, false);
             if (marketData == null) {
                 log.warn("Market data service returned null response");
                 return Collections.emptyMap();
@@ -91,13 +91,13 @@ public abstract class AbstractAnalyticsProvider<T, I> {
         try {
             // Create HistoricalDataRequest from TimeFrameRequest
             HistoricalDataRequest request = HistoricalDataRequest.builder()
-                    .symbols(symbols)
+                    .symbols(String.join(",", symbols))
                     .fromDate(timeFrameRequest.getFromDate())
                     .toDate(timeFrameRequest.getToDate())
-                    .filterType(FilterType.START_END)
-                    .instrumentType(InstrumentType.STOCK)
+                    .filterType(FilterType.START_END.getValue())
+                    .instrumentType(InstrumentType.STOCK.getValue())
                     .continuous(false)
-                    .timeFrame(timeFrameRequest.getTimeFrame())
+                    .timeFrame(timeFrameRequest.getTimeFrame().getValue())
                     .build();
             
             Map<String, MarketData> historicalData = marketDataService.getHistoricalData(request);

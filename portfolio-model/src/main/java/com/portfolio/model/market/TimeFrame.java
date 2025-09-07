@@ -4,13 +4,18 @@ package com.portfolio.model.market;
  * Enum representing different time intervals for market data.
  */
 public enum TimeFrame {
-    MINUTE("minute"),
-    FIVE_MIN("5min"),
-    TEN_MIN("10min"),
-    FIFTEEN_MIN("15mins"),
-    THIRTY_MIN("30min"),
-    HOUR("hour"),
-    DAY("day");
+    MINUTE("1m"),
+    THREE_MIN("3m"),
+    FIVE_MIN("5m"),
+    TEN_MIN("10m"),
+    FIFTEEN_MIN("15m"),
+    THIRTY_MIN("30m"),
+    HOUR("1H"),
+    FOUR_HOUR("4H"),
+    DAY("1D"),
+    WEEK("1W"),
+    MONTH("1M"),
+    YEAR("1Y");
     
     private final String value;
     

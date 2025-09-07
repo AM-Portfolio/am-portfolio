@@ -35,15 +35,15 @@ public class MarketDataApiConfig {
     /**
      * Connection timeout in milliseconds.
      */
-    private int connectionTimeout = 5000;
+    private int connectionTimeout = 10000;
     
     /**
      * Read timeout in milliseconds.
      */
-    private int readTimeout = 5000;
+    private int readTimeout = 10000;
     
     /**
      * Maximum number of retry attempts.
      */
-    private int maxRetryAttempts = 3;
+    private int maxRetryAttempts = 2;
 }

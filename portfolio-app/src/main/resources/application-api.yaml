@@ -10,9 +10,9 @@ market-data:
     nse-indices-endpoint: /api/v1/nse-indices
 
     # Connection settings
-    connection-timeout: 5000
-    read-timeout: 5000
-    max-retry-attempts: 3
+    connection-timeout: 10000
+    read-timeout: 10000
+    max-retry-attempts: 2
 
 # Resilience settings
 resilience4j:

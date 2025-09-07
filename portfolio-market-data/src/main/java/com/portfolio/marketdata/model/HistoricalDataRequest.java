@@ -2,8 +2,10 @@ package com.portfolio.marketdata.model;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
-import com.portfolio.model.market.TimeFrame;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -14,40 +16,50 @@ import lombok.NoArgsConstructor;
  * Request parameters for historical market data.
  */
 @Data
-@Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class HistoricalDataRequest {
     
     /**
-     * List of symbols to fetch historical data for
+     * Symbols to fetch historical data for, as a comma-separated string
      */
-    private List<String> symbols;
+    private String symbols;
+    
+    /**
+     * List of symbols to fetch historical data for
+     * This field is used for backward compatibility and is not serialized
+     */
+    @JsonIgnore
+    private List<String> symbolsList;
     
     /**
      * Start date for historical data (inclusive)
      */
+    @JsonProperty("from")
     private LocalDate fromDate;
     
     /**
      * End date for historical data (inclusive)
      */
+    @JsonProperty("to")
     private LocalDate toDate;
     
     /**
      * Time interval for data points (e.g., DAY, FIFTEEN_MIN)
      */
-    private TimeFrame timeFrame;
+    @JsonProperty("interval")
+    private String timeFrame;
     
     /**
      * Instrument type (e.g., EQ for equity)
      */
-    private InstrumentType instrumentType;
+    private String instrumentType;
     
     /**
      * Type of filtering to apply (ALL, START_END, CUSTOM)
      */
-    private FilterType filterType;
+    private String filterType;
     
     /**
      * Frequency for CUSTOM filtering (required when filterType is CUSTOM)
@@ -62,6 +74,11 @@ public class HistoricalDataRequest {
     /**
      * Whether to refresh the data or use cached data
      */
-    @Builder.Default
-    private Boolean refresh = false;
+    private Boolean forceRefresh = false;
+    
+    /**
+     * Additional parameters for the request
+     */
+    private Map<String, String> additionalParams;
+    
 }
