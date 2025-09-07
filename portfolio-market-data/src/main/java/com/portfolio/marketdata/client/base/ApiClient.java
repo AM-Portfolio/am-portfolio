@@ -37,47 +37,25 @@ public interface ApiClient {
     int getMaxRetryAttempts();
     
     /**
-     * Makes a GET request to the specified path.
+     * Makes a GET request to the specified path with optional query parameters.
      * 
      * @param <T> the response type
      * @param path the API path
      * @param responseType the class of the response type
-     * @return a Mono of the response type
-     */
-    <T> Mono<T> get(String path, Class<T> responseType);
-    
-    /**
-     * Makes a GET request to the specified path with query parameters.
-     * 
-     * @param <T> the response type
-     * @param path the API path
-     * @param responseType the class of the response type
-     * @param queryParams the query parameters
+     * @param queryParams optional query parameters as key-value pairs
      * @return a Mono of the response type
      */
     <T> Mono<T> get(String path, Class<T> responseType, Object... queryParams);
     
     /**
-     * Makes a POST request to the specified path with a request body.
+     * Makes a POST request to the specified path with a request body and optional query parameters.
      * 
      * @param <T> the response type
      * @param <R> the request body type
      * @param path the API path
      * @param requestBody the request body
      * @param responseType the class of the response type
-     * @return a Mono of the response type
-     */
-    <T, R> Mono<T> post(String path, R requestBody, Class<T> responseType);
-    
-    /**
-     * Makes a POST request to the specified path with a request body and query parameters.
-     * 
-     * @param <T> the response type
-     * @param <R> the request body type
-     * @param path the API path
-     * @param requestBody the request body
-     * @param responseType the class of the response type
-     * @param queryParams the query parameters
+     * @param queryParams optional query parameters as key-value pairs
      * @return a Mono of the response type
      */
     <T, R> Mono<T> post(String path, R requestBody, Class<T> responseType, Object... queryParams);

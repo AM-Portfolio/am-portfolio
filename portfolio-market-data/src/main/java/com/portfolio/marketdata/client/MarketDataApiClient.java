@@ -46,7 +46,7 @@ public class MarketDataApiClient extends AbstractApiClient {
         OhlcDataRequest request = OhlcDataRequest.builder()
                 .symbols(symbolsParam)
                 .timeFrame(timeFrame)
-                .forceRefresh(refresh)
+                .refresh(refresh)
                 .indexSymbol(false)
                 .build();
         
@@ -87,13 +87,10 @@ public class MarketDataApiClient extends AbstractApiClient {
      */
     public Mono<HistoricalDataResponseWrapper> getHistoricalData(HistoricalDataRequest request) {
         // Ensure we have a comma-separated string of symbols
-        if (request.getSymbols() == null && request.getSymbolsList() != null) {
-            request.setSymbols(String.join(",", request.getSymbolsList()));
-        }
         
         log.debug("Fetching historical data for {} from {} to {} with interval={}, filterType={}, forceRefresh={}", 
                 request.getSymbols(), request.getFromDate(), request.getToDate(), 
-                request.getTimeFrame(), request.getFilterType(), request.getForceRefresh());
+                request.getInterval(), request.getFilterType(), request.getForceRefresh());
         
         // Use POST with the request body
         return post(config.getHistoricalDataEndpoint(), request, HistoricalDataResponseWrapper.class)

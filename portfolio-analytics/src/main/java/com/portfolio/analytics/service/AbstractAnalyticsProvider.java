@@ -1,5 +1,6 @@
 package com.portfolio.analytics.service;
 
+import com.portfolio.analytics.model.AnalyticsType;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.model.FilterType;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
@@ -97,7 +98,7 @@ public abstract class AbstractAnalyticsProvider<T, I> {
                     .filterType(FilterType.START_END.getValue())
                     .instrumentType(InstrumentType.STOCK.getValue())
                     .continuous(false)
-                    .timeFrame(timeFrameRequest.getTimeFrame().getValue())
+                    .interval(timeFrameRequest.getTimeFrame().getValue())
                     .build();
             
             Map<String, MarketData> historicalData = marketDataService.getHistoricalData(request);

@@ -1,5 +1,7 @@
-package com.portfolio.analytics.service;
+package com.portfolio.analytics.service.providers.index;
 
+import com.portfolio.analytics.model.AnalyticsType;
+import com.portfolio.analytics.service.AnalyticsFactory;
 import com.portfolio.model.analytics.AnalyticsComponent;
 import com.portfolio.model.analytics.GainerLoser;
 import com.portfolio.model.analytics.Heatmap;

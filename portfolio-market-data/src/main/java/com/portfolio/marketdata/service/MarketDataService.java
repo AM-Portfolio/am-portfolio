@@ -52,7 +52,8 @@ public class MarketDataService {
         
         Map<String, MarketData> marketDataMap = new HashMap<>();
         historicalData.forEach((symbol, response) -> {
-            marketDataMap.put(symbol, MarketDataConverter.fromHistoricalDataResponse(response));
+            String cleanedSymbol = cleanSymbol(symbol);
+            marketDataMap.put(cleanedSymbol, MarketDataConverter.fromHistoricalDataResponse(response));
         });
         
         return marketDataMap;
@@ -68,7 +69,7 @@ public class MarketDataService {
         
         log.info("Getting historical data for {} from {} to {} with interval={}, filterType={}", 
                 request.getSymbols(), request.getFromDate(), request.getToDate(), 
-                request.getTimeFrame(), request.getFilterType());
+                request.getInterval(), request.getFilterType());
         
         try {
             HistoricalDataResponseWrapper response = marketDataApiClient.getHistoricalData(request).block();
@@ -96,13 +97,25 @@ public class MarketDataService {
     }
 
     /**
-     * Convert MarketDataResponseWrapper to a map of MarketData objects.
-     * This is a common method used by both synchronous and asynchronous OHLC data fetching methods.
+     * Cleans a symbol by removing exchange prefixes like NSE:, BSE:, etc.
      * 
-     * @param wrapper The MarketDataResponseWrapper to convert
-     * @param isAsync Whether this is being called from an async context (for logging purposes)
-     * @return Map of symbols to their respective market data
+     * @param symbol The symbol with potential exchange prefix
+     * @return The cleaned symbol without the exchange prefix
      */
+    private String cleanSymbol(String symbol) {
+        if (symbol == null || symbol.isEmpty()) {
+            return symbol;
+        }
+        
+        // Check for exchange prefix pattern (like NSE:, BSE:, etc.)
+        int colonIndex = symbol.indexOf(':');
+        if (colonIndex > 0 && colonIndex < symbol.length() - 1) {
+            return symbol.substring(colonIndex + 1);
+        }
+        
+        return symbol;
+    }
+    
     private Map<String, MarketData> convertToMarketDataMap(MarketDataResponseWrapper wrapper, boolean isAsync) {
         if (wrapper == null) {
             log.warn("Received null response wrapper from market data API {}", isAsync ? "(async)" : "");
@@ -118,7 +131,8 @@ public class MarketDataService {
         // Convert MarketDataResponse to MarketData
         Map<String, MarketData> marketDataMap = new HashMap<>();
         responseData.forEach((symbol, response) -> {
-            marketDataMap.put(symbol, MarketDataConverter.fromMarketDataResponse(response));
+            String cleanedSymbol = cleanSymbol(symbol);
+            marketDataMap.put(cleanedSymbol, MarketDataConverter.fromMarketDataResponse(response));
         });
         
         return marketDataMap;
@@ -214,7 +228,7 @@ public class MarketDataService {
                 .symbols(String.join(",", symbols))
                 .fromDate(fromDate)
                 .toDate(toDate)
-                .timeFrame(tf.getValue())
+                .interval(tf.getValue())
                 .instrumentType(it.getValue())
                 .filterType(ft.getValue())
                 .build();
@@ -224,7 +238,7 @@ public class MarketDataService {
                     .symbols(request.getSymbols())
                     .fromDate(request.getFromDate())
                     .toDate(request.getToDate())
-                    .timeFrame(request.getTimeFrame())
+                    .interval(request.getInterval())
                     .instrumentType(request.getInstrumentType())
                     .filterType(request.getFilterType());
                     

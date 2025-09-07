@@ -1,11 +1,9 @@
-package com.portfolio.analytics.service.providers;
+package com.portfolio.analytics.service.providers.portfolio;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.service.PortfolioService;
-import com.portfolio.analytics.service.AbstractPortfolioAnalyticsProvider;
-import com.portfolio.analytics.service.AnalyticsType;
-import com.portfolio.analytics.service.utils.AnalyticsUtils;
+import com.portfolio.analytics.model.AnalyticsType;
 import com.portfolio.analytics.service.utils.AllocationUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
@@ -49,57 +47,44 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
     private SectorAllocation generateSectorAllocation(String portfolioId, TimeFrameRequest timeFrameRequest) {
         log.info("Calculating sector allocations for portfolio: {} with timeFrame: {}", portfolioId, timeFrameRequest);
         
-        // Get portfolio data
-        PortfolioModelV1 portfolio = getPortfolio(portfolioId);
-        if (portfolio == null || portfolio.getEquityModels() == null || portfolio.getEquityModels().isEmpty()) {
-            log.warn("No portfolio or holdings found for ID: {}", portfolioId);
-            return createEmptyResult();
-        }
+        return processPortfolioData(
+            portfolioId,
+            timeFrameRequest,
+            this::createEmptyResult,
+            (portfolio, portfolioSymbols, marketData) -> {
         
-        // Get symbols from portfolio holdings
-        List<String> portfolioSymbols = getPortfolioSymbols(portfolio);
-        if (portfolioSymbols.isEmpty()) {
-            log.warn("No stock symbols found in portfolio: {}", portfolioId);
-            return createEmptyResult();
-        }
-        
-        // Fetch market data for all stocks in the portfolio using AnalyticsUtils
-        Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, timeFrameRequest);
-        if (marketData.isEmpty()) {
-            log.warn("No market data available for portfolio: {}", portfolioId);
-            return createEmptyResult();
-        }
-        
-        // Create a map of symbol to holding quantity
-        Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
-        
-        // Group stocks by sector and industry
-        Map<String, List<String>> sectorToStocks = securityDetailsService.groupSymbolsBySector(portfolioSymbols);
-        Map<String, List<String>> industryToStocks = securityDetailsService.groupSymbolsByIndustry(portfolioSymbols);
-        
-        log.debug("Sector groups for portfolio {}: {}", portfolioId, sectorToStocks.keySet());
-        log.debug("Industry groups for portfolio {}: {}", portfolioId, industryToStocks.keySet());
-        
-        // Map industry to parent sector
-        Map<String, String> industryToSector = mapIndustriesToSectors(industryToStocks, sectorToStocks);
-        
-        // Calculate market values for each stock
-        Map<String, Double> stockToMarketValue = new HashMap<>();
-        double totalPortfolioValue = calculateMarketValues(marketData, symbolToQuantity, stockToMarketValue);
-        
-        // Calculate sector and industry weights
-        List<SectorAllocation.SectorWeight> sectorWeights = calculateSectorWeights(
-                sectorToStocks, stockToMarketValue, totalPortfolioValue);
-        
-        List<SectorAllocation.IndustryWeight> industryWeights = calculateIndustryWeights(
-                industryToStocks, industryToSector, stockToMarketValue, totalPortfolioValue);
-        
-        return SectorAllocation.builder()
-            
-            .timestamp(Instant.now())
-            .sectorWeights(sectorWeights)
-            .industryWeights(industryWeights)
-            .build();
+                // Create a map of symbol to holding quantity
+                Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
+                
+                // Group stocks by sector and industry
+                Map<String, List<String>> sectorToStocks = securityDetailsService.groupSymbolsBySector(portfolioSymbols);
+                Map<String, List<String>> industryToStocks = securityDetailsService.groupSymbolsByIndustry(portfolioSymbols);
+                
+                log.debug("Sector groups for portfolio {}: {}", portfolioId, sectorToStocks.keySet());
+                log.debug("Industry groups for portfolio {}: {}", portfolioId, industryToStocks.keySet());
+                
+                // Map industry to parent sector
+                Map<String, String> industryToSector = mapIndustriesToSectors(industryToStocks, sectorToStocks);
+                
+                // Calculate market values for each stock
+                Map<String, Double> stockToMarketValue = new HashMap<>();
+                double totalPortfolioValue = calculateMarketValues(marketData, symbolToQuantity, stockToMarketValue);
+                
+                // Calculate sector and industry weights
+                List<SectorAllocation.SectorWeight> sectorWeights = calculateSectorWeights(
+                        sectorToStocks, stockToMarketValue, totalPortfolioValue);
+                
+                List<SectorAllocation.IndustryWeight> industryWeights = calculateIndustryWeights(
+                        industryToStocks, industryToSector, stockToMarketValue, totalPortfolioValue);
+                
+                return SectorAllocation.builder()
+                    
+                    .timestamp(Instant.now())
+                    .sectorWeights(sectorWeights)
+                    .industryWeights(industryWeights)
+                    .build();
+            }
+        );
     }
     
     /**

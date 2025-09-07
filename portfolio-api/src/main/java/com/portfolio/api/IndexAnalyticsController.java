@@ -1,9 +1,9 @@
 package com.portfolio.api;
 
+import com.portfolio.analytics.service.providers.index.IndexAnalyticsFacade;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.analytics.request.CoreIdentifiers;
 import com.portfolio.model.analytics.response.AdvancedAnalyticsResponse;
-import com.portfolio.analytics.service.IndexAnalyticsFacade;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

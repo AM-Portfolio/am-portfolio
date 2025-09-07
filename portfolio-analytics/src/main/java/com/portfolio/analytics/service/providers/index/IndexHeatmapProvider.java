@@ -1,7 +1,6 @@
-package com.portfolio.analytics.service.providers;
+package com.portfolio.analytics.service.providers.index;
 
-import com.portfolio.analytics.service.AbstractIndexAnalyticsProvider;
-import com.portfolio.analytics.service.AnalyticsType;
+import com.portfolio.analytics.model.AnalyticsType;
 import com.portfolio.analytics.service.utils.AnalyticsUtils;
 import com.portfolio.analytics.service.utils.HeatmapUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;

@@ -1,11 +1,9 @@
-package com.portfolio.analytics.service.providers;
+package com.portfolio.analytics.service.providers.portfolio;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.service.PortfolioService;
-import com.portfolio.analytics.service.AbstractPortfolioAnalyticsProvider;
-import com.portfolio.analytics.service.AnalyticsType;
-import com.portfolio.analytics.service.utils.AnalyticsUtils;
+import com.portfolio.analytics.model.AnalyticsType;
 import com.portfolio.analytics.service.utils.HeatmapUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
@@ -40,50 +38,37 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         log.info("Generating sector heatmap for portfolio: {}", request.getCoreIdentifiers().getPortfolioId());
         
         String portfolioId = request.getCoreIdentifiers().getPortfolioId();
-        // Get portfolio data
-        PortfolioModelV1 portfolio = getPortfolio(portfolioId);
-        if (portfolio == null || portfolio.getEquityModels() == null || portfolio.getEquityModels().isEmpty()) {
-            log.warn("No portfolio or holdings found for ID: {}", portfolioId);
-            return createEmptyResult();
-        }
+        return processPortfolioData(
+            portfolioId,
+            request.getTimeFrameRequest(),
+            this::createEmptyResult,
+            (portfolio, portfolioSymbols, marketData) -> {
         
-        // Get symbols from portfolio holdings
-        List<String> portfolioSymbols = getPortfolioSymbols(portfolio);
-        if (portfolioSymbols.isEmpty()) {
-            log.warn("No stock symbols found in portfolio: {}", portfolioId);
-            return createEmptyResult();
-        }
-        
-        // Fetch market data for all stocks in the portfolio
-        Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, request.getTimeFrameRequest());
-        if (marketData.isEmpty()) {
-            log.warn("No market data available for portfolio: {}", portfolioId);
-            return createEmptyResult();
-        }
-        
-        // Create a map of symbol to holding quantity
-        Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
-        
-        // Group stocks by sector
-        Map<String, List<String>> sectorToStocks = securityDetailsService.groupSymbolsBySector(portfolioSymbols);
-        
-        // Process market data by sector
-        Map<String, List<MarketData>> sectorMarketDataMap = new HashMap<>();
-        Map<String, List<Double>> sectorQuantitiesMap = new HashMap<>();
-        groupMarketDataBySector(marketData, sectorToStocks, symbolToQuantity, sectorMarketDataMap, sectorQuantitiesMap);
-        
-        // Calculate performance for each sector
-        List<Heatmap.SectorPerformance> sectorPerformances = calculateSectorPerformances(sectorMarketDataMap, sectorQuantitiesMap);
-        
-        // Sort sectors by performance (highest to lowest)
-        sectorPerformances.sort(Comparator.comparing(Heatmap.SectorPerformance::getPerformance).reversed());
-        
-        log.info("Generated heatmap with {} sectors for portfolio: {}", sectorPerformances.size(), portfolioId);
-        
-        return Heatmap.builder()
-            .timestamp(Instant.now())
-            .sectors(sectorPerformances)
-            .build();
+                // Create a map of symbol to holding quantity
+                Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
+                
+                // Group stocks by sector
+                Map<String, List<String>> sectorToStocks = securityDetailsService.groupSymbolsBySector(portfolioSymbols);
+                
+                // Process market data by sector
+                Map<String, List<MarketData>> sectorMarketDataMap = new HashMap<>();
+                Map<String, List<Double>> sectorQuantitiesMap = new HashMap<>();
+                groupMarketDataBySector(marketData, sectorToStocks, symbolToQuantity, sectorMarketDataMap, sectorQuantitiesMap);
+                
+                // Calculate performance for each sector
+                List<Heatmap.SectorPerformance> sectorPerformances = calculateSectorPerformances(sectorMarketDataMap, sectorQuantitiesMap);
+                
+                // Sort sectors by performance (highest to lowest)
+                sectorPerformances.sort(Comparator.comparing(Heatmap.SectorPerformance::getPerformance).reversed());
+                
+                log.info("Generated heatmap with {} sectors for portfolio: {}", sectorPerformances.size(), portfolioId);
+                
+                return Heatmap.builder()
+                    .timestamp(Instant.now())
+                    .sectors(sectorPerformances)
+                    .build();
+            }
+        );
     }
     
     /**

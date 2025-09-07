@@ -62,168 +62,110 @@ public abstract class AbstractApiClient implements ApiClient {
     }
 
     @Override
-    public <T> Mono<T> get(String path, Class<T> responseType) {
-        String requestId = generateRequestId();
-        String fullUrl = config.getBaseUrl() + path;
-        log.info("API Request [{}] - GET - Path: {} - ResponseType: {}", requestId, path, responseType.getSimpleName());
-        
-        // Log curl command for debugging
-        log.debug("API Request [{}] - curl command: curl -X GET '{}' -H 'Content-Type: application/json'", 
-                requestId, fullUrl);
-        
-        return executeWithRetry(client -> client
-                .get()
-                .uri(path)
-                .retrieve()
-                .bodyToMono(responseType), requestId);
-    }
-
-    @Override
     public <T> Mono<T> get(String path, Class<T> responseType, Object... queryParams) {
         String requestId = generateRequestId();
         
         // Build query params string for logging
-        StringBuilder paramsLog = new StringBuilder();
-        if (queryParams.length > 0) {
-            for (int i = 0; i < queryParams.length; i += 2) {
-                if (i > 0) paramsLog.append(", ");
-                if (i + 1 < queryParams.length) {
-                    paramsLog.append(queryParams[i]).append("=").append(queryParams[i + 1]);
-                }
-            }
-        }
+        String queryParamsStr = queryParams.length > 0 ? buildQueryParamString(queryParams) : "";
         
-        log.info("API Request [{}] - GET - Path: {} - Params: {} - ResponseType: {}", 
-                requestId, path, paramsLog.toString(), responseType.getSimpleName());
+        // Log request information
+        if (queryParams.length > 0) {
+            log.info("API Request [{}] - GET - Path: {} - Params: {} - ResponseType: {}", 
+                    requestId, path, queryParamsStr, responseType.getSimpleName());
+        } else {
+            log.info("API Request [{}] - GET - Path: {} - ResponseType: {}", 
+                    requestId, path, responseType.getSimpleName());
+        }
         
         // Build the full URL for curl command
-        StringBuilder curlUrlBuilder = new StringBuilder(config.getBaseUrl());
+        StringBuilder urlBuilder = new StringBuilder(config.getBaseUrl());
         if (!path.startsWith("/")) {
-            curlUrlBuilder.append("/");
+            urlBuilder.append("/");
         }
-        curlUrlBuilder.append(path);
-        if (path.contains("?")) {
-            curlUrlBuilder.append("&");
+        urlBuilder.append(path);
+        
+        // Log curl command for debugging
+        logCurlCommand(requestId, "GET", urlBuilder.toString(), queryParamsStr, null);
+        
+        // Execute the request with or without query parameters
+        if (queryParams.length > 0) {
+            return executeWithRetry(client -> client
+                    .get()
+                    .uri(uriBuilder -> {
+                        if (queryParams.length % 2 != 0) {
+                            throw new IllegalArgumentException("Query parameters must be provided as key-value pairs");
+                        }
+                        
+                        for (int i = 0; i < queryParams.length; i += 2) {
+                            uriBuilder = uriBuilder.queryParam(queryParams[i].toString(), queryParams[i + 1]);
+                        }
+                        
+                        return uriBuilder.path(path).build();
+                    })
+                    .retrieve()
+                    .bodyToMono(responseType), requestId);
         } else {
-            curlUrlBuilder.append("?");
+            return executeWithRetry(client -> client
+                    .get()
+                    .uri(path)
+                    .retrieve()
+                    .bodyToMono(responseType), requestId);
         }
-        
-        // Add query parameters to curl URL
-        StringBuilder curlParamsBuilder = new StringBuilder();
-        for (int i = 0; i < queryParams.length; i += 2) {
-            if (i > 0) curlParamsBuilder.append("&");
-            if (i + 1 < queryParams.length) {
-                Object value = queryParams[i + 1];
-                String valueStr = value != null ? value.toString() : "";
-                curlParamsBuilder.append(queryParams[i]).append("=").append(valueStr);
-            }
-        }
-        
-        // Log curl command for debugging
-        log.debug("API Request [{}] - curl command: curl -X GET '{}{}' -H 'Content-Type: application/json'", 
-                requestId, curlUrlBuilder.toString(), curlParamsBuilder.toString());
-        
-        return executeWithRetry(client -> client
-                .get()
-                .uri(uriBuilder -> {
-                    if (queryParams.length % 2 != 0) {
-                        throw new IllegalArgumentException("Query parameters must be provided as key-value pairs");
-                    }
-                    
-                    for (int i = 0; i < queryParams.length; i += 2) {
-                        uriBuilder = uriBuilder.queryParam(queryParams[i].toString(), queryParams[i + 1]);
-                    }
-                    
-                    return uriBuilder.path(path).build();
-                })
-                .retrieve()
-                .bodyToMono(responseType), requestId);
-    }
-    
-    @Override
-    public <T, R> Mono<T> post(String path, R requestBody, Class<T> responseType) {
-        String requestId = generateRequestId();
-        String requestBodyStr = serializeRequestBody(requestBody);
-        
-        log.info("API Request [{}] - POST - Path: {} - RequestBody: {} - ResponseType: {}", 
-                requestId, path, requestBodyStr, responseType.getSimpleName());
-        
-        // Log curl command for debugging
-        String fullUrl = config.getBaseUrl() + path;
-        log.debug("API Request [{}] - curl command: curl -X POST '{}' -H 'Content-Type: application/json' -d '{}'", 
-                requestId, fullUrl, requestBodyStr);
-        
-        return executeWithRetry(client -> client
-                .post()
-                .uri(path)
-                .bodyValue(requestBody)
-                .retrieve()
-                .bodyToMono(responseType), requestId);
     }
     
     @Override
     public <T, R> Mono<T> post(String path, R requestBody, Class<T> responseType, Object... queryParams) {
         String requestId = generateRequestId();
-        
-        // Build query params string for logging
-        StringBuilder paramsLog = new StringBuilder();
-        if (queryParams.length > 0) {
-            for (int i = 0; i < queryParams.length; i += 2) {
-                if (i > 0) paramsLog.append(", ");
-                if (i + 1 < queryParams.length) {
-                    paramsLog.append(queryParams[i]).append("=").append(queryParams[i + 1]);
-                }
-            }
-        }
-        
         String requestBodyStr = serializeRequestBody(requestBody);
         
-        log.info("API Request [{}] - POST - Path: {} - Params: {} - RequestBody: {} - ResponseType: {}", 
-                requestId, path, paramsLog.toString(), requestBodyStr, responseType.getSimpleName());
+        // Build query params string for logging
+        String queryParamsStr = queryParams.length > 0 ? buildQueryParamString(queryParams) : "";
+        
+        // Log request information
+        if (queryParams.length > 0) {
+            log.info("API Request [{}] - POST - Path: {} - Params: {} - RequestBody: {} - ResponseType: {}", 
+                    requestId, path, queryParamsStr, requestBodyStr, responseType.getSimpleName());
+        } else {
+            log.info("API Request [{}] - POST - Path: {} - RequestBody: {} - ResponseType: {}", 
+                    requestId, path, requestBodyStr, responseType.getSimpleName());
+        }
         
         // Build the full URL for curl command
-        StringBuilder curlUrlBuilder = new StringBuilder(config.getBaseUrl());
+        StringBuilder urlBuilder = new StringBuilder(config.getBaseUrl());
         if (!path.startsWith("/")) {
-            curlUrlBuilder.append("/");
+            urlBuilder.append("/");
         }
-        curlUrlBuilder.append(path);
-        if (path.contains("?")) {
-            curlUrlBuilder.append("&");
-        } else {
-            curlUrlBuilder.append("?");
-        }
-        
-        // Add query parameters to curl URL
-        StringBuilder curlParamsBuilder = new StringBuilder();
-        for (int i = 0; i < queryParams.length; i += 2) {
-            if (i > 0) curlParamsBuilder.append("&");
-            if (i + 1 < queryParams.length) {
-                Object value = queryParams[i + 1];
-                String valueStr = value != null ? value.toString() : "";
-                curlParamsBuilder.append(queryParams[i]).append("=").append(valueStr);
-            }
-        }
+        urlBuilder.append(path);
         
         // Log curl command for debugging
-        log.debug("API Request [{}] - curl command: curl -X POST '{}{}' -H 'Content-Type: application/json' -d '{}'", 
-                requestId, curlUrlBuilder.toString(), curlParamsBuilder.toString(), requestBodyStr);
+        logCurlCommand(requestId, "POST", urlBuilder.toString(), queryParamsStr, requestBody);
         
-        return executeWithRetry(client -> client
-                .post()
-                .uri(uriBuilder -> {
-                    if (queryParams.length % 2 != 0) {
-                        throw new IllegalArgumentException("Query parameters must be provided as key-value pairs");
-                    }
-                    
-                    for (int i = 0; i < queryParams.length; i += 2) {
-                        uriBuilder = uriBuilder.queryParam(queryParams[i].toString(), queryParams[i + 1]);
-                    }
-                    
-                    return uriBuilder.path(path).build();
-                })
-                .bodyValue(requestBody)
-                .retrieve()
-                .bodyToMono(responseType), requestId);
+        // Execute the request with or without query parameters
+        if (queryParams.length > 0) {
+            return executeWithRetry(client -> client
+                    .post()
+                    .uri(uriBuilder -> {
+                        if (queryParams.length % 2 != 0) {
+                            throw new IllegalArgumentException("Query parameters must be provided as key-value pairs");
+                        }
+                        
+                        for (int i = 0; i < queryParams.length; i += 2) {
+                            uriBuilder = uriBuilder.queryParam(queryParams[i].toString(), queryParams[i + 1]);
+                        }
+                        
+                        return uriBuilder.path(path).build();
+                    })
+                    .bodyValue(requestBody)
+                    .retrieve()
+                    .bodyToMono(responseType), requestId);
+        } else {
+            return executeWithRetry(client -> client
+                    .post()
+                    .uri(path)
+                    .bodyValue(requestBody)
+                    .retrieve()
+                    .bodyToMono(responseType), requestId);
+        }
     }
     
     @Override
@@ -336,6 +278,7 @@ public abstract class AbstractApiClient implements ApiClient {
                 return json.substring(0, maxLength) + "... [truncated]";
             }
             return json;
+            
         } catch (JsonProcessingException e) {
             // Fallback to toString() if serialization fails
             String result = requestBody.toString();
@@ -345,5 +288,91 @@ public abstract class AbstractApiClient implements ApiClient {
             }
             return result;
         }
+    }
+    
+    /**
+     * Builds a query parameter string for logging and curl commands.
+     * 
+     * @param queryParams the query parameters as key-value pairs
+     * @return a formatted query parameter string
+     */
+    private String buildQueryParamString(Object... queryParams) {
+        if (queryParams == null || queryParams.length == 0) {
+            return "";
+        }
+        
+        if (queryParams.length % 2 != 0) {
+            throw new IllegalArgumentException("Query parameters must be provided as key-value pairs");
+        }
+        
+        StringBuilder paramsBuilder = new StringBuilder();
+        for (int i = 0; i < queryParams.length; i += 2) {
+            if (i > 0) paramsBuilder.append("&");
+            if (i + 1 < queryParams.length) {
+                Object value = queryParams[i + 1];
+                String valueStr = value != null ? value.toString() : "";
+                paramsBuilder.append(queryParams[i]).append("=").append(valueStr);
+            }
+        }
+        
+        return paramsBuilder.toString();
+    }
+    
+    /**
+     * Logs a curl command for debugging purposes.
+     * 
+     * @param requestId the unique identifier for this request
+     * @param method the HTTP method (GET, POST, etc.)
+     * @param url the full URL
+     * @param queryParams the query parameters string (can be null)
+     * @param requestBody the request body object (can be null)
+     */
+    private <R> void logCurlCommand(String requestId, String method, String url, String queryParams, R requestBody) {
+        StringBuilder curlCommand = new StringBuilder("curl -X ").append(method).append(" '");
+        
+        // Add URL and query parameters
+        curlCommand.append(url);
+        if (queryParams != null && !queryParams.isEmpty()) {
+            curlCommand.append(url.contains("?") ? "&" : "?").append(queryParams);
+        }
+        curlCommand.append("'");
+        
+        // Add headers
+        curlCommand.append(" -H 'Content-Type: application/json'")
+                 .append(" -H 'Accept: application/json'")
+                 .append(" -H 'User-Agent: Mozilla/5.0'");
+        
+        // Add request body if present
+        if (requestBody != null) {
+            String fullRequestBody;
+            try {
+                // Ensure we're using a properly configured ObjectMapper for consistent JSON formatting
+                ObjectMapper mapper = new ObjectMapper();
+                // Use writeValueAsString to get proper JSON format
+                fullRequestBody = mapper.writeValueAsString(requestBody);
+            } catch (JsonProcessingException e) {
+                fullRequestBody = requestBody.toString();
+                
+                // If the toString() doesn't look like JSON, try to format it as JSON
+                if (!fullRequestBody.startsWith("{") && !fullRequestBody.startsWith("[")) {
+                    try {
+                        // Create a simple JSON object with field values from toString
+                        fullRequestBody = "{\"request\": " + 
+                                new ObjectMapper().writeValueAsString(fullRequestBody) + "}";
+                    } catch (JsonProcessingException ex) {
+                        // If that fails too, just use the toString() result
+                        log.warn("Failed to format request body as JSON: {}", ex.getMessage());
+                    }
+                }
+            }
+            
+            // Escape single quotes in the request body for proper curl command formatting
+            String escapedRequestBody = fullRequestBody.replace("'", "'\\''")
+                    .replace("\n", " ");
+            
+            curlCommand.append(" -d '").append(escapedRequestBody).append("'");
+        }
+        
+        log.debug("API Request [{}] - curl command: {}", requestId, curlCommand.toString());
     }
 }
