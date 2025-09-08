@@ -1,11 +1,10 @@
-package com.portfolio.analytics.service.providers;
+package com.portfolio.analytics.service.providers.portfolio;
 
 import com.am.common.amcommondata.model.MarketCapType;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.service.PortfolioService;
-import com.portfolio.analytics.service.AbstractPortfolioAnalyticsProvider;
-import com.portfolio.analytics.service.AnalyticsType;
+import com.portfolio.analytics.model.AnalyticsType;
 import com.portfolio.analytics.service.utils.AnalyticsUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
@@ -42,7 +41,7 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
     @Override
     public MarketCapAllocation generateAnalytics(AdvancedAnalyticsRequest request) {
         log.info("Calculating market cap allocations for portfolio: {}", request.getCoreIdentifiers().getPortfolioId());
-        return generateMarketCapAllocation(request.getCoreIdentifiers().getPortfolioId(), null);
+        return generateMarketCapAllocation(request.getCoreIdentifiers().getPortfolioId(), request.getTimeFrameRequest());
     }
     
     /**
@@ -53,60 +52,45 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
      * @return Market cap allocation analytics
      */
     private MarketCapAllocation generateMarketCapAllocation(String portfolioId, TimeFrameRequest timeFrameRequest) {
-        // Get portfolio data
-        PortfolioModelV1 portfolio = getPortfolio(portfolioId);
-        if (portfolio == null || portfolio.getEquityModels() == null || portfolio.getEquityModels().isEmpty()) {
-            log.warn("No portfolio or holdings found for ID: {}", portfolioId);
-            return createEmptyResult();
-        }
+        return processPortfolioData(
+            portfolioId,
+            timeFrameRequest,
+            this::createEmptyResult,
+            (portfolio, portfolioSymbols, marketData) -> {
         
-        // Get symbols from portfolio holdings
-        List<String> portfolioSymbols = getPortfolioSymbols(portfolio);
-        if (portfolioSymbols.isEmpty()) {
-            log.warn("No stock symbols found in portfolio: {}", portfolioId);
-            return createEmptyResult();
-        }
-        
-        // Fetch market data for all stocks in the portfolio
-        Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, timeFrameRequest);
-       
-        
-        if (marketData.isEmpty()) {
-            log.warn("No market data available for portfolio: {}", portfolioId);
-            return createEmptyResult();
-        }
-        
-        // Create a map of symbol to holding quantity
-        Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
-        
-        // Use SecurityDetailsService to group symbols by market cap type
-        Map<String, List<String>> marketCapGroups = securityDetailsService.groupSymbolsByMarketType(portfolioSymbols);
-        log.info("Market cap groups for portfolio {}: {}", portfolioId, marketCapGroups.keySet());
-        
-        // Create a mapping for market cap type enum to segment name
-        Map<String, String> marketCapTypeToSegmentName = createMarketCapTypeMapping();
-        
-        // Calculate market values and assign segments
-        Map<String, Double> stockMarketValues = new HashMap<>();
-        Map<String, String> symbolToSegment = new HashMap<>();
-        double totalPortfolioValue = calculateMarketValuesAndAssignSegments(
-                portfolioSymbols, marketData, symbolToQuantity, marketCapGroups, 
-                marketCapTypeToSegmentName, stockMarketValues, symbolToSegment);
-        
-        // Group symbols by segment
-        Map<String, List<String>> segmentToSymbols = groupSymbolsBySegment(symbolToSegment);
-        
-        // Create segment objects with allocation percentages
-        List<MarketCapAllocation.CapSegment> segments = createCapSegments(
-                segmentToSymbols, stockMarketValues, totalPortfolioValue);
-        
-        log.info("Generated market cap allocation with {} segments for portfolio: {}", segments.size(), portfolioId);
-        
-        return MarketCapAllocation.builder()
-           
-            .timestamp(Instant.now())
-            .segments(segments)
-            .build();
+                // Create a map of symbol to holding quantity
+                Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
+                
+                // Use SecurityDetailsService to group symbols by market cap type
+                Map<String, List<String>> marketCapGroups = securityDetailsService.groupSymbolsByMarketType(portfolioSymbols);
+                log.info("Market cap groups for portfolio {}: {}", portfolioId, marketCapGroups.keySet());
+                
+                // Create a mapping for market cap type enum to segment name
+                Map<String, String> marketCapTypeToSegmentName = createMarketCapTypeMapping();
+                
+                // Calculate market values and assign segments
+                Map<String, Double> stockMarketValues = new HashMap<>();
+                Map<String, String> symbolToSegment = new HashMap<>();
+                double totalPortfolioValue = calculateMarketValuesAndAssignSegments(
+                        portfolioSymbols, marketData, symbolToQuantity, marketCapGroups, 
+                        marketCapTypeToSegmentName, stockMarketValues, symbolToSegment);
+                
+                // Group symbols by segment
+                Map<String, List<String>> segmentToSymbols = groupSymbolsBySegment(symbolToSegment);
+                
+                // Create segment objects with allocation percentages
+                List<MarketCapAllocation.CapSegment> segments = createCapSegments(
+                        segmentToSymbols, stockMarketValues, totalPortfolioValue);
+                
+                log.info("Generated market cap allocation with {} segments for portfolio: {}", segments.size(), portfolioId);
+                
+                return MarketCapAllocation.builder()
+                   
+                    .timestamp(Instant.now())
+                    .segments(segments)
+                    .build();
+            }
+        );
     }
     
     /**

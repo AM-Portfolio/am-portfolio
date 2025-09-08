@@ -1,5 +1,6 @@
-package com.portfolio.analytics.service;
+package com.portfolio.analytics.service.providers.portfolio;
 
+import com.portfolio.analytics.model.AnalyticsType;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 
 /**

@@ -1,4 +1,4 @@
-package com.portfolio.analytics.service;
+package com.portfolio.analytics.model;
 
 /**
  * Enum representing different types of analytics

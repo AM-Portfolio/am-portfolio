@@ -6,13 +6,6 @@ import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
-
 /**
  * Request object for advanced analytics that combines multiple analytics features
  * with timeframe support.

@@ -1,5 +1,6 @@
 package com.portfolio.api;
 
+import com.portfolio.analytics.service.providers.portfolio.PortfolioAnalyticsFacade;
 import com.portfolio.model.analytics.GainerLoser;
 import com.portfolio.model.analytics.Heatmap;
 import com.portfolio.model.analytics.MarketCapAllocation;
@@ -7,7 +8,6 @@ import com.portfolio.model.analytics.SectorAllocation;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.analytics.request.CoreIdentifiers;
 import com.portfolio.model.analytics.response.AdvancedAnalyticsResponse;
-import com.portfolio.analytics.service.PortfolioAnalyticsFacade;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

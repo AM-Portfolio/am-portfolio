@@ -1,8 +1,7 @@
-package com.portfolio.analytics.service.providers;
+package com.portfolio.analytics.service.providers.index;
 
 import com.am.common.amcommondata.model.MarketCapType;
-import com.portfolio.analytics.service.AbstractIndexAnalyticsProvider;
-import com.portfolio.analytics.service.AnalyticsType;
+import com.portfolio.analytics.model.AnalyticsType;
 import com.portfolio.analytics.service.utils.AnalyticsUtils;
 import com.portfolio.analytics.service.utils.MarketCapUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;

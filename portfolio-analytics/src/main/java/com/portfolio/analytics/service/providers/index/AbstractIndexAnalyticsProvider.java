@@ -1,5 +1,6 @@
-package com.portfolio.analytics.service;
+package com.portfolio.analytics.service.providers.index;
 
+import com.portfolio.analytics.service.AbstractAnalyticsProvider;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;

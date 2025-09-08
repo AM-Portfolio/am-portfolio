@@ -1,7 +1,6 @@
-package com.portfolio.analytics.service.providers;
+package com.portfolio.analytics.service.providers.index;
 
-import com.portfolio.analytics.service.AbstractIndexAnalyticsProvider;
-import com.portfolio.analytics.service.AnalyticsType;
+import com.portfolio.analytics.model.AnalyticsType;
 import com.portfolio.analytics.service.utils.AnalyticsUtils;
 import com.portfolio.analytics.service.utils.HeatmapUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
@@ -172,25 +171,62 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
         log.info("Calculating performance metrics for {} sectors", sectorMap.size());
         List<Heatmap.SectorPerformance> sectorPerformances = new ArrayList<>();
         
+        // Calculate total market value for weightage calculation
+        double totalMarketValue = calculateTotalMarketValue(sectorMap);
+        log.debug("Total market value for weightage calculation: {}", totalMarketValue);
+        
         for (Map.Entry<String, List<MarketData>> entry : sectorMap.entrySet()) {
             String sectorName = entry.getKey();
             List<MarketData> sectorStocks = entry.getValue();
             
-            // Calculate metrics for this sector
+            // Calculate sector market value for weightage
+            double sectorMarketValue = calculateSectorMarketValue(sectorStocks);
+            
+            // Calculate metrics for this sector including weightage
             log.debug("Calculating metrics for sector '{}'", sectorName);
-            HeatmapUtils.SectorMetrics metrics = HeatmapUtils.calculateSectorMetrics(sectorStocks);
+            HeatmapUtils.SectorMetrics metrics = HeatmapUtils.calculateSectorMetrics(
+                sectorStocks, totalMarketValue, sectorMarketValue);
             
             // Create sector performance object using utility
             sectorPerformances.add(HeatmapUtils.createSectorPerformance(sectorName, metrics));
             
             // Get color based on performance for logging
             String color = HeatmapUtils.getColorForPerformance(metrics.getPerformance());
-            log.debug("Sector '{}' performance: {}, change: {}%, color: {}", 
-                    sectorName, metrics.getPerformance(), metrics.getChangePercent(), color);
+            log.debug("Sector '{}' performance: {}, change: {}%, weightage: {}%, color: {}", 
+                    sectorName, metrics.getPerformance(), metrics.getChangePercent(), 
+                    metrics.getWeightage(), color);
         }
         
         log.info("Calculated performance metrics for {} sectors", sectorPerformances.size());
         return sectorPerformances;
+    }
+    
+    /**
+     * Calculate the total market value of all stocks in the index
+     */
+    private double calculateTotalMarketValue(Map<String, List<MarketData>> sectorMap) {
+        double totalValue = 0.0;
+        
+        for (List<MarketData> stocks : sectorMap.values()) {
+            totalValue += calculateSectorMarketValue(stocks);
+        }
+        
+        return totalValue;
+    }
+    
+    /**
+     * Calculate the market value of a sector based on last prices
+     */
+    private double calculateSectorMarketValue(List<MarketData> stocks) {
+        double sectorValue = 0.0;
+        
+        for (MarketData stock : stocks) {
+            // For index stocks, we don't have quantity information
+            // Using last price as a proxy for market value contribution
+            sectorValue += stock.getLastPrice();
+        }
+        
+        return sectorValue;
     }
     
     // SectorMetrics class and related methods have been moved to HeatmapUtils

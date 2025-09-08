@@ -1,17 +1,12 @@
-package com.portfolio.analytics.service.providers;
+package com.portfolio.analytics.service.providers.portfolio;
 
-import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.service.PortfolioService;
-import com.portfolio.analytics.service.AbstractPortfolioAnalyticsProvider;
-import com.portfolio.analytics.service.AnalyticsType;
-import com.portfolio.analytics.service.utils.AnalyticsUtils;
+import com.portfolio.analytics.model.AnalyticsType;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.analytics.service.utils.TopMoverUtils;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.GainerLoser;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
-
-import com.portfolio.model.market.MarketData;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -53,39 +48,22 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
         log.info("Generating top {} movers for portfolio {} with time frame, pagination, and feature configuration", 
                 limit, portfolioId);
         
-        // Get portfolio data
-        PortfolioModelV1 portfolio = getPortfolio(portfolioId);
-        if (!isValidPortfolio(portfolio)) {
-            return createEmptyResponse();
-        }
-        
-        // Get symbols from portfolio holdings
-        List<String> portfolioSymbols = getPortfolioSymbols(portfolio);
-        if (portfolioSymbols.isEmpty()) {
-            log.warn("No stock symbols found in portfolio: {}", portfolioId);
-            return createEmptyResponse();
-        }
-        
-        // Fetch historical market data for all stocks in the portfolio using time frame
-        Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, request.getTimeFrameRequest());
-        if (marketData.isEmpty()) {
-            log.warn("No historical market data available for portfolio: {}", portfolioId);
-            return createEmptyResponse();
-        }
-
-        Map<String, String> symbolSectors = securityDetailsService.getSymbolMapSectors(portfolioSymbols);
-        
-        // Calculate top movers using the determined limit and include sector information
-        return TopMoverUtils.buildTopMoversResponse(marketData, limit, portfolioId, true, symbolSectors);
+        // Use the common portfolio data processing method
+        return processPortfolioData(
+            portfolioId,
+            request.getTimeFrameRequest(),
+            this::createEmptyResponse,
+            (portfolio, portfolioSymbols, marketData) -> {
+                // Get sector information for symbols
+                Map<String, String> symbolSectors = securityDetailsService.getSymbolMapSectors(portfolioSymbols);
+                
+                // Calculate top movers using the determined limit and include sector information
+                return TopMoverUtils.buildTopMoversResponse(marketData, limit, portfolioId, true, symbolSectors);
+            }
+        );
     }
 
     
-    /**
-     * Checks if the portfolio is valid and has holdings
-     */
-    private boolean isValidPortfolio(PortfolioModelV1 portfolio) {
-        return portfolio != null && portfolio.getEquityModels() != null && !portfolio.getEquityModels().isEmpty();
-    }
     
     /**
      * Creates an empty response when no data is available

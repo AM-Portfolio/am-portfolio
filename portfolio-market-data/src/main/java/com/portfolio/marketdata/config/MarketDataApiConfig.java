@@ -15,30 +15,35 @@ public class MarketDataApiConfig {
     /**
      * Base URL for the market data API.
      */
-    private String baseUrl = "http://am-market-data.dev.svc.cluster.local:8080";
+    private String baseUrl;
     
     /**
      * API path for OHLC data.
      */
-    private String ohlcPath = "/api/v1/market-data/ohlc";
+    private String ohlcEndpoint;
     
     /**
      * API path for historical data.
      */
-    private String historicalDataPath = "/api/v1/market-data/historical-data";
+    private String historicalDataEndpoint;
+
+    /**
+     * API path for NSE indices data.
+     */
+    private String nseIndicesEndpoint;
     
     /**
      * Connection timeout in milliseconds.
      */
-    private int connectionTimeout = 5000;
+    private int connectionTimeout = 10000;
     
     /**
      * Read timeout in milliseconds.
      */
-    private int readTimeout = 5000;
+    private int readTimeout = 10000;
     
     /**
      * Maximum number of retry attempts.
      */
-    private int maxRetryAttempts = 3;
+    private int maxRetryAttempts = 2;
 }
