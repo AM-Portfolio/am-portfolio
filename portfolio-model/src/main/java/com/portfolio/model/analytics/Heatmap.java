@@ -40,6 +40,9 @@ public class Heatmap {
         @Builder.Default
         @JsonInclude(JsonInclude.Include.NON_NULL)
         private double changePercent = 0.0;
+        @Builder.Default
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private double weightage = 0.0; // Sector's weight in the portfolio or index
         private String color; // For UI representation (e.g., "green", "red", or hex code)
     }
 }

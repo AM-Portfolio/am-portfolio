@@ -118,6 +118,8 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         }
     }
     
+    // Removed unused calculateTotalPortfolioValue method as we're using calculateTotalSectorValues
+    
     /**
      * Find the sector for a given symbol
      */
@@ -139,19 +141,48 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         log.debug("Calculating performance metrics for {} sectors", sectorMarketDataMap.size());
         List<Heatmap.SectorPerformance> sectorPerformances = new ArrayList<>();
         
+        // Calculate total portfolio value for weightage calculation
+        double totalPortfolioValue = calculateTotalSectorValues(sectorMarketDataMap, sectorQuantitiesMap);
+        log.debug("Total portfolio value for weightage calculation: {}", totalPortfolioValue);
+        
         for (Map.Entry<String, List<MarketData>> entry : sectorMarketDataMap.entrySet()) {
             String sectorName = entry.getKey();
             List<MarketData> sectorStocks = entry.getValue();
             List<Double> quantities = sectorQuantitiesMap.get(sectorName);
             
-            // Calculate weighted averages for the sector using utility
-            HeatmapUtils.SectorMetrics metrics = HeatmapUtils.calculateWeightedSectorMetrics(sectorStocks, quantities);
+            // Calculate weighted averages for the sector using utility, including weightage
+            HeatmapUtils.SectorMetrics metrics = HeatmapUtils.calculateWeightedSectorMetrics(
+                sectorStocks, quantities, totalPortfolioValue);
             
             // Create sector performance object using utility
             sectorPerformances.add(HeatmapUtils.createSectorPerformance(sectorName, metrics));
         }
         
         return sectorPerformances;
+    }
+    
+    /**
+     * Calculate the total value across all sectors
+     */
+    private double calculateTotalSectorValues(
+            Map<String, List<MarketData>> sectorMarketDataMap,
+            Map<String, List<Double>> sectorQuantitiesMap) {
+        
+        double totalValue = 0.0;
+        
+        for (Map.Entry<String, List<MarketData>> entry : sectorMarketDataMap.entrySet()) {
+            String sectorName = entry.getKey();
+            List<MarketData> sectorStocks = entry.getValue();
+            List<Double> quantities = sectorQuantitiesMap.get(sectorName);
+            
+            for (int i = 0; i < sectorStocks.size(); i++) {
+                MarketData stock = sectorStocks.get(i);
+                double quantity = quantities.get(i);
+                totalValue += stock.getLastPrice() * quantity;
+            }
+        }
+        
+        return totalValue;
     }
     
     // SectorMetrics class and related methods have been moved to HeatmapUtils
