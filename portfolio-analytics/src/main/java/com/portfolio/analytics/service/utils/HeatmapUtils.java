@@ -3,8 +3,10 @@ package com.portfolio.analytics.service.utils;
 import com.portfolio.model.analytics.Heatmap;
 import com.portfolio.model.market.MarketData;
 import lombok.extern.slf4j.Slf4j;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -14,19 +16,7 @@ import java.util.List;
 @Slf4j
 public class HeatmapUtils {
 
-    /**
-     * Get color code based on performance value
-     * @param performance The performance value
-     * @return A hex color code representing the performance level
-     */
-    public static String getColorForPerformance(double performance) {
-        if (performance > 3) return "#006400"; // Dark Green
-        if (performance > 1) return "#32CD32"; // Lime Green
-        if (performance > 0) return "#90EE90"; // Light Green
-        if (performance > -1) return "#FFA07A"; // Light Salmon
-        if (performance > -3) return "#FF4500"; // Orange Red
-        return "#8B0000"; // Dark Red
-    }
+    // Removed getColorForPerformance as it's now in the Heatmap class
 
     /**
      * Helper class to hold sector metrics
@@ -176,21 +166,67 @@ public class HeatmapUtils {
     }
 
     /**
-     * Create a sector performance object
+     * Create a sector performance object with domain-driven approach
      * @param sectorName The name of the sector
      * @param metrics The metrics for the sector
      * @return A SectorPerformance object
      */
     public static Heatmap.SectorPerformance createSectorPerformance(String sectorName, SectorMetrics metrics) {
-        String color = getColorForPerformance(metrics.getPerformance());
+        // Generate a sector code from the sector name
+        String sectorCode = generateSectorCode(sectorName);
         
-        return Heatmap.SectorPerformance.builder()
+        Heatmap.SectorPerformance sectorPerformance = Heatmap.SectorPerformance.builder()
             .sectorName(sectorName)
+            .sectorCode(sectorCode)
             .performance(metrics.getPerformance())
             .changePercent(metrics.getChangePercent())
             .weightage(metrics.getWeightage())
-            .color(color)
             .build();
+            
+        // Use domain method to update color
+        sectorPerformance.updateColor();
+        
+        return sectorPerformance;
+    }
+    
+    /**
+     * Create a sector performance object with domain-driven approach and explicit sector code
+     * @param sectorName The name of the sector
+     * @param sectorCode The sector code (stable identifier)
+     * @param metrics The metrics for the sector
+     * @return A SectorPerformance object
+     */
+    public static Heatmap.SectorPerformance createSectorPerformance(String sectorName, String sectorCode, SectorMetrics metrics) {
+        Heatmap.SectorPerformance sectorPerformance = Heatmap.SectorPerformance.builder()
+            .sectorName(sectorName)
+            .sectorCode(sectorCode)
+            .performance(metrics.getPerformance())
+            .changePercent(metrics.getChangePercent())
+            .weightage(metrics.getWeightage())
+            .build();
+            
+        // Use domain method to update color
+        sectorPerformance.updateColor();
+        
+        return sectorPerformance;
+    }
+    
+    /**
+     * Generate a sector code from a sector name
+     * @param sectorName The sector name
+     * @return A sector code
+     */
+    private static String generateSectorCode(String sectorName) {
+        if (sectorName == null || sectorName.isEmpty()) {
+            return "UNKN";
+        }
+        
+        // Take first 4 characters and convert to uppercase
+        if (sectorName.length() <= 4) {
+            return sectorName.toUpperCase();
+        } else {
+            return sectorName.substring(0, 4).toUpperCase();
+        }
     }
     
     /**
@@ -202,5 +238,103 @@ public class HeatmapUtils {
         BigDecimal bd = BigDecimal.valueOf(value);
         bd = bd.setScale(2, RoundingMode.HALF_UP);
         return bd.doubleValue();
+    }
+    
+    /**
+     * Convert MarketData to StockDetail using domain-driven approach
+     * @param symbol The stock symbol
+     * @param data The market data
+     * @param quantity The quantity (for portfolio stocks)
+     * @return A StockDetail object
+     */
+    public static Heatmap.StockDetail convertToStockDetail(String symbol, MarketData data, double quantity) {
+        if (data == null || data.getOhlc() == null) {
+            return null;
+        }
+        
+        // Create StockDetail with basic information
+        Heatmap.StockDetail stockDetail = Heatmap.StockDetail.builder()
+            .symbol(symbol)
+            .name(symbol) // Use symbol as name if company name not available
+            .price(BigDecimal.valueOf(data.getLastPrice()))
+            .quantity(BigDecimal.valueOf(quantity))
+            .build();
+        
+        // Use domain methods to calculate values
+        BigDecimal previousPrice = BigDecimal.valueOf(data.getOhlc().getClose());
+        stockDetail.calculateChange(previousPrice)
+                  .calculateChangePercent(previousPrice)
+                  .calculateValue()
+                  .updateColor();
+        
+        return stockDetail;
+    }
+    
+    /**
+     * Create stock details for a sector using domain-driven approach
+     * @param sectorStocks List of market data for stocks in a sector
+     * @param quantities List of quantities for each stock
+     * @param symbols List of symbols for each stock
+     * @return List of StockDetail objects
+     */
+    public static List<Heatmap.StockDetail> createStockDetails(
+            List<MarketData> sectorStocks, 
+            List<Double> quantities,
+            List<String> symbols) {
+        
+        List<Heatmap.StockDetail> stockDetails = new ArrayList<>();
+        
+        for (int i = 0; i < sectorStocks.size(); i++) {
+            MarketData data = sectorStocks.get(i);
+            double quantity = quantities.get(i);
+            String symbol = symbols.get(i);
+            
+            Heatmap.StockDetail stockDetail = convertToStockDetail(symbol, data, quantity);
+            if (stockDetail != null) {
+                stockDetails.add(stockDetail);
+            }
+        }
+        
+        return stockDetails;
+    }
+    
+    /**
+     * Create a complete sector performance with stock details using domain-driven approach
+     * @param sectorName The name of the sector
+     * @param sectorCode The sector code (stable identifier)
+     * @param sectorStocks List of market data for stocks in a sector
+     * @param quantities List of quantities for each stock
+     * @param symbols List of symbols for each stock
+     * @param totalPortfolioValue Total value of the portfolio (optional)
+     * @return A complete SectorPerformance object with stock details
+     */
+    public static Heatmap.SectorPerformance createCompleteSectorPerformance(
+            String sectorName,
+            String sectorCode,
+            List<MarketData> sectorStocks,
+            List<Double> quantities,
+            List<String> symbols,
+            Double totalPortfolioValue) {
+        
+        // Calculate metrics
+        SectorMetrics metrics = calculateWeightedSectorMetrics(sectorStocks, quantities, totalPortfolioValue);
+        
+        // Create sector performance
+        Heatmap.SectorPerformance sectorPerformance = createSectorPerformance(sectorName, sectorCode, metrics);
+        
+        // Create stock details
+        List<Heatmap.StockDetail> stockDetails = createStockDetails(sectorStocks, quantities, symbols);
+        
+        // Set stock details and use domain methods to calculate values
+        sectorPerformance.setStocks(stockDetails);
+        sectorPerformance.setStockCount(stockDetails.size());
+        
+        // Use domain methods to calculate values and sort stocks
+        sectorPerformance.calculateTotalValue()
+                        .calculateTotalReturnAmount()
+                        .calculateStockWeights()
+                        .sortStocksByValue();
+        
+        return sectorPerformance;
     }
 }

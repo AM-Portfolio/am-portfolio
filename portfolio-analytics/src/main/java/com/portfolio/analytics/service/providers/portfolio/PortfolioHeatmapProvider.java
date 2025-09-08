@@ -56,17 +56,21 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 groupMarketDataBySector(marketData, sectorToStocks, symbolToQuantity, sectorMarketDataMap, sectorQuantitiesMap);
                 
                 // Calculate performance for each sector
-                List<Heatmap.SectorPerformance> sectorPerformances = calculateSectorPerformances(sectorMarketDataMap, sectorQuantitiesMap);
+                List<Heatmap.SectorPerformance> sectorPerformances = calculateSectorPerformances(sectorMarketDataMap, sectorQuantitiesMap, symbolToQuantity);
                 
-                // Sort sectors by performance (highest to lowest)
-                sectorPerformances.sort(Comparator.comparing(Heatmap.SectorPerformance::getPerformance).reversed());
-                
-                log.info("Generated heatmap with {} sectors for portfolio: {}", sectorPerformances.size(), portfolioId);
-                
-                return Heatmap.builder()
+                // Create heatmap with domain-driven approach
+                Heatmap heatmap = Heatmap.builder()
+                    .portfolioId(portfolioId)
                     .timestamp(Instant.now())
                     .sectors(sectorPerformances)
                     .build();
+                    
+                // Use domain method to sort sectors
+                heatmap.sortSectorsByPerformance();
+                
+                log.info("Generated heatmap with {} sectors for portfolio: {}", sectorPerformances.size(), portfolioId);
+                
+                return heatmap;
             }
         );
     }
@@ -132,11 +136,12 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
     }
     
     /**
-     * Calculate performance for each sector
+     * Calculate performance for each sector with domain-driven approach
      */
     private List<Heatmap.SectorPerformance> calculateSectorPerformances(
             Map<String, List<MarketData>> sectorMarketDataMap,
-            Map<String, List<Double>> sectorQuantitiesMap) {
+            Map<String, List<Double>> sectorQuantitiesMap,
+            Map<String, Double> symbolToQuantity) {
         
         log.debug("Calculating performance metrics for {} sectors", sectorMarketDataMap.size());
         List<Heatmap.SectorPerformance> sectorPerformances = new ArrayList<>();
@@ -150,12 +155,39 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             List<MarketData> sectorStocks = entry.getValue();
             List<Double> quantities = sectorQuantitiesMap.get(sectorName);
             
-            // Calculate weighted averages for the sector using utility, including weightage
-            HeatmapUtils.SectorMetrics metrics = HeatmapUtils.calculateWeightedSectorMetrics(
-                sectorStocks, quantities, totalPortfolioValue);
+            // Extract symbols for this sector
+            List<String> symbols = new ArrayList<>();
+            for (MarketData data : sectorStocks) {
+                // Get symbol from MarketData or use a placeholder if null
+                String symbol = data.getSymbol();
+                if (symbol == null || symbol.isEmpty()) {
+                    // Try to find the symbol by looking up in the symbolToQuantity map
+                    for (Map.Entry<String, Double> symbolEntry : symbolToQuantity.entrySet()) {
+                        if (symbolEntry.getValue().equals(quantities.get(symbols.size()))) {
+                            symbol = symbolEntry.getKey();
+                            break;
+                        }
+                    }
+                    
+                    // If still null, use a placeholder
+                    if (symbol == null || symbol.isEmpty()) {
+                        symbol = "UNKNOWN-" + symbols.size();
+                    }
+                }
+                symbols.add(symbol);
+                log.debug("Added symbol: {} to sector: {}", symbol, sectorName);
+            }
             
-            // Create sector performance object using utility
-            sectorPerformances.add(HeatmapUtils.createSectorPerformance(sectorName, metrics));
+            // Create complete sector performance with stock details using domain-driven approach
+            Heatmap.SectorPerformance sectorPerformance = HeatmapUtils.createCompleteSectorPerformance(
+                sectorName,
+                null, // Let the utility generate a sector code
+                sectorStocks,
+                quantities,
+                symbols,
+                totalPortfolioValue);
+            
+            sectorPerformances.add(sectorPerformance);
         }
         
         return sectorPerformances;
