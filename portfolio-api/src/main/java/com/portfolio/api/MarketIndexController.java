@@ -4,6 +4,12 @@ import com.portfolio.model.market.IndexIndices;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.service.MarketIndexIndicesService;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -16,10 +22,18 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/v1/market-index")
 @RequiredArgsConstructor
 @Slf4j
+@Tag(name = "Market Indices", description = "Endpoints for retrieving market index data")
 public class MarketIndexController {
     
     private final MarketIndexIndicesService marketIndexService;
      
+    @Operation(summary = "Get all market indices", description = "Retrieves all market indices with optional filtering by interval and type")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Market indices retrieved successfully",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = IndexIndices.class))),
+        @ApiResponse(responseCode = "400", description = "Invalid interval parameter"),
+        @ApiResponse(responseCode = "404", description = "No market indices found")
+    })
     @GetMapping("/all")
     public ResponseEntity<List<IndexIndices>> getAllMarketIndices(
         @RequestParam(required = false) String interval,

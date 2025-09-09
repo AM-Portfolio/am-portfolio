@@ -8,6 +8,14 @@ import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.service.PortfolioDashboardService;
 
+import io.swagger.v3.oas.annotations.Hidden;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -20,13 +28,22 @@ import java.util.UUID;
 @RequestMapping("/api/v1/portfolios")
 @RequiredArgsConstructor
 @Slf4j
+@Tag(name = "Portfolio Management", description = "Endpoints for managing user portfolios")
 public class PortfolioController {
     
     private final PortfolioDashboardService portfolioDashboardService;
     private final PortfolioService portfolioService;
 
+    @Operation(summary = "Get portfolio by ID", description = "Retrieves detailed portfolio information for a specific portfolio ID")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Portfolio found",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = PortfolioModelV1.class))),
+        @ApiResponse(responseCode = "400", description = "Invalid portfolio ID format"),
+        @ApiResponse(responseCode = "404", description = "Portfolio not found")
+    })
     @GetMapping("/{portfolioId}")
-    public ResponseEntity<PortfolioModelV1> getPortfolioById(@PathVariable String portfolioId) {
+    public ResponseEntity<PortfolioModelV1> getPortfolioById(
+            @Parameter(description = "Portfolio ID (UUID format)") @PathVariable String portfolioId) {
         log.info("PortfolioController - getPortfolioById called with portfolioId: {}", portfolioId);
         
         try {
@@ -39,8 +56,14 @@ public class PortfolioController {
         }
     }
 
+    @Operation(summary = "Get all portfolios for user", description = "Retrieves all portfolios associated with a specific user ID")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "List of portfolios retrieved successfully"),
+        @ApiResponse(responseCode = "404", description = "No portfolios found for user")
+    })
     @GetMapping
-    public ResponseEntity<List<PortfolioModelV1>> getPortfolios(@RequestParam String userId) {
+    public ResponseEntity<List<PortfolioModelV1>> getPortfolios(
+            @Parameter(description = "User ID to fetch portfolios for") @RequestParam String userId) {
         log.info("PortfolioController - getPortfolios called with userId: {}", userId);
         
         List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
@@ -50,6 +73,8 @@ public class PortfolioController {
         return ResponseEntity.ok(portfolios);
     }
 
+    @Hidden
+    @Operation(summary = "Get portfolio analysis", description = "Retrieves detailed analysis for a specific portfolio (hidden from API docs)")
     @GetMapping("/{portfolioId}/analysis")
     public ResponseEntity<PortfolioAnalysis> getPortfolioAnalysis(
             @PathVariable String portfolioId,
@@ -78,6 +103,11 @@ public class PortfolioController {
         }
     }
 
+    @Operation(summary = "Get portfolio summary", description = "Retrieves a summary of all portfolios for a user with performance metrics")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Portfolio summary retrieved successfully"),
+        @ApiResponse(responseCode = "404", description = "No portfolio summary found for user")
+    })
     @GetMapping("/summary")
     public ResponseEntity<PortfolioSummaryV1> getPortfolioSummary(
             @RequestParam String userId,
@@ -104,6 +134,11 @@ public class PortfolioController {
         }
     }
 
+    @Operation(summary = "Get portfolio holdings", description = "Retrieves all holdings across portfolios for a user with current values")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Portfolio holdings retrieved successfully"),
+        @ApiResponse(responseCode = "404", description = "No holdings found for user")
+    })
     @GetMapping("/holdings")
     public ResponseEntity<PortfolioHoldings> getPortfolioHoldings(
             @RequestParam String userId,

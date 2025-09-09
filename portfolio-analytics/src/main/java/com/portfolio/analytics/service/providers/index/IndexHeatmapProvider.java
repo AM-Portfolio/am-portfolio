@@ -72,15 +72,19 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
         // Calculate performance for each sector
         List<Heatmap.SectorPerformance> sectorPerformances = calculateSectorPerformances(sectorMap);
         
-        // Sort sectors by performance (highest to lowest)
-        sectorPerformances.sort(Comparator.comparing(Heatmap.SectorPerformance::getPerformance).reversed());
-        
-        log.info("Generated heatmap with {} sectors for index: {}", sectorPerformances.size(), indexSymbol);
-        
-        return Heatmap.builder()
+        // Create heatmap with domain-driven approach
+        Heatmap heatmap = Heatmap.builder()
+            .indexSymbol(indexSymbol)
             .timestamp(Instant.now())
             .sectors(sectorPerformances)
             .build();
+            
+        // Use domain method to sort sectors and assign performance ranks
+        heatmap.sortSectorsByPerformance();
+        
+        log.info("Generated heatmap with {} sectors for index: {}", sectorPerformances.size(), indexSymbol);
+        
+        return heatmap;
     }
     
     /**
@@ -165,7 +169,7 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
     }
     
     /**
-     * Calculate performance metrics for each sector
+     * Calculate performance metrics for each sector using domain-driven approach
      */
     private List<Heatmap.SectorPerformance> calculateSectorPerformances(Map<String, List<MarketData>> sectorMap) {
         log.info("Calculating performance metrics for {} sectors", sectorMap.size());
@@ -179,26 +183,64 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
             String sectorName = entry.getKey();
             List<MarketData> sectorStocks = entry.getValue();
             
-            // Calculate sector market value for weightage
-            double sectorMarketValue = calculateSectorMarketValue(sectorStocks);
+            // Extract symbols for this sector
+            List<String> symbols = new ArrayList<>();
+            for (MarketData data : sectorStocks) {
+                String symbol = data.getSymbol();
+                if (symbol == null || symbol.isEmpty()) {
+                    symbol = "UNKNOWN-" + symbols.size();
+                }
+                symbols.add(symbol);
+                log.debug("Added symbol: {} to sector: {}", symbol, sectorName);
+            }
             
-            // Calculate metrics for this sector including weightage
-            log.debug("Calculating metrics for sector '{}'", sectorName);
-            HeatmapUtils.SectorMetrics metrics = HeatmapUtils.calculateSectorMetrics(
-                sectorStocks, totalMarketValue, sectorMarketValue);
+            // Create quantities list (for index stocks, we use 1.0 as default quantity)
+            List<Double> quantities = new ArrayList<>();
+            for (int i = 0; i < sectorStocks.size(); i++) {
+                quantities.add(1.0); // Default quantity for index stocks
+            }
             
-            // Create sector performance object using utility
-            sectorPerformances.add(HeatmapUtils.createSectorPerformance(sectorName, metrics));
+            // Generate sector code from sector name
+            String sectorCode = generateSectorCode(sectorName);
             
-            // Get color based on performance for logging
-            String color = HeatmapUtils.getColorForPerformance(metrics.getPerformance());
+            // Create complete sector performance with stock details using domain-driven approach
+            Heatmap.SectorPerformance sectorPerformance = HeatmapUtils.createCompleteSectorPerformance(
+                sectorName,
+                sectorCode,
+                sectorStocks,
+                quantities,
+                symbols,
+                totalMarketValue);
+            
+            sectorPerformances.add(sectorPerformance);
+            
+            // Use domain method to get color for logging
+            String color = Heatmap.deriveColorFromPerformance(sectorPerformance.getPerformance());
             log.debug("Sector '{}' performance: {}, change: {}%, weightage: {}%, color: {}", 
-                    sectorName, metrics.getPerformance(), metrics.getChangePercent(), 
-                    metrics.getWeightage(), color);
+                    sectorName, sectorPerformance.getPerformance(), sectorPerformance.getChangePercent(), 
+                    sectorPerformance.getWeightage(), color);
         }
         
         log.info("Calculated performance metrics for {} sectors", sectorPerformances.size());
         return sectorPerformances;
+    }
+    
+    /**
+     * Generate a sector code from a sector name
+     * @param sectorName The sector name
+     * @return A sector code
+     */
+    private String generateSectorCode(String sectorName) {
+        if (sectorName == null || sectorName.isEmpty()) {
+            return "UNKN";
+        }
+        
+        // Take first 4 characters and convert to uppercase
+        if (sectorName.length() <= 4) {
+            return sectorName.toUpperCase();
+        } else {
+            return sectorName.substring(0, 4).toUpperCase();
+        }
     }
     
     /**

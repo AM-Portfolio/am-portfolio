@@ -10,9 +10,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import io.swagger.v3.oas.annotations.Hidden;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import reactor.core.publisher.Mono;
 
 /**
  * Debug controller for market data API
@@ -21,6 +22,7 @@ import reactor.core.publisher.Mono;
 @RequestMapping("/api/v1/debug")
 @RequiredArgsConstructor
 @Slf4j
+@Tag(name = "Debug Tools", description = "Debug endpoints for market data (hidden from production)")
 public class MarketDataDebugController {
 
     private final WebClient.Builder webClientBuilder;
@@ -30,6 +32,7 @@ public class MarketDataDebugController {
      * @param symbols The symbols to fetch data for
      * @return Raw API response
      */
+    @Hidden
     @GetMapping("/market-data/raw")
     public ResponseEntity<String> getRawMarketData(
             @RequestParam(defaultValue = "NIFTY 50,INFY,TCS") String symbols) {
@@ -56,6 +59,7 @@ public class MarketDataDebugController {
      * @param indexSymbol The index symbol
      * @return Raw API response
      */
+    @Hidden
     @GetMapping("/nse-indices/raw")
     public ResponseEntity<String> getRawNseIndicesData(
             @RequestParam(defaultValue = "NIFTY50") String indexSymbol) {
