@@ -260,4 +260,23 @@ public class MarketDataService {
         return getHistoricalData(request);
     }
 
+    public Map<String, MarketData> getMarketData(List<String> symbols) {
+        if (symbols.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        
+        log.info("Fetching market data for {} symbols", symbols.size());
+        try {
+            Map<String, MarketData> marketData = getOhlcData(symbols, false);
+            if (marketData == null) {
+                log.warn("Market data service returned null response");
+                return Collections.emptyMap();
+            }
+            return marketData;
+        } catch (Exception e) {
+            log.error("Error fetching market data: {}", e.getMessage(), e);
+            return Collections.emptyMap();
+        }
+    }
+
 }

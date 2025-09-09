@@ -12,7 +12,7 @@ import lombok.Data;
 @Data
 @Builder
 @JsonInclude(Include.NON_NULL)
-public class  EquityHoldings {
+public class EquityHoldings {
    private String isin;
    private String symbol;
    private String name;
@@ -22,10 +22,22 @@ public class  EquityHoldings {
    private Double quantity;
    private Double investmentCost;
    private Double currentValue;
+   
+   // Portfolio weight
+   private Double weightInPortfolio; // Percentage of total portfolio value
+   
+   // Overall performance metrics
    private Double gainLoss;
    private Double gainLossPercentage;
+   
+   // Today's performance metrics
+   private Double todayGainLoss;
+   private Double todayGainLossPercentage;
+   
+   // Stock price metrics
    private Double averageBuyingPrice;
-   private double currentPrice;
+   private Double currentPrice;
+   private Double percentageChange; // Stock price percentage change
 
    @Builder.Default
    private List<EquityBrokerHolding> brokerPortfolios = new ArrayList<>();
