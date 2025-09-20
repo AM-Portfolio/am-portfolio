@@ -125,7 +125,7 @@ app:
       topic: ${MARKET_INDEX_TOPIC}
 
 server:
-  port: 8083
+  port: 8080
   servlet:
     context-path: /
   tomcat:

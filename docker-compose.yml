@@ -43,11 +43,11 @@ services:
         echo "=== Starting AM Portfolio Service ==="
         java -jar app.jar
     ports:
-      - "8082:8082"
+      - "8072:8080"
     networks:
       - market-data-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
       interval: 30s
       timeout: 3s
       retries: ${AM_PORTFOLIO_MAX_RETRIES}
