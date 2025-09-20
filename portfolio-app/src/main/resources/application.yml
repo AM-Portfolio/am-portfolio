@@ -20,7 +20,7 @@ MARKET_INDEX_TOPIC: nse-stock-indices-update
 #Redis
 REDIS_HOSTNAME: localhost
 REDIS_PORT: 6379
-REDIS_PASSWORD: password
+REDIS_PASSWORD: RedisPassword123!
 
 spring:
   application:

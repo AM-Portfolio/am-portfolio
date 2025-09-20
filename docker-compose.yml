@@ -1,41 +1,57 @@
 version: '3.8'
 
-services:
-  redis:
-    image: redis:7.2-alpine
-    container_name: portfolio_redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-    networks:
-      - portfolio_network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
 
-  redisinsight:
-    image: redislabs/redisinsight:latest
-    container_name: portfolio_redisinsight
+services:
+  am-portfolio-service:
+    container_name: am-portfolio-service
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    environment:
+      # Spring Profile
+      - SPRING_PROFILES_ACTIVE=docker
+      
+      # MongoDB Configuration
+      - MONGODB_URL=${MONGODB_URL}
+      - MONGODB_DATABASE=${MONGODB_DATABASE}
+      - MONGODB_USERNAME=${MONGODB_USERNAME}
+      - MONGODB_PASSWORD=${MONGODB_PASSWORD}
+      - MONGODB_AUTHENTICATION_DATABASE=admin
+    
+
+      # Redis Configuration
+      - REDIS_HOSTNAME=${REDIS_HOSTNAME}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_PORT=${REDIS_PORT}
+      
+    entrypoint: ["/bin/sh", "-c"]
+    command: 
+      - |
+        echo "=== AM Portfolio Service Environment Variables ==="
+        echo "Database URL: $${SPRING_DATASOURCE_URL}"
+        echo "Database User: $${SPRING_DATASOURCE_USERNAME}"
+        echo "Kafka Servers: $${SPRING_KAFKA_BOOTSTRAP_SERVERS}"
+        echo "Kafka Group: $${SPRING_KAFKA_CONSUMER_GROUP_ID}"
+        echo "Max Retries: $${AM_PORTFOLIO_MAX_RETRIES}"
+        echo "=== Starting AM Portfolio Service ==="
+        java -jar app.jar
     ports:
-      - "8001:8001"
-    volumes:
-      - redisinsight_data:/db
+      - "8082:8082"
     networks:
-      - portfolio_network
-    depends_on:
-      redis:
-        condition: service_healthy
-        
+      - am-portfolio-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      interval: 30s
+      timeout: 3s
+      retries: ${AM_PORTFOLIO_MAX_RETRIES}
+    restart: unless-stopped
+
 volumes:
-  redis_data:
-    name: portfolio_redis_data
-  redisinsight_data:
-    name: portfolio_redisinsight_data
+  postgres_data:
+  influxdb_data:
+  grafana_data:
 
 networks:
-  portfolio_network:
-    name: portfolio_network
+  am-portfolio-network:
+    driver: bridge
