@@ -7,23 +7,27 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-
+    env_file:
+        - .env
     environment:
+
+      # Kafka Configuration
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+
       # Spring Profile
-      - SPRING_PROFILES_ACTIVE=docker
-      
+      SPRING_PROFILES_ACTIVE: docker
+
       # MongoDB Configuration
-      - MONGODB_URL=${MONGODB_URL}
-      - MONGODB_DATABASE=${MONGODB_DATABASE}
-      - MONGODB_USERNAME=${MONGODB_USERNAME}
-      - MONGODB_PASSWORD=${MONGODB_PASSWORD}
-      - MONGODB_AUTHENTICATION_DATABASE=admin
-    
+      MONGODB_URL: ${MONGODB_URL}
+      MONGODB_DATABASE: ${MONGODB_DATABASE}
+      MONGODB_USERNAME: ${MONGODB_USERNAME}
+      MONGODB_PASSWORD: ${MONGODB_PASSWORD}
+      MONGODB_AUTHENTICATION_DATABASE: admin
 
       # Redis Configuration
-      - REDIS_HOSTNAME=${REDIS_HOSTNAME}
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-      - REDIS_PORT=${REDIS_PORT}
+      REDIS_HOSTNAME: ${REDIS_HOSTNAME}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_PORT: ${REDIS_PORT}
       
     entrypoint: ["/bin/sh", "-c"]
     command: 
@@ -39,7 +43,7 @@ services:
     ports:
       - "8082:8082"
     networks:
-      - am-portfolio-network
+      - market-data-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
       interval: 30s
@@ -53,5 +57,5 @@ volumes:
   grafana_data:
 
 networks:
-  am-portfolio-network:
+  market-data-network:
     driver: bridge

@@ -10,10 +10,10 @@ import org.springframework.data.mongodb.repository.config.EnableMongoRepositorie
 import org.springframework.scheduling.annotation.EnableAsync;
 
 import com.am.common.amcommondata.config.SecurityServiceAutoConfiguration;
-import com.portfolio.app.config.DatabaseConfig;
+//import com.portfolio.app.config.DatabaseConfig;
 import com.portfolio.app.config.MarketDataApiConfigResolver;
 
-@Import({DatabaseConfig.class, MarketDataApiConfigResolver.class, SecurityServiceAutoConfiguration.class})
+@Import({ MarketDataApiConfigResolver.class, SecurityServiceAutoConfiguration.class})
 @ComponentScans({
     @ComponentScan("com.am.common.amcommondata"),
     @ComponentScan("com.portfolio.api"),

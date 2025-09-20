@@ -44,9 +44,9 @@ spring:
       ssl-truststore-password: changeit
   data:
     redis:
-      host: localhost
-      port: 6379
-      password: RedisPassword123!
+      host: ${REDIS_HOSTNAME}
+      port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD}
       portfolio-mover:
         ttl: 900  # 15 minutes in seconds
         key-prefix: "portfolio:analysis:"
@@ -111,7 +111,7 @@ app:
     portfolio:
       consumer:
         id: ${PORTFOLIO_CONSUMER_ID}
-        enabled: false
+        enabled: true
       topic: ${PORTFOLIO_TOPIC}
     stock:
       consumer:
@@ -125,7 +125,7 @@ app:
       topic: ${MARKET_INDEX_TOPIC}
 
 server:
-  port: 8082
+  port: 8083
   servlet:
     context-path: /
   tomcat:
