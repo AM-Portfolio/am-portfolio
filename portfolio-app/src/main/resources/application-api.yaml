@@ -1,8 +1,10 @@
+AM_MARKET_DATA_API_URL: http://localhost:8092
+
 # Market Data API Configuration
 market-data:
   api:
     # Base URL for the market data API - AKS deployed service with Kubernetes FQDN and port
-    base-url: http://localhost:8092
+    base-url: ${AM_MARKET_DATA_API_URL}
 
     # API paths
     ohlc-endpoint: /api/v1/market-data/ohlc
