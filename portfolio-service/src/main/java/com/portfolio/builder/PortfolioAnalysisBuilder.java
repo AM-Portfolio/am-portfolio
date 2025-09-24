@@ -10,7 +10,6 @@ import java.util.Map;
 
 import org.springframework.stereotype.Component;
 
-import com.portfolio.model.MarketComparison;
 import com.portfolio.model.StockPerformance;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.PerformanceMetrics;

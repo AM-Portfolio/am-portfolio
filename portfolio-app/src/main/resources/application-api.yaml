@@ -1,0 +1,34 @@
+AM_MARKET_DATA_API_URL: http://localhost:8092
+
+# Market Data API Configuration
+market-data:
+  api:
+    # Base URL for the market data API - AKS deployed service with Kubernetes FQDN and port
+    base-url: ${AM_MARKET_DATA_API_URL}
+
+    # API paths
+    ohlc-endpoint: /api/v1/market-data/ohlc
+    historical-data-endpoint: /api/v1/market-data/historical-data
+    nse-indices-endpoint: /api/v1/nse-indices
+
+    # Connection settings
+    connection-timeout: 10000
+    read-timeout: 10000
+    max-retry-attempts: 2
+
+# Resilience settings
+resilience4j:
+  retry:
+    instances:
+      market-data-api:
+        max-attempts: 3
+        wait-duration: 1s
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+  circuitbreaker:
+    instances:
+      market-data-api:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 5

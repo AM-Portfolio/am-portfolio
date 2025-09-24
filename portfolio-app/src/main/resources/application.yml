@@ -1,0 +1,154 @@
+#mongo
+MONGODB_URL: mongodb://ssd2658:ssd2658@localhost:27017/portfolio?authSource=admin
+
+#Kafka
+KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+KAFKA_USERNAME: kafkaUser
+KAFKA_PASSWORD: kafkaPassword123!
+KAFKA_JAAS_CONFIG:  #org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME}" password="${KAFKA_PASSWORD}";
+KAFKA_SECURITY_PROTOCOL: PLAINTEXT
+KAFKA_SASL_MECHANISM: PLAIN
+
+#Topic
+PORTFOLIO_CONSUMER_ID: am-portfolio-group-1
+PORTFOLIO_TOPIC: am-portfolio
+STOCK_CONSUMER_ID: am-stock-group.v2
+STOCK_TOPIC: am-stock-price-update
+MARKET_INDEX_CONSUMER_ID: am-market-index-group-1
+MARKET_INDEX_TOPIC: nse-stock-indices-update
+
+#Redis
+REDIS_HOSTNAME: localhost
+REDIS_PORT: 6379
+REDIS_PASSWORD: RedisPassword123!
+
+spring:
+  application:
+    name: portfolio-app
+  profiles:
+    include:
+      - api
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    consumer:
+      group-id: ${PORTFOLIO_CONSUMER_ID}
+      auto-offset-reset: latest
+      enable-auto-commit: false
+      max-poll-records: 100
+    properties:
+      security-protocol: ${KAFKA_SECURITY_PROTOCOL}
+      sasl-mechanism: ${KAFKA_SASL_MECHANISM}
+      sasl-jaas-config: ${KAFKA_JAAS_CONFIG}
+      ssl-endpoint-identification-algorithm: ""
+      ssl-truststore-location: /etc/ssl/certs/java/cacerts
+      ssl-truststore-password: changeit
+  data:
+    redis:
+      host: ${REDIS_HOSTNAME}
+      port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD}
+      portfolio-mover:
+        ttl: 900  # 15 minutes in seconds
+        key-prefix: "portfolio:analysis:"
+      portfolio-summary:
+        ttl: 900  # 15 minutes in seconds
+        key-prefix: "portfolio:summary:"
+      portfolio-holdings:
+        ttl: 900  # 15 minutes in seconds
+        key-prefix: "portfolio:holdings:"
+      market-indices:
+        ttl: 129600  # 30 Days in seconds
+        key-prefix: "market-indices:indices:"
+        historical:
+          key-prefix: "market-indices:historical-indices:"
+          ttl: 129600  # 30 Days in seconds
+      stock:
+        ttl: 129600  # 30 Days in seconds
+        key-prefix: "stock:price:"
+        historical:
+          key-prefix: "stock:historical-price:"
+          ttl: 129600  # 30 Days in seconds
+      stock-indices:
+        ttl: 129600  # 30 Days in seconds
+        key-prefix: "stock-indices:data:"
+        historical:
+          key-prefix: "stock-indices:historical-data:"
+          ttl: 129600  # 30 Days in seconds
+    mongodb:
+      uri: ${MONGODB_URL}
+      authentication-database: admin
+  # Disable JDBC auto-configuration since we're using MongoDB
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+
+nse:
+  broad-market-indices:
+    - NIFTY 50
+    - NIFTY NEXT 50
+    - NIFTY MIDCAP 50
+    - NIFTY MIDCAP 100
+    - NIFTY MIDCAP 150
+    - NIFTY MIDCAP 250
+    - NIFTY MIDCAP 500
+    - NIFTY SMLCAP 100
+    - NIFTY SMLCAP 250
+    - NIFTY SMLCAP 500
+  sector-indices:
+    - NIFTY BANK
+    - NIFTY IT
+    - NIFTY PHARMA
+    - NIFTY AUTO
+    - NIFTY METAL
+    - NIFTY ENERGY
+    - NIFTY FMCG
+    - NIFTY MEDIA
+    - NIFTY REALTY
+    - NIFTY PSU BANK
+
+app:
+  kafka:
+    portfolio:
+      consumer:
+        id: ${PORTFOLIO_CONSUMER_ID}
+        enabled: true
+      topic: ${PORTFOLIO_TOPIC}
+    stock:
+      consumer:
+        id: ${STOCK_CONSUMER_ID}
+        enabled: false
+      topic: ${STOCK_TOPIC}
+    market-index:
+      consumer:
+        id: ${MARKET_INDEX_CONSUMER_ID}
+        enabled: false
+      topic: ${MARKET_INDEX_TOPIC}
+
+server:
+  port: 8080
+  servlet:
+    context-path: /
+  tomcat:
+    max-threads: 20
+    min-spare-threads: 10
+    max-connections: 200
+
+# OpenAPI Documentation
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: method
+    tagsSorter: alpha
+
+logging:
+  level:
+    "[com.portfolio]": DEBUG
+    "[com.portfolio.analytics]": DEBUG
+    "[com.portfolio.api]": DEBUG
+    "[com.portfolio.marketdata]": DEBUG
+    "[com.portfolio.model]": DEBUG
+    "[com.am.common]": DEBUG
+    "[com.am.common.amcommondata]": DEBUG
+    org.springframework.kafka: INFO

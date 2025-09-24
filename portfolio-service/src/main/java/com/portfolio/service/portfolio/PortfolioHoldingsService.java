@@ -11,13 +11,20 @@ import com.portfolio.mapper.holdings.PortfolioHoldingsMapper;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.PortfolioHoldings;
-import com.portfolio.rediscache.service.PortfolioHoldingsRedisService;
-import com.portfolio.rediscache.service.StockPriceRedisService;
+import com.portfolio.redis.service.PortfolioHoldingsRedisService;
+import com.portfolio.redis.service.StockIndicesRedisService;
+import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.model.market.MarketData;
+
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 @Service
 @RequiredArgsConstructor
@@ -26,8 +33,9 @@ public class PortfolioHoldingsService {
     
     private final PortfolioService portfolioService;
     private final PortfolioHoldingsMapper portfolioHoldingsMapper;
-    private final StockPriceRedisService stockPriceRedisService;
+    private final StockIndicesRedisService stockPriceRedisService;
     private final PortfolioHoldingsRedisService portfolioHoldingsRedisService;
+    private final MarketDataService marketDataService;
 
     public PortfolioHoldings getPortfolioHoldings(String userId, TimeInterval interval) {
         log.info("Starting getPortfolioHoldings - User: {}, Interval: {}", userId, interval != null ? interval.getCode() : "null");
@@ -85,37 +93,170 @@ public class PortfolioHoldingsService {
             return equityHoldings;
         }
         
-        return equityHoldings.stream()
-            .map(this::enrichStockPriceAndPerformance)
+        // Extract all symbols from equity holdings
+        List<String> symbols = equityHoldings.stream()
+            .map(EquityHoldings::getSymbol)
+            .filter(symbol -> symbol != null)
+            .collect(Collectors.toList());
+            
+        // Fetch market data for all symbols in a single call
+        Map<String, MarketData> marketDataMap = marketDataService.getMarketData(symbols);
+        log.debug("Fetched market data for {} out of {} symbols", marketDataMap.size(), symbols.size());
+        
+        // First pass: enrich each holding with market data
+        List<EquityHoldings> enrichedHoldings = equityHoldings.stream()
+            .map(holding -> enrichStockPriceAndPerformance(holding, marketDataMap))
             .toList();
+            
+        // Calculate total portfolio value for weight calculation
+        Double totalPortfolioValue = enrichedHoldings.stream()
+            .filter(h -> h.getCurrentValue() != null)
+            .mapToDouble(EquityHoldings::getCurrentValue)
+            .sum();
+            
+        log.debug("Total portfolio value for weight calculation: {}", totalPortfolioValue);
+        
+        // Second pass: calculate weight in portfolio
+        if (totalPortfolioValue > 0) {
+            enrichedHoldings.forEach(holding -> {
+                if (holding.getCurrentValue() != null) {
+                    double weight = (holding.getCurrentValue() / totalPortfolioValue) * 100.0;
+                    holding.setWeightInPortfolio(roundToTwoDecimalPlaces(weight));
+                    log.debug("Set weight for {} to {}%", holding.getSymbol(), holding.getWeightInPortfolio());
+                }
+            });
+        }
+        
+        return enrichedHoldings;
     }
 
-    private EquityHoldings enrichStockPriceAndPerformance(EquityHoldings equityHoldings) {
-        log.debug("Enriching equity holding: Symbol={}, Quantity={}", 
-            equityHoldings.getSymbol(), equityHoldings.getQuantity());
-            
-        var latestPrice = stockPriceRedisService.getLatestPrice(equityHoldings.getSymbol());
-        if (latestPrice.isPresent()) {
-            var currentPrice = latestPrice.get().getClosePrice();
-            var currentValue = currentPrice * equityHoldings.getQuantity();
-            
-            log.debug("Price data found for {}: Price={}, Value={}", 
-                equityHoldings.getSymbol(), currentPrice, currentValue);
-                
-            equityHoldings.setCurrentPrice(currentPrice);
-            equityHoldings.setCurrentValue(currentValue);
-            equityHoldings.setGainLoss(currentValue - equityHoldings.getInvestmentCost());
-            equityHoldings.setGainLossPercentage(equityHoldings.getGainLoss() / equityHoldings.getInvestmentCost());
-            
-            log.debug("Calculated performance for {}: GainLoss={}, GainLossPercentage={}%", 
-                equityHoldings.getSymbol(), equityHoldings.getGainLoss(), 
-                equityHoldings.getGainLossPercentage() * 100);
-        } else {
-            log.warn("No price data found for symbol: {}", equityHoldings.getSymbol());
+    private EquityHoldings enrichStockPriceAndPerformance(EquityHoldings equityHoldings, Map<String, MarketData> marketDataMap) {
+        String symbol = equityHoldings.getSymbol();
+        
+        if (symbol == null) {
+            log.warn("Equity holding has no symbol, cannot enrich with market data");
+            return equityHoldings;
         }
+        
+        log.debug("Enriching equity holding: Symbol={}, Quantity={}", 
+            symbol, equityHoldings.getQuantity());
+        
+        // Get market data for this symbol
+        MarketData marketData = marketDataMap.get(symbol);
+        
+        if (marketData != null) {
+            // Determine current price from market data
+            Double currentPrice = null;
+            Double previousClosePrice = null;
+            
+            // First check lastPrice (current price) and use it if available
+            if (marketData.getLastPrice() != null) {
+                currentPrice = marketData.getLastPrice();
+                log.debug("Using lastPrice for {}: {}", symbol, currentPrice);
+            } 
+            // Fall back to OHLC close price if lastPrice is not available
+            else if (marketData.getOhlc() != null) {
+                currentPrice = marketData.getOhlc().getClose();
+                log.debug("Using OHLC close price for {}: {}", symbol, currentPrice);
+            }
+            
+            // Get previous close price for today's gain/loss calculation
+            if (marketData.getOhlc() != null) {
+                // For today's calculation, use the open price as reference
+                previousClosePrice = marketData.getOhlc().getOpen();
+                
+                // Calculate stock price percentage change
+                if (previousClosePrice > 0 && currentPrice != null) {
+                    Double priceChange = currentPrice - previousClosePrice;
+                    Double percentageChange = (priceChange / previousClosePrice) * 100;
+                    equityHoldings.setPercentageChange(roundToTwoDecimalPlaces(percentageChange));
+                    log.debug("Calculated stock price change for {}: {}% (from {} to {})", 
+                        symbol, equityHoldings.getPercentageChange(), previousClosePrice, currentPrice);
+                }
+            }
+            
+            if (currentPrice != null && equityHoldings.getQuantity() != null) {
+                Double currentValue = currentPrice * equityHoldings.getQuantity();
+                
+                log.debug("Price data found for {}: Price={}, Value={}", 
+                    symbol, currentPrice, currentValue);
+                    
+                // Update equity holding with current price and value
+                equityHoldings.setCurrentPrice(roundToTwoDecimalPlaces(currentPrice));
+                equityHoldings.setCurrentValue(roundToTwoDecimalPlaces(currentValue));
+                
+                // Calculate overall gain/loss metrics if investment cost is available
+                if (equityHoldings.getInvestmentCost() != null && equityHoldings.getInvestmentCost() > 0) {
+                    Double gainLoss = currentValue - equityHoldings.getInvestmentCost();
+                    Double gainLossPercentage = (gainLoss / equityHoldings.getInvestmentCost()) * 100;
+                    
+                    equityHoldings.setGainLoss(roundToTwoDecimalPlaces(gainLoss));
+                    equityHoldings.setGainLossPercentage(roundToTwoDecimalPlaces(gainLossPercentage));
+                    
+                    log.debug("Calculated overall performance for {}: GainLoss={}, GainLossPercentage={}%", 
+                        symbol, gainLoss, gainLossPercentage);
+                }
+                
+                // Calculate today's gain/loss metrics if previous close price is available
+                if (previousClosePrice != null && previousClosePrice > 0) {
+                    Double previousValue = previousClosePrice * equityHoldings.getQuantity();
+                    Double todayGainLoss = currentValue - previousValue;
+                    Double todayGainLossPercentage = (todayGainLoss / previousValue) * 100;
+                    
+                    equityHoldings.setTodayGainLoss(roundToTwoDecimalPlaces(todayGainLoss));
+                    equityHoldings.setTodayGainLossPercentage(roundToTwoDecimalPlaces(todayGainLossPercentage));
+                    
+                    log.debug("Calculated today's performance for {}: TodayGainLoss={}, TodayGainLossPercentage={}%", 
+                        symbol, todayGainLoss, todayGainLossPercentage);
+                }
+            }
+        } else {
+            // Fall back to Redis if market data is not available
+            log.debug("No market data found for {}, falling back to Redis", symbol);
+            var latestPrice = stockPriceRedisService.getLatestPrice(symbol);
+            
+            if (latestPrice.isPresent()) {
+                var currentPrice = latestPrice.get().getClosePrice();
+                var currentValue = currentPrice * equityHoldings.getQuantity();
+                
+                log.debug("Redis price data found for {}: Price={}, Value={}", 
+                    symbol, currentPrice, currentValue);
+                    
+                equityHoldings.setCurrentPrice(roundToTwoDecimalPlaces(currentPrice));
+                equityHoldings.setCurrentValue(roundToTwoDecimalPlaces(currentValue));
+                
+                if (equityHoldings.getInvestmentCost() != null && equityHoldings.getInvestmentCost() > 0) {
+                    Double gainLoss = currentValue - equityHoldings.getInvestmentCost();
+                    Double gainLossPercentage = (gainLoss / equityHoldings.getInvestmentCost()) * 100;
+                    
+                    equityHoldings.setGainLoss(roundToTwoDecimalPlaces(gainLoss));
+                    equityHoldings.setGainLossPercentage(roundToTwoDecimalPlaces(gainLossPercentage));
+                }
+                
+                // Note: We can't calculate today's gain/loss from Redis data as we don't have previous close price
+            } else {
+                log.warn("No price data found for symbol: {} in either market data or Redis", symbol);
+            }
+        }
+        
         return equityHoldings;
     }
 
+    /**
+     * Utility method to round a double value to two decimal places
+     * 
+     * @param value The value to round
+     * @return The rounded value
+     */
+    private Double roundToTwoDecimalPlaces(Double value) {
+        if (value == null) {
+            return null;
+        }
+        BigDecimal bd = BigDecimal.valueOf(value);
+        bd = bd.setScale(2, RoundingMode.HALF_UP);
+        return bd.doubleValue();
+    }
+    
     private Optional<PortfolioHoldings> getCachedHoldings(String userId, TimeInterval interval) {
         log.debug("Checking cache for portfolio holdings - User: {}, Interval: {}", 
             userId, interval != null ? interval.getCode() : "null");
