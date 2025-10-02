@@ -2,6 +2,7 @@ package com.portfolio.api;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.service.PortfolioService;
+import com.portfolio.api.model.PortfolioBasicInfo;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.PortfolioAnalysis;
 import com.portfolio.model.portfolio.PortfolioHoldings;
@@ -73,6 +74,36 @@ public class PortfolioController {
         return ResponseEntity.ok(portfolios);
     }
 
+    @Operation(summary = "Get portfolio IDs and names", description = "Retrieves a lightweight list of portfolio IDs and names for all user portfolios")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Portfolio list retrieved successfully"),
+        @ApiResponse(responseCode = "404", description = "No portfolios found for user")
+    })
+    @GetMapping("/list")
+    public ResponseEntity<List<PortfolioBasicInfo>> getPortfolioBasicDetails(
+            @Parameter(description = "User ID to fetch portfolio basic details for") @RequestParam String userId) {
+        log.info("PortfolioController - getPortfolioBasicDetails called with userId: {}", userId);
+        
+        List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
+        
+        if (portfolios == null || portfolios.isEmpty()) {
+            log.warn("PortfolioController - getPortfolioBasicDetails - No portfolios found for user: {}", userId);
+            return ResponseEntity.notFound().build();
+        }
+        
+        List<PortfolioBasicInfo> basicInfoList = portfolios.stream()
+            .map(portfolio -> new PortfolioBasicInfo(
+                portfolio.getId() != null ? portfolio.getId().toString() : null,
+                portfolio.getName()
+            ))
+            .collect(java.util.stream.Collectors.toList());
+        
+        log.info("PortfolioController - getPortfolioBasicDetails - Found {} portfolio basic details for user: {}", 
+            basicInfoList.size(), userId);
+            
+        return ResponseEntity.ok(basicInfoList);
+    }
+
     @Hidden
     @Operation(summary = "Get portfolio analysis", description = "Retrieves detailed analysis for a specific portfolio (hidden from API docs)")
     @GetMapping("/{portfolioId}/analysis")
@@ -103,30 +134,42 @@ public class PortfolioController {
         }
     }
 
-    @Operation(summary = "Get portfolio summary", description = "Retrieves a summary of all portfolios for a user with performance metrics")
+    @Operation(summary = "Get portfolio summary", description = "Retrieves a summary of all portfolios for a user with performance metrics. Optionally filter by specific portfolio ID.")
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Portfolio summary retrieved successfully"),
         @ApiResponse(responseCode = "404", description = "No portfolio summary found for user")
     })
     @GetMapping("/summary")
     public ResponseEntity<PortfolioSummaryV1> getPortfolioSummary(
-            @RequestParam String userId,
+            @Parameter(description = "User ID to fetch portfolio summary for") @RequestParam String userId,
+            @Parameter(description = "Optional portfolio ID to filter results for specific portfolio") @RequestParam(required = false) String portfolioId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
-        log.info("PortfolioController - getPortfolioSummary called - User: {}, Page: {}, Size: {}, Interval: {}", 
-            userId, page, size, interval != null ? interval : "null");
+        log.info("PortfolioController - getPortfolioSummary called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}", 
+            userId, portfolioId != null ? portfolioId : "all", page, size, interval != null ? interval : "null");
         
         try {
             TimeInterval timeInterval = TimeInterval.fromCode(interval);
-            PortfolioSummaryV1 portfolioSummary = portfolioDashboardService.overviewPortfolio(userId, timeInterval);
+            PortfolioSummaryV1 portfolioSummary;
+            
+            if (portfolioId != null && !portfolioId.trim().isEmpty()) {
+                // Filter by specific portfolio
+                log.info("PortfolioController - getPortfolioSummary - Filtering by portfolio: {}", portfolioId);
+                portfolioSummary = portfolioDashboardService.overviewPortfolio(userId, portfolioId, timeInterval);
+            } else {
+                // Get summary for all portfolios
+                portfolioSummary = portfolioDashboardService.overviewPortfolio(userId, timeInterval);
+            }
             
             if (portfolioSummary == null) {
-                log.warn("PortfolioController - getPortfolioSummary - No summary found for user: {}", userId);
+                log.warn("PortfolioController - getPortfolioSummary - No summary found for user: {} and portfolio: {}", 
+                    userId, portfolioId != null ? portfolioId : "all");
                 return ResponseEntity.notFound().build();
             }
             
-            log.info("PortfolioController - getPortfolioSummary - Successfully retrieved summary for user: {}", userId);
+            log.info("PortfolioController - getPortfolioSummary - Successfully retrieved summary for user: {} and portfolio: {}", 
+                userId, portfolioId != null ? portfolioId : "all");
             return ResponseEntity.ok(portfolioSummary);
         } catch (IllegalArgumentException e) {
             log.error("PortfolioController - getPortfolioSummary - Invalid interval: {}", interval, e);
@@ -134,30 +177,42 @@ public class PortfolioController {
         }
     }
 
-    @Operation(summary = "Get portfolio holdings", description = "Retrieves all holdings across portfolios for a user with current values")
+    @Operation(summary = "Get portfolio holdings", description = "Retrieves all holdings across portfolios for a user with current values. Optionally filter by specific portfolio ID.")
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Portfolio holdings retrieved successfully"),
         @ApiResponse(responseCode = "404", description = "No holdings found for user")
     })
     @GetMapping("/holdings")
     public ResponseEntity<PortfolioHoldings> getPortfolioHoldings(
-            @RequestParam String userId,
+            @Parameter(description = "User ID to fetch portfolio holdings for") @RequestParam String userId,
+            @Parameter(description = "Optional portfolio ID to filter results for specific portfolio") @RequestParam(required = false) String portfolioId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
-        log.info("PortfolioController - getPortfolioHoldings called - User: {}, Page: {}, Size: {}, Interval: {}", 
-            userId, page, size, interval != null ? interval : "null");
+        log.info("PortfolioController - getPortfolioHoldings called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}", 
+            userId, portfolioId != null ? portfolioId : "all", page, size, interval != null ? interval : "null");
         
         try {
             TimeInterval timeInterval = TimeInterval.fromCode(interval);
-            PortfolioHoldings portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(userId, timeInterval);
+            PortfolioHoldings portfolioHoldings;
+            
+            if (portfolioId != null && !portfolioId.trim().isEmpty()) {
+                // Filter by specific portfolio
+                log.info("PortfolioController - getPortfolioHoldings - Filtering by portfolio: {}", portfolioId);
+                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(userId, portfolioId, timeInterval);
+            } else {
+                // Get holdings for all portfolios
+                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(userId, timeInterval);
+            }
             
             if (portfolioHoldings == null) {
-                log.warn("PortfolioController - getPortfolioHoldings - No holdings found for user: {}", userId);
+                log.warn("PortfolioController - getPortfolioHoldings - No holdings found for user: {} and portfolio: {}", 
+                    userId, portfolioId != null ? portfolioId : "all");
                 return ResponseEntity.notFound().build();
             }
             
-            log.info("PortfolioController - getPortfolioHoldings - Successfully retrieved holdings for user: {}", userId);
+            log.info("PortfolioController - getPortfolioHoldings - Successfully retrieved holdings for user: {} and portfolio: {}", 
+                userId, portfolioId != null ? portfolioId : "all");
             return ResponseEntity.ok(portfolioHoldings);
         } catch (IllegalArgumentException e) {
             log.error("PortfolioController - getPortfolioHoldings - Invalid interval: {}", interval, e);

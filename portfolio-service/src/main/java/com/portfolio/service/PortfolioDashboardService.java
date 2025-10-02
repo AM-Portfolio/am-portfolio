@@ -41,6 +41,25 @@ public class PortfolioDashboardService {
             userId, result != null ? "yes" : "no");
         return result;
     }
+    
+    /**
+     * Provides an overview of a specific portfolio for the given user, portfolio ID and time interval.
+     * 
+     * @param userId      the ID of the user
+     * @param portfolioId the ID of the specific portfolio to filter by
+     * @param interval    the time interval
+     * @return the portfolio summary for the specific portfolio
+     */
+    public PortfolioSummaryV1 overviewPortfolio(String userId, String portfolioId, TimeInterval interval) {
+        log.info("PortfolioDashboardService - Starting overviewPortfolio for user: {}, portfolio: {}, interval: {}", 
+            userId, portfolioId, interval != null ? interval.getCode() : "null");
+        
+        PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, portfolioId, interval);
+        
+        log.info("PortfolioDashboardService - Completed overviewPortfolio for user: {}, portfolio: {}, found summary: {}", 
+            userId, portfolioId, result != null ? "yes" : "no");
+        return result;
+    }
 
     /**
      * Analyzes the portfolio for the given portfolio ID, user ID, page number, page size, and time interval.
@@ -78,6 +97,25 @@ public class PortfolioDashboardService {
         
         log.info("PortfolioDashboardService - Completed getPortfolioHoldings for user: {}, found holdings: {}", 
             userId, result != null ? "yes" : "no");
+        return result;
+    }
+    
+    /**
+     * Retrieves the portfolio holdings for a specific portfolio of the given user and time interval.
+     * 
+     * @param userId      the ID of the user
+     * @param portfolioId the ID of the specific portfolio to filter by
+     * @param interval    the time interval
+     * @return the portfolio holdings for the specific portfolio
+     */
+    public PortfolioHoldings getPortfolioHoldings(String userId, String portfolioId, TimeInterval interval) {
+        log.info("PortfolioDashboardService - Starting getPortfolioHoldings for user: {}, portfolio: {}, interval: {}", 
+            userId, portfolioId, interval != null ? interval.getCode() : "null");
+        
+        PortfolioHoldings result = portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, interval);
+        
+        log.info("PortfolioDashboardService - Completed getPortfolioHoldings for user: {}, portfolio: {}, found holdings: {}", 
+            userId, portfolioId, result != null ? "yes" : "no");
         return result;
     }
 }
