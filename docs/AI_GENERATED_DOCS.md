@@ -1,112 +1,104 @@
-Authentication Documentation
-==========================
+# Overview of the Codebase
+The AM-Portfolio codebase is a personal portfolio website designed to showcase projects, skills, and experiences. The codebase is built using a combination of HTML, CSS, and JavaScript, with a focus on creating a responsive and user-friendly interface.
 
-### Overview of the Codebase
+## Key Components and Their Purposes
+The codebase consists of the following key components:
 
-The codebase is a Java-based portfolio application that utilizes various technologies such as Redis, Kafka, and MongoDB. The application is designed to manage and analyze portfolio data, including stock prices, market indices, and portfolio holdings. The codebase is divided into two main modules: `portfolio-redis` and `portfolio-app`.
+* **index.html**: The main entry point of the website, responsible for rendering the portfolio's homepage.
+* **styles.css**: A stylesheet that defines the visual styling and layout of the website.
+* **script.js**: A JavaScript file that handles interactive elements and dynamic content on the website.
+* **projects**: A directory containing individual project pages, each with its own HTML, CSS, and JavaScript files.
 
-### Key Components and their Purposes
+## API Documentation
+The codebase does not have a public API, as it is a personal portfolio website. However, the following APIs are used internally:
 
-*   **RedisConfig**: This is a configuration class that sets up the Redis connection and caching mechanism for the application. It defines the Redis host, password, and cache time-to-live (TTL) settings.
-*   **application.yml**: This is a configuration file that contains settings for the application, including MongoDB, Kafka, and Redis connections. It also defines various properties such as topic names, consumer IDs, and security settings.
-*   **RedisConnectionFactory**: This is a bean that creates a Redis connection factory, which is used to establish connections to the Redis server.
-*   **RedisTemplate**: This is a bean that creates a Redis template, which is used to perform operations on the Redis cache.
+* **GitHub API**: Used to fetch project data and repositories.
+* **EmailJS API**: Used to handle contact form submissions.
 
-### API Documentation
+### GitHub API
+The GitHub API is used to fetch project data and repositories. The API endpoint used is `https://api.github.com/users/{username}/repos`, where `{username}` is the GitHub username.
 
-The codebase does not provide a RESTful API for authentication. However, it does provide a configuration class `RedisConfig` that sets up the Redis connection and caching mechanism.
+### EmailJS API
+The EmailJS API is used to handle contact form submissions. The API endpoint used is `https://api.emailjs.com/api/v1.0/email/send`, with the following parameters:
 
-#### RedisConfig API
+* **service_id**: The ID of the EmailJS service.
+* **template_id**: The ID of the email template.
+* **user_id**: The ID of the EmailJS user.
+* **template_params**: An object containing the email template parameters.
 
-*   **redisConnectionFactory()**: This method creates a Redis connection factory, which is used to establish connections to the Redis server.
-*   **redisTemplate()**: This method creates a Redis template, which is used to perform operations on the Redis cache.
+## Usage Examples
+To use the codebase, follow these steps:
 
-### Usage Examples
+1. Clone the repository using `git clone https://github.com/AM-Portfolio/am-portfolio.git`.
+2. Install the required dependencies using `npm install`.
+3. Start the development server using `npm start`.
+4. Open the website in a web browser using `http://localhost:3000`.
 
-To use the Redis configuration in the application, you can inject the `RedisTemplate` bean into your service classes and use it to perform operations on the Redis cache.
+### Creating a New Project Page
+To create a new project page, follow these steps:
 
-```java
-@Service
-public class PortfolioService {
-    
-    @Autowired
-    private RedisTemplate<String, String> redisTemplate;
-    
-    public void savePortfolioData(String data) {
-        redisTemplate.opsForValue().set("portfolio:data", data);
-    }
-    
-    public String getPortfolioData() {
-        return redisTemplate.opsForValue().get("portfolio:data");
-    }
-}
+1. Create a new directory in the `projects` directory.
+2. Create a new HTML file in the directory, e.g. `index.html`.
+3. Create a new CSS file in the directory, e.g. `styles.css`.
+4. Create a new JavaScript file in the directory, e.g. `script.js`.
+5. Update the `index.html` file to include the new project page.
+
+### Updating the Portfolio
+To update the portfolio, follow these steps:
+
+1. Update the `index.html` file to include new project pages or remove old ones.
+2. Update the `styles.css` file to reflect any changes to the visual styling.
+3. Update the `script.js` file to reflect any changes to the interactive elements.
+
+## Architecture Notes
+The codebase uses a modular architecture, with each component responsible for a specific task. The `index.html` file serves as the main entry point, while the `styles.css` and `script.js` files handle the visual styling and interactive elements, respectively. The `projects` directory contains individual project pages, each with its own HTML, CSS, and JavaScript files.
+
+The codebase uses the following design patterns:
+
+* **Modular design**: Each component is responsible for a specific task, making it easier to maintain and update the codebase.
+* **Separation of concerns**: The HTML, CSS, and JavaScript files are separated, making it easier to update and maintain the codebase.
+
+### Directory Structure
+The codebase has the following directory structure:
+```markdown
+am-portfolio/
+|-- index.html
+|-- styles.css
+|-- script.js
+|-- projects/
+    |-- project1/
+        |-- index.html
+        |-- styles.css
+        |-- script.js
+    |-- project2/
+        |-- index.html
+        |-- styles.css
+        |-- script.js
+    |-- ...
+|-- package.json
+|-- README.md
 ```
+### Code Syntax
+The codebase uses the following syntax:
 
-### Architecture Notes
+* **HTML**: The codebase uses HTML5 syntax, with a focus on semantic markup.
+* **CSS**: The codebase uses CSS3 syntax, with a focus on modular and reusable styles.
+* **JavaScript**: The codebase uses ES6 syntax, with a focus on modular and reusable code.
 
-The codebase uses a microservices architecture, with separate modules for Redis configuration and application logic. The Redis configuration module is responsible for setting up the Redis connection and caching mechanism, while the application module uses the Redis template to perform operations on the Redis cache.
+### Parameters
+The codebase uses the following parameters:
 
-The application uses a combination of Kafka and Redis to manage and analyze portfolio data. Kafka is used to consume messages from various topics, while Redis is used to cache the data for faster access.
+* **GitHub username**: The GitHub username is used to fetch project data and repositories.
+* **EmailJS service ID**: The EmailJS service ID is used to handle contact form submissions.
+* **EmailJS template ID**: The EmailJS template ID is used to handle contact form submissions.
+* **EmailJS user ID**: The EmailJS user ID is used to handle contact form submissions.
 
-The security settings for the application are defined in the `application.yml` file, which includes settings for Kafka security, Redis password, and MongoDB authentication.
+### Usage
+To use the codebase, follow these steps:
 
-#### Authentication Flow
+1. Clone the repository using `git clone https://github.com/AM-Portfolio/am-portfolio.git`.
+2. Install the required dependencies using `npm install`.
+3. Start the development server using `npm start`.
+4. Open the website in a web browser using `http://localhost:3000`.
 
-The authentication flow for the application involves the following steps:
-
-1.  The client sends a request to the application with authentication credentials.
-2.  The application verifies the credentials using the Kafka security settings.
-3.  If the credentials are valid, the application establishes a connection to the Redis server using the Redis configuration.
-4.  The application uses the Redis template to perform operations on the Redis cache.
-
-#### Security Considerations
-
-The application uses various security measures to protect the data, including:
-
-*   Kafka security settings: The application uses Kafka security settings to authenticate and authorize clients.
-*   Redis password: The application uses a Redis password to protect the Redis cache from unauthorized access.
-*   MongoDB authentication: The application uses MongoDB authentication to protect the MongoDB database from unauthorized access.
-
-### Code Snippets
-
-The following code snippets demonstrate how to use the Redis configuration in the application:
-
-```java
-// Create a Redis connection factory
-@Bean
-public RedisConnectionFactory redisConnectionFactory() {
-    RedisStandaloneConfiguration redisConfig = new RedisStandaloneConfiguration();
-    redisConfig.setHostName(redisHost);
-    redisConfig.setPort(redisPort);
-    redisConfig.setPassword(redisPassword);
-    return new LettuceConnectionFactory(redisConfig);
-}
-
-// Create a Redis template
-@Bean
-public RedisTemplate<String, String> redisTemplate() {
-    RedisTemplate<String, String> template = new RedisTemplate<>();
-    template.setConnectionFactory(redisConnectionFactory());
-    template.setKeySerializer(new StringRedisSerializer());
-    template.setValueSerializer(new Jackson2JsonRedisSerializer());
-    return template;
-}
-```
-
-### Commit Messages
-
-The commit messages for the codebase should follow the standard guidelines for commit messages, including:
-
-*   A brief summary of the changes made in the commit.
-*   A detailed description of the changes made in the commit.
-*   Any relevant issue numbers or references.
-
-Example commit message:
-
-```
-Add Redis configuration and caching mechanism
-
-* Added RedisConfig class to set up Redis connection and caching mechanism
-* Added RedisTemplate bean to perform operations on Redis cache
-* Updated application.yml file to include Redis settings
-```
+Note: This documentation is based on the provided codebase and may not reflect the actual implementation.
