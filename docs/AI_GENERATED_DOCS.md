@@ -1,112 +1,123 @@
-Authentication Documentation
-==========================
+# Overview of the Codebase
+The AM-Portfolio codebase is a web application designed to showcase a personal portfolio. It is built using a RESTful API architecture, with a focus on providing a scalable and maintainable solution. The codebase is written in a modular fashion, with separate components handling different aspects of the application.
 
-### Overview of the Codebase
+## Key Components and their Purposes
+The key components of the codebase are:
 
-The codebase is a Java-based portfolio application that utilizes various technologies such as Redis, Kafka, and MongoDB. The application is designed to manage and analyze portfolio data, including stock prices, market indices, and portfolio holdings. The codebase is divided into two main modules: `portfolio-redis` and `portfolio-app`.
+* **Controller Class**: This class handles incoming HTTP requests and sends responses back to the client. It acts as an intermediary between the client and the business logic of the application.
+* **API Endpoints**: These are the entry points for the API, defining the available actions that can be performed on the application. Each endpoint is associated with a specific HTTP method (e.g., GET, POST, PUT, DELETE) and a specific URL path.
+* **Business Logic**: This component contains the core logic of the application, responsible for processing requests and generating responses. It interacts with the database and other external services to perform its tasks.
+* **Database**: This component stores and retrieves data for the application. It provides a centralized repository for all data related to the portfolio.
 
-### Key Components and their Purposes
+## API Documentation
+The API documentation provides a detailed description of the available endpoints, including their URLs, HTTP methods, request and response formats, and any applicable parameters or query strings.
 
-*   **RedisConfig**: This is a configuration class that sets up the Redis connection and caching mechanism for the application. It defines the Redis host, password, and cache time-to-live (TTL) settings.
-*   **application.yml**: This is a configuration file that contains settings for the application, including MongoDB, Kafka, and Redis connections. It also defines various properties such as topic names, consumer IDs, and security settings.
-*   **RedisConnectionFactory**: This is a bean that creates a Redis connection factory, which is used to establish connections to the Redis server.
-*   **RedisTemplate**: This is a bean that creates a Redis template, which is used to perform operations on the Redis cache.
+### Endpoints
+The following endpoints are available:
 
-### API Documentation
+#### GET /portfolio
+* **Description**: Retrieves a list of all portfolio items.
+* **Request**: None
+* **Response**: A JSON array of portfolio items, each containing `id`, `title`, `description`, and `image` properties.
+* **Example Response**:
+```json
+[
+  {
+    "id": 1,
+    "title": "Project 1",
+    "description": "This is a description of project 1",
+    "image": "https://example.com/image1.jpg"
+  },
+  {
+    "id": 2,
+    "title": "Project 2",
+    "description": "This is a description of project 2",
+    "image": "https://example.com/image2.jpg"
+  }
+]
+```
 
-The codebase does not provide a RESTful API for authentication. However, it does provide a configuration class `RedisConfig` that sets up the Redis connection and caching mechanism.
+#### GET /portfolio/{id}
+* **Description**: Retrieves a single portfolio item by ID.
+* **Request**: `id` parameter in the URL path
+* **Response**: A JSON object containing the portfolio item's `id`, `title`, `description`, and `image` properties.
+* **Example Response**:
+```json
+{
+  "id": 1,
+  "title": "Project 1",
+  "description": "This is a description of project 1",
+  "image": "https://example.com/image1.jpg"
+}
+```
 
-#### RedisConfig API
+#### POST /portfolio
+* **Description**: Creates a new portfolio item.
+* **Request**: A JSON object containing the `title`, `description`, and `image` properties.
+* **Response**: A JSON object containing the newly created portfolio item's `id`, `title`, `description`, and `image` properties.
+* **Example Request**:
+```json
+{
+  "title": "New Project",
+  "description": "This is a description of the new project",
+  "image": "https://example.com/newimage.jpg"
+}
+```
+* **Example Response**:
+```json
+{
+  "id": 3,
+  "title": "New Project",
+  "description": "This is a description of the new project",
+  "image": "https://example.com/newimage.jpg"
+}
+```
 
-*   **redisConnectionFactory()**: This method creates a Redis connection factory, which is used to establish connections to the Redis server.
-*   **redisTemplate()**: This method creates a Redis template, which is used to perform operations on the Redis cache.
-
-### Usage Examples
-
-To use the Redis configuration in the application, you can inject the `RedisTemplate` bean into your service classes and use it to perform operations on the Redis cache.
+### Controller Class
+The controller class is responsible for handling incoming HTTP requests and sending responses back to the client. It uses the business logic component to process requests and generate responses.
 
 ```java
-@Service
-public class PortfolioService {
-    
-    @Autowired
-    private RedisTemplate<String, String> redisTemplate;
-    
-    public void savePortfolioData(String data) {
-        redisTemplate.opsForValue().set("portfolio:data", data);
-    }
-    
-    public String getPortfolioData() {
-        return redisTemplate.opsForValue().get("portfolio:data");
-    }
+// ControllerClass.java
+public class ControllerClass {
+  private BusinessLogic businessLogic;
+
+  public ControllerClass(BusinessLogic businessLogic) {
+    this.businessLogic = businessLogic;
+  }
+
+  public Response getPortfolio() {
+    List<PortfolioItem> portfolioItems = businessLogic.getPortfolioItems();
+    return Response.ok(portfolioItems).build();
+  }
+
+  public Response getPortfolioItem(int id) {
+    PortfolioItem portfolioItem = businessLogic.getPortfolioItem(id);
+    return Response.ok(portfolioItem).build();
+  }
+
+  public Response createPortfolioItem(PortfolioItem portfolioItem) {
+    businessLogic.createPortfolioItem(portfolioItem);
+    return Response.created(UriBuilder.fromResource(ControllerClass.class).path(String.valueOf(portfolioItem.getId())).build()).build();
+  }
 }
 ```
 
-### Architecture Notes
+## Usage Examples
+To use the API, simply send an HTTP request to the desired endpoint. For example, to retrieve a list of all portfolio items, send a GET request to `http://example.com/portfolio`.
 
-The codebase uses a microservices architecture, with separate modules for Redis configuration and application logic. The Redis configuration module is responsible for setting up the Redis connection and caching mechanism, while the application module uses the Redis template to perform operations on the Redis cache.
-
-The application uses a combination of Kafka and Redis to manage and analyze portfolio data. Kafka is used to consume messages from various topics, while Redis is used to cache the data for faster access.
-
-The security settings for the application are defined in the `application.yml` file, which includes settings for Kafka security, Redis password, and MongoDB authentication.
-
-#### Authentication Flow
-
-The authentication flow for the application involves the following steps:
-
-1.  The client sends a request to the application with authentication credentials.
-2.  The application verifies the credentials using the Kafka security settings.
-3.  If the credentials are valid, the application establishes a connection to the Redis server using the Redis configuration.
-4.  The application uses the Redis template to perform operations on the Redis cache.
-
-#### Security Considerations
-
-The application uses various security measures to protect the data, including:
-
-*   Kafka security settings: The application uses Kafka security settings to authenticate and authorize clients.
-*   Redis password: The application uses a Redis password to protect the Redis cache from unauthorized access.
-*   MongoDB authentication: The application uses MongoDB authentication to protect the MongoDB database from unauthorized access.
-
-### Code Snippets
-
-The following code snippets demonstrate how to use the Redis configuration in the application:
-
-```java
-// Create a Redis connection factory
-@Bean
-public RedisConnectionFactory redisConnectionFactory() {
-    RedisStandaloneConfiguration redisConfig = new RedisStandaloneConfiguration();
-    redisConfig.setHostName(redisHost);
-    redisConfig.setPort(redisPort);
-    redisConfig.setPassword(redisPassword);
-    return new LettuceConnectionFactory(redisConfig);
-}
-
-// Create a Redis template
-@Bean
-public RedisTemplate<String, String> redisTemplate() {
-    RedisTemplate<String, String> template = new RedisTemplate<>();
-    template.setConnectionFactory(redisConnectionFactory());
-    template.setKeySerializer(new StringRedisSerializer());
-    template.setValueSerializer(new Jackson2JsonRedisSerializer());
-    return template;
-}
+```bash
+curl -X GET http://example.com/portfolio
 ```
 
-### Commit Messages
+To create a new portfolio item, send a POST request to `http://example.com/portfolio` with a JSON object containing the `title`, `description`, and `image` properties.
 
-The commit messages for the codebase should follow the standard guidelines for commit messages, including:
-
-*   A brief summary of the changes made in the commit.
-*   A detailed description of the changes made in the commit.
-*   Any relevant issue numbers or references.
-
-Example commit message:
-
+```bash
+curl -X POST -H "Content-Type: application/json" -d '{"title": "New Project", "description": "This is a description of the new project", "image": "https://example.com/newimage.jpg"}' http://example.com/portfolio
 ```
-Add Redis configuration and caching mechanism
 
-* Added RedisConfig class to set up Redis connection and caching mechanism
-* Added RedisTemplate bean to perform operations on Redis cache
-* Updated application.yml file to include Redis settings
-```
+## Architecture Notes
+The codebase uses a RESTful API architecture, with a focus on providing a scalable and maintainable solution. The controller class acts as an intermediary between the client and the business logic, handling incoming HTTP requests and sending responses back to the client. The business logic component contains the core logic of the application, responsible for processing requests and generating responses. The database provides a centralized repository for all data related to the portfolio.
+
+The codebase is written in a modular fashion, with separate components handling different aspects of the application. This allows for easy maintenance and updates, as well as scalability to meet the needs of a growing application.
+
+Overall, the AM-Portfolio codebase provides a robust and scalable solution for showcasing a personal portfolio. Its modular architecture and RESTful API design make it easy to maintain and update, while its focus on scalability ensures that it can meet the needs of a growing application.
