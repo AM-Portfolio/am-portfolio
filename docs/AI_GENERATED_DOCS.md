@@ -1,8 +1,5 @@
-Authentication Documentation
+Overview of the Codebase
 ==========================
-
-### Overview of the Codebase
-
 The codebase is a Java-based portfolio application that utilizes various technologies such as Redis, Kafka, and MongoDB. The application is designed to manage and analyze portfolio data, including stock prices, market indices, and portfolio holdings. The codebase is divided into two main modules: `portfolio-redis` and `portfolio-app`.
 
 ### Key Components and their Purposes
@@ -11,6 +8,9 @@ The codebase is a Java-based portfolio application that utilizes various technol
 *   **application.yml**: This is a configuration file that contains settings for the application, including MongoDB, Kafka, and Redis connections. It also defines various properties such as topic names, consumer IDs, and security settings.
 *   **RedisConnectionFactory**: This is a bean that creates a Redis connection factory, which is used to establish connections to the Redis server.
 *   **RedisTemplate**: This is a bean that creates a Redis template, which is used to perform operations on the Redis cache.
+*   **AnalyticsModuleConfig**: This is a configuration class for the portfolio-analytics module. It ensures that Spring can discover and load all components in this module.
+*   **AbstractAnalyticsProvider**: This is a common base class for all analytics providers (index and portfolio). It provides methods for generating analytics and fetching market data.
+*   **AnalyticsFactory**: This is a factory for creating and managing analytics providers for both index and portfolio analytics.
 
 ### API Documentation
 
@@ -32,81 +32,44 @@ public class PortfolioService {
     @Autowired
     private RedisTemplate<String, String> redisTemplate;
     
-    public void savePortfolioData(String data) {
-        redisTemplate.opsForValue().set("portfolio:data", data);
-    }
-    
-    public String getPortfolioData() {
-        return redisTemplate.opsForValue().get("portfolio:data");
-    }
+    // Use the redisTemplate to perform operations on the Redis cache
 }
 ```
 
 ### Architecture Notes
 
-The codebase uses a microservices architecture, with separate modules for Redis configuration and application logic. The Redis configuration module is responsible for setting up the Redis connection and caching mechanism, while the application module uses the Redis template to perform operations on the Redis cache.
+The codebase follows a modular architecture, with separate modules for portfolio analytics and Redis configuration. The analytics module uses a factory pattern to support extensibility for future analytics types. The Redis configuration module uses a configuration class to set up the Redis connection and caching mechanism.
 
-The application uses a combination of Kafka and Redis to manage and analyze portfolio data. Kafka is used to consume messages from various topics, while Redis is used to cache the data for faster access.
+The codebase also uses Spring Framework for dependency injection and configuration management. It uses MongoDB, Kafka, and Redis for data storage and messaging.
 
-The security settings for the application are defined in the `application.yml` file, which includes settings for Kafka security, Redis password, and MongoDB authentication.
+### Helm Chart
 
-#### Authentication Flow
+The codebase includes a Helm chart for deploying the Market Data Service to AKS (Azure Kubernetes Service). The chart provides automated deployment of the Market Data Service with optimized configurations, built-in retry mechanism, comprehensive metrics collection, and Grafana dashboards for monitoring.
 
-The authentication flow for the application involves the following steps:
+### Installation
 
-1.  The client sends a request to the application with authentication credentials.
-2.  The application verifies the credentials using the Kafka security settings.
-3.  If the credentials are valid, the application establishes a connection to the Redis server using the Redis configuration.
-4.  The application uses the Redis template to perform operations on the Redis cache.
+To install the Helm chart, you need to add the required Helm repositories, create a values override file, and install the chart using the `helm install` command.
 
-#### Security Considerations
+```bash
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo add influxdata https://helm.influxdata.com/
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
 
-The application uses various security measures to protect the data, including:
-
-*   Kafka security settings: The application uses Kafka security settings to authenticate and authorize clients.
-*   Redis password: The application uses a Redis password to protect the Redis cache from unauthorized access.
-*   MongoDB authentication: The application uses MongoDB authentication to protect the MongoDB database from unauthorized access.
-
-### Code Snippets
-
-The following code snippets demonstrate how to use the Redis configuration in the application:
-
-```java
-// Create a Redis connection factory
-@Bean
-public RedisConnectionFactory redisConnectionFactory() {
-    RedisStandaloneConfiguration redisConfig = new RedisStandaloneConfiguration();
-    redisConfig.setHostName(redisHost);
-    redisConfig.setPort(redisPort);
-    redisConfig.setPassword(redisPassword);
-    return new LettuceConnectionFactory(redisConfig);
-}
-
-// Create a Redis template
-@Bean
-public RedisTemplate<String, String> redisTemplate() {
-    RedisTemplate<String, String> template = new RedisTemplate<>();
-    template.setConnectionFactory(redisConnectionFactory());
-    template.setKeySerializer(new StringRedisSerializer());
-    template.setValueSerializer(new Jackson2JsonRedisSerializer());
-    return template;
-}
+helm install market-data ./market-data -f custom-values.yaml -n market-data --create-namespace
 ```
 
-### Commit Messages
+### Configuration
 
-The commit messages for the codebase should follow the standard guidelines for commit messages, including:
+The Helm chart provides various configuration options, including market data processing, resource allocation, and autoscaling. You can customize these settings by creating a values override file and passing it to the `helm install` command.
 
-*   A brief summary of the changes made in the commit.
-*   A detailed description of the changes made in the commit.
-*   Any relevant issue numbers or references.
-
-Example commit message:
-
-```
-Add Redis configuration and caching mechanism
-
-* Added RedisConfig class to set up Redis connection and caching mechanism
-* Added RedisTemplate bean to perform operations on Redis cache
-* Updated application.yml file to include Redis settings
+```yaml
+config:
+  marketData:
+    maxRetries: 3              # Maximum retry attempts for API calls
+    retryDelayMs: 1000        # Base delay between retries
+    threadPoolSize: 5         # Thread pool size for parallel processing
+    threadQueueCapacity: 10   # Queue capacity for pending tasks
+    maxAgeMinutes: 15        # Maximum age of market data
 ```
