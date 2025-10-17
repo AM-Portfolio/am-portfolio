@@ -1,6 +1,5 @@
 Authentication Documentation
 ==========================
-
 ### Overview of the Codebase
 
 The codebase is a Java-based portfolio application that utilizes various technologies such as Redis, Kafka, and MongoDB. The application is designed to manage and analyze portfolio data, including stock prices, market indices, and portfolio holdings. The codebase is divided into two main modules: `portfolio-redis` and `portfolio-app`.
@@ -44,69 +43,162 @@ public class PortfolioService {
 
 ### Architecture Notes
 
-The codebase uses a microservices architecture, with separate modules for Redis configuration and application logic. The Redis configuration module is responsible for setting up the Redis connection and caching mechanism, while the application module uses the Redis template to perform operations on the Redis cache.
+The application uses a microservices architecture, with separate modules for Redis configuration and portfolio data management. The `portfolio-redis` module is responsible for setting up the Redis connection and caching mechanism, while the `portfolio-app` module handles portfolio data management and analysis.
 
-The application uses a combination of Kafka and Redis to manage and analyze portfolio data. Kafka is used to consume messages from various topics, while Redis is used to cache the data for faster access.
+The application uses Redis as a caching layer to improve performance and reduce the load on the database. The `RedisConfig` class sets up the Redis connection and caching mechanism, and provides methods for creating a Redis connection factory and template.
 
-The security settings for the application are defined in the `application.yml` file, which includes settings for Kafka security, Redis password, and MongoDB authentication.
+The application also uses Kafka for messaging and data integration. The `application.yml` file contains settings for Kafka connections, topic names, and consumer IDs.
 
-#### Authentication Flow
+The application uses MongoDB as the primary database for storing portfolio data. The `application.yml` file contains settings for MongoDB connections and database names.
 
-The authentication flow for the application involves the following steps:
+Overall, the application is designed to be scalable, flexible, and highly available, with a focus on performance and reliability.
 
-1.  The client sends a request to the application with authentication credentials.
-2.  The application verifies the credentials using the Kafka security settings.
-3.  If the credentials are valid, the application establishes a connection to the Redis server using the Redis configuration.
-4.  The application uses the Redis template to perform operations on the Redis cache.
+### Security Considerations
 
-#### Security Considerations
+The application uses Redis authentication and authorization to secure access to the Redis cache. The `RedisConfig` class sets up the Redis connection and caching mechanism, and provides methods for creating a Redis connection factory and template.
 
-The application uses various security measures to protect the data, including:
+The application also uses Kafka security features, such as SSL/TLS encryption and authentication, to secure data transmission and integration.
 
-*   Kafka security settings: The application uses Kafka security settings to authenticate and authorize clients.
-*   Redis password: The application uses a Redis password to protect the Redis cache from unauthorized access.
-*   MongoDB authentication: The application uses MongoDB authentication to protect the MongoDB database from unauthorized access.
+The application uses MongoDB security features, such as authentication and authorization, to secure access to the database.
 
-### Code Snippets
+### Best Practices
 
-The following code snippets demonstrate how to use the Redis configuration in the application:
+The application follows best practices for coding, testing, and deployment, including:
 
+*   Using a consistent coding style and formatting conventions
+*   Writing unit tests and integration tests to ensure code quality and reliability
+*   Using continuous integration and continuous deployment (CI/CD) pipelines to automate testing and deployment
+*   Using monitoring and logging tools to track application performance and issues
+*   Using security best practices to protect sensitive data and prevent unauthorized access
+
+### Future Development
+
+The application is designed to be highly scalable and flexible, with a focus on performance and reliability. Future development plans include:
+
+*   Adding new features and functionality to the application, such as support for multiple portfolio types and advanced analytics
+*   Improving application performance and reliability, such as by optimizing database queries and caching mechanisms
+*   Enhancing security and authentication features, such as by adding support for multi-factor authentication and encryption
+*   Expanding the application to support multiple users and organizations, such as by adding support for user authentication and authorization. 
+
+### Code Files
+
+#### File: `portfolio-redis/src/main/java/com/portfolio/redis/config/RedisConfig.java`
 ```java
-// Create a Redis connection factory
-@Bean
-public RedisConnectionFactory redisConnectionFactory() {
-    RedisStandaloneConfiguration redisConfig = new RedisStandaloneConfiguration();
-    redisConfig.setHostName(redisHost);
-    redisConfig.setPort(redisPort);
-    redisConfig.setPassword(redisPassword);
-    return new LettuceConnectionFactory(redisConfig);
-}
+package com.portfolio.redis.config;
 
-// Create a Redis template
-@Bean
-public RedisTemplate<String, String> redisTemplate() {
-    RedisTemplate<String, String> template = new RedisTemplate<>();
-    template.setConnectionFactory(redisConnectionFactory());
-    template.setKeySerializer(new StringRedisSerializer());
-    template.setValueSerializer(new Jackson2JsonRedisSerializer());
-    return template;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.StringRedisSerializer;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
+@Configuration
+@EnableCaching
+public class RedisConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(RedisConfig.class);
+
+    @Value("${spring.data.redis.host}")
+    private String redisHost;
+
+    @Value("${spring.data.redis.password}")
+    private String redisPassword;
+
+    @Value("${market.data.cache.ttl.seconds:300}")
+    private long cacheTimeToLiveSeconds;
+
+    @Bean
+    public RedisConnectionFactory redisConnectionFactory() {
+        RedisStandaloneConfiguration redisConfig = new RedisStandaloneConfiguration();
+        redisConfig.setHostName(redisHost);
+        redisConfig.setPassword(redisPassword);
+        return new LettuceConnectionFactory(redisConfig);
+    }
+
+    @Bean
+    public RedisTemplate<String, String> redisTemplate() {
+        RedisTemplate<String, String> template = new RedisTemplate<>();
+        template.setConnectionFactory(redisConnectionFactory());
+        template.setKeySerializer(new StringRedisSerializer());
+        template.setValueSerializer(new StringRedisSerializer());
+        return template;
+    }
 }
 ```
 
-### Commit Messages
+#### File: `portfolio-app/src/main/resources/application.yml`
+```yml
+# mongo
+MONGODB_URL: mongodb://ssd2658:ssd2658@mongodb.dev.svc.cluster.local:27017/portfolio?authSource=admin
 
-The commit messages for the codebase should follow the standard guidelines for commit messages, including:
+# Kafka
+KAFKA_USERNAME: kafkaUser
+KAFKA_PASSWORD: kafkaPassword123!
+KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+KAFKA_SECURITY_PROTOCOL: SASL_PLAINTEXT
+KAFKA_SASL_MECHANISM: PLAIN
+KAFKA_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME}" password="${KAFKA_PASSWORD}";
 
-*   A brief summary of the changes made in the commit.
-*   A detailed description of the changes made in the commit.
-*   Any relevant issue numbers or references.
+# Topic
+PORTFOLIO_CONSUMER_ID: am-portfolio-group-1
+PORTFOLIO_TOPIC: am-portfolio
+STOCK_CONSUMER_ID: am-stock-group.v2
+STOCK_TOPIC: am-stock-price-update
+MARKET_INDEX_CONSUMER_ID: am-market-index-group-1
+MARKET_INDEX_TOPIC: nse-stock-indices-update
 
-Example commit message:
+# Redis
+REDIS_HOSTNAME: localhost
+REDIS_PORT: 6379
+REDIS_PASSWORD: password
 
-```
-Add Redis configuration and caching mechanism
-
-* Added RedisConfig class to set up Redis connection and caching mechanism
-* Added RedisTemplate bean to perform operations on Redis cache
-* Updated application.yml file to include Redis settings
+spring:
+  application:
+    name: portfolio-app
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    consumer:
+      group-id: ${PORTFOLIO_CONSUMER_ID}
+      auto-offset-reset: latest
+      enable-auto-commit: false
+      max-poll-records: 100
+    properties:
+      security-protocol: SASL_PLAINTEXT
+      sasl-mechanism: PLAIN
+      sasl-jaas-config: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME}" password="${KAFKA_PASSWORD}";
+      ssl-endpoint-identification-algorithm: ""
+      ssl-truststore-location: /etc/ssl/certs/java/cacerts
+      ssl-truststore-password: changeit
+  data:
+    redis:
+      host: redis.dev.svc.cluster.local
+      port: 6379
+      password: RedisPassword123!
+      portfolio-mover:
+        ttl: 900  # 15 minutes in seconds
+        key-prefix: "portfolio:analysis:"
+      portfolio-summary:
+        ttl: 900  # 15 minutes in seconds
+        key-prefix: "portfolio:summary:"
+      portfolio-holdings:
+        ttl: 900  # 15 minutes in seconds
+        key-prefix: "portfolio:holdings:"
+      market-indices:
+        ttl: 129600  # 30 Days in seconds
+        key-prefix: "market-indices:indices:"
+        historical:
+          key-prefix: "market-indices:historical:"
 ```
