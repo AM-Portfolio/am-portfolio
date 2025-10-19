@@ -1,0 +1,55 @@
+## 🎯 API Implementations Found
+
+🔍 We've searched the repository **AM-Portfolio/am-portfolio** and found relevant results for your query. Here's a summary of our findings: 📊 **Statistics**:
+
+- ✅ Found: 5 items
+- 🎯 Relevance: up to 0.93
+- ⏱️ Response time: not specified
+
+### 📋 Overview
+
+Our search uncovered various Java files within the **AM-Portfolio/am-portfolio** repository that match your query. These files are related to API clients, portfolio applications, and Kafka consumers.
+
+### 🔑 Key Findings
+
+🔸 **NseIndicesApiClient.java**: This file contains an implementation of an API client for retrieving market data. 🔹 **PortfolioApplication.java**: This is the main application file for the portfolio app, configuring Spring Boot and MongoDB repositories. 🔸 **PortfolioUpdateConsumerService.java**: A Kafka consumer service for handling portfolio updates.
+
+### 📂 File Locations
+
+Here are the locations of the found files:
+
+- 📁 `portfolio-market-data/src/main/java/com/portfolio/marketdata/client/NseIndicesApiClient.java` (relevance: 0.93)
+- 📁 `portfolio-app/src/main/java/com/portfolio/app/PortfolioApplication.java` (relevance: 0.92)
+- 📁 `portfolio-kafka/src/main/java/com/portfolio/kafka/consumer/PortfolioUpdateConsumerService.java` (relevance: 0.90)
+- 📁 `portfolio-market-data/src/main/java/com/portfolio/marketdata/client/base/AbstractApiClient.java` (relevance: 0.89)
+- 📁 `portfolio-model/src/main/java/com/portfolio/model/cache/StockPriceCache.java` (relevance: 0.87)
+
+### 💻 Code Examples
+
+```java
+// Example from NseIndicesApiClient.java
+package com.portfolio.marketdata.client;
+
+import org.springframework.http.HttpHeaders; import org.springframework.http.MediaType; import org.springframework.stereotype.Component; import org.springframework.web.reactive.function.client.WebClient;
+
+// Implementation of the API client ```
+
+### 📊 Summary
+
+📊 **Found Items**:
+
+- ✅ `NseIndicesApiClient.java`
+- ✅ `PortfolioApplication.java`
+- ✅ `PortfolioUpdateConsumerService.java`
+- ✅ `AbstractApiClient.java`
+- ✅ `StockPriceCache.java`
+
+### 🎯 Next Steps
+
+🔍 Review the found files and their implementations to understand how they contribute to the overall functionality of the portfolio application. 💡 Consider exploring the Spring Boot and Kafka configurations for a deeper understanding of the application's architecture. 📝 Update or modify the code as necessary to fit your specific requirements or to improve performance.
+
+---
+
+### 🎯 Summary
+
+🔸 Review found files for relevance and functionality. 🔹 Explore Spring Boot and Kafka configurations. 🔸 Update or modify code as necessary. 🔹 Test changes thoroughly to ensure compatibility and performance.
