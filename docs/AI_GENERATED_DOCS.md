@@ -43,90 +43,100 @@ public class PortfolioService {
 
 ### Architecture Notes
 
-The application uses a microservices architecture, with separate modules for Redis configuration and portfolio management. The Redis configuration module provides a centralized caching mechanism for the application, while the portfolio management module handles the business logic for managing and analyzing portfolio data.
+The application uses a microservices architecture, with separate modules for Redis configuration and portfolio data management. The Redis configuration module provides a centralized configuration for the Redis connection and caching mechanism, while the portfolio data management module uses the Redis template to perform operations on the Redis cache.
 
-The application uses the following technologies:
-
-*   **Redis**: An in-memory data store used for caching and storing portfolio data.
-*   **Kafka**: A messaging platform used for handling events and notifications related to portfolio data.
-*   **MongoDB**: A NoSQL database used for storing and retrieving portfolio data.
-
-The application has the following components:
-
-*   **RedisConfig**: A configuration class that sets up the Redis connection and caching mechanism.
-*   **PortfolioService**: A service class that handles the business logic for managing and analyzing portfolio data.
-*   **PortfolioRepository**: A repository class that handles the data access and storage for portfolio data.
+The application also uses a configuration file `application.yml` to define various properties such as topic names, consumer IDs, and security settings. This file is used to configure the application and its dependencies.
 
 ### Security Considerations
 
-The application uses the following security measures:
+The application uses a Redis password to secure the Redis connection. The password is defined in the `application.yml` file and is used to authenticate the Redis connection.
 
-*   **Authentication**: The application uses Kafka's built-in security features, such as SASL and SSL/TLS, to authenticate and authorize access to Kafka topics.
-*   **Authorization**: The application uses role-based access control to authorize access to portfolio data and functionality.
-*   **Data Encryption**: The application uses SSL/TLS to encrypt data in transit between the application and Kafka, and between the application and MongoDB.
+The application also uses Kafka security features such as SASL_PLAINTEXT and SSL encryption to secure the Kafka connection.
 
-### Configuration Settings
+### Best Practices
 
-The application has the following configuration settings:
+The application follows best practices such as:
 
-*   **Redis Host**: The hostname or IP address of the Redis server.
-*   **Redis Port**: The port number of the Redis server.
-*   **Redis Password**: The password for the Redis server.
-*   **Kafka Bootstrap Servers**: The list of Kafka bootstrap servers.
-*   **Kafka Consumer Group ID**: The ID of the Kafka consumer group.
-*   **MongoDB URL**: The URL of the MongoDB database.
+*   Using a centralized configuration file `application.yml` to define various properties and settings.
+*   Using a Redis connection factory and template to perform operations on the Redis cache.
+*   Using Kafka security features to secure the Kafka connection.
+*   Using a microservices architecture to separate concerns and improve scalability.
 
-These configuration settings can be modified in the `application.yml` file to customize the application's behavior.
+### Troubleshooting
+
+To troubleshoot issues with the application, you can check the following:
+
+*   Redis connection logs to ensure that the Redis connection is established successfully.
+*   Kafka connection logs to ensure that the Kafka connection is established successfully.
+*   Application logs to ensure that the application is functioning correctly.
+
+You can also use tools such as Redis CLI and Kafka CLI to troubleshoot issues with the Redis and Kafka connections.
+
+### Future Development
+
+Future development plans for the application include:
+
+*   Adding more features to the portfolio data management module.
+*   Improving the security and scalability of the application.
+*   Adding more microservices to the application to separate concerns and improve scalability.
 
 ### Code Examples
 
-Here are some code examples that demonstrate how to use the Redis configuration and portfolio management functionality:
+Here are some code examples that demonstrate how to use the Redis configuration and portfolio data management modules:
 
 ```java
 // Create a Redis connection factory
-RedisConnectionFactory redisConnectionFactory = new RedisConnectionFactory();
+RedisConnectionFactory redisConnectionFactory = new LettuceConnectionFactory(new RedisStandaloneConfiguration("localhost", 6379));
 
 // Create a Redis template
 RedisTemplate<String, String> redisTemplate = new RedisTemplate<>();
+redisTemplate.setConnectionFactory(redisConnectionFactory);
 
 // Save portfolio data to Redis
 redisTemplate.opsForValue().set("portfolio:data", "example data");
 
 // Get portfolio data from Redis
 String portfolioData = redisTemplate.opsForValue().get("portfolio:data");
-
-// Create a portfolio service
-PortfolioService portfolioService = new PortfolioService();
-
-// Save portfolio data using the portfolio service
-portfolioService.savePortfolioData("example data");
-
-// Get portfolio data using the portfolio service
-String portfolioDataFromService = portfolioService.getPortfolioData();
 ```
 
-### Commit Messages and API Documentation Guidelines
+```java
+// Create a portfolio service
+@Service
+public class PortfolioService {
+    
+    @Autowired
+    private RedisTemplate<String, String> redisTemplate;
+    
+    public void savePortfolioData(String data) {
+        redisTemplate.opsForValue().set("portfolio:data", data);
+    }
+    
+    public String getPortfolioData() {
+        return redisTemplate.opsForValue().get("portfolio:data");
+    }
+}
+```
 
-The following guidelines should be followed for commit messages and API documentation:
+```java
+// Create a Kafka producer
+KafkaProducer<String, String> producer = new KafkaProducer<>(props);
 
-*   Commit messages should be concise and descriptive, and should follow the standard format of "type: brief description".
-*   API documentation should be clear and concise, and should include examples and usage notes where applicable.
-*   API documentation should be written in a consistent style and format throughout the application.
+// Send a message to Kafka
+producer.send(new ProducerRecord<>("example_topic", "example_message"));
+```
 
-### Testing Guidelines
+```java
+// Create a Kafka consumer
+KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
 
-The following guidelines should be followed for testing:
+// Subscribe to a topic
+consumer.subscribe(Collections.singleton("example_topic"));
 
-*   Unit tests should be written for all components and functionality.
-*   Integration tests should be written to test the interactions between components and functionality.
-*   Tests should be written in a consistent style and format throughout the application.
-*   Tests should be run regularly to ensure that the application is working as expected.
-
-### Best Practices for Code Quality
-
-The following best practices should be followed for code quality:
-
-*   Code should be written in a consistent style and format throughout the application.
-*   Code should be modular and reusable, with clear and concise interfaces and APIs.
-*   Code should be thoroughly tested and validated to ensure that it is working as expected.
-*   Code should be regularly reviewed and refactored to ensure that it is maintainable and efficient.
+// Poll for messages
+while (true) {
+    ConsumerRecords<String, String> records = consumer.poll(100);
+    for (ConsumerRecord<String, String> record : records) {
+        System.out.println(record.value());
+    }
+}
+```
