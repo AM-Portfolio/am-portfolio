@@ -1,5 +1,6 @@
 Authentication Documentation
 ==========================
+
 ### Overview of the Codebase
 
 The codebase is a Java-based portfolio application that utilizes various technologies such as Redis, Kafka, and MongoDB. The application is designed to manage and analyze portfolio data, including stock prices, market indices, and portfolio holdings. The codebase is divided into two main modules: `portfolio-redis` and `portfolio-app`.
@@ -32,111 +33,147 @@ public class PortfolioService {
     private RedisTemplate<String, String> redisTemplate;
     
     public void savePortfolioData(String data) {
-        redisTemplate.opsForValue().set("portfolio:data", data);
+        redisTemplate.put("portfolio:data", data);
     }
     
     public String getPortfolioData() {
-        return redisTemplate.opsForValue().get("portfolio:data");
+        return redisTemplate.get("portfolio:data");
     }
 }
 ```
 
 ### Architecture Notes
 
-The application uses a microservices architecture, with separate modules for Redis configuration and portfolio data management. The Redis configuration module provides a centralized configuration for the Redis connection and caching mechanism, while the portfolio data management module uses the Redis template to perform operations on the Redis cache.
+The application uses a microservices architecture, with separate modules for Redis configuration and portfolio management. The Redis configuration module is responsible for setting up the Redis connection and caching mechanism, while the portfolio management module uses the Redis cache to store and retrieve portfolio data.
 
-The application also uses a configuration file `application.yml` to define various properties such as topic names, consumer IDs, and security settings. This file is used to configure the application and its dependencies.
+The application also uses Kafka for messaging and MongoDB for data storage. The Kafka configuration is defined in the `application.yml` file, and the MongoDB connection is established using the `MONGODB_URL` property.
+
+The application uses Spring Boot for dependency injection and configuration management. The `RedisConfig` class is annotated with `@Configuration` and `@EnableCaching` to enable caching and configure the Redis connection.
 
 ### Security Considerations
 
-The application uses a Redis password to secure the Redis connection. The password is defined in the `application.yml` file and is used to authenticate the Redis connection.
+The application uses Redis password authentication to secure the Redis connection. The Redis password is defined in the `application.yml` file and is used to establish the Redis connection.
 
-The application also uses Kafka security features such as SASL_PLAINTEXT and SSL encryption to secure the Kafka connection.
+The application also uses Kafka security features, such as SSL/TLS encryption and SASL authentication, to secure the Kafka connection. The Kafka security configuration is defined in the `application.yml` file.
 
 ### Best Practices
 
-The application follows best practices such as:
+The application follows best practices for coding and configuration management, including:
 
-*   Using a centralized configuration file `application.yml` to define various properties and settings.
-*   Using a Redis connection factory and template to perform operations on the Redis cache.
-*   Using Kafka security features to secure the Kafka connection.
-*   Using a microservices architecture to separate concerns and improve scalability.
+*   Using meaningful variable names and comments to improve code readability
+*   Using dependency injection to manage dependencies and improve testability
+*   Using configuration files to manage application settings and improve flexibility
+*   Using security features, such as authentication and encryption, to secure the application and its data
 
-### Troubleshooting
+### Future Improvements
 
-To troubleshoot issues with the application, you can check the following:
+Future improvements to the application could include:
 
-*   Redis connection logs to ensure that the Redis connection is established successfully.
-*   Kafka connection logs to ensure that the Kafka connection is established successfully.
-*   Application logs to ensure that the application is functioning correctly.
+*   Adding additional security features, such as access control and auditing, to further secure the application and its data
+*   Improving the performance and scalability of the application by optimizing the Redis configuration and Kafka messaging
+*   Adding additional features and functionality to the application, such as data analytics and reporting, to improve its usefulness and value to users. 
 
-You can also use tools such as Redis CLI and Kafka CLI to troubleshoot issues with the Redis and Kafka connections.
+### Code File Explanations
 
-### Future Development
+#### File: portfolio-redis/src/main/java/com/portfolio/redis/config/RedisConfig.java
 
-Future development plans for the application include:
-
-*   Adding more features to the portfolio data management module.
-*   Improving the security and scalability of the application.
-*   Adding more microservices to the application to separate concerns and improve scalability.
-
-### Code Examples
-
-Here are some code examples that demonstrate how to use the Redis configuration and portfolio data management modules:
+This file contains the `RedisConfig` class, which is responsible for setting up the Redis connection and caching mechanism. The class is annotated with `@Configuration` and `@EnableCaching` to enable caching and configure the Redis connection.
 
 ```java
-// Create a Redis connection factory
-RedisConnectionFactory redisConnectionFactory = new LettuceConnectionFactory(new RedisStandaloneConfiguration("localhost", 6379));
+@Configuration
+@EnableCaching
+public class RedisConfig {
 
-// Create a Redis template
-RedisTemplate<String, String> redisTemplate = new RedisTemplate<>();
-redisTemplate.setConnectionFactory(redisConnectionFactory);
+    // Redis connection settings
+    @Value("${spring.data.redis.host}")
+    private String redisHost;
 
-// Save portfolio data to Redis
-redisTemplate.opsForValue().set("portfolio:data", "example data");
+    @Value("${spring.data.redis.password}")
+    private String redisPassword;
 
-// Get portfolio data from Redis
-String portfolioData = redisTemplate.opsForValue().get("portfolio:data");
-```
+    // Cache time-to-live settings
+    @Value("${market.data.cache.ttl.seconds:300}")
+    private long cacheTimeToLiveSeconds;
 
-```java
-// Create a portfolio service
-@Service
-public class PortfolioService {
-    
-    @Autowired
-    private RedisTemplate<String, String> redisTemplate;
-    
-    public void savePortfolioData(String data) {
-        redisTemplate.opsForValue().set("portfolio:data", data);
+    // Create a Redis connection factory
+    @Bean
+    public RedisConnectionFactory redisConnectionFactory() {
+        RedisStandaloneConfiguration redisConfig = new RedisStandaloneConfiguration();
+        redisConfig.setHostName(redisHost);
+        redisConfig.setPassword(redisPassword);
+        return new LettuceConnectionFactory(redisConfig);
     }
-    
-    public String getPortfolioData() {
-        return redisTemplate.opsForValue().get("portfolio:data");
+
+    // Create a Redis template
+    @Bean
+    public RedisTemplate<String, String> redisTemplate() {
+        RedisTemplate<String, String> template = new RedisTemplate<>();
+        template.setConnectionFactory(redisConnectionFactory());
+        template.setKeySerializer(new StringRedisSerializer());
+        template.setValueSerializer(new Jackson2JsonRedisSerializer<>(String.class));
+        return template;
     }
 }
 ```
 
-```java
-// Create a Kafka producer
-KafkaProducer<String, String> producer = new KafkaProducer<>(props);
+#### File: portfolio-app/src/main/resources/application.yml
 
-// Send a message to Kafka
-producer.send(new ProducerRecord<>("example_topic", "example_message"));
+This file contains the application configuration settings, including the Redis connection settings, Kafka configuration, and MongoDB connection settings.
+
+```yml
+# Redis connection settings
+spring:
+  data:
+    redis:
+      host: redis.dev.svc.cluster.local
+      port: 6379
+      password: RedisPassword123!
+
+# Kafka configuration
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    consumer:
+      group-id: ${PORTFOLIO_CONSUMER_ID}
+      auto-offset-reset: latest
+      enable-auto-commit: false
+      max-poll-records: 100
+    properties:
+      security-protocol: SASL_PLAINTEXT
+      sasl-mechanism: PLAIN
+      sasl-jaas-config: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME}" password="${KAFKA_PASSWORD}";
+
+# MongoDB connection settings
+MONGODB_URL: mongodb://ssd2658:ssd2658@mongodb.dev.svc.cluster.local:27017/portfolio?authSource=admin
 ```
 
-```java
-// Create a Kafka consumer
-KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
+### Commit Messages
 
-// Subscribe to a topic
-consumer.subscribe(Collections.singleton("example_topic"));
+Commit messages should follow the standard format of:
 
-// Poll for messages
-while (true) {
-    ConsumerRecords<String, String> records = consumer.poll(100);
-    for (ConsumerRecord<String, String> record : records) {
-        System.out.println(record.value());
-    }
-}
-```
+`type(scope): brief description`
+
+Where `type` is one of:
+
+*   `feat` for new features
+*   `fix` for bug fixes
+*   `docs` for documentation changes
+*   `style` for code style changes
+*   `refactor` for code refactoring
+*   `perf` for performance improvements
+*   `test` for test additions or changes
+*   `build` for build system changes
+*   `ci` for continuous integration changes
+*   `chore` for miscellaneous changes
+
+And `scope` is the scope of the change, such as `redis` or `kafka`.
+
+For example:
+
+`feat(redis): add Redis connection settings to application.yml`
+
+Or:
+
+`fix(kafka): fix Kafka consumer group ID configuration`
+
+This format helps to clearly and concisely communicate the purpose and scope of each commit.
