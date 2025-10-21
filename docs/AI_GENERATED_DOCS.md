@@ -43,9 +43,9 @@ public class PortfolioService {
 
 ### Architecture Notes
 
-The application uses a microservices architecture, with separate modules for Redis configuration and application logic. The Redis configuration module provides a centralized way to manage Redis connections and caching settings, while the application logic module uses these settings to perform operations on the Redis cache.
+The application uses a microservices architecture, with separate modules for Redis configuration and application logic. The Redis configuration module provides a centralized configuration for the Redis connection and caching mechanism, while the application logic module uses the Redis template to perform operations on the Redis cache.
 
-The application also uses a configuration file `application.yml` to store settings for the application, including MongoDB, Kafka, and Redis connections. This file is used to configure the application and its dependencies.
+The application also uses a configuration file `application.yml` to define various properties such as topic names, consumer IDs, and security settings. This file is used to configure the application and its dependencies.
 
 ### Security Considerations
 
@@ -57,35 +57,90 @@ The application also uses Kafka as a messaging system, which can pose security r
 
 The application follows best practices for coding and configuration, including:
 
-*   Using a centralized configuration file `application.yml` to store settings for the application
-*   Using a secure Redis connection with a password and TLS encryption
-*   Using a secure Kafka connection with SASL authentication and TLS encryption
-*   Using a microservices architecture to separate concerns and improve scalability
-*   Using a caching mechanism to improve performance and reduce latency
+*   Using a centralized configuration file `application.yml` to define various properties and settings.
+*   Using a secure Redis connection with a password and TLS encryption.
+*   Using a secure Kafka connection with SASL authentication and TLS encryption.
+*   Using a microservices architecture to separate concerns and improve scalability.
+*   Using a caching mechanism to improve performance and reduce latency.
 
-### Future Development
+### Future Improvements
 
-Future development of the application could include:
+The application can be improved in several ways, including:
 
-*   Adding additional security features, such as authentication and authorization
-*   Improving the performance and scalability of the application
-*   Adding additional features, such as data analytics and visualization
-*   Integrating with other systems and services, such as databases and messaging systems
+*   Adding more security features, such as authentication and authorization, to protect the application and its data.
+*   Improving the performance and scalability of the application by optimizing the caching mechanism and adding more nodes to the Kafka cluster.
+*   Adding more features and functionality to the application, such as real-time analytics and alerts, to improve its usefulness and value to users.
+*   Improving the user interface and user experience of the application to make it more intuitive and user-friendly.
 
-### Code Organization
+### Code Examples
 
-The code is organized into two main modules: `portfolio-redis` and `portfolio-app`. The `portfolio-redis` module contains the Redis configuration and caching mechanism, while the `portfolio-app` module contains the application logic and dependencies.
+Here are some code examples that demonstrate how to use the Redis configuration and template:
 
-The code is also organized into separate packages and classes, each with its own specific responsibility and functionality. This organization makes it easy to maintain and extend the code, and to add new features and functionality.
+```java
+@Configuration
+@EnableCaching
+public class RedisConfig {
+    
+    @Value("${spring.data.redis.host}")
+    private String redisHost;
+    
+    @Value("${spring.data.redis.password}")
+    private String redisPassword;
+    
+    @Bean
+    public RedisConnectionFactory redisConnectionFactory() {
+        RedisStandaloneConfiguration redisConfig = new RedisStandaloneConfiguration();
+        redisConfig.setHostName(redisHost);
+        redisConfig.setPassword(redisPassword);
+        return new LettuceConnectionFactory(redisConfig);
+    }
+    
+    @Bean
+    public RedisTemplate<String, String> redisTemplate() {
+        RedisTemplate<String, String> template = new RedisTemplate<>();
+        template.setConnectionFactory(redisConnectionFactory());
+        return template;
+    }
+}
+```
 
-### Testing
+```java
+@Service
+public class PortfolioService {
+    
+    @Autowired
+    private RedisTemplate<String, String> redisTemplate;
+    
+    public void savePortfolioData(String data) {
+        redisTemplate.opsForValue().set("portfolio:data", data);
+    }
+    
+    public String getPortfolioData() {
+        return redisTemplate.opsForValue().get("portfolio:data");
+    }
+}
+```
 
-The application includes unit tests and integration tests to ensure that the code is correct and functions as expected. The tests cover the Redis configuration and caching mechanism, as well as the application logic and dependencies.
-
-The tests are written using JUnit and Spring Boot Test, and are run using Maven and Gradle. The tests are also integrated with CI/CD pipelines to ensure that the code is tested and validated automatically.
-
-### Deployment
-
-The application is deployed to a cloud-based platform, such as AWS or Google Cloud. The deployment process includes building and packaging the code, configuring the environment and dependencies, and deploying the application to the cloud.
-
-The deployment process is automated using CI/CD pipelines, which ensure that the code is built, tested, and deployed consistently and reliably. The deployment process also includes monitoring and logging, to ensure that the application is running correctly and to detect any issues or errors.
+```yml
+application.yml
+spring:
+  data:
+    redis:
+      host: redis.dev.svc.cluster.local
+      port: 6379
+      password: RedisPassword123!
+      portfolio-mover:
+        ttl: 900  # 15 minutes in seconds
+        key-prefix: "portfolio:analysis:"
+      portfolio-summary:
+        ttl: 900  # 15 minutes in seconds
+        key-prefix: "portfolio:summary:"
+      portfolio-holdings:
+        ttl: 900  # 15 minutes in seconds
+        key-prefix: "portfolio:holdings:"
+      market-indices:
+        ttl: 129600  # 30 Days in seconds
+        key-prefix: "market-indices:indices:"
+        historical:
+          key-prefix: "market-indices:hi
+```
