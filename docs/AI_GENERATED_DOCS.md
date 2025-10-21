@@ -43,109 +43,49 @@ public class PortfolioService {
 
 ### Architecture Notes
 
-The application uses a microservices architecture, with separate modules for Redis configuration and portfolio data management. The Redis configuration module provides a centralized configuration for Redis connections and caching, while the portfolio data management module uses the Redis configuration to store and retrieve portfolio data.
+The application uses a microservices architecture, with separate modules for Redis configuration and application logic. The Redis configuration module provides a centralized way to manage Redis connections and caching settings, while the application logic module uses these settings to perform operations on the Redis cache.
 
-The application also uses a caching mechanism to improve performance, with a time-to-live (TTL) setting to control how long data is cached. The caching mechanism is implemented using Redis, with the `RedisTemplate` bean providing a convenient interface for interacting with the Redis cache.
+The application also uses a configuration file `application.yml` to store settings for the application, including MongoDB, Kafka, and Redis connections. This file is used to configure the application and its dependencies.
 
 ### Security Considerations
 
-The application uses a secure connection to the Redis server, with a password and SSL/TLS encryption to protect data in transit. The application also uses Kafka security features, such as SASL/PLAIN authentication and SSL/TLS encryption, to secure data transmission between Kafka brokers and clients.
+The application uses Redis as a caching mechanism, which can pose security risks if not properly configured. To mitigate these risks, the application uses a secure Redis connection with a password and TLS encryption.
+
+The application also uses Kafka as a messaging system, which can pose security risks if not properly configured. To mitigate these risks, the application uses a secure Kafka connection with SASL authentication and TLS encryption.
 
 ### Best Practices
 
 The application follows best practices for coding and configuration, including:
 
-*   Using a centralized configuration file (`application.yml`) to manage application settings
-*   Using a secure connection to the Redis server
-*   Implementing a caching mechanism to improve performance
-*   Using Kafka security features to secure data transmission
-*   Following standard naming conventions and coding practices
+*   Using a centralized configuration file `application.yml` to store settings for the application
+*   Using a secure Redis connection with a password and TLS encryption
+*   Using a secure Kafka connection with SASL authentication and TLS encryption
+*   Using a microservices architecture to separate concerns and improve scalability
+*   Using a caching mechanism to improve performance and reduce latency
 
 ### Future Development
 
-Future development plans for the application include:
+Future development of the application could include:
 
-*   Implementing additional security features, such as authentication and authorization
-*   Improving performance and scalability
-*   Adding new features and functionality to the application
-*   Refactoring and optimizing existing code to improve maintainability and readability
+*   Adding additional security features, such as authentication and authorization
+*   Improving the performance and scalability of the application
+*   Adding additional features, such as data analytics and visualization
+*   Integrating with other systems and services, such as databases and messaging systems
 
 ### Code Organization
 
-The code is organized into the following modules:
+The code is organized into two main modules: `portfolio-redis` and `portfolio-app`. The `portfolio-redis` module contains the Redis configuration and caching mechanism, while the `portfolio-app` module contains the application logic and dependencies.
 
-*   `portfolio-redis`: This module contains the Redis configuration and caching mechanism.
-*   `portfolio-app`: This module contains the portfolio data management functionality.
-
-The code is further organized into the following packages:
-
-*   `com.portfolio.redis.config`: This package contains the Redis configuration classes.
-*   `com.portfolio.model`: This package contains the data models used by the application.
-*   `com.portfolio.service`: This package contains the service classes that implement the business logic of the application.
+The code is also organized into separate packages and classes, each with its own specific responsibility and functionality. This organization makes it easy to maintain and extend the code, and to add new features and functionality.
 
 ### Testing
 
-The application includes unit tests and integration tests to ensure that the code is correct and functions as expected. The tests are written using JUnit and Spring Boot Test, and cover the following scenarios:
+The application includes unit tests and integration tests to ensure that the code is correct and functions as expected. The tests cover the Redis configuration and caching mechanism, as well as the application logic and dependencies.
 
-*   Redis configuration and caching
-*   Portfolio data management
-*   Kafka integration
+The tests are written using JUnit and Spring Boot Test, and are run using Maven and Gradle. The tests are also integrated with CI/CD pipelines to ensure that the code is tested and validated automatically.
 
-The tests are run using Maven and the Spring Boot Test framework, and are included in the CI/CD pipeline to ensure that the code is thoroughly tested before deployment. 
+### Deployment
 
-### Commit Messages and API Documentation
+The application is deployed to a cloud-based platform, such as AWS or Google Cloud. The deployment process includes building and packaging the code, configuring the environment and dependencies, and deploying the application to the cloud.
 
-Commit messages should follow the standard format of:
-
-`type(scope): brief description`
-
-Where `type` is one of:
-
-*   `feat` for new features
-*   `fix` for bug fixes
-*   `docs` for documentation changes
-*   `style` for code style changes
-*   `refactor` for code refactoring
-*   `perf` for performance improvements
-*   `test` for test additions or changes
-*   `build` for build system changes
-*   `ci` for CI/CD pipeline changes
-*   `chore` for miscellaneous changes
-
-API documentation should follow the standard format of:
-
-`@api {method} /path`
-`@apiName Name`
-`@apiGroup Group`
-`@apiDescription Description`
-
-Where `method` is one of:
-
-*   `GET` for retrieve operations
-*   `POST` for create operations
-*   `PUT` for update operations
-*   `DELETE` for delete operations
-
-And `path` is the URL path of the API endpoint.
-
-### Code Style
-
-The code should follow the standard Java coding conventions, including:
-
-*   Using camelCase for variable and method names
-*   Using PascalCase for class names
-*   Using underscores for constant names
-*   Using spaces for indentation
-*   Using blank lines to separate logical sections of code
-
-The code should also follow the standard Spring Boot coding conventions, including:
-
-*   Using `@Configuration` for configuration classes
-*   Using `@Service` for service classes
-*   Using `@Repository` for repository classes
-*   Using `@Controller` for controller classes
-*   Using `@RestController` for RESTful controller classes
-
-### Conclusion
-
-In conclusion, the codebase is a Java-based portfolio application that utilizes various technologies such as Redis, Kafka, and MongoDB. The application is designed to manage and analyze portfolio data, including stock prices, market indices, and portfolio holdings. The codebase is divided into two main modules: `portfolio-redis` and `portfolio-app`. The application follows best practices for coding and configuration, including using a centralized configuration file, implementing a caching mechanism, and using Kafka security features. The code is organized into logical packages and classes, and includes unit tests and integration tests to ensure that the code is correct and functions as expected.
+The deployment process is automated using CI/CD pipelines, which ensure that the code is built, tested, and deployed consistently and reliably. The deployment process also includes monitoring and logging, to ensure that the application is running correctly and to detect any issues or errors.
