@@ -1,6 +1,5 @@
 Authentication Documentation
 ==========================
-
 ### Overview of the Codebase
 
 The codebase is a Java-based portfolio application that utilizes various technologies such as Redis, Kafka, and MongoDB. The application is designed to manage and analyze portfolio data, including stock prices, market indices, and portfolio holdings. The codebase is divided into two main modules: `portfolio-redis` and `portfolio-app`.
@@ -33,121 +32,68 @@ public class PortfolioService {
     private RedisTemplate<String, String> redisTemplate;
     
     public void savePortfolioData(String data) {
-        redisTemplate.put("portfolio:data", data);
+        redisTemplate.opsForValue().set("portfolio:data", data);
     }
     
     public String getPortfolioData() {
-        return redisTemplate.get("portfolio:data");
+        return redisTemplate.opsForValue().get("portfolio:data");
     }
 }
 ```
 
 ### Architecture Notes
 
-The application uses a microservices architecture, with separate modules for Redis configuration and portfolio management. The Redis configuration module is responsible for setting up the Redis connection and caching mechanism, while the portfolio management module uses the Redis cache to store and retrieve portfolio data.
+The application uses a microservices architecture, with separate modules for Redis configuration and portfolio data management. The Redis configuration module provides a centralized configuration for Redis connections and caching, while the portfolio data management module uses the Redis configuration to store and retrieve portfolio data.
 
-The application also uses Kafka for messaging and MongoDB for data storage. The Kafka configuration is defined in the `application.yml` file, and the MongoDB connection is established using the `MONGODB_URL` property.
-
-The application uses Spring Boot for dependency injection and configuration management. The `RedisConfig` class is annotated with `@Configuration` and `@EnableCaching` to enable caching and configure the Redis connection.
+The application also uses a caching mechanism to improve performance, with a time-to-live (TTL) setting to control how long data is cached. The caching mechanism is implemented using Redis, with the `RedisTemplate` bean providing a convenient interface for interacting with the Redis cache.
 
 ### Security Considerations
 
-The application uses Redis password authentication to secure the Redis connection. The Redis password is defined in the `application.yml` file and is used to establish the Redis connection.
-
-The application also uses Kafka security features, such as SSL/TLS encryption and SASL authentication, to secure the Kafka connection. The Kafka security configuration is defined in the `application.yml` file.
+The application uses a secure connection to the Redis server, with a password and SSL/TLS encryption to protect data in transit. The application also uses Kafka security features, such as SASL/PLAIN authentication and SSL/TLS encryption, to secure data transmission between Kafka brokers and clients.
 
 ### Best Practices
 
-The application follows best practices for coding and configuration management, including:
+The application follows best practices for coding and configuration, including:
 
-*   Using meaningful variable names and comments to improve code readability
-*   Using dependency injection to manage dependencies and improve testability
-*   Using configuration files to manage application settings and improve flexibility
-*   Using security features, such as authentication and encryption, to secure the application and its data
+*   Using a centralized configuration file (`application.yml`) to manage application settings
+*   Using a secure connection to the Redis server
+*   Implementing a caching mechanism to improve performance
+*   Using Kafka security features to secure data transmission
+*   Following standard naming conventions and coding practices
 
-### Future Improvements
+### Future Development
 
-Future improvements to the application could include:
+Future development plans for the application include:
 
-*   Adding additional security features, such as access control and auditing, to further secure the application and its data
-*   Improving the performance and scalability of the application by optimizing the Redis configuration and Kafka messaging
-*   Adding additional features and functionality to the application, such as data analytics and reporting, to improve its usefulness and value to users. 
+*   Implementing additional security features, such as authentication and authorization
+*   Improving performance and scalability
+*   Adding new features and functionality to the application
+*   Refactoring and optimizing existing code to improve maintainability and readability
 
-### Code File Explanations
+### Code Organization
 
-#### File: portfolio-redis/src/main/java/com/portfolio/redis/config/RedisConfig.java
+The code is organized into the following modules:
 
-This file contains the `RedisConfig` class, which is responsible for setting up the Redis connection and caching mechanism. The class is annotated with `@Configuration` and `@EnableCaching` to enable caching and configure the Redis connection.
+*   `portfolio-redis`: This module contains the Redis configuration and caching mechanism.
+*   `portfolio-app`: This module contains the portfolio data management functionality.
 
-```java
-@Configuration
-@EnableCaching
-public class RedisConfig {
+The code is further organized into the following packages:
 
-    // Redis connection settings
-    @Value("${spring.data.redis.host}")
-    private String redisHost;
+*   `com.portfolio.redis.config`: This package contains the Redis configuration classes.
+*   `com.portfolio.model`: This package contains the data models used by the application.
+*   `com.portfolio.service`: This package contains the service classes that implement the business logic of the application.
 
-    @Value("${spring.data.redis.password}")
-    private String redisPassword;
+### Testing
 
-    // Cache time-to-live settings
-    @Value("${market.data.cache.ttl.seconds:300}")
-    private long cacheTimeToLiveSeconds;
+The application includes unit tests and integration tests to ensure that the code is correct and functions as expected. The tests are written using JUnit and Spring Boot Test, and cover the following scenarios:
 
-    // Create a Redis connection factory
-    @Bean
-    public RedisConnectionFactory redisConnectionFactory() {
-        RedisStandaloneConfiguration redisConfig = new RedisStandaloneConfiguration();
-        redisConfig.setHostName(redisHost);
-        redisConfig.setPassword(redisPassword);
-        return new LettuceConnectionFactory(redisConfig);
-    }
+*   Redis configuration and caching
+*   Portfolio data management
+*   Kafka integration
 
-    // Create a Redis template
-    @Bean
-    public RedisTemplate<String, String> redisTemplate() {
-        RedisTemplate<String, String> template = new RedisTemplate<>();
-        template.setConnectionFactory(redisConnectionFactory());
-        template.setKeySerializer(new StringRedisSerializer());
-        template.setValueSerializer(new Jackson2JsonRedisSerializer<>(String.class));
-        return template;
-    }
-}
-```
+The tests are run using Maven and the Spring Boot Test framework, and are included in the CI/CD pipeline to ensure that the code is thoroughly tested before deployment. 
 
-#### File: portfolio-app/src/main/resources/application.yml
-
-This file contains the application configuration settings, including the Redis connection settings, Kafka configuration, and MongoDB connection settings.
-
-```yml
-# Redis connection settings
-spring:
-  data:
-    redis:
-      host: redis.dev.svc.cluster.local
-      port: 6379
-      password: RedisPassword123!
-
-# Kafka configuration
-spring:
-  kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
-    consumer:
-      group-id: ${PORTFOLIO_CONSUMER_ID}
-      auto-offset-reset: latest
-      enable-auto-commit: false
-      max-poll-records: 100
-    properties:
-      security-protocol: SASL_PLAINTEXT
-      sasl-mechanism: PLAIN
-      sasl-jaas-config: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME}" password="${KAFKA_PASSWORD}";
-
-# MongoDB connection settings
-MONGODB_URL: mongodb://ssd2658:ssd2658@mongodb.dev.svc.cluster.local:27017/portfolio?authSource=admin
-```
-
-### Commit Messages
+### Commit Messages and API Documentation
 
 Commit messages should follow the standard format of:
 
@@ -163,17 +109,43 @@ Where `type` is one of:
 *   `perf` for performance improvements
 *   `test` for test additions or changes
 *   `build` for build system changes
-*   `ci` for continuous integration changes
+*   `ci` for CI/CD pipeline changes
 *   `chore` for miscellaneous changes
 
-And `scope` is the scope of the change, such as `redis` or `kafka`.
+API documentation should follow the standard format of:
 
-For example:
+`@api {method} /path`
+`@apiName Name`
+`@apiGroup Group`
+`@apiDescription Description`
 
-`feat(redis): add Redis connection settings to application.yml`
+Where `method` is one of:
 
-Or:
+*   `GET` for retrieve operations
+*   `POST` for create operations
+*   `PUT` for update operations
+*   `DELETE` for delete operations
 
-`fix(kafka): fix Kafka consumer group ID configuration`
+And `path` is the URL path of the API endpoint.
 
-This format helps to clearly and concisely communicate the purpose and scope of each commit.
+### Code Style
+
+The code should follow the standard Java coding conventions, including:
+
+*   Using camelCase for variable and method names
+*   Using PascalCase for class names
+*   Using underscores for constant names
+*   Using spaces for indentation
+*   Using blank lines to separate logical sections of code
+
+The code should also follow the standard Spring Boot coding conventions, including:
+
+*   Using `@Configuration` for configuration classes
+*   Using `@Service` for service classes
+*   Using `@Repository` for repository classes
+*   Using `@Controller` for controller classes
+*   Using `@RestController` for RESTful controller classes
+
+### Conclusion
+
+In conclusion, the codebase is a Java-based portfolio application that utilizes various technologies such as Redis, Kafka, and MongoDB. The application is designed to manage and analyze portfolio data, including stock prices, market indices, and portfolio holdings. The codebase is divided into two main modules: `portfolio-redis` and `portfolio-app`. The application follows best practices for coding and configuration, including using a centralized configuration file, implementing a caching mechanism, and using Kafka security features. The code is organized into logical packages and classes, and includes unit tests and integration tests to ensure that the code is correct and functions as expected.
