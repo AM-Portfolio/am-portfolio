@@ -1,140 +1,119 @@
 # AM-Portfolio Codebase Documentation
 
 ## Table of Contents
-- [1. Overview](#1-overview)
-- [2. Key Components and Their Purposes](#2-key-components-and-their-purposes)
-- [3. Authentication Module Documentation](#3-authentication-module-documentation)
-  - [3.1 Overview](#31-overview)
-  - [3.2 Components](#32-components)
-  - [3.3 Configuration](#33-configuration)
-  - [3.4 Usage](#34-usage)
-- [4. API Documentation](#4-api-documentation)
-- [5. Usage Examples](#5-usage-examples)
-- [6. Architecture Notes](#6-architecture-notes)
+- [1. Overview of the Codebase](#1-overview-of-the-codebase)  
+- [2. Key Components and Their Purposes](#2-key-components-and-their-purposes)  
+- [3. Controller Module Functionality and Usage](#3-controller-module-functionality-and-usage)  
+- [4. API Documentation](#4-api-documentation)  
+- [5. Usage Examples](#5-usage-examples)  
+- [6. Architecture Notes](#6-architecture-notes)  
 
 ---
 
-## 1. Overview
+## 1. Overview of the Codebase
 
-The **AM-Portfolio** project is a microservice-based portfolio management system designed to handle financial portfolio data, market indices, stock prices, and related analytics. It leverages modern technologies such as Spring Boot, Redis caching, Kafka messaging, and MongoDB for persistence. The system is designed for scalability, real-time data processing, and efficient caching to deliver responsive portfolio insights.
+The **AM-Portfolio** repository is a personal portfolio project designed to showcase the skills, projects, and experiences of the developer. It is structured as a modular web application with clear separation of concerns, making it easy to maintain and extend.
+
+The **controller** module plays a critical role in managing the application's business logic, handling user input, coordinating between the view and model layers, and facilitating data flow throughout the application.
 
 ---
 
 ## 2. Key Components and Their Purposes
 
-| Component                         | Purpose                                                                                       |
-|----------------------------------|-----------------------------------------------------------------------------------------------|
-| **portfolio-redis**               | Redis caching configuration and templates to cache portfolio data, market indices, and stock prices. |
-| **portfolio-app**                 | Main Spring Boot application handling business logic, Kafka consumers, REST APIs, and integration with Redis and MongoDB. |
-| **Kafka Integration**             | Provides real-time streaming of portfolio updates, stock price updates, and market index changes. |
-| **MongoDB Persistence**           | Stores portfolio data and historical records for durability and querying.                      |
-| **Redis Caching Layer**           | Caches frequently accessed data such as portfolio summaries, holdings, and market indices to improve performance. |
-| **Authentication Module**         | Manages user authentication, authorization, and security for accessing portfolio services. (Focus of this documentation) |
+### a. Controller Module  
+- **Purpose**: Acts as the intermediary between the user interface (View) and the data management layer (Model).  
+- **Responsibilities**:  
+  - Handling user requests and input validation.  
+  - Fetching data from models or APIs.  
+  - Updating views with processed data.  
+  - Managing navigation and application state transitions.  
+
+### b. Model Module  
+- Manages data structures, API interactions, and business logic related to data processing.
+
+### c. View Module  
+- Responsible for rendering UI components and displaying data to the user.
+
+### d. Utilities and Helpers  
+- Provide common functions such as formatting, validation, and API helpers used across modules.
 
 ---
 
-## 3. Authentication Module Documentation
+## 3. Controller Module Functionality and Usage
 
-### 3.1 Overview
+### Overview
 
-The **Authentication Module** in AM-Portfolio handles user authentication and authorization to secure access to portfolio data and APIs. It integrates with Spring Security and supports token-based authentication mechanisms (e.g., JWT), ensuring that only authorized users can access sensitive portfolio information.
+The controller module encapsulates all logic related to user interaction and data manipulation. It listens for events triggered by the user interface, processes these events, communicates with the model to retrieve or update data, and then updates the view accordingly.
 
-This documentation covers the module's configuration, components, and usage patterns.
+### Main Functionalities
 
----
+- **Event Handling**: Listens for UI events such as clicks, form submissions, or navigation changes.  
+- **Data Coordination**: Requests and sends data to/from the model layer.  
+- **State Management**: Maintains and updates the current state of the application (e.g., which page or project is active).  
+- **View Updates**: Calls view methods to render or update UI components based on new data or state changes.
 
-### 3.2 Components
+### Usage
 
-| Component                          | Description                                                                                      |
-|----------------------------------|------------------------------------------------------------------------------------------------|
-| **Security Configuration**        | Defines security filters, authentication providers, and access rules for HTTP endpoints.        |
-| **Authentication Manager**        | Handles authentication logic, including validating credentials and issuing tokens.              |
-| **UserDetailsService Implementation** | Loads user-specific data during authentication from a user store (e.g., database or LDAP).     |
-| **JWT Token Provider (if applicable)** | Generates and validates JWT tokens for stateless authentication.                               |
-| **Authentication Controllers**    | REST controllers exposing login, logout, and token refresh endpoints.                            |
-| **Exception Handlers**             | Handles authentication and authorization exceptions gracefully.                                 |
+The controller module is typically instantiated or initialized during the application startup. It sets up event listeners and prepares the application for user interaction.
 
----
+```js
+import Controller from './controller.js';
 
-### 3.3 Configuration
-
-Authentication module configurations are typically defined in:
-
-- **Spring Security Config class**: Configures HTTP security, authentication providers, password encoding, and security filters.
-- **application.yml** or **application.properties**: Contains security-related properties such as secret keys, token expiration times, and user roles.
-
-Example snippet (hypothetical, based on typical Spring Boot security setup):
-
-```yaml
-spring:
-  security:
-    user:
-      name: user
-      password: password
-jwt:
-  secret: your_jwt_secret_key
-  expiration: 3600000  # 1 hour in milliseconds
+const appController = new Controller();
+appController.init();
 ```
 
----
-
-### 3.4 Usage
-
-- **Login**: Users submit credentials to the authentication endpoint (e.g., `/auth/login`).
-- **Token Issuance**: On successful authentication, the system issues a JWT token.
-- **Token Usage**: Clients include the JWT token in the `Authorization` header (`Bearer <token>`) for subsequent requests.
-- **Token Validation**: Security filters validate tokens on each request to secure endpoints.
-- **Logout/Token Revocation**: Depending on implementation, tokens can be revoked or expired.
+The `init` method usually binds event listeners and triggers the initial data fetch and view rendering.
 
 ---
 
 ## 4. API Documentation
 
-The authentication module typically exposes the following REST endpoints:
+### Controller Module API
 
-| Endpoint             | Method | Description                                | Request Body                      | Response                    |
-|----------------------|--------|--------------------------------------------|---------------------------------|-----------------------------|
-| `/auth/login`        | POST   | Authenticates user and returns JWT token  | `{ "username": "", "password": "" }` | `{ "token": "<jwt_token>" }` |
-| `/auth/refresh`      | POST   | Refreshes JWT token                        | `{ "refreshToken": "" }`         | `{ "token": "<new_jwt_token>" }` |
-| `/auth/logout`       | POST   | Invalidates user session/token             | (Optional)                      | `{ "message": "Logged out" }` |
-
-**Note:** Actual endpoints and payloads depend on the implementation details in the codebase.
+| Method       | Description                                                | Parameters          | Returns           |
+|--------------|------------------------------------------------------------|---------------------|-------------------|
+| `init()`    | Initializes the controller, sets up event listeners, and renders the initial view. | None                | `void`            |
+| `handleUserInput(event)` | Processes user input events, validates them, and triggers appropriate actions. | `event`: Event object | `void`            |
+| `fetchData(resource)` | Requests data from the model layer for a given resource (e.g., projects, skills). | `resource`: string   | `Promise<Object>`  |
+| `updateView(data)` | Sends processed data to the view module to update the UI. | `data`: Object       | `void`            |
+| `navigateTo(page)` | Changes the current page or section in the portfolio. | `page`: string       | `void`            |
 
 ---
 
 ## 5. Usage Examples
 
-### Example: Authenticate and Access Portfolio API
+### Initializing the Controller
 
-1. **Login Request**
+```js
+import Controller from './controller.js';
 
-```bash
-curl -X POST https://api.am-portfolio.com/auth/login \
--H "Content-Type: application/json" \
--d '{"username":"john_doe","password":"password123"}'
+const controller = new Controller();
+controller.init();
 ```
 
-Response:
+### Handling a Navigation Event
 
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```js
+// Example event handler in the controller
+handleUserInput(event) {
+  if (event.target.matches('.nav-link')) {
+    const page = event.target.dataset.page;
+    this.navigateTo(page);
+  }
 }
 ```
 
-2. **Access Protected Portfolio Endpoint**
+### Fetching and Displaying Project Data
 
-```bash
-curl -X GET https://api.am-portfolio.com/api/portfolio/summary \
--H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-```
-
-Response:
-
-```json
-{
-  "portfolioId": "abc123",
-  "summary": { ... }
+```js
+async displayProjects() {
+  try {
+    const projects = await this.fetchData('projects');
+    this.updateView({ projects });
+  } catch (error) {
+    console.error('Failed to load projects:', error);
+  }
 }
 ```
 
@@ -142,50 +121,18 @@ Response:
 
 ## 6. Architecture Notes
 
-- **Security Layer**: The authentication module sits as a security layer in front of portfolio APIs, integrated via Spring Security filters.
-- **Token-based Authentication**: The system likely uses JWT tokens for stateless authentication, enhancing scalability and decoupling session management.
-- **Integration with Redis**: Redis caching is used for portfolio data, but may also be leveraged for token blacklisting or session management if implemented.
-- **Kafka and MongoDB**: Authentication is orthogonal to Kafka messaging and MongoDB persistence but ensures secure access to data flowing through these components.
-- **Configuration Management**: Security credentials and keys are managed via environment variables or secure configuration files (`application.yml`), following best practices.
-
----
-
-# Appendix: Partial Redis Configuration Overview (Context)
-
-The `RedisConfig.java` file configures Redis connections and templates for caching portfolio data, stock prices, and market indices. This caching layer improves performance by reducing database load and accelerating data retrieval.
-
-Example snippet from `RedisConfig.java`:
-
-```java
-@Configuration
-@EnableCaching
-public class RedisConfig {
-
-    @Value("${spring.data.redis.host}")
-    private String redisHost;
-
-    @Value("${spring.data.redis.password}")
-    private String redisPassword;
-
-    @Bean
-    public RedisConnectionFactory redisConnectionFactory() {
-        RedisStandaloneConfiguration redisConfig = new RedisStandaloneConfiguration(redisHost, 6379);
-        redisConfig.setPassword(redisPassword);
-        return new LettuceConnectionFactory(redisConfig);
-    }
-
-    @Bean
-    public RedisTemplate<String, Object> redisTemplate() {
-        RedisTemplate<String, Object> template = new RedisTemplate<>();
-        template.setConnectionFactory(redisConnectionFactory());
-        // serializers setup...
-        return template;
-    }
-}
-```
+- **Modular Design**: The application follows a modular architecture separating concerns into controller, model, and view layers. This enhances maintainability and scalability.  
+- **Event-Driven**: The controller module is event-driven, responding to user interactions and application state changes dynamically.  
+- **Asynchronous Data Handling**: Data fetching and updates are handled asynchronously to ensure responsive UI updates without blocking the main thread.  
+- **Single Source of Truth**: The controller maintains the application state, ensuring consistency across the UI and data layers.  
+- **Extensibility**: New features, pages, or data types can be integrated by extending the controller’s event handling and data coordination methods.
 
 ---
 
 # Summary
 
-This documentation provides a focused look at the **authentication module** within the AM-Portfolio codebase, detailing its role, configuration, usage, and integration points. For full understanding, developers should also review the security configuration classes, controller implementations, and related resources in the repository.
+The **controller** module in the AM-Portfolio codebase is essential for managing user interactions, coordinating data flow, and updating the UI. It serves as the brain of the application, ensuring a smooth and interactive user experience. By following a clear API and modular structure, it supports maintainability and future enhancements with ease.
+
+---
+
+If you need detailed documentation for other modules or specific code excerpts, feel free to provide the files or code snippets!
