@@ -107,6 +107,10 @@ nse:
     - NIFTY PSU BANK
 
 app:
+  jwt:
+    internal-secret: ${INTERNAL_JWT_SECRET:internal-service-super-secret-key-32chars-minimum-change-in-prod}
+    secret: ${JWT_SECRET:jwt-super-secret-signing-key-change-in-production-must-be-32chars-minimum-xyz}
+    algorithm: ${JWT_ALGORITHM:HS256}
   kafka:
     portfolio:
       consumer:

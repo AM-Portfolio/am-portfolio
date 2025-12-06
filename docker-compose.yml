@@ -30,6 +30,11 @@ services:
       REDIS_HOSTNAME: ${REDIS_HOSTNAME}
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_PORT: ${REDIS_PORT}
+
+      # JWT Configuration
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
       
     entrypoint: ["/bin/sh", "-c"]
     command: 
