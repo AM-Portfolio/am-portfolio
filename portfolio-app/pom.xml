@@ -51,6 +51,11 @@
             <artifactId>portfolio-analytics</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>com.portfolio</groupId>
+            <artifactId>portfolio-basket</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         
         <!-- Spring Boot -->
         <dependency>
@@ -59,11 +64,20 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
         </dependency>
         
         <!-- Test -->

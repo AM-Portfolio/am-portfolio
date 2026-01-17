@@ -11,6 +11,8 @@ import lombok.Data;
 
 @Data
 @Builder
+@lombok.NoArgsConstructor
+@lombok.AllArgsConstructor
 @JsonInclude(Include.NON_NULL)
 public class EquityHoldings {
    private String isin;
@@ -22,18 +24,18 @@ public class EquityHoldings {
    private Double quantity;
    private Double investmentCost;
    private Double currentValue;
-   
+
    // Portfolio weight
    private Double weightInPortfolio; // Percentage of total portfolio value
-   
+
    // Overall performance metrics
    private Double gainLoss;
    private Double gainLossPercentage;
-   
+
    // Today's performance metrics
    private Double todayGainLoss;
    private Double todayGainLossPercentage;
-   
+
    // Stock price metrics
    private Double averageBuyingPrice;
    private Double currentPrice;

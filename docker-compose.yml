@@ -10,6 +10,9 @@ services:
     env_file:
         - .env
     environment:
+      # Infrastructure
+      INFRA_HOST: ${INFRA_HOST}
+
       # Application Configuration
       AM_MARKET_DATA_API_URL: ${AM_MARKET_DATA_API_URL}
 

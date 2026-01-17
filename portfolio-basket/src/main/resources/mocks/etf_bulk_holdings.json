@@ -1,0 +1,134 @@
+{
+    "INF20220202": {
+        "symbol": "NIFTY50",
+        "name": "Nifty 50 ETF",
+        "holdings": [
+            {
+                "symbol": "RELIANCE",
+                "isin": "INE002A01018",
+                "sector": "Energy",
+                "weight": 10.0
+            },
+            {
+                "symbol": "HDFCBANK",
+                "isin": "INE040A01034",
+                "sector": "Financial Services",
+                "weight": 13.0
+            },
+            {
+                "symbol": "INFY",
+                "isin": "INE009A01021",
+                "sector": "IT",
+                "weight": 6.0
+            },
+            {
+                "symbol": "TCS",
+                "isin": "INE467B01029",
+                "sector": "IT",
+                "weight": 4.0
+            },
+            {
+                "symbol": "ICICIBANK",
+                "isin": "INE090A01021",
+                "sector": "Financial Services",
+                "weight": 7.0
+            },
+            {
+                "symbol": "SBIN",
+                "isin": "INE062A01020",
+                "sector": "Financial Services",
+                "weight": 3.0
+            },
+            {
+                "symbol": "M&M",
+                "isin": "INE101A01026",
+                "sector": "Automobile",
+                "weight": 2.0
+            },
+            {
+                "symbol": "AXISBANK",
+                "isin": "INE238A01034",
+                "sector": "Financial Services",
+                "weight": 3.0
+            },
+            {
+                "symbol": "ITC",
+                "isin": "INE154A01025",
+                "sector": "Consumer Goods",
+                "weight": 4.0
+            },
+            {
+                "symbol": "L&T",
+                "isin": "INE018A01030",
+                "sector": "Construction",
+                "weight": 3.0
+            }
+        ]
+    },
+    "INF20220203": {
+        "symbol": "NIFTYIT",
+        "name": "Nifty IT ETF",
+        "holdings": [
+            {
+                "symbol": "TCS",
+                "isin": "INE467B01029",
+                "sector": "Technology",
+                "weight": 25.0
+            },
+            {
+                "symbol": "Infosys",
+                "isin": "INE009A01021",
+                "sector": "Technology",
+                "weight": 25.0
+            },
+            {
+                "symbol": "HCL Tech",
+                "isin": "INE860A01027",
+                "sector": "Technology",
+                "weight": 10.0
+            },
+            {
+                "symbol": "Wipro",
+                "isin": "INE075A01022",
+                "sector": "Technology",
+                "weight": 10.0
+            },
+            {
+                "symbol": "Tech Mahindra",
+                "isin": "INE669C01036",
+                "sector": "Technology",
+                "weight": 10.0
+            },
+            {
+                "symbol": "LTIMindtree",
+                "isin": "INE214T01019",
+                "sector": "Technology",
+                "weight": 5.0
+            },
+            {
+                "symbol": "Persistent Systems",
+                "isin": "INE262H01013",
+                "sector": "Technology",
+                "weight": 5.0
+            },
+            {
+                "symbol": "Coforge",
+                "isin": "INE591G01017",
+                "sector": "Technology",
+                "weight": 5.0
+            },
+            {
+                "symbol": "Mphasis",
+                "isin": "INE356A01018",
+                "sector": "Technology",
+                "weight": 2.5
+            },
+            {
+                "symbol": "Tata Elxsi",
+                "isin": "INE670A01012",
+                "sector": "Technology",
+                "weight": 2.5
+            }
+        ]
+    }
+}

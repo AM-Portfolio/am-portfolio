@@ -1,0 +1,35 @@
+{
+    "userId": "USER002",
+    "holdings": [
+        {
+            "isin": "INE009A01021",
+            "symbol": "INFY",
+            "sector": "IT",
+            "quantity": 100
+        },
+        {
+            "isin": "INE467B01029",
+            "symbol": "TCS",
+            "sector": "IT",
+            "quantity": 50
+        },
+        {
+            "isin": "INE018A01030",
+            "symbol": "LTI",
+            "sector": "IT",
+            "quantity": 20
+        },
+        {
+            "isin": "INE000X00000",
+            "symbol": "HCLTECH",
+            "sector": "IT",
+            "quantity": 30
+        },
+        {
+            "isin": "INE000Y00000",
+            "symbol": "PERSISTENT",
+            "sector": "IT",
+            "quantity": 15
+        }
+    ]
+}

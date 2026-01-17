@@ -1,0 +1,53 @@
+{
+    "userId": "USER001",
+    "holdings": [
+        {
+            "isin": "INE002A01018",
+            "symbol": "RELIANCE",
+            "sector": "Energy",
+            "quantity": 50
+        },
+        {
+            "isin": "INE040A01034",
+            "symbol": "HDFCBANK",
+            "sector": "Financial Services",
+            "quantity": 30
+        },
+        {
+            "isin": "INE009A01021",
+            "symbol": "INFY",
+            "sector": "IT",
+            "quantity": 25
+        },
+        {
+            "isin": "INE467B01029",
+            "symbol": "TCS",
+            "sector": "IT",
+            "quantity": 10
+        },
+        {
+            "isin": "INE090A01021",
+            "symbol": "ICICIBANK",
+            "sector": "Financial Services",
+            "quantity": 100
+        },
+        {
+            "isin": "INE062A01020",
+            "symbol": "SBIN",
+            "sector": "Financial Services",
+            "quantity": 40
+        },
+        {
+            "isin": "INE101A01026",
+            "symbol": "M&M",
+            "sector": "Automobile",
+            "quantity": 10
+        },
+        {
+            "isin": "INE238A01034",
+            "symbol": "AXISBANK",
+            "sector": "Financial Services",
+            "quantity": 5
+        }
+    ]
+}

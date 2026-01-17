@@ -19,12 +19,14 @@
     <modules>
         <module>portfolio-model</module>
         <module>portfolio-market-data</module>
+        <module>portfolio-basket</module>
         <module>portfolio-service</module>
         <module>portfolio-api</module>
         <module>portfolio-redis</module>
         <module>portfolio-kafka</module>
         <module>portfolio-app</module>
         <module>portfolio-analytics</module>
+        <module>portfolio-sdk</module>
     </modules>
 
     <properties>

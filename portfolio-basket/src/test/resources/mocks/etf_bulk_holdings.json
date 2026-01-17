@@ -1,0 +1,140 @@
+{
+    "INF20220202": {
+        "symbol": "NIFTY50",
+        "name": "Nifty 50 ETF",
+        "holdings": [
+            {
+                "isin": "INE002A01018",
+                "symbol": "RELIANCE",
+                "sector": "Energy",
+                "weight": 10.5
+            },
+            {
+                "isin": "INE040A01034",
+                "symbol": "HDFCBANK",
+                "sector": "Financial Services",
+                "weight": 9.2
+            },
+            {
+                "isin": "INE009A01021",
+                "symbol": "INFY",
+                "sector": "IT",
+                "weight": 7.8
+            },
+            {
+                "isin": "INE467B01029",
+                "symbol": "TCS",
+                "sector": "IT",
+                "weight": 4.5
+            },
+            {
+                "isin": "INE090A01021",
+                "symbol": "ICICIBANK",
+                "sector": "Financial Services",
+                "weight": 6.8
+            },
+            {
+                "isin": "INE062A01020",
+                "symbol": "SBIN",
+                "sector": "Financial Services",
+                "weight": 2.5
+            },
+            {
+                "isin": "INE018A01030",
+                "symbol": "LTI",
+                "sector": "IT",
+                "weight": 1.2
+            },
+            {
+                "isin": "INE101A01026",
+                "symbol": "M&M",
+                "sector": "Automobile",
+                "weight": 1.5
+            },
+            {
+                "isin": "INE742F01042",
+                "symbol": "ADANIPORTS",
+                "sector": "Services",
+                "weight": 0.9
+            },
+            {
+                "isin": "INE238A01034",
+                "symbol": "AXISBANK",
+                "sector": "Financial Services",
+                "weight": 2.2
+            }
+        ]
+    },
+    "INF20220203": {
+        "symbol": "NIFTYIT",
+        "name": "Nifty IT ETF",
+        "holdings": [
+            {
+                "isin": "INE009A01021",
+                "symbol": "INFY",
+                "sector": "IT",
+                "weight": 28.5
+            },
+            {
+                "isin": "INE467B01029",
+                "symbol": "TCS",
+                "sector": "IT",
+                "weight": 26.2
+            },
+            {
+                "isin": "INE018A01030",
+                "symbol": "LTI",
+                "sector": "IT",
+                "weight": 5.2
+            },
+            {
+                "isin": "INE669C01036",
+                "symbol": "TECHM",
+                "sector": "IT",
+                "weight": 8.5
+            },
+            {
+                "isin": "INE075A01022",
+                "symbol": "WIPRO",
+                "sector": "IT",
+                "weight": 7.1
+            }
+        ]
+    },
+    "INF20220204": {
+        "symbol": "BANKBEES",
+        "name": "Nifty Bank ETF",
+        "holdings": [
+            {
+                "isin": "INE040A01034",
+                "symbol": "HDFCBANK",
+                "sector": "Financial Services",
+                "weight": 30.2
+            },
+            {
+                "isin": "INE090A01021",
+                "symbol": "ICICIBANK",
+                "sector": "Financial Services",
+                "weight": 25.8
+            },
+            {
+                "isin": "INE238A01034",
+                "symbol": "AXISBANK",
+                "sector": "Financial Services",
+                "weight": 12.2
+            },
+            {
+                "isin": "INE062A01020",
+                "symbol": "SBIN",
+                "sector": "Financial Services",
+                "weight": 10.5
+            },
+            {
+                "isin": "INE028A01039",
+                "symbol": "KOTAKBANK",
+                "sector": "Financial Services",
+                "weight": 9.1
+            }
+        ]
+    }
+}

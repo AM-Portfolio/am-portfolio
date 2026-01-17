@@ -1,26 +1,29 @@
+# Infrastructure Host Configuration
+INFRA_HOST: 100.72.208.15
+
 #mongo
-MONGODB_URL: mongodb://ssd2658:ssd2658@localhost:27017/portfolio?authSource=admin
+MONGODB_CONNECTION_URL: ${MONGODB_URL:mongodb://admin:password123@${INFRA_HOST}:27017/portfolio?authSource=admin}
 
 #Kafka
-KAFKA_BOOTSTRAP_SERVERS: localhost:9092
-KAFKA_USERNAME: kafkaUser
-KAFKA_PASSWORD: kafkaPassword123!
-KAFKA_JAAS_CONFIG:  #org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_USERNAME}" password="${KAFKA_PASSWORD}";
-KAFKA_SECURITY_PROTOCOL: PLAINTEXT
-KAFKA_SASL_MECHANISM: PLAIN
+PROJ_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:${INFRA_HOST}:9092}
+PROJ_KAFKA_USERNAME: ${KAFKA_USERNAME:admin}
+PROJ_KAFKA_PASSWORD: ${KAFKA_PASSWORD:password123}
+PROJ_KAFKA_JAAS_CONFIG: ${KAFKA_JAAS_CONFIG:org.apache.kafka.common.security.plain.PlainLoginModule required username="${PROJ_KAFKA_USERNAME}" password="${PROJ_KAFKA_PASSWORD}";}
+PROJ_KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:SASL_PLAINTEXT}
+PROJ_KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:PLAIN}
 
 #Topic
-PORTFOLIO_CONSUMER_ID: am-portfolio-group-1
-PORTFOLIO_TOPIC: am-portfolio
-STOCK_CONSUMER_ID: am-stock-group.v2
-STOCK_TOPIC: am-stock-price-update
-MARKET_INDEX_CONSUMER_ID: am-market-index-group-1
-MARKET_INDEX_TOPIC: nse-stock-indices-update
+PORTFOLIO_CONSUMER_GROUP: ${PORTFOLIO_CONSUMER_ID:am-portfolio-group-1}
+PORTFOLIO_TOPIC_NAME: ${PORTFOLIO_TOPIC:am-portfolio}
+STOCK_CONSUMER_GROUP: ${STOCK_CONSUMER_ID:am-stock-group.v2}
+STOCK_TOPIC_NAME: ${STOCK_TOPIC:am-stock-price-update}
+MARKET_INDEX_CONSUMER_GROUP: ${MARKET_INDEX_CONSUMER_ID:am-market-index-group-1}
+MARKET_INDEX_TOPIC_NAME: ${MARKET_INDEX_TOPIC:nse-stock-indices-update}
 
 #Redis
-REDIS_HOSTNAME: localhost
-REDIS_PORT: 6379
-REDIS_PASSWORD: RedisPassword123!
+PROJ_REDIS_HOSTNAME: ${REDIS_HOSTNAME:${INFRA_HOST}}
+PROJ_REDIS_PORT: ${REDIS_PORT:6379}
+PROJ_REDIS_PASSWORD: ${REDIS_PASSWORD:password123}
 
 spring:
   application:
@@ -29,24 +32,24 @@ spring:
     include:
       - api
   kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    bootstrap-servers: ${PROJ_KAFKA_BOOTSTRAP_SERVERS}
     consumer:
-      group-id: ${PORTFOLIO_CONSUMER_ID}
+      group-id: ${PORTFOLIO_CONSUMER_GROUP}
       auto-offset-reset: latest
       enable-auto-commit: false
       max-poll-records: 100
     properties:
-      security-protocol: ${KAFKA_SECURITY_PROTOCOL}
-      sasl-mechanism: ${KAFKA_SASL_MECHANISM}
-      sasl-jaas-config: ${KAFKA_JAAS_CONFIG}
+      security-protocol: ${PROJ_KAFKA_SECURITY_PROTOCOL}
+      sasl-mechanism: ${PROJ_KAFKA_SASL_MECHANISM}
+      sasl-jaas-config: ${PROJ_KAFKA_JAAS_CONFIG}
       ssl-endpoint-identification-algorithm: ""
       ssl-truststore-location: /etc/ssl/certs/java/cacerts
       ssl-truststore-password: changeit
   data:
     redis:
-      host: ${REDIS_HOSTNAME}
-      port: ${REDIS_PORT}
-      password: ${REDIS_PASSWORD}
+      host: ${PROJ_REDIS_HOSTNAME}
+      port: ${PROJ_REDIS_PORT}
+      password: ${PROJ_REDIS_PASSWORD}
       portfolio-mover:
         ttl: 900  # 15 minutes in seconds
         key-prefix: "portfolio:analysis:"
@@ -75,7 +78,7 @@ spring:
           key-prefix: "stock-indices:historical-data:"
           ttl: 129600  # 30 Days in seconds
     mongodb:
-      uri: ${MONGODB_URL}
+      uri: ${MONGODB_CONNECTION_URL}
       authentication-database: admin
   # Disable JDBC auto-configuration since we're using MongoDB
   autoconfigure:
@@ -114,22 +117,22 @@ app:
   kafka:
     portfolio:
       consumer:
-        id: ${PORTFOLIO_CONSUMER_ID}
+        id: ${PORTFOLIO_CONSUMER_GROUP}
         enabled: true
-      topic: ${PORTFOLIO_TOPIC}
+      topic: ${PORTFOLIO_TOPIC_NAME}
     stock:
       consumer:
-        id: ${STOCK_CONSUMER_ID}
+        id: ${STOCK_CONSUMER_GROUP}
         enabled: false
-      topic: ${STOCK_TOPIC}
+      topic: ${STOCK_TOPIC_NAME}
     market-index:
       consumer:
-        id: ${MARKET_INDEX_CONSUMER_ID}
+        id: ${MARKET_INDEX_CONSUMER_GROUP}
         enabled: false
-      topic: ${MARKET_INDEX_TOPIC}
+      topic: ${MARKET_INDEX_TOPIC_NAME}
 
 server:
-  port: 8080
+  port: 8060
   servlet:
     context-path: /
   tomcat:
@@ -148,11 +151,11 @@ springdoc:
 
 logging:
   level:
-    "[com.portfolio]": DEBUG
-    "[com.portfolio.analytics]": DEBUG
-    "[com.portfolio.api]": DEBUG
-    "[com.portfolio.marketdata]": DEBUG
-    "[com.portfolio.model]": DEBUG
-    "[com.am.common]": DEBUG
-    "[com.am.common.amcommondata]": DEBUG
+    "[com.portfolio]": INFO
+    "[com.portfolio.analytics]": INFO
+    "[com.portfolio.api]": INFO
+    "[com.portfolio.marketdata]": INFO
+    "[com.portfolio.model]": INFO
+    "[com.am.common]": INFO
+    "[com.am.common.amcommondata]": INFO
     org.springframework.kafka: INFO
