@@ -21,6 +21,11 @@ public class EquityHoldings {
    private String sector;
    private String industry;
    private String marketCap;
+
+   // Portfolio context
+   private String portfolioId; // Portfolio UUID for tracking source portfolio
+   private String portfolioName; // Portfolio name for display purposes
+
    private Double quantity;
    private Double investmentCost;
    private Double currentValue;

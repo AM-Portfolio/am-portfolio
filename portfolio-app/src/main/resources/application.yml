@@ -51,32 +51,32 @@ spring:
       port: ${PROJ_REDIS_PORT}
       password: ${PROJ_REDIS_PASSWORD}
       portfolio-mover:
-        ttl: 900  # 15 minutes in seconds
+        ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:analysis:"
       portfolio-summary:
-        ttl: 900  # 15 minutes in seconds
+        ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:summary:"
       portfolio-holdings:
-        ttl: 900  # 15 minutes in seconds
+        ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:holdings:"
       market-indices:
-        ttl: 129600  # 30 Days in seconds
+        ttl: 129600 # 30 Days in seconds
         key-prefix: "market-indices:indices:"
         historical:
           key-prefix: "market-indices:historical-indices:"
-          ttl: 129600  # 30 Days in seconds
+          ttl: 129600 # 30 Days in seconds
       stock:
-        ttl: 129600  # 30 Days in seconds
+        ttl: 129600 # 30 Days in seconds
         key-prefix: "stock:price:"
         historical:
           key-prefix: "stock:historical-price:"
-          ttl: 129600  # 30 Days in seconds
+          ttl: 129600 # 30 Days in seconds
       stock-indices:
-        ttl: 129600  # 30 Days in seconds
+        ttl: 129600 # 30 Days in seconds
         key-prefix: "stock-indices:data:"
         historical:
           key-prefix: "stock-indices:historical-data:"
-          ttl: 129600  # 30 Days in seconds
+          ttl: 129600 # 30 Days in seconds
     mongodb:
       uri: ${MONGODB_CONNECTION_URL}
       authentication-database: admin
@@ -118,7 +118,7 @@ app:
     portfolio:
       consumer:
         id: ${PORTFOLIO_CONSUMER_GROUP}
-        enabled: true
+        enabled: false
       topic: ${PORTFOLIO_TOPIC_NAME}
     stock:
       consumer:
@@ -132,13 +132,17 @@ app:
       topic: ${MARKET_INDEX_TOPIC_NAME}
 
 server:
-  port: 8060
+  port: 8080
   servlet:
     context-path: /
   tomcat:
     max-threads: 20
     min-spare-threads: 10
     max-connections: 200
+
+etf:
+  api:
+    url: ${ETF_API_URL:http://localhost:8022}
 
 # OpenAPI Documentation
 springdoc:

@@ -9,6 +9,9 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -28,6 +31,7 @@ public class SecurityConfig {
         private String jwtSecret;
 
         @Bean
+        @Order(Ordered.HIGHEST_PRECEDENCE)
         public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
                 http
                                 // Disable CSRF (stateless REST API with JWT)
@@ -41,25 +45,24 @@ public class SecurityConfig {
                                 .authorizeHttpRequests(auth -> auth
                                                 // ✅ PUBLIC ENDPOINTS - No authentication required
                                                 .requestMatchers(
-                                                                "/actuator/health", // Docker health check
-                                                                "/actuator/health/live", // Kubernetes liveness probe
-                                                                "/actuator/health/ready", // Kubernetes readiness probe
-                                                                "/swagger-ui/**", // Swagger API documentation
-                                                                "/v3/api-docs/**", // OpenAPI specification
-                                                                "/api-docs", // Custom OpenAPI path
-                                                                "/v3/api-docs.yaml", // OpenAPI YAML
-                                                                "/api/v1/basket/**" // Basket endpoints (Dev)
-                                                ).permitAll()
+                                                                AntPathRequestMatcher.antMatcher("/api/v1/basket/**"),
+                                                                AntPathRequestMatcher.antMatcher("/actuator/health/**"),
+                                                                AntPathRequestMatcher.antMatcher("/swagger-ui/**"),
+                                                                AntPathRequestMatcher.antMatcher("/v3/api-docs/**"),
+                                                                AntPathRequestMatcher.antMatcher("/api-docs/**"),
+                                                                AntPathRequestMatcher.antMatcher("/error"),
+                                                                AntPathRequestMatcher.antMatcher("/**"))
+                                                .permitAll()
 
                                                 // ✅ PROTECTED ENDPOINTS - Require valid JWT
-                                                .requestMatchers(
-                                                                "/api/v1/portfolios/**", // All portfolio operations
-                                                                "/api/v1/portfolio-analytics/**", // Analytics endpoints
-                                                                "/api/v1/market-data/**", // Market data endpoints
-                                                                "/api/v1/market-index/**", // Market index endpoints
-                                                                "/api/v1/index-analytics/**" // Index analytics
-                                                                                             // endpoints
-                                                ).authenticated()
+                                                // .requestMatchers(
+                                                // "/api/v1/portfolios/**", // All portfolio operations
+                                                // "/api/v1/portfolio-analytics/**", // Analytics endpoints
+                                                // "/api/v1/market-data/**", // Market data endpoints
+                                                // "/api/v1/market-index/**", // Market index endpoints
+                                                // "/api/v1/index-analytics/**" // Index analytics
+                                                // // endpoints
+                                                // ).authenticated()
 
                                                 // ❌ Deny all other endpoints (fail secure)
                                                 .anyRequest().denyAll())

@@ -30,16 +30,24 @@ public class PortfolioHoldingsService {
     private final PortfolioCalculator portfolioCalculator;
 
     public PortfolioHoldings getPortfolioHoldings(String userId, TimeInterval interval) {
-        log.info("Starting getPortfolioHoldings - User: {}, Interval: {}", userId,
-                interval != null ? interval.getCode() : "null");
+        return getPortfolioHoldings(userId, interval, true);
+    }
 
-        Optional<PortfolioHoldings> cachedHoldings = getCachedHoldings(userId, interval);
-        if (cachedHoldings.isPresent()) {
-            log.info("Returning cached portfolio holdings for user: {}", userId);
-            return cachedHoldings.get();
+    public PortfolioHoldings getPortfolioHoldings(String userId, TimeInterval interval, boolean enrich) {
+        log.info("Starting getPortfolioHoldings - User: {}, Interval: {}, Enrich: {}", userId,
+                interval != null ? interval.getCode() : "null", enrich);
+
+        // If enrichment is disabled, we skip cache as cache usually stores
+        // enriched/full data
+        if (enrich) {
+            Optional<PortfolioHoldings> cachedHoldings = getCachedHoldings(userId, interval);
+            if (cachedHoldings.isPresent()) {
+                log.info("Returning cached portfolio holdings for user: {}", userId);
+                return cachedHoldings.get();
+            }
         }
 
-        log.info("Cache miss for portfolio holdings - User: {}, fetching from source", userId);
+        log.info("Cache miss or skip for portfolio holdings - User: {}, fetching from source", userId);
         var portfolios = portfolioService.getPortfoliosByUserId(userId);
         if (portfolios == null || portfolios.isEmpty()) {
             log.warn("No portfolios found for user: {}", userId);
@@ -47,7 +55,7 @@ public class PortfolioHoldingsService {
         }
         log.info("Found {} portfolios for user: {}", portfolios.size(), userId);
 
-        var portfolioHoldings = buildPortfolioHoldings(portfolios, userId, null, interval);
+        var portfolioHoldings = buildPortfolioHoldings(portfolios, userId, null, interval, enrich);
 
         log.info("Completed getPortfolioHoldings for user: {}", userId);
         return portfolioHoldings;
@@ -63,6 +71,21 @@ public class PortfolioHoldingsService {
      * @return the portfolio holdings for the specific portfolio
      */
     public PortfolioHoldings getPortfolioHoldings(String userId, String portfolioId, TimeInterval interval) {
+        return getPortfolioHoldings(userId, portfolioId, interval, true);
+    }
+
+    /**
+     * Retrieves the portfolio holdings for a specific portfolio of the given user
+     * and time interval, with optional enrichment.
+     * 
+     * @param userId      the ID of the user
+     * @param portfolioId the ID of the specific portfolio to filter by
+     * @param interval    the time interval
+     * @param enrich      whether to enrich holdings with market data
+     * @return the portfolio holdings for the specific portfolio
+     */
+    public PortfolioHoldings getPortfolioHoldings(String userId, String portfolioId, TimeInterval interval,
+            boolean enrich) {
         log.info("Starting getPortfolioHoldings for specific portfolio - User: {}, Portfolio: {}, Interval: {}",
                 userId, portfolioId, interval != null ? interval.getCode() : "null");
 
@@ -87,7 +110,7 @@ public class PortfolioHoldingsService {
         log.info("Found {} matching portfolio(s) for ID: {} and user: {}",
                 filteredPortfolios.size(), portfolioId, userId);
 
-        var portfolioHoldings = buildPortfolioHoldings(filteredPortfolios, userId, portfolioId, interval);
+        var portfolioHoldings = buildPortfolioHoldings(filteredPortfolios, userId, portfolioId, interval, enrich);
 
         // Note: We do not cache specific portfolio holdings to avoid stale data issues
 
@@ -105,26 +128,34 @@ public class PortfolioHoldingsService {
      * @return the complete portfolio holdings with enriched data
      */
     private PortfolioHoldings buildPortfolioHoldings(List<PortfolioModelV1> portfolios, String userId,
-            String portfolioId, TimeInterval interval) {
+            String portfolioId, TimeInterval interval, boolean enrich) {
         String context = portfolioId != null ? "portfolio: " + portfolioId : "all portfolios";
         log.debug("Building portfolio holdings for user: {} and {}", userId, context);
 
         var portfolioHoldings = portfolioHoldingsMapper.toPortfolioHoldingsV1(portfolios);
 
-        log.info("Enriching stock prices and performance data for {} equity holdings for {}",
-                portfolioHoldings.getEquityHoldings() != null ? portfolioHoldings.getEquityHoldings().size() : 0,
-                context);
+        if (enrich) {
+            log.info("Enriching stock prices and performance data for {} equity holdings for {}",
+                    portfolioHoldings.getEquityHoldings() != null ? portfolioHoldings.getEquityHoldings().size() : 0,
+                    context);
 
-        var enrichedHoldings = portfolioCalculator.enrichHoldings(portfolioHoldings.getEquityHoldings());
-        portfolioCalculator.calculateWeights(enrichedHoldings);
-        portfolioHoldings.setEquityHoldings(enrichedHoldings);
+            var enrichedHoldings = portfolioCalculator.enrichHoldings(portfolioHoldings.getEquityHoldings());
+            portfolioCalculator.calculateWeights(enrichedHoldings);
+            portfolioHoldings.setEquityHoldings(enrichedHoldings);
+        } else {
+            log.info("Skipping enrichment for user: {} and {}", userId, context);
+        }
+
         portfolioHoldings.setLastUpdated(LocalDateTime.now());
 
         log.debug("Completed building portfolio holdings for user: {} and {}", userId, context);
 
-        // Store in cache only for all portfolios (not for specific portfolio)
-        log.info("Caching portfolio holdings for user: {}", userId);
-        portfolioHoldingsRedisService.cachePortfolioHoldings(portfolioHoldings, userId, interval);
+        // Store in cache only for all portfolios (not for specific portfolio) AND if
+        // enriched
+        if (enrich) {
+            log.info("Caching portfolio holdings for user: {}", userId);
+            portfolioHoldingsRedisService.cachePortfolioHoldings(portfolioHoldings, userId, interval);
+        }
 
         log.info("Completed getPortfolioHoldings for user: {}", userId);
         return portfolioHoldings;

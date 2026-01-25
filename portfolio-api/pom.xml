@@ -34,6 +34,11 @@
             <artifactId>portfolio-service</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>com.portfolio</groupId>
+            <artifactId>portfolio-basket</artifactId>
+            <version>${project.version}</version>
+        </dependency>
 
         <!-- Spring Boot -->
         <dependency>

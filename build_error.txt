@@ -1,0 +1,84 @@
+﻿[INFO] Scanning for projects...
+[WARNING] 
+[WARNING] Some problems were encountered while building the effective model for com.portfolio:portfolio-redis:jar:1.0-SNAPSHOT
+[WARNING] 'dependencies.dependency.(groupId:artifactId:type:classifier)' must be unique: com.am.common:am-common-investment-model:jar -> version ${am.common.version} vs ${am.investment.version} @ line 60, column 21
+[WARNING] 
+[WARNING] It is highly recommended to fix these problems because they threaten the stability of your build.
+[WARNING] 
+[WARNING] For this reason, future Maven versions might no longer support building such malformed projects.
+[WARNING] 
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] am-portfolio                                                       [pom]
+[INFO] portfolio-model                                                    [jar]
+[INFO] portfolio-basket                                                   [jar]
+[INFO] 
+[INFO] ---------------------< com.portfolio:am-portfolio >---------------------
+[INFO] Building am-portfolio 1.0-SNAPSHOT                                 [1/3]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] -------------------< com.portfolio:portfolio-model >--------------------
+[INFO] Building portfolio-model 1.0-SNAPSHOT                              [2/3]
+[INFO]   from portfolio-model\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ portfolio-model ---
+[INFO] Copying 0 resource from src\main\resources to target\classes
+[INFO] Copying 0 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ portfolio-model ---
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] -------------------< com.portfolio:portfolio-basket >-------------------
+[INFO] Building portfolio-basket 1.0-SNAPSHOT                             [3/3]
+[INFO]   from portfolio-basket\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ portfolio-basket ---
+[INFO] Copying 0 resource from src\main\resources to target\classes
+[INFO] Copying 2 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ portfolio-basket ---
+[INFO] Changes detected - recompiling the module! :source
+[INFO] Compiling 6 source files with javac [debug release 17] to target\classes
+[INFO] /A:/InfraCode/AM-Portfolio-grp/am-portfolio/am-portfolio-data/portfolio-basket/src/main/java/com/portfolio/basket/service/MockUserPortfolioProvider.java: A:\InfraCode\AM-Portfolio-grp\am-portfolio\am-portfolio-data\portfolio-basket\src\main\java\com\portfolio\basket\service\MockUserPortfolioProvider.java uses unchecked or unsafe operations.
+[INFO] /A:/InfraCode/AM-Portfolio-grp/am-portfolio/am-portfolio-data/portfolio-basket/src/main/java/com/portfolio/basket/service/MockUserPortfolioProvider.java: Recompile with -Xlint:unchecked for details.
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /A:/InfraCode/AM-Portfolio-grp/am-portfolio/am-portfolio-data/portfolio-basket/src/main/java/com/portfolio/basket/scheduler/BasketRecommendationScheduler.java:[46,66] method findOpportunities in class com.portfolio.basket.service.BasketEngineService cannot be applied to given types;
+  required: java.util.List<com.portfolio.model.portfolio.EquityHoldings>,java.lang.String
+  found:    java.util.List<com.portfolio.model.portfolio.EquityHoldings>
+  reason: actual and formal argument lists differ in length
+[INFO] 1 error
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for am-portfolio 1.0-SNAPSHOT:
+[INFO] 
+[INFO] am-portfolio ....................................... SUCCESS [  0.003 s]
+[INFO] portfolio-model .................................... SUCCESS [  2.062 s]
+[INFO] portfolio-basket ................................... FAILURE [  4.136 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  7.070 s
+[INFO] Finished at: 2026-01-24T21:22:19+05:30
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.11.0:compile (default-compile) on project portfolio-basket: Compilation failure
+[ERROR] /A:/InfraCode/AM-Portfolio-grp/am-portfolio/am-portfolio-data/portfolio-basket/src/main/java/com/portfolio/basket/scheduler/BasketRecommendationScheduler.java:[46,66] method findOpportunities in class com.portfolio.basket.service.BasketEngineService cannot be applied to given types;
+[ERROR]   required: java.util.List<com.portfolio.model.portfolio.EquityHoldings>,java.lang.String
+[ERROR]   found:    java.util.List<com.portfolio.model.portfolio.EquityHoldings>
+[ERROR]   reason: actual and formal argument lists differ in length
+[ERROR] 
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+[ERROR] 
+[ERROR] After correcting the problems, you can resume the build with the command
+[ERROR]   mvn <args> -rf :portfolio-basket

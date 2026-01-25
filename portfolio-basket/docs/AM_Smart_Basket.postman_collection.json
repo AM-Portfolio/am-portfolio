@@ -1,0 +1,157 @@
+{
+    "info": {
+        "_postman_id": "b6a8d7c4-5e1f-4f1a-9a8b-1d2e3f4g5h6i",
+        "name": "AM Smart Basket",
+        "description": "Collection for Smart Investment Basket Feature (Phase 1 & 2)",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Basket Service (Java)",
+            "item": [
+                {
+                    "name": "Preview Opportunity",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"etfIsin\": \"INF204KB14I2\",\n    \"userId\": \"ssd2658\",\n    \"portfolioId\": \"163d0143-4fcb-480c-ac20-622f14e0e293\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost:8085/api/v1/basket/preview",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "port": "8085",
+                            "path": [
+                                "api",
+                                "v1",
+                                "basket",
+                                "preview"
+                            ]
+                        },
+                        "description": "Check overlap for a specific ETF against user holdings."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Find Opportunities",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"userId\": \"ssd2658\",\n    \"portfolioId\": \"163d0143-4fcb-480c-ac20-622f14e0e293\",\n    \"etfQuery\": \"NIFTY\",\n    \"userHoldings\": []\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost:8085/api/v1/basket/opportunities",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "port": "8085",
+                            "path": [
+                                "api",
+                                "v1",
+                                "basket",
+                                "opportunities"
+                            ]
+                        },
+                        "description": "Find all ETF opportunities for the given user holdings."
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Parser Service (Python)",
+            "item": [
+                {
+                    "name": "Bulk Fetch Holdings",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost:8022/v1/holdings/bulk",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "port": "8022",
+                            "path": [
+                                "v1",
+                                "holdings",
+                                "bulk"
+                            ]
+                        },
+                        "description": "Fetch optimized bulk holdings map for Java syncing."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Search ETFs",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost:8022/v1/etf/search?query=Nifty",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "port": "8022",
+                            "path": [
+                                "v1",
+                                "etf",
+                                "search"
+                            ],
+                            "query": [
+                                {
+                                    "key": "query",
+                                    "value": "Nifty"
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get ETF Holdings (Detail)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost:8022/v1/etf/holdings/NIFTYBEES",
+                            "protocol": "http",
+                            "host": [
+                                "localhost"
+                            ],
+                            "port": "8022",
+                            "path": [
+                                "v1",
+                                "etf",
+                                "holdings",
+                                "NIFTYBEES"
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        }
+    ]
+}

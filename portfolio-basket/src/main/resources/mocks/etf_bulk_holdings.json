@@ -65,6 +65,72 @@
             }
         ]
     },
+    "INF204KB14I2": {
+        "symbol": "NIFTYBEES",
+        "name": "Nippon India ETF Nifty 50 BeES",
+        "holdings": [
+            {
+                "symbol": "RELIANCE",
+                "isin": "INE002A01018",
+                "sector": "Energy",
+                "weight": 10.0
+            },
+            {
+                "symbol": "HDFCBANK",
+                "isin": "INE040A01034",
+                "sector": "Financial Services",
+                "weight": 13.0
+            },
+            {
+                "symbol": "INFY",
+                "isin": "INE009A01021",
+                "sector": "IT",
+                "weight": 6.0
+            },
+            {
+                "symbol": "TCS",
+                "isin": "INE467B01029",
+                "sector": "IT",
+                "weight": 4.0
+            },
+            {
+                "symbol": "ICICIBANK",
+                "isin": "INE090A01021",
+                "sector": "Financial Services",
+                "weight": 7.0
+            },
+            {
+                "symbol": "SBIN",
+                "isin": "INE062A01020",
+                "sector": "Financial Services",
+                "weight": 3.0
+            },
+            {
+                "symbol": "M&M",
+                "isin": "INE101A01026",
+                "sector": "Automobile",
+                "weight": 2.0
+            },
+            {
+                "symbol": "AXISBANK",
+                "isin": "INE238A01034",
+                "sector": "Financial Services",
+                "weight": 3.0
+            },
+            {
+                "symbol": "ITC",
+                "isin": "INE154A01025",
+                "sector": "Consumer Goods",
+                "weight": 4.0
+            },
+            {
+                "symbol": "L&T",
+                "isin": "INE018A01030",
+                "sector": "Construction",
+                "weight": 3.0
+            }
+        ]
+    },
     "INF20220203": {
         "symbol": "NIFTYIT",
         "name": "Nifty IT ETF",
