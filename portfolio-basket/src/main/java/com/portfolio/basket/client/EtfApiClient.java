@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
 @Slf4j
 public class EtfApiClient {
 
-    @Value("${etf.api.url:http://localhost:8022}")
+    @Value("${etf.url:http://localhost:8022}")
     private String apiUrl;
 
     private final RestTemplate restTemplate = new RestTemplate();
@@ -92,7 +92,7 @@ public class EtfApiClient {
         return Collections.emptyList();
     }
 
-    @Value("${market.data.api.base-url}")
+    @Value("${market-data.api.base-url}")
     private String marketDataUrl;
 
     public void enrichHoldings(List<EtfHolding> holdings) {
@@ -127,14 +127,28 @@ public class EtfApiClient {
                     String query = h.getSymbol() != null ? h.getSymbol() : h.getIsin();
                     SecurityMatch match = matchMap.get(query);
                     if (match != null) {
+                        // CRITICAL: Update symbol from market data match (e.g., "Indusind Bank Ltd." ->
+                        // "INDUSINDBK")
+                        if (match.getSymbol() != null)
+                            h.setSymbol(match.getSymbol());
+
                         if (match.getSector() != null)
                             h.setSector(match.getSector());
-                        if (match.getMarketCapType() != null)
+
+                        // Fix for Market Cap mapping
+                        // The field in EtfHolding is marketCapCategory (String) and marketCapValue
+                        // (Double)
+                        // The field in SecurityMatch is marketCapType (String) and marketCapValue
+                        // (Double)
+                        if (match.getMarketCapType() != null) {
                             h.setMarketCapCategory(match.getMarketCapType());
-                        if (match.getMarketCapValue() != null)
+                        }
+                        if (match.getMarketCapValue() != null) {
                             h.setMarketCapValue(match.getMarketCapValue());
+                        }
                     }
                 }
+
             }
 
         } catch (Exception e) {

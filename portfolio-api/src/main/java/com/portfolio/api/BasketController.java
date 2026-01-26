@@ -93,6 +93,19 @@ public class BasketController {
         }
     }
 
+    @PostMapping("/calculate-quantities")
+    public BasketOpportunity calculateQuantities(@RequestBody CalculationRequest request) {
+        log.info("Calculating quantities for investment amount: {}", request.getInvestmentAmount());
+        return basketService.calculateBasketQuantities(request.getInvestmentAmount(), request.getOpportunity(), true);
+    }
+
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class CalculationRequest {
+        private Double investmentAmount;
+        private BasketOpportunity opportunity;
+    }
+
     private List<EquityHoldings> resolveUserHoldings(String userId, String portfolioId,
             List<EquityHoldings> manualHoldings) {
         // If manual holdings are provided, use them directly

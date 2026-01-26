@@ -25,10 +25,74 @@ import java.util.stream.Collectors;
 public class BasketEngineService {
 
     private final EtfApiClient etfApiClient;
+    private final com.portfolio.marketdata.service.MarketDataService marketDataService;
+
+    public BasketOpportunity calculateBasketQuantities(Double investmentAmount, BasketOpportunity opportunity,
+            boolean includeHeld) {
+        if (investmentAmount == null || investmentAmount <= 0) {
+            return opportunity;
+        }
+
+        // 1. Gather all unique symbols from the composition (held + missing)
+        Set<String> symbols = new HashSet<>();
+        if (opportunity.getComposition() != null) {
+            for (BasketItem item : opportunity.getComposition()) {
+                if (item.getStockSymbol() != null) {
+                    symbols.add(item.getStockSymbol());
+                }
+            }
+        }
+
+        if (symbols.isEmpty()) {
+            return opportunity;
+        }
+
+        // 2. Fetch Live Prices
+        log.info("Fetching live prices for {} symbols to calculate quantities", symbols.size());
+        Map<String, Double> prices = marketDataService.getCurrentPrices(new ArrayList<>(symbols));
+
+        // 3. Calculate Quantities
+        for (BasketItem item : opportunity.getComposition()) {
+            Double price = prices.get(item.getStockSymbol());
+            if (price == null || price <= 0) {
+                log.warn("Price not found for {}, skipping calculation", item.getStockSymbol());
+                continue;
+            }
+
+            // If includeHeld is false and item is HELD, we skip buying (quantity = 0)
+            if (!includeHeld && item.getStatus() == ItemStatus.HELD) {
+                item.setBuyQuantity(0.0);
+                item.setLastPrice(price);
+                continue;
+            }
+
+            // Target Amount for this stock
+            double targetAmount = (item.getEtfWeight() / 100.0) * investmentAmount;
+
+            // Calculate quantity (floor)
+            int quantity = (int) Math.floor(targetAmount / price);
+
+            item.setBuyQuantity((double) quantity);
+            item.setLastPrice(price);
+        }
+
+        return opportunity;
+    }
 
     public List<BasketOpportunity> findOpportunities(List<EquityHoldings> userHoldings, String etfQuery) {
         // 0. Calculate User Portfolio Weights
         calculateUserWeights(userHoldings);
+
+        // Calculate Total Portfolio Value using Current Value preference
+        double totalValue = userHoldings.stream()
+                .mapToDouble(h -> {
+                    if (h.getCurrentValue() != null)
+                        return h.getCurrentValue();
+                    if (h.getInvestmentCost() != null)
+                        return h.getInvestmentCost();
+                    return 0.0;
+                })
+                .sum();
 
         // 1. Discover ETFs
         Set<String> allIsins = new HashSet<>();
@@ -50,6 +114,9 @@ public class BasketEngineService {
 
         log.info("Processing {} ETFs for matching", allIsins.size());
         List<BasketOpportunity> opportunities = findOpportunitiesInternal(userHoldings, allIsins);
+
+        // Set total portfolio value on each opportunity
+        opportunities.forEach(op -> op.setTotalPortfolioValue(totalValue));
 
         // 2. Sort by match score descending
         opportunities.sort(Comparator.comparingDouble(BasketOpportunity::getMatchScore).reversed());

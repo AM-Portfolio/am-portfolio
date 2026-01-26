@@ -19,6 +19,7 @@ public class BasketOpportunity {
     private int totalItems;
     private int heldCount;
     private int missingCount;
+    private Double totalPortfolioValue;
 
     private List<BasketItem> composition;
     private List<BasketItem> buyList; // Stocks to buy to reach 100% or bridge gap
@@ -39,6 +40,7 @@ public class BasketOpportunity {
         private Double userWeight; // Actual Weight in User Portfolio
         private Double replicaWeight; // Weight contributed to the replica
         private Double buyQuantity; // Suggested if MISSING
+        private Double lastPrice; // Current market price
         private String marketCapCategory;
         private Double marketCapValue;
 

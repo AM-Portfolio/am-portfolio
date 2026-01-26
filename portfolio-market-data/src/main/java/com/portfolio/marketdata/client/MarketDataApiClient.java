@@ -1,14 +1,19 @@
 package com.portfolio.marketdata.client;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Date;
 
 import org.springframework.stereotype.Component;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.portfolio.marketdata.client.base.AbstractApiClient;
 import com.portfolio.marketdata.config.MarketDataApiConfig;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
 import com.portfolio.marketdata.model.HistoricalDataResponseWrapper;
+import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.model.MarketDataResponseWrapper;
 import com.portfolio.marketdata.model.OhlcDataRequest;
 import com.portfolio.model.market.TimeFrame;
@@ -53,8 +58,33 @@ public class MarketDataApiClient extends AbstractApiClient {
                 log.debug("Fetching OHLC data for {} with timeFrame={} from {} with refresh={}",
                                 String.join(",", symbols), timeFrame, config.getOhlcEndpoint(), refresh);
 
-                // Use POST with the request body
-                return post(config.getOhlcEndpoint(), request, MarketDataResponseWrapper.class)
+                // Use POST with the request body, expecting a raw Map
+                return post(config.getOhlcEndpoint(), request, Map.class)
+                                .map(rawMap -> {
+                                        ObjectMapper mapper = new ObjectMapper();
+                                        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
+                                        MarketDataResponseWrapper wrapper = new MarketDataResponseWrapper();
+                                        wrapper.setCached(!refresh);
+                                        wrapper.setTimestamp(new Date().getTime());
+
+                                        Map<String, MarketDataResponse> dataMap = new HashMap<>();
+                                        if (rawMap != null) {
+                                                for (Object key : rawMap.keySet()) {
+                                                        try {
+                                                                Object value = rawMap.get(key);
+                                                                MarketDataResponse response = mapper.convertValue(value,
+                                                                                MarketDataResponse.class);
+                                                                dataMap.put(String.valueOf(key), response);
+                                                        } catch (Exception e) {
+                                                                log.error("Error converting response for symbol {}",
+                                                                                key, e);
+                                                        }
+                                                }
+                                        }
+                                        wrapper.setData(dataMap);
+                                        return wrapper;
+                                })
                                 .doOnSuccess(data -> log.debug("Successfully fetched OHLC data for {} with {} entries",
                                                 String.join(",", symbols),
                                                 data.getData() != null ? data.getData().size() : 0))
