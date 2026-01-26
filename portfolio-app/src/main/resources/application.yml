@@ -141,8 +141,14 @@ server:
     max-connections: 200
 
 etf:
+  url: ${ETF_API_URL:http://localhost:8022}
+
+market-data:
   api:
-    url: ${ETF_API_URL:http://localhost:8022}
+    base-url: ${MARKET_DATA_API_URL:http://localhost:8092}
+    ohlc-endpoint: /v1/market-data/ohlc
+    historical-data-endpoint: /v1/market-data/historical-data
+    securities-endpoint: /v1/securities
 
 # OpenAPI Documentation
 springdoc:

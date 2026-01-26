@@ -16,32 +16,37 @@ public class MarketDataApiConfig {
      * Base URL for the market data API.
      */
     private String baseUrl;
-    
+
     /**
      * API path for OHLC data.
      */
     private String ohlcEndpoint;
-    
+
     /**
      * API path for historical data.
      */
     private String historicalDataEndpoint;
 
     /**
+     * API path for securities data.
+     */
+    private String securitiesEndpoint;
+
+    /**
      * API path for NSE indices data.
      */
     private String nseIndicesEndpoint;
-    
+
     /**
      * Connection timeout in milliseconds.
      */
     private int connectionTimeout = 10000;
-    
+
     /**
      * Read timeout in milliseconds.
      */
     private int readTimeout = 10000;
-    
+
     /**
      * Maximum number of retry attempts.
      */

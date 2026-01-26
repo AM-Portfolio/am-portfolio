@@ -20,7 +20,9 @@ public class EquityHoldings {
    private String name;
    private String sector;
    private String industry;
-   private String marketCap;
+   private String marketCap; // Formatted string (e.g. "1.5T")
+   private Double marketCapValue; // Numeric value in billions/absolute
+   private String marketCapCategory; // Large, Mid, Small
 
    // Portfolio context
    private String portfolioId; // Portfolio UUID for tracking source portfolio

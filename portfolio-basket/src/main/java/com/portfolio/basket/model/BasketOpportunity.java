@@ -39,6 +39,8 @@ public class BasketOpportunity {
         private Double userWeight; // Actual Weight in User Portfolio
         private Double replicaWeight; // Weight contributed to the replica
         private Double buyQuantity; // Suggested if MISSING
+        private String marketCapCategory;
+        private Double marketCapValue;
 
         private List<Alternative> alternatives; // Possible substitutes
     }

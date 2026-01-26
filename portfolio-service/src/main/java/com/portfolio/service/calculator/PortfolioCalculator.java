@@ -30,8 +30,12 @@ public class PortfolioCalculator {
     /**
      * Enriches equity holdings with real-time market data (price, value, P&L).
      */
+    /**
+     * Enriches equity holdings with real-time market data (price, value, P&L) and
+     * market cap info.
+     */
     public List<EquityHoldings> enrichHoldings(List<EquityHoldings> equityHoldings) {
-        log.debug("Enriching {} equity holdings with price and performance data",
+        log.debug("Enriching {} equity holdings with price, performance, and market cap data",
                 equityHoldings != null ? equityHoldings.size() : 0);
 
         if (equityHoldings == null || equityHoldings.isEmpty()) {
@@ -48,16 +52,38 @@ public class PortfolioCalculator {
         Map<String, MarketData> marketDataMap = marketDataService.getMarketData(symbols);
         log.debug("Fetched market data for {} out of {} symbols", marketDataMap.size(), symbols.size());
 
+        // Fetch market cap data for all symbols
+        Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap = marketDataService
+                .getMarketCapData(symbols);
+        log.debug("Fetched market cap data for {} out of {} symbols", marketCapMap.size(), symbols.size());
+
         // Enrich each holding
         return equityHoldings.stream()
-                .map(holding -> enrichHolding(holding, marketDataMap))
+                .map(holding -> enrichHolding(holding, marketDataMap, marketCapMap))
                 .collect(Collectors.toList());
     }
 
-    private EquityHoldings enrichHolding(EquityHoldings holding, Map<String, MarketData> marketDataMap) {
+    private EquityHoldings enrichHolding(EquityHoldings holding, Map<String, MarketData> marketDataMap,
+            Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap) {
         String symbol = holding.getSymbol();
         if (symbol == null)
             return holding;
+
+        // Enrich with market cap data
+        if (marketCapMap != null && marketCapMap.containsKey(symbol)) {
+            var match = marketCapMap.get(symbol);
+            if (match.getMarketCapValue() != null) {
+                // Convert Long to Double as EquityHoldings expects Double for marketCapValue
+                holding.setMarketCapValue(match.getMarketCapValue().doubleValue());
+            }
+            if (match.getMarketCapType() != null) {
+                holding.setMarketCapCategory(match.getMarketCapType());
+                // Fallback for older existing field if needed
+                if (holding.getMarketCap() == null) {
+                    holding.setMarketCap(match.getMarketCapType());
+                }
+            }
+        }
 
         MarketData marketData = marketDataMap.get(symbol);
 

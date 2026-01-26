@@ -1,8 +1,8 @@
 package com.portfolio.basket.client;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.portfolio.basket.service.BasketEngineService.EtfData;
-import com.portfolio.basket.service.BasketEngineService.EtfHolding;
+import com.portfolio.basket.model.EtfData;
+import com.portfolio.basket.model.EtfHolding;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,6 +12,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Component
@@ -89,6 +90,81 @@ public class EtfApiClient {
             log.error("Failed to search ETFs: {}", e.getMessage());
         }
         return Collections.emptyList();
+    }
+
+    @Value("${market.data.api.base-url}")
+    private String marketDataUrl;
+
+    public void enrichHoldings(List<EtfHolding> holdings) {
+        if (holdings == null || holdings.isEmpty())
+            return;
+
+        try {
+            List<String> queries = holdings.stream()
+                    .map(h -> h.getSymbol() != null ? h.getSymbol() : h.getIsin())
+                    .collect(Collectors.toList());
+
+            // Split into chunks if necessary, but for now assuming one batch is fine or
+            // logic inside BatchSearch handles it
+            BatchSearchRequest request = new BatchSearchRequest();
+            request.setQueries(queries);
+            request.setLimit(1); // We only need the best match
+
+            String url = String.format("%s/v1/securities/batch-search", marketDataUrl);
+            log.info("Enriching {} holdings via {}", holdings.size(), url);
+
+            BatchSearchResponse response = restTemplate.postForObject(url, request, BatchSearchResponse.class);
+
+            if (response != null && response.getResults() != null) {
+                Map<String, SecurityMatch> matchMap = new java.util.HashMap<>();
+                for (BatchSearchResult result : response.getResults()) {
+                    if (result.getMatches() != null && !result.getMatches().isEmpty()) {
+                        matchMap.put(result.getQuery(), result.getMatches().get(0));
+                    }
+                }
+
+                for (EtfHolding h : holdings) {
+                    String query = h.getSymbol() != null ? h.getSymbol() : h.getIsin();
+                    SecurityMatch match = matchMap.get(query);
+                    if (match != null) {
+                        if (match.getSector() != null)
+                            h.setSector(match.getSector());
+                        if (match.getMarketCapType() != null)
+                            h.setMarketCapCategory(match.getMarketCapType());
+                        if (match.getMarketCapValue() != null)
+                            h.setMarketCapValue(match.getMarketCapValue());
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            log.error("Failed to enrich holdings: {}", e.getMessage());
+        }
+    }
+
+    @Data
+    private static class BatchSearchRequest {
+        private List<String> queries;
+        private Integer limit;
+    }
+
+    @Data
+    private static class BatchSearchResponse {
+        private List<BatchSearchResult> results;
+    }
+
+    @Data
+    private static class BatchSearchResult {
+        private String query;
+        private List<SecurityMatch> matches;
+    }
+
+    @Data
+    private static class SecurityMatch {
+        private String symbol;
+        private String sector;
+        private String marketCapType;
+        private Double marketCapValue;
     }
 
     @Data

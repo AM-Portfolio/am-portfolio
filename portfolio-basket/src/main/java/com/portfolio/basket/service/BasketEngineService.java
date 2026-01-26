@@ -1,11 +1,11 @@
 package com.portfolio.basket.service;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.portfolio.basket.client.EtfApiClient;
 import com.portfolio.basket.model.BasketOpportunity;
 import com.portfolio.basket.model.BasketOpportunity.BasketItem;
 import com.portfolio.basket.model.BasketOpportunity.ItemStatus;
+import com.portfolio.basket.model.EtfData;
+import com.portfolio.basket.model.EtfHolding;
 import com.portfolio.model.basket.ExposureResponse;
 import com.portfolio.model.basket.ExposureResponse.EtfExposureSource;
 import com.portfolio.model.basket.ExposureResponse.SectorExposure;
@@ -15,10 +15,7 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.core.io.ClassPathResource;
 
-import jakarta.annotation.PostConstruct;
-import java.io.IOException;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -27,31 +24,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class BasketEngineService {
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
     private final EtfApiClient etfApiClient;
-
-    // Cache for ETF Data
-    private Map<String, EtfData> etfDataMap = new HashMap<>();
-
-    @PostConstruct
-    public void init() {
-        // Load Initial Mock Data (Optional, kept as fallback)
-        loadMockData();
-    }
-
-    private void loadMockData() {
-        try {
-            ClassPathResource resource = new ClassPathResource("mocks/etf_bulk_holdings.json");
-            if (resource.exists()) {
-                etfDataMap = objectMapper.readValue(resource.getInputStream(),
-                        new TypeReference<Map<String, EtfData>>() {
-                        });
-                log.info("✅ Loaded {} ETF mocks (Fallback)", etfDataMap.size());
-            }
-        } catch (IOException e) {
-            log.error("❌ Failed to load mock ETF data", e);
-        }
-    }
 
     public List<BasketOpportunity> findOpportunities(List<EquityHoldings> userHoldings, String etfQuery) {
         // 0. Calculate User Portfolio Weights
@@ -65,10 +38,9 @@ public class BasketEngineService {
             allIsins.addAll(etfApiClient.searchEtfs(etfQuery));
         }
 
-        // Add cached ones (fallback or supplement)
+        // No fallback - require valid search query or discovery mechanism
         if (allIsins.isEmpty()) {
-            log.info("No search results or no query provided. Using cached/mock ISINs.");
-            allIsins.addAll(etfDataMap.keySet());
+            log.warn("No ETFs discovered. Query is required for ETF discovery.");
         }
 
         if (allIsins.isEmpty()) {
@@ -228,22 +200,18 @@ public class BasketEngineService {
         return opportunities;
     }
 
-    // Fetch Data with Mock Fallback
+    // Fetch Data from Live API Only
     public EtfData getEtfData(String isin) {
-        // 1. Try Live API
+        log.info("Fetching live ETF data for ISIN: {}", isin);
         EtfData data = etfApiClient.fetchEtfHoldings(isin);
-        if (data != null) {
-            etfDataMap.put(isin, data); // Update cache with live data
-            return data;
+        if (data == null) {
+            log.warn("⚠️ No ETF data available from API for ISIN: {}", isin);
+        } else {
+            // Enrich with market data if possible
+            log.info("Enriching ETF data for {}", isin);
+            etfApiClient.enrichHoldings(data.getHoldings());
         }
-
-        // 2. Fallback to Mock / Cache
-        if (etfDataMap.containsKey(isin)) {
-            log.warn("⚠️ Using Mock/Cached data for {}", isin);
-            return etfDataMap.get(isin);
-        }
-
-        return null;
+        return data;
     }
 
     // Called by Controller for specific preview
@@ -286,6 +254,8 @@ public class BasketEngineService {
                         .etfWeight(req.getWeight())
                         .userWeight(0.0)
                         .replicaWeight(0.0)
+                        .marketCapCategory(req.getMarketCapCategory())
+                        .marketCapValue(req.getMarketCapValue())
                         .build();
 
                 // A. Direct Match
@@ -301,10 +271,20 @@ public class BasketEngineService {
                     replicaScoreTotal += matchWeight;
                     matchCount++;
                 }
-                // B. Sector Substitution
+                // B. Sector Substitution (Enhanced with Market Cap)
                 else {
                     List<EquityHoldings> sectorPeers = userSectorMap.getOrDefault(req.getSector(),
                             Collections.emptyList());
+
+                    // Filter peer candidates by Market Cap Category if available
+                    if (req.getMarketCapCategory() != null && !sectorPeers.isEmpty()) {
+                        List<EquityHoldings> mcapPeers = sectorPeers.stream()
+                                .filter(p -> req.getMarketCapCategory().equalsIgnoreCase(p.getMarketCapCategory()))
+                                .collect(Collectors.toList());
+                        if (!mcapPeers.isEmpty()) {
+                            sectorPeers = mcapPeers; // Refine candidates to those matching both Sector AND MCap
+                        }
+                    }
 
                     if (!sectorPeers.isEmpty()) {
                         // Populate alternatives list
@@ -325,7 +305,8 @@ public class BasketEngineService {
                         item.setStatus(ItemStatus.SUBSTITUTE);
                         item.setUserHoldingSymbol(substitute.getSymbol());
                         item.setUserWeight(round(substitute.getWeightInPortfolio()));
-                        item.setReason("Sector Match: " + req.getSector());
+                        item.setReason("Substitute: " + req.getSector()
+                                + (req.getMarketCapCategory() != null ? "/" + req.getMarketCapCategory() : ""));
 
                         // For substitute, we assume it fills the weight requirement of the ETF stock
                         double matchWeight = Math.min(req.getWeight(), substitute.getWeightInPortfolio());
@@ -570,20 +551,5 @@ public class BasketEngineService {
                 .sectorAllocations(sectorAllocations)
                 .directIndirectBreakdown(breakdown)
                 .build();
-    }
-
-    @Data
-    public static class EtfData {
-        private String symbol;
-        private String name;
-        private List<EtfHolding> holdings;
-    }
-
-    @Data
-    public static class EtfHolding {
-        private String isin;
-        private String symbol;
-        private String sector;
-        private double weight;
     }
 }
