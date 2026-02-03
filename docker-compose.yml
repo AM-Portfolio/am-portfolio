@@ -53,7 +53,7 @@ services:
     ports:
       - "8072:8080"
     networks:
-      - am-network
+      - am-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8072/actuator/health"]
       interval: 30s
@@ -67,5 +67,6 @@ volumes:
   grafana_data:
 
 networks:
-  am-network:
+  am-net:
     external: true
+    name: am-infra_am-net

@@ -1,20 +1,20 @@
-AM_MARKET_DATA_API_URL: http://localhost:8093
+# AM_MARKET_DATA_API_URL: http://localhost:8093
 
-# Market Data API Configuration
-market-data:
-  api:
-    # Base URL for the market data API - AKS deployed service with Kubernetes FQDN and port
-    base-url: ${AM_MARKET_DATA_API_URL}
+# # Market Data API Configuration
+# market-data:
+#   api:
+#     # Base URL for the market data API - AKS deployed service with Kubernetes FQDN and port
+#     base-url: ${AM_MARKET_DATA_API_URL}
 
-    # API paths
-    ohlc-endpoint: /v1/market-data/ohlc
-    historical-data-endpoint: /v1/market-data/historical-data
-    nse-indices-endpoint: /v1/nse-indices
+#     # API paths
+#     ohlc-endpoint: /v1/market-data/ohlc
+#     historical-data-endpoint: /v1/market-data/historical-data
+#     nse-indices-endpoint: /v1/nse-indices
 
-    # Connection settings
-    connection-timeout: 60000
-    read-timeout: 60000
-    max-retry-attempts: 2
+#     # Connection settings
+#     connection-timeout: 60000
+#     read-timeout: 60000
+#     max-retry-attempts: 2
 
 # Resilience settings
 resilience4j:

@@ -145,7 +145,7 @@ etf:
 
 market-data:
   api:
-    base-url: http://localhost:8093
+    base-url: http://localhost:8092
     ohlc-endpoint: /v1/market-data/ohlc
     historical-data-endpoint: /v1/market-data/historical-data
     securities-endpoint: /v1/securities

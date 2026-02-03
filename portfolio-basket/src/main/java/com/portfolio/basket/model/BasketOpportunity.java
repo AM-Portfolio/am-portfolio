@@ -44,6 +44,9 @@ public class BasketOpportunity {
         private String marketCapCategory;
         private Double marketCapValue;
 
+        private Double heldQuantity; // Actual quantity held in main portfolio
+        private Double heldAveragePrice; // Average buying price of held stock
+
         private List<Alternative> alternatives; // Possible substitutes
     }
 

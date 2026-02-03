@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.service.PortfolioService;
-import com.portfolio.kafka.mapper.PortfolioMapperv1;
+import com.portfolio.model.mapper.PortfolioMapperv1;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.v1.BrokerPortfolioSummary;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;

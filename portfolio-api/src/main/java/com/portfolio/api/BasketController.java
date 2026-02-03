@@ -1,6 +1,7 @@
 package com.portfolio.api;
 
 import com.portfolio.basket.model.BasketOpportunity;
+import com.portfolio.basket.service.BasketAllocationService;
 import com.portfolio.basket.service.BasketEngineService;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.service.portfolio.PortfolioHoldingsService;
@@ -19,6 +20,7 @@ import java.util.List;
 public class BasketController {
 
     private final BasketEngineService basketService;
+    private final BasketAllocationService basketAllocationService;
     private final PortfolioHoldingsService portfolioHoldingsService;
 
     @PostMapping("/opportunities")
@@ -43,7 +45,8 @@ public class BasketController {
 
         log.info("Calculating cumulative exposure for {} holdings", userHoldings.size());
 
-        com.portfolio.model.basket.ExposureResponse response = basketService.calculateCumulativeExposure(userHoldings);
+        com.portfolio.model.basket.ExposureResponse response = basketAllocationService
+                .calculateCumulativeExposure(userHoldings);
 
         // Enrich response with request context
         response.setUserId(request.getUserId());
@@ -63,7 +66,7 @@ public class BasketController {
 
         log.info("Generating allocations for {} holdings", userHoldings.size());
 
-        com.portfolio.model.basket.PortfolioAllocationResponse allocation = basketService
+        com.portfolio.model.basket.PortfolioAllocationResponse allocation = basketAllocationService
                 .calculatePortfolioAllocation(userHoldings);
 
         // Enrich with request context

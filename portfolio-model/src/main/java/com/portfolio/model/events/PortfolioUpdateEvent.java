@@ -1,4 +1,4 @@
-package com.portfolio.kafka.model;
+package com.portfolio.model.events;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -27,6 +27,10 @@ public class PortfolioUpdateEvent {
     private BrokerType brokerType;
     private String userId;
     private String portfolioId;
+
+    // Core Data
+    private List<EquityModel> equities;
+    private List<MutualFundModel> mutualFunds;
 
     // Summary / Calculation Data
     private Double totalValue;

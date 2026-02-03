@@ -6,12 +6,8 @@ import com.portfolio.basket.model.BasketOpportunity.BasketItem;
 import com.portfolio.basket.model.BasketOpportunity.ItemStatus;
 import com.portfolio.basket.model.EtfData;
 import com.portfolio.basket.model.EtfHolding;
-import com.portfolio.model.basket.ExposureResponse;
-import com.portfolio.model.basket.ExposureResponse.EtfExposureSource;
-import com.portfolio.model.basket.ExposureResponse.SectorExposure;
-import com.portfolio.model.basket.ExposureResponse.StockExposure;
+import com.portfolio.basket.util.BasketUtils;
 import com.portfolio.model.portfolio.EquityHoldings;
-import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -66,8 +62,39 @@ public class BasketEngineService {
                 continue;
             }
 
-            // Target Amount for this stock
+            // Target Amount for this stock based on ETF weight and total investment amount
             double targetAmount = (item.getEtfWeight() / 100.0) * investmentAmount;
+
+            // If we are including held items, we must subtract the value of what we already
+            // hold
+            // so we only buy the "gap" (or nothing if over-held).
+            if (includeHeld && (item.getStatus() == ItemStatus.HELD || item.getStatus() == ItemStatus.SUBSTITUTE)) {
+                double existingValue = 0.0;
+
+                // Method 1: Use Held Quantity * Current Price (Most Accurate)
+                if (item.getHeldQuantity() != null && price != null) {
+                    existingValue = item.getHeldQuantity() * price;
+                }
+                // Method 2: Fallback to User Weight (Less Accurate if TotalValue incorrect)
+                else if (opportunity.getTotalPortfolioValue() != null && item.getUserWeight() != null) {
+                    existingValue = (item.getUserWeight() / 100.0) * opportunity.getTotalPortfolioValue();
+                } else {
+                    log.warn("Cannot determine held value for {}. Qty: {}, TotalVal: {}",
+                            item.getStockSymbol(), item.getHeldQuantity(), opportunity.getTotalPortfolioValue());
+                }
+
+                double requiredAmount = targetAmount - existingValue;
+
+                if (requiredAmount <= 0) {
+                    // We have enough or more than enough
+                    item.setBuyQuantity(0.0);
+                    item.setLastPrice(price);
+                    continue;
+                } else {
+                    // We need to buy more to reach the target
+                    targetAmount = requiredAmount;
+                }
+            }
 
             // Calculate quantity (floor)
             int quantity = (int) Math.floor(targetAmount / price);
@@ -81,7 +108,7 @@ public class BasketEngineService {
 
     public List<BasketOpportunity> findOpportunities(List<EquityHoldings> userHoldings, String etfQuery) {
         // 0. Calculate User Portfolio Weights
-        calculateUserWeights(userHoldings);
+        BasketUtils.calculateUserWeights(userHoldings);
 
         // Calculate Total Portfolio Value using Current Value preference
         double totalValue = userHoldings.stream()
@@ -98,8 +125,16 @@ public class BasketEngineService {
         Set<String> allIsins = new HashSet<>();
 
         if (etfQuery != null && !etfQuery.trim().isEmpty()) {
-            log.info("Discovering ETFs via search query: {}", etfQuery);
-            allIsins.addAll(etfApiClient.searchEtfs(etfQuery));
+            if (etfQuery.contains(",")) {
+                log.info("Processing explicit ISIN list: {}", etfQuery);
+                Arrays.stream(etfQuery.split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .forEach(allIsins::add);
+            } else {
+                log.info("Discovering ETFs via search query: {}", etfQuery);
+                allIsins.addAll(etfApiClient.searchEtfs(etfQuery));
+            }
         }
 
         // No fallback - require valid search query or discovery mechanism
@@ -122,124 +157,6 @@ public class BasketEngineService {
         opportunities.sort(Comparator.comparingDouble(BasketOpportunity::getMatchScore).reversed());
 
         return opportunities;
-    }
-
-    /**
-     * Feature 1: Cumulative Look-Through Exposure
-     * Calculates total exposure to each stock and sector by aggregating direct
-     * holdings
-     * and indirect exposure via ETFs. Each stock exposure includes a detailed
-     * breakdown of sources.
-     */
-    public ExposureResponse calculateCumulativeExposure(List<EquityHoldings> userHoldings) {
-        // 0. Ensure weights are calculated
-        calculateUserWeights(userHoldings);
-
-        Map<String, StockExposure> stockExposureMap = new HashMap<>();
-        Map<String, Double> sectorExposureMap = new HashMap<>();
-
-        for (EquityHoldings holding : userHoldings) {
-            String isin = holding.getIsin();
-            double holdingWeight = holding.getWeightInPortfolio();
-
-            // 1. Try to fetch ETF constituents (Look-through)
-            EtfData etfDetails = getEtfData(isin);
-            if (etfDetails != null && etfDetails.getHoldings() != null) {
-                log.info("Look-through for ETF holding: {} ({})", etfDetails.getName(), isin);
-                for (EtfHolding constituent : etfDetails.getHoldings()) {
-                    // Indirect Weight = (ETF Weight in Portfolio * Stock Weight in ETF) / 100
-                    double indirectWeight = (holdingWeight * constituent.getWeight()) / 100.0;
-
-                    StockExposure exposure = stockExposureMap.computeIfAbsent(constituent.getIsin(),
-                            k -> StockExposure.builder()
-                                    .isin(constituent.getIsin())
-                                    .symbol(constituent.getSymbol())
-                                    .sector(constituent.getSector())
-                                    .sources(new ArrayList<>())
-                                    .build());
-
-                    exposure.setIndirectWeight(round(exposure.getIndirectWeight() + indirectWeight));
-                    exposure.setTotalWeight(round(exposure.getTotalWeight() + indirectWeight));
-                    exposure.getSources().add(EtfExposureSource.builder()
-                            .etfIsin(isin)
-                            .etfSymbol(etfDetails.getSymbol())
-                            .contribution(round(indirectWeight))
-                            .build());
-
-                    // Aggregate sector exposure
-                    String sector = constituent.getSector() != null ? constituent.getSector() : "Unknown";
-                    sectorExposureMap.put(sector, sectorExposureMap.getOrDefault(sector, 0.0) + indirectWeight);
-                }
-            } else {
-                // 2. Direct Stock Exposure
-                StockExposure exposure = stockExposureMap.computeIfAbsent(isin, k -> StockExposure.builder()
-                        .isin(isin)
-                        .symbol(holding.getSymbol())
-                        .sector(holding.getSector())
-                        .sources(new ArrayList<>())
-                        .build());
-
-                exposure.setDirectWeight(round(exposure.getDirectWeight() + holdingWeight));
-                exposure.setTotalWeight(round(exposure.getTotalWeight() + holdingWeight));
-
-                // Add source attribution for direct holding with portfolio context
-                exposure.getSources().add(EtfExposureSource.builder()
-                        .etfIsin(null) // No ETF for direct holdings
-                        .etfSymbol(null) // No ETF symbol for direct holdings
-                        .portfolioId(holding.getPortfolioId()) // Actual portfolio UUID
-                        .portfolioName(holding.getPortfolioName()) // Actual portfolio name
-                        .contribution(round(holdingWeight))
-                        .build());
-
-                // Aggregate sector exposure
-                String sector = holding.getSector() != null ? holding.getSector() : "Unknown";
-                sectorExposureMap.put(sector, sectorExposureMap.getOrDefault(sector, 0.0) + holdingWeight);
-            }
-        }
-
-        List<StockExposure> sortedStockExposure = new ArrayList<>(stockExposureMap.values());
-        sortedStockExposure.sort(Comparator.comparingDouble(StockExposure::getTotalWeight).reversed());
-
-        List<SectorExposure> sortedSectorExposure = sectorExposureMap.entrySet().stream()
-                .map(e -> SectorExposure.builder().sector(e.getKey()).weight(round(e.getValue())).build())
-                .sorted(Comparator.comparingDouble(SectorExposure::getWeight).reversed())
-                .collect(Collectors.toList());
-
-        return ExposureResponse.builder()
-                .stockExposure(sortedStockExposure)
-                .sectorExposure(sortedSectorExposure)
-                .build();
-    }
-
-    // Helper to calculate user weights dynamically
-    private void calculateUserWeights(List<EquityHoldings> userHoldings) {
-        if (userHoldings == null || userHoldings.isEmpty())
-            return;
-
-        // Calculate total value using Current Value (preferred) or Investment Cost
-        // (fallback)
-        double totalValue = userHoldings.stream()
-                .mapToDouble(h -> {
-                    if (h.getCurrentValue() != null)
-                        return h.getCurrentValue();
-                    if (h.getInvestmentCost() != null)
-                        return h.getInvestmentCost();
-                    return 0.0;
-                })
-                .sum();
-
-        if (totalValue > 0) {
-            userHoldings.forEach(h -> {
-                double value = 0.0;
-                if (h.getCurrentValue() != null) {
-                    value = h.getCurrentValue();
-                } else if (h.getInvestmentCost() != null) {
-                    value = h.getInvestmentCost();
-                }
-
-                h.setWeightInPortfolio((value / totalValue) * 100.0);
-            });
-        }
     }
 
     // Helper to calculate opportunities for specific ETF ISINs
@@ -284,7 +201,7 @@ public class BasketEngineService {
     // Called by Controller for specific preview
     public BasketOpportunity getPreview(String etfIsin, List<EquityHoldings> userHoldings) {
         // 0. Calculate User Weights
-        calculateUserWeights(userHoldings);
+        BasketUtils.calculateUserWeights(userHoldings);
 
         EtfData etf = getEtfData(etfIsin);
         if (etf == null) {
@@ -325,68 +242,25 @@ public class BasketEngineService {
                         .marketCapValue(req.getMarketCapValue())
                         .build();
 
+                boolean isMatch = false;
+
                 // A. Direct Match
                 if (req.getIsin() != null && userMap.containsKey(req.getIsin())) {
-                    EquityHoldings userHolding = userMap.get(req.getIsin());
-                    item.setStatus(ItemStatus.HELD);
-                    item.setUserHoldingSymbol(userHolding.getSymbol());
-                    item.setUserWeight(round(userHolding.getWeightInPortfolio()));
-
-                    // Match weight = min(etfWeight, userWeight)
-                    double matchWeight = Math.min(req.getWeight(), userHolding.getWeightInPortfolio());
-                    item.setReplicaWeight(round(matchWeight));
-                    replicaScoreTotal += matchWeight;
-                    matchCount++;
+                    isMatch = processDirectMatch(item, req, userMap.get(req.getIsin()));
                 }
                 // B. Sector Substitution (Enhanced with Market Cap)
                 else {
-                    List<EquityHoldings> sectorPeers = userSectorMap.getOrDefault(req.getSector(),
-                            Collections.emptyList());
-
-                    // Filter peer candidates by Market Cap Category if available
-                    if (req.getMarketCapCategory() != null && !sectorPeers.isEmpty()) {
-                        List<EquityHoldings> mcapPeers = sectorPeers.stream()
-                                .filter(p -> req.getMarketCapCategory().equalsIgnoreCase(p.getMarketCapCategory()))
-                                .collect(Collectors.toList());
-                        if (!mcapPeers.isEmpty()) {
-                            sectorPeers = mcapPeers; // Refine candidates to those matching both Sector AND MCap
-                        }
-                    }
-
-                    if (!sectorPeers.isEmpty()) {
-                        // Populate alternatives list
-                        List<BasketOpportunity.Alternative> alts = sectorPeers.stream()
-                                .map(h -> BasketOpportunity.Alternative.builder()
-                                        .symbol(h.getSymbol())
-                                        .isin(h.getIsin())
-                                        .userWeight(round(h.getWeightInPortfolio()))
-                                        .build())
-                                .collect(Collectors.toList());
-                        item.setAlternatives(alts);
-
-                        // Pick best substitute (simplistic: highest user weight in that sector)
-                        EquityHoldings substitute = sectorPeers.stream()
-                                .max(Comparator.comparingDouble(EquityHoldings::getWeightInPortfolio))
-                                .orElse(sectorPeers.get(0));
-
-                        item.setStatus(ItemStatus.SUBSTITUTE);
-                        item.setUserHoldingSymbol(substitute.getSymbol());
-                        item.setUserWeight(round(substitute.getWeightInPortfolio()));
-                        item.setReason("Substitute: " + req.getSector()
-                                + (req.getMarketCapCategory() != null ? "/" + req.getMarketCapCategory() : ""));
-
-                        // For substitute, we assume it fills the weight requirement of the ETF stock
-                        double matchWeight = Math.min(req.getWeight(), substitute.getWeightInPortfolio());
-                        item.setReplicaWeight(round(matchWeight));
-                        replicaScoreTotal += matchWeight;
-                        matchCount++;
-                    } else {
-                        item.setStatus(ItemStatus.MISSING);
-                        item.setUserWeight(0.0);
-                        item.setBuyQuantity(1.0); // Placeholder for quantity
-                        buyList.add(item);
+                    isMatch = processSectorSubstitute(item, req, userSectorMap);
+                    if (!isMatch) {
+                        buyList.add(item); // Add to buy list only if no match/substitute found
                     }
                 }
+
+                if (isMatch) {
+                    replicaScoreTotal += item.getReplicaWeight();
+                    matchCount++;
+                }
+
                 composition.add(item);
             }
         }
@@ -397,8 +271,8 @@ public class BasketEngineService {
         return BasketOpportunity.builder()
                 .etfIsin(etfIsin)
                 .etfName(etf.getName())
-                .matchScore(round(matchScore))
-                .replicaScore(round(replicaScore))
+                .matchScore(BasketUtils.round(matchScore))
+                .replicaScore(BasketUtils.round(replicaScore))
                 .readyToReplicate(replicaScore >= 70.0)
                 .totalItems(total)
                 .heldCount(matchCount)
@@ -408,215 +282,71 @@ public class BasketEngineService {
                 .build();
     }
 
-    private double round(double value) {
-        return Math.round(value * 100.0) / 100.0;
+    private boolean processDirectMatch(BasketItem item, EtfHolding req, EquityHoldings userHolding) {
+        log.info("Checking Held Item: {} | Qty: {} | AvgPrice: {}",
+                userHolding.getSymbol(), userHolding.getQuantity(), userHolding.getAverageBuyingPrice());
+
+        item.setStatus(ItemStatus.HELD);
+        item.setUserHoldingSymbol(userHolding.getSymbol());
+        item.setUserWeight(BasketUtils.round(userHolding.getWeightInPortfolio()));
+        item.setHeldQuantity(userHolding.getQuantity());
+        item.setHeldAveragePrice(userHolding.getAverageBuyingPrice());
+
+        // Match weight = min(etfWeight, userWeight)
+        double matchWeight = Math.min(req.getWeight(), userHolding.getWeightInPortfolio());
+        item.setReplicaWeight(BasketUtils.round(matchWeight));
+
+        return true;
     }
 
-    /**
-     * Generate comprehensive portfolio allocation for UI visualization
-     * Includes stock counts, sector breakdown, and direct/indirect analysis
-     */
-    public com.portfolio.model.basket.PortfolioAllocationResponse calculatePortfolioAllocation(
-            List<EquityHoldings> userHoldings) {
-        // 0. Calculate weights
-        calculateUserWeights(userHoldings);
+    private boolean processSectorSubstitute(BasketItem item, EtfHolding req,
+            Map<String, List<EquityHoldings>> userSectorMap) {
+        List<EquityHoldings> sectorPeers = userSectorMap.getOrDefault(req.getSector(), Collections.emptyList());
 
-        // Get exposure data first
-        ExposureResponse exposure = calculateCumulativeExposure(userHoldings);
-
-        // Build comprehensive allocation response
-        return buildAllocationResponse(exposure, userHoldings);
-    }
-
-    private com.portfolio.model.basket.PortfolioAllocationResponse buildAllocationResponse(
-            ExposureResponse exposure, List<EquityHoldings> userHoldings) {
-
-        // Calculate overview stats
-        int totalStocks = exposure.getStockExposure() != null ? exposure.getStockExposure().size() : 0;
-        int directStockCount = 0;
-        int indirectStockCount = 0;
-        double totalDirectPercentage = 0.0;
-        double totalIndirectPercentage = 0.0;
-
-        // Track portfolios and sources
-        Map<String, com.portfolio.model.basket.PortfolioAllocationResponse.PortfolioContribution> portfolioContributions = new HashMap<>();
-        Map<String, com.portfolio.model.basket.PortfolioAllocationResponse.IndirectAllocation> indirectSources = new HashMap<>();
-
-        // Process stock allocations
-        List<com.portfolio.model.basket.PortfolioAllocationResponse.StockAllocation> stockAllocations = new ArrayList<>();
-
-        if (exposure.getStockExposure() != null) {
-            for (StockExposure stock : exposure.getStockExposure()) {
-                List<com.portfolio.model.basket.PortfolioAllocationResponse.AllocationSource> sources = new ArrayList<>();
-
-                Set<String> processedSourceIds = new HashSet<>();
-
-                if (stock.getSources() != null) {
-                    for (EtfExposureSource source : stock.getSources()) {
-                        com.portfolio.model.basket.PortfolioAllocationResponse.SourceType sourceType;
-                        String sourceId;
-                        String sourceName;
-
-                        // Determine source type and ID
-                        if (source.getPortfolioId() != null) {
-                            sourceType = com.portfolio.model.basket.PortfolioAllocationResponse.SourceType.DIRECT_PORTFOLIO;
-                            sourceId = source.getPortfolioId();
-                            sourceName = source.getPortfolioName();
-                        } else if (source.getEtfIsin() != null) {
-                            sourceType = com.portfolio.model.basket.PortfolioAllocationResponse.SourceType.ETF;
-                            sourceId = source.getEtfIsin();
-                            sourceName = source.getEtfSymbol();
-                        } else {
-                            continue;
-                        }
-
-                        // Track portfolio contribution
-                        if (source.getPortfolioId() != null) {
-                            portfolioContributions.computeIfAbsent(sourceId,
-                                    k -> com.portfolio.model.basket.PortfolioAllocationResponse.PortfolioContribution
-                                            .builder()
-                                            .portfolioId(sourceId)
-                                            .portfolioName(sourceName)
-                                            .percentage(0.0)
-                                            .stockCount(0)
-                                            .build());
-                            com.portfolio.model.basket.PortfolioAllocationResponse.PortfolioContribution contrib = portfolioContributions
-                                    .get(sourceId);
-                            contrib.setPercentage(round(contrib.getPercentage() + source.getContribution()));
-                            // Only increment stock count if we haven't seen this source for this stock yet
-                            if (processedSourceIds.add(sourceId)) {
-                                contrib.setStockCount(contrib.getStockCount() + 1);
-                            }
-                        }
-                        // Track indirect source
-                        else if (source.getEtfIsin() != null) {
-                            indirectSources.computeIfAbsent(sourceId,
-                                    k -> com.portfolio.model.basket.PortfolioAllocationResponse.IndirectAllocation
-                                            .builder()
-                                            .sourceType(sourceType)
-                                            .sourceId(sourceId)
-                                            .sourceName(sourceName)
-                                            .percentage(0.0)
-                                            .stockCount(0)
-                                            .build());
-                            com.portfolio.model.basket.PortfolioAllocationResponse.IndirectAllocation indirect = indirectSources
-                                    .get(sourceId);
-                            indirect.setPercentage(round(indirect.getPercentage() + source.getContribution()));
-                            // Only increment stock count if we haven't seen this source for this stock yet
-                            if (processedSourceIds.add(sourceId)) {
-                                indirect.setStockCount(indirect.getStockCount() + 1);
-                            }
-                        }
-
-                        sources.add(com.portfolio.model.basket.PortfolioAllocationResponse.AllocationSource.builder()
-                                .sourceType(sourceType)
-                                .sourceId(sourceId)
-                                .sourceName(sourceName)
-                                .contribution(round(source.getContribution()))
-                                .build());
-                    }
-                }
-
-                // Count unique stocks - each stock counted only once
-                // If stock has any direct weight, it's a "direct" stock
-                // Only count as "indirect" if it has NO direct weight
-                if (stock.getDirectWeight() > 0) {
-                    directStockCount++;
-                    totalDirectPercentage += stock.getDirectWeight();
-                } else if (stock.getIndirectWeight() > 0) {
-                    // Only count as indirect if there's NO direct weight
-                    indirectStockCount++;
-                    totalIndirectPercentage += stock.getIndirectWeight();
-                }
-
-                // Add indirect percentage to total even for direct stocks
-                if (stock.getDirectWeight() > 0 && stock.getIndirectWeight() > 0) {
-                    totalIndirectPercentage += stock.getIndirectWeight();
-                }
-
-                stockAllocations.add(com.portfolio.model.basket.PortfolioAllocationResponse.StockAllocation.builder()
-                        .isin(stock.getIsin())
-                        .symbol(stock.getSymbol())
-                        .sector(stock.getSector())
-                        .totalPercentage(round(stock.getTotalWeight()))
-                        .directPercentage(round(stock.getDirectWeight()))
-                        .indirectPercentage(round(stock.getIndirectWeight()))
-                        .sources(sources.isEmpty() ? null : sources)
-                        .build());
-            }
-        }
-
-        // Process sector allocations
-        List<com.portfolio.model.basket.PortfolioAllocationResponse.SectorAllocation> sectorAllocations = new ArrayList<>();
-        Map<String, com.portfolio.model.basket.PortfolioAllocationResponse.SectorAllocation> sectorMap = new HashMap<>();
-
-        if (exposure.getStockExposure() != null) {
-            for (StockExposure stock : exposure.getStockExposure()) {
-                String sector = stock.getSector() != null ? stock.getSector() : "Unknown";
-
-                com.portfolio.model.basket.PortfolioAllocationResponse.SectorAllocation sectorAlloc = sectorMap
-                        .computeIfAbsent(sector,
-                                k -> com.portfolio.model.basket.PortfolioAllocationResponse.SectorAllocation.builder()
-                                        .sectorName(sector)
-                                        .totalPercentage(0.0)
-                                        .directPercentage(0.0)
-                                        .indirectPercentage(0.0)
-                                        .stockCount(0)
-                                        .topStocks(new ArrayList<>())
-                                        .build());
-
-                sectorAlloc.setTotalPercentage(round(sectorAlloc.getTotalPercentage() + stock.getTotalWeight()));
-                sectorAlloc.setDirectPercentage(round(sectorAlloc.getDirectPercentage() + stock.getDirectWeight()));
-                sectorAlloc
-                        .setIndirectPercentage(round(sectorAlloc.getIndirectPercentage() + stock.getIndirectWeight()));
-                sectorAlloc.setStockCount(sectorAlloc.getStockCount() + 1);
-
-                // Add to top stocks list (limit to 5)
-                if (sectorAlloc.getTopStocks().size() < 5) {
-                    sectorAlloc.getTopStocks().add(stock.getSymbol());
-                }
-            }
-
-            sectorAllocations = sectorMap.values().stream()
-                    .sorted(Comparator.comparingDouble(
-                            com.portfolio.model.basket.PortfolioAllocationResponse.SectorAllocation::getTotalPercentage)
-                            .reversed())
+        // Filter peer candidates by Market Cap Category if available
+        if (req.getMarketCapCategory() != null && !sectorPeers.isEmpty()) {
+            List<EquityHoldings> mcapPeers = sectorPeers.stream()
+                    .filter(p -> req.getMarketCapCategory().equalsIgnoreCase(p.getMarketCapCategory()))
                     .collect(Collectors.toList());
+            if (!mcapPeers.isEmpty()) {
+                sectorPeers = mcapPeers; // Refine candidates to those matching both Sector AND MCap
+            }
         }
 
-        // Build overview
-        com.portfolio.model.basket.PortfolioAllocationResponse.AllocationOverview overview = com.portfolio.model.basket.PortfolioAllocationResponse.AllocationOverview
-                .builder()
-                .totalStocks(totalStocks)
-                .totalDirectPercentage(round(totalDirectPercentage))
-                .totalIndirectPercentage(round(totalIndirectPercentage))
-                .directStockCount(directStockCount)
-                .indirectStockCount(indirectStockCount)
-                .totalSectors(sectorAllocations.size())
-                .build();
+        if (!sectorPeers.isEmpty()) {
+            // Populate alternatives list of substitutes
+            List<BasketOpportunity.Alternative> alts = sectorPeers.stream()
+                    .map(h -> BasketOpportunity.Alternative.builder()
+                            .symbol(h.getSymbol())
+                            .isin(h.getIsin())
+                            .userWeight(BasketUtils.round(h.getWeightInPortfolio()))
+                            .build())
+                    .collect(Collectors.toList());
+            item.setAlternatives(alts);
 
-        // Build direct/indirect breakdown
-        com.portfolio.model.basket.PortfolioAllocationResponse.DirectAllocation directAllocation = com.portfolio.model.basket.PortfolioAllocationResponse.DirectAllocation
-                .builder()
-                .totalPercentage(round(totalDirectPercentage))
-                .stockCount(directStockCount)
-                .portfolioContributions(new ArrayList<>(portfolioContributions.values()))
-                .build();
+            // Pick best substitute (simplistic: highest user weight in that sector)
+            EquityHoldings substitute = sectorPeers.stream()
+                    .max(Comparator.comparingDouble(EquityHoldings::getWeightInPortfolio))
+                    .orElse(sectorPeers.get(0));
 
-        com.portfolio.model.basket.PortfolioAllocationResponse.DirectIndirectBreakdown breakdown = com.portfolio.model.basket.PortfolioAllocationResponse.DirectIndirectBreakdown
-                .builder()
-                .directAllocation(directAllocation)
-                .indirectAllocations(new ArrayList<>(indirectSources.values()))
-                .build();
+            item.setStatus(ItemStatus.SUBSTITUTE);
+            item.setUserHoldingSymbol(substitute.getSymbol());
+            item.setUserWeight(BasketUtils.round(substitute.getWeightInPortfolio()));
+            item.setHeldQuantity(substitute.getQuantity());
+            item.setHeldAveragePrice(substitute.getAverageBuyingPrice());
+            item.setReason("Substitute: " + req.getSector()
+                    + (req.getMarketCapCategory() != null ? "/" + req.getMarketCapCategory() : ""));
 
-        // Build final response
-        return com.portfolio.model.basket.PortfolioAllocationResponse.builder()
-                .userId(exposure.getUserId())
-                .portfolioId(exposure.getPortfolioId())
-                .overview(overview)
-                .stockAllocations(stockAllocations)
-                .sectorAllocations(sectorAllocations)
-                .directIndirectBreakdown(breakdown)
-                .build();
+            // For substitute, we assume it fills the weight requirement of the ETF stock
+            double matchWeight = Math.min(req.getWeight(), substitute.getWeightInPortfolio());
+            item.setReplicaWeight(BasketUtils.round(matchWeight));
+
+            return true;
+        } else {
+            item.setStatus(ItemStatus.MISSING);
+            item.setUserWeight(0.0);
+            item.setBuyQuantity(1.0); // Placeholder for quantity
+            return false;
+        }
     }
 }

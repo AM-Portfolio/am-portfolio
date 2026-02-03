@@ -27,6 +27,13 @@
             <version>${project.version}</version>
         </dependency>
         
+        <!-- Portfolio Service -->
+        <dependency>
+            <groupId>com.portfolio</groupId>
+            <artifactId>portfolio-service</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        
         <!-- Portfolio Redis -->
         <dependency>
             <groupId>com.portfolio</groupId>

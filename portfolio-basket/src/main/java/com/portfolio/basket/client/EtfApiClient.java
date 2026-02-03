@@ -95,13 +95,89 @@ public class EtfApiClient {
     @Value("${market-data.api.base-url}")
     private String marketDataUrl;
 
+    private List<SecurityDocumentDTO> referenceSecurities = null;
+
+    private void fetchReferenceSecurities() {
+        if (referenceSecurities != null && !referenceSecurities.isEmpty()) {
+            return;
+        }
+        try {
+            String url = String.format("%s/v1/securities/search", marketDataUrl);
+            log.info("Fetching reference securities (NIFTY 500) from: {}", url);
+
+            SecuritySearchRequest request = new SecuritySearchRequest();
+            request.setIndex("NIFTY 500");
+
+            // Assuming the response is a List<SecurityDocumentDTO>
+            // We need to map it properly. RestTemplate might need
+            // ParameterizedTypeReference but array works too.
+            SecurityDocumentDTO[] response = restTemplate.postForObject(url, request, SecurityDocumentDTO[].class);
+
+            if (response != null) {
+                referenceSecurities = java.util.Arrays.asList(response);
+                log.info("Loaded {} reference securities for fuzzy matching", referenceSecurities.size());
+            }
+
+        } catch (Exception e) {
+            log.error("Failed to fetch reference securities: {}", e.getMessage());
+        }
+    }
+
+    private SecurityDocumentDTO findBestMatch(String rawName, List<SecurityDocumentDTO> candidates) {
+        if (rawName == null || candidates == null)
+            return null;
+
+        String normalizedRaw = normalize(rawName);
+
+        // Strategy 1: Exact match on normalized name
+        for (SecurityDocumentDTO doc : candidates) {
+            if (doc.getMetadata() != null && doc.getMetadata().getCompanyName() != null) {
+                String normalizedCandidate = normalize(doc.getMetadata().getCompanyName());
+                if (normalizedRaw.equals(normalizedCandidate)) {
+                    return doc;
+                }
+            }
+        }
+
+        // Strategy 2: Contains match (if one contains the other and length difference
+        // is small)
+        for (SecurityDocumentDTO doc : candidates) {
+            if (doc.getMetadata() != null && doc.getMetadata().getCompanyName() != null) {
+                String normalizedCandidate = normalize(doc.getMetadata().getCompanyName());
+                if (normalizedRaw.contains(normalizedCandidate) || normalizedCandidate.contains(normalizedRaw)) {
+                    // Simple heuristic: if length ratio > 0.7
+                    double ratio = (double) Math.min(normalizedRaw.length(), normalizedCandidate.length())
+                            / Math.max(normalizedRaw.length(), normalizedCandidate.length());
+                    if (ratio > 0.6) {
+                        return doc;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private String normalize(String s) {
+        if (s == null)
+            return "";
+        return s.toLowerCase()
+                .replace("limited", "")
+                .replace("ltd", "")
+                .replace("corp", "")
+                .replace("corporation", "")
+                .replace("company", "")
+                .replaceAll("[^a-z0-9]", "")
+                .trim();
+    }
+
     public void enrichHoldings(List<EtfHolding> holdings) {
         if (holdings == null || holdings.isEmpty())
             return;
 
         try {
             List<String> queries = holdings.stream()
-                    .map(h -> h.getSymbol() != null ? h.getSymbol() : h.getIsin())
+                    .map(h -> (h.getIsin() != null && !h.getIsin().isEmpty()) ? h.getIsin() : h.getSymbol())
                     .collect(Collectors.toList());
 
             // Split into chunks if necessary, but for now assuming one batch is fine or
@@ -114,41 +190,77 @@ public class EtfApiClient {
             log.info("Enriching {} holdings via {}", holdings.size(), url);
 
             BatchSearchResponse response = restTemplate.postForObject(url, request, BatchSearchResponse.class);
+            Map<String, SecurityMatch> matchMap = new java.util.HashMap<>();
 
             if (response != null && response.getResults() != null) {
-                Map<String, SecurityMatch> matchMap = new java.util.HashMap<>();
                 for (BatchSearchResult result : response.getResults()) {
                     if (result.getMatches() != null && !result.getMatches().isEmpty()) {
                         matchMap.put(result.getQuery(), result.getMatches().get(0));
                     }
                 }
+            }
 
-                for (EtfHolding h : holdings) {
-                    String query = h.getSymbol() != null ? h.getSymbol() : h.getIsin();
-                    SecurityMatch match = matchMap.get(query);
-                    if (match != null) {
-                        // CRITICAL: Update symbol from market data match (e.g., "Indusind Bank Ltd." ->
-                        // "INDUSINDBK")
-                        if (match.getSymbol() != null)
-                            h.setSymbol(match.getSymbol());
+            // Check if we need fallback
+            boolean needsFallback = holdings.stream().anyMatch(h -> {
+                String query = (h.getIsin() != null && !h.getIsin().isEmpty()) ? h.getIsin() : h.getSymbol();
+                SecurityMatch match = matchMap.get(query);
+                return match == null || (h.getIsin() == null && match.getIsin() == null); // If we still don't have ISIN
+            });
 
-                        if (match.getSector() != null)
-                            h.setSector(match.getSector());
+            if (needsFallback) {
+                fetchReferenceSecurities();
+            }
 
-                        // Fix for Market Cap mapping
-                        // The field in EtfHolding is marketCapCategory (String) and marketCapValue
-                        // (Double)
-                        // The field in SecurityMatch is marketCapType (String) and marketCapValue
-                        // (Double)
-                        if (match.getMarketCapType() != null) {
-                            h.setMarketCapCategory(match.getMarketCapType());
-                        }
-                        if (match.getMarketCapValue() != null) {
-                            h.setMarketCapValue(match.getMarketCapValue());
-                        }
+            for (EtfHolding h : holdings) {
+                String query = (h.getIsin() != null && !h.getIsin().isEmpty()) ? h.getIsin() : h.getSymbol();
+                SecurityMatch match = matchMap.get(query);
+
+                // Fallback Logic
+                if (match == null && referenceSecurities != null) {
+                    SecurityDocumentDTO bestMatch = findBestMatch(h.getSymbol(), referenceSecurities); // h.getSymbol is
+                                                                                                       // stockName if
+                                                                                                       // ISIN missing
+                    if (bestMatch != null) {
+                        log.info("Fuzzy matched '{}' to '{}' ({})", h.getSymbol(),
+                                bestMatch.getMetadata().getCompanyName(), bestMatch.getKey().getSymbol());
+                        match = new SecurityMatch();
+                        match.setSymbol(bestMatch.getKey().getSymbol());
+                        match.setIsin(bestMatch.getKey().getIsin());
+                        match.setSector(bestMatch.getMetadata().getSector());
+                        match.setIndustry(bestMatch.getMetadata().getIndustry());
+                        match.setMarketCapType(bestMatch.getMetadata().getMarketCapType());
+                        if (bestMatch.getMetadata().getMarketCapValue() != null)
+                            match.setMarketCapValue(Double.valueOf(bestMatch.getMetadata().getMarketCapValue()));
                     }
                 }
 
+                if (match != null) {
+                    // CRITICAL: Update symbol from market data match (e.g., "Indusind Bank Ltd." ->
+                    // "INDUSINDBK")
+                    if (match.getSymbol() != null)
+                        h.setSymbol(match.getSymbol());
+
+                    if (match.getIsin() != null)
+                        h.setIsin(match.getIsin());
+
+                    if (match.getIndustry() != null) {
+                        h.setSector(match.getIndustry());
+                    } else if (match.getSector() != null) {
+                        h.setSector(match.getSector());
+                    }
+
+                    // Fix for Market Cap mapping
+                    // The field in EtfHolding is marketCapCategory (String) and marketCapValue
+                    // (Double)
+                    // The field in SecurityMatch is marketCapType (String) and marketCapValue
+                    // (Double)
+                    if (match.getMarketCapType() != null) {
+                        h.setMarketCapCategory(match.getMarketCapType());
+                    }
+                    if (match.getMarketCapValue() != null) {
+                        h.setMarketCapValue(match.getMarketCapValue());
+                    }
+                }
             }
 
         } catch (Exception e) {
@@ -176,9 +288,42 @@ public class EtfApiClient {
     @Data
     private static class SecurityMatch {
         private String symbol;
+        private String isin; // Added ISIN
         private String sector;
+        private String industry;
         private String marketCapType;
         private Double marketCapValue;
+    }
+
+    // Fallback DTOs
+    @Data
+    private static class SecuritySearchRequest {
+        private String index;
+        private List<String> symbols;
+        private String query;
+        private String sector;
+        private String industry;
+    }
+
+    @Data
+    private static class SecurityDocumentDTO {
+        private SecurityKey key;
+        private SecurityMetadata metadata;
+
+        @Data
+        public static class SecurityKey {
+            private String symbol;
+            private String isin;
+        }
+
+        @Data
+        public static class SecurityMetadata {
+            private String companyName;
+            private String sector;
+            private String industry;
+            private Long marketCapValue;
+            private String marketCapType;
+        }
     }
 
     @Data
