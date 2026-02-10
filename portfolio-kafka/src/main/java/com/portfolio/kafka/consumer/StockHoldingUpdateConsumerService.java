@@ -51,7 +51,12 @@ public class StockHoldingUpdateConsumerService {
                     TimeInterval.ONE_DAY);
 
             if (updatedHoldings != null) {
-                // 2. Perform Full Summary Calculation
+                // 2. Enrich Holdings with Market Data
+                List<EquityHoldings> enrichedHoldings = portfolioCalculator
+                        .enrichHoldings(updatedHoldings.getEquityHoldings());
+                updatedHoldings.setEquityHoldings(enrichedHoldings);
+
+                // 3. Perform Full Summary Calculation
                 double totalInvestment = updatedHoldings.getEquityHoldings().stream()
                         .filter(h -> h.getInvestmentCost() != null)
                         .mapToDouble(EquityHoldings::getInvestmentCost)
@@ -65,7 +70,7 @@ public class StockHoldingUpdateConsumerService {
                         event.getPortfolioId());
 
                 log.info("Publishing REAL-TIME portfolio update event for user: {}", event.getUserId());
-                kafkaProducerService.sendMessage(updateEvent);
+                kafkaProducerService.sendMessage(updateEvent, null);
             }
 
             acknowledgment.acknowledge();
@@ -111,6 +116,7 @@ public class StockHoldingUpdateConsumerService {
                 .avgBuyingPrice(holding.getAverageBuyingPrice())
                 .currentPrice(holding.getCurrentPrice()) // Using new field in AssetModel
                 .currentValue(holding.getCurrentValue())
+                .investmentValue(holding.getInvestmentCost())
                 .profitLoss(holding.getGainLoss()) // Mapping gainLoss to profitLoss
                 .profitLossPercentage(holding.getGainLossPercentage())
                 .todayProfitLoss(holding.getTodayGainLoss()) // Using new field in AssetModel

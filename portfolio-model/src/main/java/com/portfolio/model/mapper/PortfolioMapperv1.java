@@ -73,16 +73,21 @@ public class PortfolioMapperv1 {
     }
 
     private Double calculateTotalValue(List<EquityModel> equityModels) {
-        if (equityModels.isEmpty()) {
+        if (equityModels == null || equityModels.isEmpty()) {
             return 0.0;
         }
         return equityModels.stream()
-                .map(equity -> equity.getAvgBuyingPrice() * equity.getQuantity())
+                .filter(equity -> equity != null)
+                .map(equity -> {
+                    Double price = equity.getAvgBuyingPrice() != null ? equity.getAvgBuyingPrice() : 0.0;
+                    Double quantity = equity.getQuantity() != null ? equity.getQuantity() : 0.0;
+                    return price * quantity;
+                })
                 .reduce(0.0, Double::sum);
     }
 
     private Integer calculateAssetCount(List<EquityModel> equityModels) {
-        if (equityModels.isEmpty()) {
+        if (equityModels == null || equityModels.isEmpty()) {
             return 0;
         }
         return equityModels.size();

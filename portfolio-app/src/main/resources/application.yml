@@ -1,15 +1,14 @@
 # Infrastructure Host Configuration
 INFRA_HOST: 100.72.208.15
-
 #mongo
 MONGODB_CONNECTION_URL: ${MONGODB_URL:mongodb://admin:password123@${INFRA_HOST}:27017/portfolio?authSource=admin}
 
 #Kafka
-PROJ_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:${INFRA_HOST}:9092}
+PROJ_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
 PROJ_KAFKA_USERNAME: ${KAFKA_USERNAME:admin}
 PROJ_KAFKA_PASSWORD: ${KAFKA_PASSWORD:password123}
 PROJ_KAFKA_JAAS_CONFIG: ${KAFKA_JAAS_CONFIG:org.apache.kafka.common.security.plain.PlainLoginModule required username="${PROJ_KAFKA_USERNAME}" password="${PROJ_KAFKA_PASSWORD}";}
-PROJ_KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:SASL_PLAINTEXT}
+PROJ_KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
 PROJ_KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:PLAIN}
 
 #Topic
@@ -118,7 +117,7 @@ app:
     portfolio:
       consumer:
         id: ${PORTFOLIO_CONSUMER_GROUP}
-        enabled: false
+        enabled: true
       topic: ${PORTFOLIO_TOPIC_NAME}
     stock:
       consumer:
@@ -145,7 +144,7 @@ etf:
 
 market-data:
   api:
-    base-url: http://localhost:8092
+    base-url: ${MARKET_DATA_API_URL:http://localhost:8092}
     ohlc-endpoint: /v1/market-data/ohlc
     historical-data-endpoint: /v1/market-data/historical-data
     securities-endpoint: /v1/securities
@@ -161,11 +160,11 @@ springdoc:
 
 logging:
   level:
-    "[com.portfolio]": INFO
-    "[com.portfolio.analytics]": INFO
-    "[com.portfolio.api]": INFO
-    "[com.portfolio.marketdata]": INFO
-    "[com.portfolio.model]": INFO
-    "[com.am.common]": INFO
-    "[com.am.common.amcommondata]": INFO
+    com.portfolio: INFO
+    com.portfolio.analytics: INFO
+    com.portfolio.api: INFO
+    com.portfolio.marketdata: INFO
+    com.portfolio.model: INFO
+    com.am.common: INFO
+    com.am.common.amcommondata: INFO
     org.springframework.kafka: INFO

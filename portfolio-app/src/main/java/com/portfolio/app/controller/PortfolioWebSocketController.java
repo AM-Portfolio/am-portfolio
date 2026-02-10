@@ -13,8 +13,12 @@ public class PortfolioWebSocketController {
     @SuppressWarnings("unused")
     private final SimpMessagingTemplate messagingTemplate;
 
-    public PortfolioWebSocketController(SimpMessagingTemplate messagingTemplate) {
+    private final com.portfolio.kafka.service.PortfolioCalculationService portfolioCalculationService;
+
+    public PortfolioWebSocketController(SimpMessagingTemplate messagingTemplate,
+            com.portfolio.kafka.service.PortfolioCalculationService portfolioCalculationService) {
         this.messagingTemplate = messagingTemplate;
+        this.portfolioCalculationService = portfolioCalculationService;
     }
 
     /**
@@ -24,5 +28,28 @@ public class PortfolioWebSocketController {
     @SubscribeMapping("/topic/portfolio")
     public void subscribeToPortfolio() {
         log.info("Client subscribed to portfolio updates");
+    }
+
+    /**
+     * Endpoint to trigger portfolio calculation manually.
+     * Payload: {"userId": "..."}
+     */
+    @org.springframework.messaging.handler.annotation.MessageMapping("/portfolio/calculate")
+    public void triggerPortfolioCalculation(
+            @org.springframework.messaging.handler.annotation.Payload java.util.Map<String, String> payload,
+            java.security.Principal principal) {
+        String userId = payload.get("userId");
+        if (userId == null && principal != null) {
+            userId = principal.getName();
+        }
+
+        log.info("Received portfolio calculation request for user: {}", userId);
+        if (userId != null) {
+            // Use a random UUID for tracing if not provided
+            String traceId = java.util.UUID.randomUUID().toString();
+            portfolioCalculationService.processCalculation(userId, traceId);
+        } else {
+            log.warn("Portfolio calculation request missing userId");
+        }
     }
 }

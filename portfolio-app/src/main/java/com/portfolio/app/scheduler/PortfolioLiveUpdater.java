@@ -36,7 +36,7 @@ public class PortfolioLiveUpdater {
                 var summary = portfolioOverviewService.refreshPortfolio(userId, TimeInterval.ONE_DAY);
 
                 if (summary != null) {
-                    messagingTemplate.convertAndSendToUser(userId, "/topic/portfolio", summary);
+                    messagingTemplate.convertAndSendToUser(userId, "/queue/portfolio", summary);
                 }
             } catch (Exception e) {
                 log.error("Failed to push update for user: " + userId, e);

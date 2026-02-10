@@ -11,6 +11,11 @@ services:
     container_name: am-portfolio-dev
     ports:
       - "8072:8080"
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=am_kafka:9092
+      - MONGODB_URL=mongodb://admin:password123@host.docker.internal:27017/portfolio?authSource=admin
+      - MARKET_DATA_API_URL=http://host.docker.internal:8092
+      - ETF_API_URL=http://host.docker.internal:8022
     volumes:
       - ./portfolio-app/target/portfolio-app-1.0-SNAPSHOT.jar:/app/app.jar
     command: ["java", "-jar", "/app/app.jar"]
