@@ -18,6 +18,7 @@ import lombok.NoArgsConstructor;
 @JsonInclude(Include.NON_NULL)
 public class PortfolioHoldings {
     private String userId;
+    private String portfolioId;
     private List<EquityHoldings> equityHoldings;
     private LocalDateTime lastUpdated;
 }

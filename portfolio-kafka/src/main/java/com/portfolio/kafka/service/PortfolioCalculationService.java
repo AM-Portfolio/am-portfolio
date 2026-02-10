@@ -29,12 +29,17 @@ public class PortfolioCalculationService {
     private final PortfolioCalculator portfolioCalculator;
     private final KafkaProducerService kafkaProducerService;
 
-    public void processCalculation(String userId, String correlationId) {
-        log.info("Processing portfolio calculation in service for UserID: {}", userId);
+    public void processCalculation(String userId, String portfolioId, String correlationId) {
+        log.info("Processing portfolio calculation in service for UserID: {}, PortfolioID: {}", userId, portfolioId);
 
         try {
             // 1. Fetch Holdings
-            PortfolioHoldings holdings = portfolioHoldingsService.getPortfolioHoldings(userId, TimeInterval.ONE_DAY);
+            PortfolioHoldings holdings;
+            if (portfolioId != null && !portfolioId.isEmpty()) {
+                holdings = portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, TimeInterval.ONE_DAY);
+            } else {
+                holdings = portfolioHoldingsService.getPortfolioHoldings(userId, TimeInterval.ONE_DAY);
+            }
 
             if (holdings == null || holdings.getEquityHoldings() == null) {
                 log.warn("No holdings found for user: {}", userId);
@@ -54,11 +59,11 @@ public class PortfolioCalculationService {
                     totalInvestment);
 
             // 3. Map to Event
-            PortfolioUpdateEvent updateEvent = mapToUpdateEvent(holdings, summary, userId, null);
+            PortfolioUpdateEvent updateEvent = mapToUpdateEvent(holdings, summary, userId, portfolioId);
 
             // 4. Publish to Kafka
-            log.info("Publishing calculated portfolio update for UserID: {}", userId);
-            kafkaProducerService.sendPortfolioStreamMessage(updateEvent);
+            log.info("Publishing calculated portfolio update for UserID: {}, PortfolioID: {}", userId, portfolioId);
+            kafkaProducerService.sendPortfolioStreamMessage(updateEvent, correlationId);
 
         } catch (Exception e) {
             log.error("Error executing calculation logic for user: {} [TraceID: {}]", userId, correlationId, e);

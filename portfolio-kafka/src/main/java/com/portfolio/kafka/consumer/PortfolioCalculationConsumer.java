@@ -40,9 +40,11 @@ public class PortfolioCalculationConsumer {
                 MDC.put("traceId", correlationId);
             }
 
-            log.info("Key Received TRIGGER_CALCULATION event [TraceID: {}] for key: {}", correlationId, record.key());
+            // Enhanced logging to see full payload as requested
+            log.info("Key Received TRIGGER_CALCULATION event [TraceID: {}] for key: {} | Payload: {}",
+                    correlationId, record.key(), record.value());
 
-            // Parse message to get UserId
+            // Parse message to get UserId and PortfolioId
             String message = record.value();
             JsonNode jsonNode = objectMapper.readTree(message);
             if (!jsonNode.has("userId")) {
@@ -51,8 +53,14 @@ public class PortfolioCalculationConsumer {
             }
             String userId = jsonNode.get("userId").asText();
 
+            // Extract portfolioId (optional for backward compatibility)
+            String portfolioId = null;
+            if (jsonNode.has("portfolioId")) {
+                portfolioId = jsonNode.get("portfolioId").asText();
+            }
+
             // Delegate to Service
-            portfolioCalculationService.processCalculation(userId, correlationId);
+            portfolioCalculationService.processCalculation(userId, portfolioId, correlationId);
 
             log.info("Portfolio calculation completed successfully [TraceID: {}]", correlationId);
 

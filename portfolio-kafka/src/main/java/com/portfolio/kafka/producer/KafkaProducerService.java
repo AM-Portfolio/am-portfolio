@@ -28,14 +28,27 @@ public class KafkaProducerService {
     @Value("${app.kafka.holding.topic:am-holding-update}")
     private String holdingTopicName;
 
-    public void sendPortfolioStreamMessage(PortfolioUpdateEvent portfolioUpdateEvent) {
+    public void sendPortfolioStreamMessage(PortfolioUpdateEvent portfolioUpdateEvent, String correlationId) {
         RecordHeaders headers = new RecordHeaders();
         headers.add("id", portfolioUpdateEvent.getId().toString().getBytes());
         headers.add("userId", portfolioUpdateEvent.getUserId().getBytes());
         headers.add("timestamp", String.valueOf(portfolioUpdateEvent.getTimestamp()).getBytes());
 
+        // Add portfolioId to headers if present
+        if (portfolioUpdateEvent.getPortfolioId() != null) {
+            headers.add("portfolioId", portfolioUpdateEvent.getPortfolioId().getBytes());
+        }
+
+        // Add correlation ID to headers if present
+        if (correlationId != null) {
+            headers.add("X-Correlation-Id", correlationId.getBytes());
+        }
+
+        // Use correlationId as key if available, otherwise fall back to event ID
+        String recordKey = correlationId != null ? correlationId : portfolioUpdateEvent.getId().toString();
+
         ProducerRecord<String, Object> record = new ProducerRecord<>(portfolioStreamTopicName, null,
-                portfolioUpdateEvent.getId().toString(), portfolioUpdateEvent, headers);
+                recordKey, portfolioUpdateEvent, headers);
 
         sendRecord(record);
     }
