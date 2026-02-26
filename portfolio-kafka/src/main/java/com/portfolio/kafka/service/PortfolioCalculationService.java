@@ -115,6 +115,9 @@ public class PortfolioCalculationService {
                 .profitLossPercentage(holding.getGainLossPercentage())
                 .todayProfitLoss(holding.getTodayGainLoss())
                 .todayProfitLossPercentage(holding.getTodayGainLossPercentage())
+                .sector(holding.getSector())
+                .industry(holding.getIndustry())
+                .marketCap(holding.getMarketCapCategory())
                 .build();
     }
 }
