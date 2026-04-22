@@ -1,10 +1,29 @@
-# Runtime stage using pre-built JAR
-FROM eclipse-temurin:17-jre-jammy
+# Multi-stage build for Portfolio Service
+# Stage 1: Build with Maven
+ARG BASE_REGISTRY=""
+FROM ${BASE_REGISTRY}am-java-maven-base:latest AS build
+
+# Build arguments for GitHub authentication (needed for private dependencies)
+ARG GITHUB_PACKAGES_USERNAME
+ARG GITHUB_PACKAGES_TOKEN
+
+WORKDIR /build
+
+# Copy the entire project for multi-module build
+COPY . .
+
+# Build the application
+# We need to pass the GitHub credentials to Maven so it can pull private dependencies
+RUN GITHUB_PACKAGES_USERNAME=${GITHUB_PACKAGES_USERNAME} GITHUB_PACKAGES_TOKEN=${GITHUB_PACKAGES_TOKEN} \
+    mvn clean package -DskipTests -B
+
+# Stage 2: Runtime with JRE 21
+FROM eclipse-temurin:21-jdk-jammy
 
 WORKDIR /app
 
-# Copy the pre-built JAR file from the correct location
-COPY portfolio-app/target/*.jar app.jar
+# Copy the built JAR from build stage
+COPY --from=build /build/portfolio-app/target/*.jar app.jar
 
 # Install curl for healthcheck
 RUN apt-get update && \

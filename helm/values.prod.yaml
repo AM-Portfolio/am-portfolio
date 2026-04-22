@@ -1,0 +1,42 @@
+# am-portfolio Production Overrides
+
+replicaCount: 2
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1024Mi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+vault:
+  secrets:
+    - name: auth
+      path: apps/data/prod/services/am-auth
+    - name: infra
+      path: apps/data/prod/infra/postgres
+    - name: portfolio
+      path: apps/data/prod/services/am-portfolio
+  template: |
+    {{- with secret "apps/data/prod/services/am-portfolio" -}}
+    {{- range $k, $v := .Data.data }}
+    export {{ $k }}="{{ $v }}"
+    {{- end }}
+    {{- end }}
+    {{- with secret "apps/data/prod/infra/postgres" -}}
+    {{- range $k, $v := .Data.data }}
+    export {{ $k }}="{{ $v }}"
+    {{- end }}
+    {{- end }}
+
+ingress:
+  hosts:
+    - host: portfolio.am-portfolio.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls:
+    - secretName: portfolio-tls-prod
+      hosts:
+        - portfolio.am-portfolio.com

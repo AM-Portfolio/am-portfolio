@@ -1,0 +1,74 @@
+# am-portfolio Universal Chart Values
+
+replicaCount: 1
+
+image:
+  repository: am-portfolio
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# Vault Secret Injection Configuration
+vault:
+  enabled: true
+  role: am-backend-role
+  secrets:
+    - name: auth
+      path: apps/data/preprod/services/am-auth
+    - name: infra
+      path: apps/data/preprod/infra/postgres
+    - name: portfolio
+      path: apps/data/preprod/services/am-portfolio
+  
+  # Template to export secrets as environment variables
+  template: |
+    {{- with secret "apps/data/preprod/services/am-portfolio" -}}
+    {{- range $k, $v := .Data.data }}
+    export {{ $k }}="{{ $v }}"
+    {{- end }}
+    {{- end }}
+    {{- with secret "apps/data/preprod/infra/postgres" -}}
+    {{- range $k, $v := .Data.data }}
+    export {{ $k }}="{{ $v }}"
+    {{- end }}
+    {{- end }}
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1024Mi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+livenessProbe:
+  httpGet:
+    path: /actuator/health/liveness
+    port: 8080
+  initialDelaySeconds: 60
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /actuator/health/readiness
+    port: 8080
+  initialDelaySeconds: 60
+  periodSeconds: 10
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: portfolio.preprod.am-portfolio.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls:
+    - secretName: portfolio-tls
+      hosts:
+        - portfolio.preprod.am-portfolio.com

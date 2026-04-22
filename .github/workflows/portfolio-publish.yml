@@ -1,0 +1,35 @@
+name: Portfolio Publish
+
+on:
+  push:
+    branches: ["main", "develop", "test/**"]
+    paths:
+      - 'portfolio-**'
+      - 'pom.xml'
+      - 'Dockerfile'
+      - '.github/workflows/portfolio-publish.yml'
+  pull_request:
+    branches: ["main", "develop", "test/**"]
+    paths:
+      - 'portfolio-**'
+      - 'pom.xml'
+      - 'Dockerfile'
+      - '.github/workflows/portfolio-publish.yml'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    name: Publish Portfolio
+    permissions:
+      contents: read
+      packages: write
+    uses: AM-Portfolio/am-pipelines/.github/workflows/central-build-publish.yml@main
+    with:
+      language: 'java'
+      working_directory: '.'
+      image_name: 'am-portfolio'
+      build_context: '.'
+      preprod_namespace: 'am-apps-preprod'
+      prod_namespace: 'am-apps-prod'
+      deploy_prod: true
+    secrets: inherit
