@@ -5,8 +5,6 @@ on:
     branches: ["main", "develop", "test/**", "feature/**", "hotfix/**", "fix/**"]
     paths:
       - 'portfolio-**'
-      - 'am-common-data/**'
-      - 'sdk/**'
       - 'pom.xml'
       - 'Dockerfile'
       - '.github/workflows/portfolio-publish.yml'
@@ -14,49 +12,14 @@ on:
     branches: ["main", "develop", "test/**", "feature/**", "hotfix/**", "fix/**"]
     paths:
       - 'portfolio-**'
-      - 'am-common-data/**'
-      - 'sdk/**'
       - 'pom.xml'
       - 'Dockerfile'
       - '.github/workflows/portfolio-publish.yml'
   workflow_dispatch:
 
 jobs:
-  # 1. Detect which paths changed to trigger conditional jobs
-  detect-changes:
-    name: Detect Changed Modules
-    runs-on: ubuntu-latest
-    outputs:
-      portfolio: ${{ steps.filter.outputs.portfolio }}
-      common-lib: ${{ steps.filter.outputs.common-lib }}
-      sdk-java: ${{ steps.filter.outputs.sdk-java }}
-      sdk-python: ${{ steps.filter.outputs.sdk-python }}
-      sdk-flutter: ${{ steps.filter.outputs.sdk-flutter }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            portfolio:
-              - 'portfolio-**'
-              - 'pom.xml'
-              - 'Dockerfile'
-              - '.github/workflows/portfolio-publish.yml'
-            common-lib:
-              - 'am-common-data/**'
-            sdk-java:
-              - 'sdk/java/**'
-            sdk-python:
-              - 'sdk/python/**'
-            sdk-flutter:
-              - 'sdk/flutter/**'
-
-  # 2. Publish Portfolio Service (Docker)
-  publish-portfolio:
+  publish:
     name: Publish Portfolio Service
-    needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.portfolio == 'true' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
       packages: write
@@ -69,64 +32,4 @@ jobs:
       preprod_namespace: 'am-apps-preprod'
       prod_namespace: 'am-apps-prod'
       deploy_prod: true
-    secrets: inherit
-
-  # 3. Publish Common Data Library (Maven)
-  publish-common-lib:
-    name: Publish Common Data Lib
-    needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.common-lib == 'true' || github.event_name == 'workflow_dispatch' }}
-    permissions:
-      contents: write
-      packages: write
-    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
-    with:
-      language: 'java'
-      working_directory: 'am-common-data'
-      sdk_name: 'am-common-data-lib'
-      maven_repo_id: 'github'
-      maven_repo_url: 'https://maven.pkg.github.com/AM-Portfolio/am-portfolio'
-    secrets: inherit
-
-  # 4. Publish SDKs
-  publish-sdk-java:
-    name: Publish Java SDK
-    needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.sdk-java == 'true' }}
-    permissions:
-      contents: write
-      packages: write
-    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
-    with:
-      language: 'java'
-      working_directory: 'sdk/java'
-      sdk_name: 'portfolio-sdk-java'
-    secrets: inherit
-
-  publish-sdk-python:
-    name: Publish Python SDK
-    needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.sdk-python == 'true' }}
-    permissions:
-      contents: write
-      packages: write
-    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
-    with:
-      language: 'python'
-      working_directory: 'sdk/python'
-      sdk_name: 'portfolio-sdk-python'
-    secrets: inherit
-
-  publish-sdk-flutter:
-    name: Publish Flutter SDK
-    needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.sdk-flutter == 'true' }}
-    permissions:
-      contents: write
-      packages: write
-    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
-    with:
-      language: 'flutter'
-      working_directory: 'sdk/flutter'
-      sdk_name: 'portfolio-sdk-flutter'
     secrets: inherit

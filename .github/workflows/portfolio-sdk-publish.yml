@@ -1,0 +1,105 @@
+name: Portfolio SDK Publish
+
+on:
+  push:
+    paths:
+      - 'portfolio-sdk/**'
+      - 'sdk/**'
+  pull_request:
+    paths:
+      - 'portfolio-sdk/**'
+      - 'sdk/**'
+  workflow_dispatch:
+
+jobs:
+  # 1. Detect which SDK paths changed
+  detect-changes:
+    name: Detect Changed SDKs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      portfolio-sdk: ${{ steps.filter.outputs.portfolio-sdk }}
+      java: ${{ steps.filter.outputs.java }}
+      python: ${{ steps.filter.outputs.python }}
+      flutter: ${{ steps.filter.outputs.flutter }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            portfolio-sdk:
+              - 'portfolio-sdk/**'
+            java:
+              - 'sdk/java/**'
+            python:
+              - 'sdk/python/**'
+            flutter:
+              - 'sdk/flutter/**'
+
+  # 2. Publish Portfolio SDK (Maven)
+  publish-portfolio-sdk:
+    name: Publish Portfolio SDK
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.portfolio-sdk == 'true' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: write
+      packages: write
+    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
+    with:
+      language: 'java'
+      working_directory: 'portfolio-sdk'
+      sdk_name: 'portfolio-sdk'
+      maven_repo_id: 'github'
+      maven_repo_url: 'https://maven.pkg.github.com/am-asrax/am-portfolio'
+    secrets: inherit
+
+  # 3. Publish Multi-Language SDKs (Generated)
+  publish-java:
+    name: Publish Java SDK
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.java == 'true' }}
+    permissions:
+      contents: write
+      packages: write
+    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
+    with:
+      language: 'java'
+      working_directory: 'sdk/java'
+      sdk_name: 'portfolio-sdk-java'
+      maven_repo_id: 'github'
+      maven_repo_url: 'https://maven.pkg.github.com/am-asrax/am-portfolio'
+    secrets: inherit
+
+  publish-python:
+    name: Publish Python SDK
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.python == 'true' }}
+    permissions:
+      contents: write
+      packages: write
+    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
+    with:
+      language: 'python'
+      working_directory: 'sdk/python'
+      sdk_name: 'portfolio-sdk-python'
+      maven_repo_id: 'github'
+      maven_repo_url: 'https://maven.pkg.github.com/am-asrax/am-portfolio'
+    secrets: inherit
+
+  publish-flutter:
+    name: Publish Flutter SDK
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.flutter == 'true' }}
+    permissions:
+      contents: write
+      packages: write
+    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
+    with:
+      language: 'flutter'
+      working_directory: 'sdk/flutter'
+      sdk_name: 'portfolio-sdk-flutter'
+      maven_repo_id: 'github'
+      maven_repo_url: 'https://maven.pkg.github.com/am-asrax/am-portfolio'
+    secrets: inherit
