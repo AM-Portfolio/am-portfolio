@@ -8,7 +8,6 @@
         <artifactId>am-portfolio</artifactId>
         <version>1.0-SNAPSHOT</version>
     </parent>
-
     <artifactId>portfolio-kafka</artifactId>
     <name>portfolio-kafka</name>
     <description>Portfolio Kafka Module</description>
