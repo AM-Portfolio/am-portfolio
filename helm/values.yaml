@@ -1,6 +1,8 @@
 # am-portfolio Universal Chart Values
 
 replicaCount: 1
+language: java
+environment: preprod
 
 image:
   repository: am-portfolio
@@ -19,42 +21,73 @@ vault:
   serviceAccountName: am-backend-sa
   role: am-backend-role
   secretPaths:
-    auth: apps/data/preprod/services/am-auth
-    portfolio: apps/data/preprod/services/am-portfolio
-    mongodb: apps/data/preprod/infra/mongodb
-    kafka: apps/data/preprod/infra/kafka
-    redis: apps/data/preprod/infra/redis
-  
-  # Template to export secrets as environment variables
-  template: |
-    {{- with secret "apps/data/preprod/services/am-portfolio" -}}
-    export PORTFOLIO_TOPIC="{{ .Data.data.PORTFOLIO_TOPIC }}"
-    {{- end }}
-    {{- with secret "apps/data/preprod/services/am-auth" -}}
-    export JWT_SECRET="{{ .Data.data.JWT_SECRET_KEY }}"
-    export INTERNAL_JWT_SECRET="{{ .Data.data.JWT_SECRET_KEY }}"
-    {{- end }}
-    {{- with secret "apps/data/preprod/infra/mongodb" -}}
-    export MONGODB_URL="{{ .Data.data.url }}"
-    {{- end }}
-    {{- with secret "apps/data/preprod/infra/kafka" -}}
-    export KAFKA_BOOTSTRAP_SERVERS="{{ .Data.data.bootstrap_servers }}"
-    export KAFKA_USERNAME="{{ .Data.data.username }}"
-    export KAFKA_PASSWORD="{{ .Data.data.password }}"
-    export KAFKA_SECURITY_PROTOCOL="SASL_PLAINTEXT"
-    export KAFKA_SASL_MECHANISM="SCRAM-SHA-256"
-    {{- end }}
-    {{- with secret "apps/data/preprod/infra/redis" -}}
-    export REDIS_HOSTNAME="{{ .Data.data.host }}"
-    export REDIS_PORT="{{ .Data.data.port }}"
-    export REDIS_PASSWORD="{{ .Data.data.password }}"
-    {{- end }}
+    auth:
+      path: apps/data/preprod/services/am-auth
+      template: |
+        {{- range $sk, $sv := .Data.data }}
+        {{- if eq $sk "JWT_SECRET_KEY" }}
+        export JWT_SECRET="{{ $sv }}"
+        export INTERNAL_JWT_SECRET="{{ $sv }}"
+        {{- else }}
+        export {{ $sk }}="{{ $sv }}"
+        {{- end }}
+        {{- end }}
+    portfolio:
+      path: apps/data/preprod/services/am-portfolio
+      template: |
+        {{- range $sk, $sv := .Data.data }}
+        export {{ $sk }}="{{ $sv }}"
+        {{- end }}
+    mongodb:
+      path: apps/data/preprod/infra/mongodb
+      template: |
+        {{- with secret "apps/data/preprod/infra/mongodb" -}}
+        export MONGODB_URL="{{ .Data.data.url }}/portfolio?authSource=admin"
+        {{- end }}
+    kafka:
+      path: apps/data/preprod/infra/kafka
+      template: |
+        {{- range $sk, $sv := .Data.data }}
+        {{- if eq $sk "bootstrap_servers" }}
+        export KAFKA_BOOTSTRAP_SERVERS="{{ $sv }}"
+        {{- else if eq $sk "username" }}
+        export KAFKA_USERNAME="{{ $sv }}"
+        {{- else if eq $sk "password" }}
+        export KAFKA_PASSWORD="{{ $sv }}"
+        {{- end }}
+        {{- end }}
+        export KAFKA_SECURITY_PROTOCOL="SASL_PLAINTEXT"
+        export KAFKA_SASL_MECHANISM="SCRAM-SHA-256"
+        export KAFKA_JAAS_CONFIG="org.apache.kafka.common.security.scram.ScramLoginModule required username=\"$KAFKA_USERNAME\" password=\"$KAFKA_PASSWORD\";"
+    redis:
+      path: apps/data/preprod/infra/redis
+      template: |
+        {{- range $sk, $sv := .Data.data }}
+        {{- if eq $sk "host" }}
+        export REDIS_HOSTNAME="{{ $sv }}"
+        {{- else if eq $sk "port" }}
+        export REDIS_PORT="{{ $sv }}"
+        {{- else if eq $sk "password" }}
+        export REDIS_PASSWORD="{{ $sv }}"
+        {{- end }}
+        {{- end }}
 
 env:
   MARKET_DATA_API_URL: "http://am-market-data:8092"
   ETF_API_URL: "http://am-parser:8022"
   SPRING_PROFILES_ACTIVE: "preprod"
   LOG_LEVEL: "INFO"
+
+probes:
+  port: 8080
+  liveness:
+    path: /actuator/health/liveness
+    initialDelaySeconds: 150
+    periodSeconds: 15
+  readiness:
+    path: /actuator/health/readiness
+    initialDelaySeconds: 150
+    periodSeconds: 15
 
 resources:
   limits:
@@ -63,20 +96,6 @@ resources:
   requests:
     cpu: 500m
     memory: 512Mi
-
-livenessProbe:
-  httpGet:
-    path: /actuator/health/liveness
-    port: 8080
-  initialDelaySeconds: 60
-  periodSeconds: 10
-
-readinessProbe:
-  httpGet:
-    path: /actuator/health/readiness
-    port: 8080
-  initialDelaySeconds: 60
-  periodSeconds: 10
 
 ingress:
   enabled: true
