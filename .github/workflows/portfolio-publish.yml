@@ -2,19 +2,21 @@ name: Portfolio Publish
 
 on:
   push:
-    branches: ["main", "develop", "test/**", "feature/**", "hotfix/**", "fix/**"]
+    branches:
+      ["main", "develop", "test/**", "feature/**", "hotfix/**", "fix/**"]
     paths:
-      - 'portfolio-**'
-      - 'pom.xml'
-      - 'Dockerfile'
-      - '.github/workflows/portfolio-publish.yml'
+      - "portfolio-**"
+      - "pom.xml"
+      - "Dockerfile"
+      - ".github/workflows/portfolio-publish.yml"
   pull_request:
-    branches: ["main", "develop", "test/**", "feature/**", "hotfix/**", "fix/**"]
+    branches:
+      ["main", "develop", "test/**", "feature/**", "hotfix/**", "fix/**"]
     paths:
-      - 'portfolio-**'
-      - 'pom.xml'
-      - 'Dockerfile'
-      - '.github/workflows/portfolio-publish.yml'
+      - "portfolio-**"
+      - "pom.xml"
+      - "Dockerfile"
+      - ".github/workflows/portfolio-publish.yml"
   workflow_dispatch:
 
 jobs:
@@ -25,14 +27,14 @@ jobs:
       packages: write
     uses: AM-Portfolio/am-pipelines/.github/workflows/central-build-publish.yml@main
     with:
-      language: 'java'
-      working_directory: '.'
-      image_name: 'am-portfolio'
-      build_context: '.'
+      language: "java"
+      working_directory: "."
+      image_name: "am-portfolio"
+      build_context: "."
       build_args: |
-        GITHUB_PACKAGES_USERNAME=${{ secrets.GITHUB_PACKAGES_USERNAME }}
-        GITHUB_PACKAGES_TOKEN=${{ secrets.GITHUB_PACKAGES_TOKEN }}
-      preprod_namespace: 'am-apps-preprod'
-      prod_namespace: 'am-apps-prod'
+        GITHUB_PACKAGES_USERNAME=${{ github.actor }}
+        GITHUB_PACKAGES_TOKEN=${{ secrets.GHCR_TOKEN }}
+      preprod_namespace: "am-apps-preprod"
+      prod_namespace: "am-apps-prod"
       deploy_prod: true
     secrets: inherit
