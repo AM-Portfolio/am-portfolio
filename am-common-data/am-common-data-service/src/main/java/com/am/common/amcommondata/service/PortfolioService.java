@@ -9,4 +9,5 @@ public interface PortfolioService {
     List<PortfolioModelV1> getPortfoliosByUserId(String userId);
     PortfolioModelV1 getPortfolioById(UUID id);
     PortfolioModelV1 createPortfolio(PortfolioModelV1 portfolio);
+    List<String> getAllUserIds();
 }

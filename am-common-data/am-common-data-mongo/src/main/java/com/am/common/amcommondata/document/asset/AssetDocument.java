@@ -27,11 +27,14 @@ public class AssetDocument extends BaseDocument {
     private MarketDataModel marketData;
     private Double quantity;
     private Double avgBuyingPrice;
+    private Double currentPrice;
     private Double currentValue;
     private Double investmentValue;
     private BrokerType brokerType;
     private Double profitLoss;
     private Double profitLossPercentage;
+    private Double todayProfitLoss;
+    private Double todayProfitLossPercentage;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private Boolean isActive;

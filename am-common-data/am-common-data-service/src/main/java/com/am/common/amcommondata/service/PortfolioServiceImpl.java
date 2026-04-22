@@ -39,4 +39,9 @@ public class PortfolioServiceImpl implements PortfolioService {
         PortfolioDocument document = portfolioMapper.toDocument(portfolioModel);
         return portfolioMapper.toModel(portfolioDocumentRepository.save(document));
     }
+    
+    @Override
+    public List<String> getAllUserIds() {
+        return portfolioDocumentRepository.findAllDistinctOwners();
+    }
 }
