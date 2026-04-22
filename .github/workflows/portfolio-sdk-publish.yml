@@ -52,7 +52,7 @@ jobs:
       working_directory: 'portfolio-sdk'
       sdk_name: 'portfolio-sdk'
       maven_repo_id: 'github'
-      maven_repo_url: 'https://maven.pkg.github.com/am-asrax/am-portfolio'
+      maven_repo_url: 'https://maven.pkg.github.com/AM-Portfolio/am-portfolio'
     secrets: inherit
 
   # 3. Publish Multi-Language SDKs (Generated)
@@ -69,7 +69,7 @@ jobs:
       working_directory: 'sdk/java'
       sdk_name: 'portfolio-sdk-java'
       maven_repo_id: 'github'
-      maven_repo_url: 'https://maven.pkg.github.com/am-asrax/am-portfolio'
+      maven_repo_url: 'https://maven.pkg.github.com/AM-Portfolio/am-portfolio'
     secrets: inherit
 
   publish-python:
@@ -85,7 +85,7 @@ jobs:
       working_directory: 'sdk/python'
       sdk_name: 'portfolio-sdk-python'
       maven_repo_id: 'github'
-      maven_repo_url: 'https://maven.pkg.github.com/am-asrax/am-portfolio'
+      maven_repo_url: 'https://maven.pkg.github.com/AM-Portfolio/am-portfolio'
     secrets: inherit
 
   publish-flutter:
@@ -101,5 +101,5 @@ jobs:
       working_directory: 'sdk/flutter'
       sdk_name: 'portfolio-sdk-flutter'
       maven_repo_id: 'github'
-      maven_repo_url: 'https://maven.pkg.github.com/am-asrax/am-portfolio'
+      maven_repo_url: 'https://maven.pkg.github.com/AM-Portfolio/am-portfolio'
     secrets: inherit

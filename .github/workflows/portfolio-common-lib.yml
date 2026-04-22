@@ -23,5 +23,5 @@ jobs:
       working_directory: 'am-common-data'
       sdk_name: 'am-common-data-lib'
       maven_repo_id: 'github'
-      maven_repo_url: 'https://maven.pkg.github.com/am-asrax/am-portfolio'
+      maven_repo_url: 'https://maven.pkg.github.com/AM-Portfolio/am-portfolio'
     secrets: inherit
