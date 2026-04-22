@@ -16,27 +16,45 @@ security:
 # Vault Secret Injection Configuration
 vault:
   enabled: true
+  serviceAccountName: am-backend-sa
   role: am-backend-role
-  secrets:
-    - name: auth
-      path: apps/data/preprod/services/am-auth
-    - name: infra
-      path: apps/data/preprod/infra/postgres
-    - name: portfolio
-      path: apps/data/preprod/services/am-portfolio
+  secretPaths:
+    auth: apps/data/preprod/services/am-auth
+    portfolio: apps/data/preprod/services/am-portfolio
+    mongodb: apps/data/preprod/infra/mongodb
+    kafka: apps/data/preprod/infra/kafka
+    redis: apps/data/preprod/infra/redis
   
   # Template to export secrets as environment variables
   template: |
     {{- with secret "apps/data/preprod/services/am-portfolio" -}}
-    {{- range $k, $v := .Data.data }}
-    export {{ $k }}="{{ $v }}"
+    export PORTFOLIO_TOPIC="{{ .Data.data.PORTFOLIO_TOPIC }}"
     {{- end }}
+    {{- with secret "apps/data/preprod/services/am-auth" -}}
+    export JWT_SECRET="{{ .Data.data.JWT_SECRET_KEY }}"
+    export INTERNAL_JWT_SECRET="{{ .Data.data.JWT_SECRET_KEY }}"
     {{- end }}
-    {{- with secret "apps/data/preprod/infra/postgres" -}}
-    {{- range $k, $v := .Data.data }}
-    export {{ $k }}="{{ $v }}"
+    {{- with secret "apps/data/preprod/infra/mongodb" -}}
+    export MONGODB_URL="{{ .Data.data.url }}"
     {{- end }}
+    {{- with secret "apps/data/preprod/infra/kafka" -}}
+    export KAFKA_BOOTSTRAP_SERVERS="{{ .Data.data.bootstrap_servers }}"
+    export KAFKA_USERNAME="{{ .Data.data.username }}"
+    export KAFKA_PASSWORD="{{ .Data.data.password }}"
+    export KAFKA_SECURITY_PROTOCOL="SASL_PLAINTEXT"
+    export KAFKA_SASL_MECHANISM="SCRAM-SHA-256"
     {{- end }}
+    {{- with secret "apps/data/preprod/infra/redis" -}}
+    export REDIS_HOSTNAME="{{ .Data.data.host }}"
+    export REDIS_PORT="{{ .Data.data.port }}"
+    export REDIS_PASSWORD="{{ .Data.data.password }}"
+    {{- end }}
+
+env:
+  MARKET_DATA_API_URL: "http://am-market-data:8092"
+  ETF_API_URL: "http://am-parser:8022"
+  SPRING_PROFILES_ACTIVE: "preprod"
+  LOG_LEVEL: "INFO"
 
 resources:
   limits:
