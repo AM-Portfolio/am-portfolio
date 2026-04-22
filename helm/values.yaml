@@ -4,6 +4,19 @@ replicaCount: 1
 language: java
 environment: preprod
 
+# Top-level service account (Fallback)
+serviceAccountName: am-backend-sa
+
+global:
+  image:
+    registry: ghcr.io/am-portfolio
+    pullPolicy: Always
+  # Global vault settings
+  vault:
+    enabled: true
+    role: "am-backend-role"
+    serviceAccountName: "am-backend-sa"
+
 image:
   repository: am-portfolio
   pullPolicy: Always
