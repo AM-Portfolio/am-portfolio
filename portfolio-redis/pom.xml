@@ -54,7 +54,7 @@
         <!-- Common Models -->
         <dependency>
             <groupId>com.am.common</groupId>
-            <artifactId>am-common-investment-model</artifactId>
+            <artifactId>am-common-investment-model-lib</artifactId>
             <version>${am.investment.version}</version>
         </dependency>
         

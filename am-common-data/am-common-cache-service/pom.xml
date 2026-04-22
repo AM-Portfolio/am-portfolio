@@ -39,7 +39,7 @@
         <!-- Common Dependencies -->
         <dependency>
             <groupId>com.portfolio</groupId>
-            <artifactId>am-common-investment-model</artifactId>
+            <artifactId>am-common-investment-model-lib</artifactId>
             <version>${am.investment.version}</version>
         </dependency>
 
