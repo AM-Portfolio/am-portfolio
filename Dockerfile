@@ -1,4 +1,4 @@
-# Multi-stage build for Portfolio Service (Monorepo)
+# Multi-stage build for Portfolio Service (Unified Monorepo)
 # Stage 1: Build with Maven
 ARG BASE_REGISTRY=""
 FROM ${BASE_REGISTRY}am-java-maven-base:latest AS build
@@ -12,16 +12,12 @@ WORKDIR /build
 # Copy settings.xml to Maven config directory
 COPY settings.xml /root/.m2/settings.xml
 
-# 1. Build am-common-data first (Local Dependency)
-COPY am-common-data/ am-common-data/
-RUN cd am-common-data && \
-    GITHUB_PACKAGES_USERNAME=${GITHUB_PACKAGES_USERNAME} GITHUB_PACKAGES_TOKEN=${GITHUB_PACKAGES_TOKEN} \
-    mvn clean install -DskipTests -B -s settings.xml
-
-# 2. Build am-portfolio
+# Copy the entire project for unified build
 COPY . .
-# We don't need to copy am-common-data again as it's already there
 
+# Build everything in one go
+# Because am-common-data is now a module in the root POM, 
+# Maven will build it and make it available to other modules automatically.
 RUN GITHUB_PACKAGES_USERNAME=${GITHUB_PACKAGES_USERNAME} GITHUB_PACKAGES_TOKEN=${GITHUB_PACKAGES_TOKEN} \
     mvn clean package -DskipTests -B -s settings.xml
 

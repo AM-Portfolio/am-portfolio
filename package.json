@@ -1,0 +1,20 @@
+{
+  "name": "am-portfolio",
+  "version": "1.0.0",
+  "description": "Portfolio Monorepo Orchestrator",
+  "scripts": {
+    "build": "mvn clean install -DskipTests",
+    "build:all": "npm run build",
+    "run": "mvn -pl portfolio-app spring-boot:run",
+    "test": "mvn test",
+    "sdk:generate:java": "npx @openapitools/openapi-generator-cli generate -i http://localhost:8080/v3/api-docs -g java -o sdk/java --skip-validate-spec",
+    "sdk:generate:python": "npx @openapitools/openapi-generator-cli generate -i http://localhost:8080/v3/api-docs -g python -o sdk/python --skip-validate-spec",
+    "sdk:generate:flutter": "npx @openapitools/openapi-generator-cli generate -i http://localhost:8080/v3/api-docs -g dart -o sdk/flutter --skip-validate-spec",
+    "sdk:generate:all": "npm run sdk:generate:java && npm run sdk:generate:python && npm run sdk:generate:flutter",
+    "docker:build": "docker build -t am-portfolio:latest .",
+    "docker:run": "docker run -p 8080:8080 am-portfolio:latest"
+  },
+  "devDependencies": {
+    "@openapitools/openapi-generator-cli": "^2.13.4"
+  }
+}

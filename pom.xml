@@ -27,6 +27,7 @@
         <module>portfolio-app</module>
         <module>portfolio-analytics</module>
         <module>portfolio-sdk</module>
+        <module>am-common-data</module>
     </modules>
 
     <properties>
