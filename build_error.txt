@@ -82,3 +82,4 @@
 [ERROR] 
 [ERROR] After correcting the problems, you can resume the build with the command
 [ERROR]   mvn <args> -rf :portfolio-basket
+
