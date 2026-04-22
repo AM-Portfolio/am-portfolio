@@ -38,13 +38,13 @@
 
         <!-- Common Dependencies -->
         <dependency>
-            <groupId>com.am.common</groupId>
+            <groupId>com.portfolio</groupId>
             <artifactId>am-common-investment-model</artifactId>
             <version>${am.investment.version}</version>
         </dependency>
 
         <dependency>
-            <groupId>com.am.common</groupId>
+            <groupId>com.portfolio</groupId>
             <artifactId>am-common-data-model</artifactId>
             <version>${am.common.version}</version>
         </dependency>

@@ -22,7 +22,7 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <groupId>com.am.common</groupId>
+            <groupId>com.portfolio</groupId>
             <artifactId>am-common-data-service</artifactId>
             <version>${am.common.version}</version> 
         </dependency>

@@ -88,6 +88,8 @@
                 </plugin>
             </plugins>
         </pluginManagement>
+    </build>
+
     <distributionManagement>
         <repository>
             <id>github</id>
