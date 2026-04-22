@@ -2,14 +2,14 @@ name: Portfolio Publish
 
 on:
   push:
-    branches: ["main", "develop", "test/**"]
+    branches: ["main", "develop", "test/**", "feature/**", "hotfix/**", "fix/**"]
     paths:
       - 'portfolio-**'
       - 'pom.xml'
       - 'Dockerfile'
       - '.github/workflows/portfolio-publish.yml'
   pull_request:
-    branches: ["main", "develop", "test/**"]
+    branches: ["main", "develop", "test/**", "feature/**", "hotfix/**", "fix/**"]
     paths:
       - 'portfolio-**'
       - 'pom.xml'
