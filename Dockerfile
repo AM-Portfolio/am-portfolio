@@ -9,19 +9,21 @@ ARG GITHUB_PACKAGES_TOKEN
 
 WORKDIR /build
 
+# Copy settings.xml to Maven config directory
+COPY settings.xml /root/.m2/settings.xml
+
 # 1. Build am-common-data first (Local Dependency)
 COPY am-common-data/ am-common-data/
 RUN cd am-common-data && \
     GITHUB_PACKAGES_USERNAME=${GITHUB_PACKAGES_USERNAME} GITHUB_PACKAGES_TOKEN=${GITHUB_PACKAGES_TOKEN} \
-    mvn clean install -DskipTests -B
+    mvn clean install -DskipTests -B -s settings.xml
 
 # 2. Build am-portfolio
 COPY . .
-# We don't need to copy am-common-data again as it's already there, 
-# but the root COPY will include it anyway.
+# We don't need to copy am-common-data again as it's already there
 
 RUN GITHUB_PACKAGES_USERNAME=${GITHUB_PACKAGES_USERNAME} GITHUB_PACKAGES_TOKEN=${GITHUB_PACKAGES_TOKEN} \
-    mvn clean package -DskipTests -B
+    mvn clean package -DskipTests -B -s settings.xml
 
 # Stage 2: Runtime with JRE 21
 FROM eclipse-temurin:21-jdk-jammy
