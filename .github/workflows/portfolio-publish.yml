@@ -31,9 +31,6 @@ jobs:
       working_directory: "."
       image_name: "am-portfolio"
       build_context: "."
-      build_args: |
-        GITHUB_PACKAGES_USERNAME=${{ github.actor }}
-        GITHUB_PACKAGES_TOKEN=${{ secrets.GHCR_TOKEN }}
       preprod_namespace: "am-apps-preprod"
       prod_namespace: "am-apps-prod"
       deploy_prod: true
