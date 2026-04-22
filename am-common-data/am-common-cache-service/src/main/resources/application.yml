@@ -1,0 +1,25 @@
+spring:
+  data:
+    redis:
+      redisendpoint: localhost:6379
+      portfolio-mover:
+        ttl: 300  # 5 minutes
+        key-prefix: "portfolio:mover:"
+      portfolio-summary:
+        ttl: 300  # 5 minutes
+        key-prefix: "portfolio:summary:"
+      portfolio-holdings:
+        ttl: 300  # 5 minutes
+        key-prefix: "portfolio:holdings:"
+      market-indices:
+        ttl: 300  # 5 minutes
+        key-prefix: "market:indices:"
+        historical:
+          key-prefix: "market:indices:historical:"
+          ttl: 604800  # 7 days
+      stock:
+        ttl: 300  # 5 minutes
+        key-prefix: "stock:price:"
+        historical:
+          key-prefix: "stock:price:historical:"
+          ttl: 604800  # 7 days

@@ -1,19 +1,25 @@
-# Multi-stage build for Portfolio Service
+# Multi-stage build for Portfolio Service (Monorepo)
 # Stage 1: Build with Maven
 ARG BASE_REGISTRY=""
 FROM ${BASE_REGISTRY}am-java-maven-base:latest AS build
 
-# Build arguments for GitHub authentication (needed for private dependencies)
+# Build arguments for GitHub authentication
 ARG GITHUB_PACKAGES_USERNAME
 ARG GITHUB_PACKAGES_TOKEN
 
 WORKDIR /build
 
-# Copy the entire project for multi-module build
-COPY . .
+# 1. Build am-common-data first (Local Dependency)
+COPY am-common-data/ am-common-data/
+RUN cd am-common-data && \
+    GITHUB_PACKAGES_USERNAME=${GITHUB_PACKAGES_USERNAME} GITHUB_PACKAGES_TOKEN=${GITHUB_PACKAGES_TOKEN} \
+    mvn clean install -DskipTests -B
 
-# Build the application
-# We need to pass the GitHub credentials to Maven so it can pull private dependencies
+# 2. Build am-portfolio
+COPY . .
+# We don't need to copy am-common-data again as it's already there, 
+# but the root COPY will include it anyway.
+
 RUN GITHUB_PACKAGES_USERNAME=${GITHUB_PACKAGES_USERNAME} GITHUB_PACKAGES_TOKEN=${GITHUB_PACKAGES_TOKEN} \
     mvn clean package -DskipTests -B
 
