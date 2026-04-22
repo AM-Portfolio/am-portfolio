@@ -68,7 +68,7 @@ public class IndexAnalyticsService {
         }
         
         log.info("Fetching market data for {} symbols in index {}", indexStockSymbols.size(), indexSymbol);
-        var marketData = marketDataService.getOhlcData(indexStockSymbols);
+        var marketData = marketDataService.getOhlcData(indexStockSymbols, false);
         if (marketData.isEmpty()) {
             log.warn("No market data available for index: {}", indexSymbol);
             return Heatmap.builder()
@@ -244,7 +244,7 @@ public class IndexAnalyticsService {
         }
         
         // Fetch market data for all stocks in the index
-        var marketData = marketDataService.getOhlcData(indexStockSymbols);
+        var marketData = marketDataService.getOhlcData(indexStockSymbols, false);
         if (marketData.isEmpty()) {
             log.warn("No market data available for index: {}", indexSymbol);
             return MarketCapAllocation.builder()

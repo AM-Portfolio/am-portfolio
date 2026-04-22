@@ -32,7 +32,7 @@ public class MarketData {
     /**
      * Current/latest price of the instrument
      */
-    private double lastPrice;
+    private Double lastPrice;
     
     /**
      * Current/latest OHLC data

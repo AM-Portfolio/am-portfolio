@@ -27,7 +27,14 @@ public class PortfolioUpdateEvent {
     private BrokerType brokerType;
     private String userId;
     private String portfolioId;
-    private List<EquityModel> equities;
-    private List<MutualFundModel> mutualFunds;
+
+    // Summary / Calculation Data
+    private Double totalValue;
+    private Double totalInvestment;
+    private Double totalGainLoss;
+    private Double totalGainLossPercentage;
+    private Double todayGainLoss;
+    private Double todayGainLossPercentage;
+
     private LocalDateTime timestamp;
 }

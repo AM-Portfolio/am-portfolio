@@ -1,67 +1,31 @@
 package com.portfolio.marketdata.model;
 
 import java.time.LocalDate;
-import java.util.List;
+import java.util.Map;
 
-import com.portfolio.model.market.TimeFrame;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * Request parameters for historical market data.
- */
 @Data
-@Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class HistoricalDataRequest {
-    
-    /**
-     * List of symbols to fetch historical data for
-     */
-    private List<String> symbols;
-    
-    /**
-     * Start date for historical data (inclusive)
-     */
+    private String symbols;
+    @JsonProperty("from")
     private LocalDate fromDate;
-    
-    /**
-     * End date for historical data (inclusive)
-     */
+    @JsonProperty("to")
     private LocalDate toDate;
-    
-    /**
-     * Time interval for data points (e.g., DAY, FIFTEEN_MIN)
-     */
-    private TimeFrame timeFrame;
-    
-    /**
-     * Instrument type (e.g., EQ for equity)
-     */
-    private InstrumentType instrumentType;
-    
-    /**
-     * Type of filtering to apply (ALL, START_END, CUSTOM)
-     */
-    private FilterType filterType;
-    
-    /**
-     * Frequency for CUSTOM filtering (required when filterType is CUSTOM)
-     */
+    @JsonProperty("interval")
+    private String interval;
+    private String instrumentType;
+    private String filterType;
     private Integer filterFrequency;
-    
-    /**
-     * Whether to use continuous data
-     */
     private Boolean continuous;
-    
-    /**
-     * Whether to refresh the data or use cached data
-     */
-    @Builder.Default
-    private Boolean refresh = false;
+    private Boolean forceRefresh = false;
+    private Map<String, String> additionalParams;
 }

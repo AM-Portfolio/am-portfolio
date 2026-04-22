@@ -7,6 +7,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import com.portfolio.analytics.model.AnalyticsType;
+import com.portfolio.analytics.service.providers.index.IndexAnalyticsProvider;
+import com.portfolio.analytics.service.providers.portfolio.PortfolioAnalyticsProvider;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 
 /**

@@ -38,6 +38,11 @@
         </dependency>
         <dependency>
             <groupId>com.portfolio</groupId>
+            <artifactId>portfolio-market-data</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.portfolio</groupId>
             <artifactId>portfolio-kafka</artifactId>
             <version>${project.version}</version>
         </dependency>
@@ -46,12 +51,18 @@
             <artifactId>portfolio-analytics</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>com.portfolio</groupId>
+            <artifactId>portfolio-basket</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         
         <!-- Spring Boot -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
         </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
@@ -59,6 +70,11 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
         </dependency>
         
         <!-- Test -->
@@ -74,6 +90,9 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.portfolio.app.PortfolioApplication</mainClass>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>

@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  am-portfolio-service:
+    # OVERRIDE: Map the locally built JAR directly into the container.
+    # This skips the need to 'docker build' when code changes.
+    # Workflow: 
+    # 1. Run 'mvn package -DskipTests' in Dev Container
+    # 2. Run 'docker-compose restart am-portfolio-service'
+    image: eclipse-temurin:17-jre-jammy
+    container_name: am-portfolio-dev
+    ports:
+      - "8072:8080"
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=am_kafka:9092
+      - MONGODB_URL=mongodb://admin:password123@host.docker.internal:27017/portfolio?authSource=admin
+      - MARKET_DATA_API_URL=http://host.docker.internal:8092
+      - ETF_API_URL=http://host.docker.internal:8022
+    volumes:
+      - ./portfolio-app/target/portfolio-app-1.0-SNAPSHOT.jar:/app/app.jar
+    command: ["java", "-jar", "/app/app.jar"]
+    networks:
+      - am-net
+    restart: unless-stopped
+
+networks:
+  am-net:
+    external: true
+    name: am-infra_am-net

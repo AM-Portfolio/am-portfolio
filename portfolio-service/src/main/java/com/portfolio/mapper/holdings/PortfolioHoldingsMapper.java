@@ -17,47 +17,58 @@ public class PortfolioHoldingsMapper {
     private final EquityHoldingsMapper equityHoldingsMapper = new EquityHoldingsMapper();
 
     public PortfolioHoldings toPortfolioHoldingsV1(List<PortfolioModelV1> portfolios) {
-        Map<String, EquityHoldings> equityHoldingsMap = new HashMap<>();
+        Map<String, EquityHoldings> equityHoldingsMap = processPortfolios(portfolios);
 
-        for (PortfolioModelV1 portfolio : portfolios) {
-            for (EquityModel equity : portfolio.getEquityModels()) {
-                String isin = equity.getIsin();
-
-                EquityHoldings holdings = equityHoldingsMap.computeIfAbsent(isin, k -> equityHoldingsMapper.toEquityHoldings(equity));
-
-                holdings.setQuantity(holdings.getQuantity() + equity.getQuantity());
-
-                // Add broker holding
-                holdings.getBrokerPortfolios().add(EquityBrokerHolding.builder()
-                    .brokerType(portfolio.getBrokerType())
-                    .quantity(equity.getQuantity())
-                    .build());
-            }
-        }
-        var portfolioHoldings = PortfolioHoldings.builder()
-            .equityHoldings(equityHoldingsMap.values().stream().collect(Collectors.toList()))
-            .build();
-        return portfolioHoldings;
+        return PortfolioHoldings.builder()
+                .equityHoldings(equityHoldingsMap.values().stream().collect(Collectors.toList()))
+                .build();
     }
 
     public List<EquityHoldings> toEquityHoldings(List<PortfolioModelV1> portfolios) {
+        Map<String, EquityHoldings> equityHoldingsMap = processPortfolios(portfolios);
+        return equityHoldingsMap.values().stream().collect(Collectors.toList());
+    }
+
+    /**
+     * Common method to process portfolios and create equity holdings map
+     * Uses symbol as the key for identifying unique holdings
+     * Enriches holdings with portfolio context for traceability
+     */
+    private Map<String, EquityHoldings> processPortfolios(List<PortfolioModelV1> portfolios) {
         Map<String, EquityHoldings> equityHoldingsMap = new HashMap<>();
 
         for (PortfolioModelV1 portfolio : portfolios) {
             for (EquityModel equity : portfolio.getEquityModels()) {
-                String isin = equity.getIsin();
+                // Use symbol instead of ISIN as the key
+                String symbol = equity.getSymbol();
 
-                EquityHoldings holdings = equityHoldingsMap.computeIfAbsent(isin, k -> equityHoldingsMapper.toEquityHoldings(equity));
+                if (symbol == null) {
+                    continue; // Skip equities without a symbol
+                }
 
-                holdings.setQuantity(holdings.getQuantity() + equity.getQuantity());
+                // If this is the first time we're seeing this symbol, create a new holding
+                if (!equityHoldingsMap.containsKey(symbol)) {
+                    // Create a new holding with the correct initial quantity
+                    EquityHoldings holdings = equityHoldingsMapper.toEquityHoldings(equity);
+
+                    // Enrich with portfolio context
+                    holdings.setPortfolioId(portfolio.getId() != null ? portfolio.getId().toString() : null);
+                    holdings.setPortfolioName(portfolio.getName());
+
+                    equityHoldingsMap.put(symbol, holdings);
+                }
+
+                // Get the holdings (either newly created or existing)
+                EquityHoldings holdings = equityHoldingsMap.get(symbol);
 
                 // Add broker holding
                 holdings.getBrokerPortfolios().add(EquityBrokerHolding.builder()
-                    .brokerType(portfolio.getBrokerType())
-                    .quantity(equity.getQuantity())
-                    .build());
+                        .brokerType(portfolio.getBrokerType())
+                        .quantity(equity.getQuantity())
+                        .build());
             }
         }
-        return equityHoldingsMap.values().stream().collect(Collectors.toList());
+
+        return equityHoldingsMap;
     }
 }

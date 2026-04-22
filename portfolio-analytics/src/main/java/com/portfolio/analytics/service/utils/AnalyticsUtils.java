@@ -136,14 +136,15 @@ public class AnalyticsUtils {
             return Collections.emptyMap();
         }
         
-        Map<String, MarketData> marketData;
-        if (timeFrameRequest != null) {
-            log.info("Fetching historical data for {} symbols with time frame", symbols.size());
-            marketData = provider.getHistoricalData(symbols, timeFrameRequest);
-        } else {
-            log.info("Fetching current market data for {} symbols", symbols.size());
-            marketData = provider.getMarketData(symbols);
-        }
+        log.info("Fetching current market data for {} symbols", symbols.size());
+        Map<String, MarketData>  marketData = provider.getMarketData(symbols);
+        // if (timeFrameRequest != null) {
+        //     log.info("Fetching historical data for {} symbols with time frame", symbols.size());
+        //     marketData = provider.getHistoricalData(symbols, timeFrameRequest);
+        // } else {
+        //     log.info("Fetching current market data for {} symbols", symbols.size());
+        //     marketData = provider.getMarketData(symbols);
+        // }
         
         if (marketData == null || marketData.isEmpty()) {
             log.warn("No market data available for the provided symbols");

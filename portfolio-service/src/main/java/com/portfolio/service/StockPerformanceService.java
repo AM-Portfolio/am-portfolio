@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
+import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.PaginatedStockPerformance;
 import com.portfolio.model.StockPerformance;
 import com.portfolio.model.StockPerformanceGroup;
@@ -27,13 +28,19 @@ public class StockPerformanceService {
     private final StockIndicesRedisService stockPriceRedisService;
     private static final int DEFAULT_TOP_N = 5;
     private static final int DEFAULT_PAGE_SIZE = 5;
-
+    private final MarketDataService marketDataService;
+    
     public List<StockPerformance> calculateStockPerformances(List<EquityModel> equityHoldings, TimeInterval interval) {
         Instant startTime = interval != null && interval.getDuration() != null ? 
             Instant.now().minus(interval.getDuration()) : null;
 
+        var symbols = equityHoldings.stream().map(EquityModel::getSymbol).filter(java.util.Objects::nonNull).toList();
+
+        // Get market data for all symbols at once
+        var marketData = marketDataService.getMarketData(symbols);
+        
         var performances = equityHoldings.stream()
-            .map(asset -> getGainLossPercentage(asset, startTime))
+            .map(asset -> getGainLossPercentage(asset, startTime, marketData))
             .filter(java.util.Objects::nonNull)
             .toList();
 
@@ -102,10 +109,12 @@ public class StockPerformanceService {
             .sum();
     }
 
-    private StockPerformance getGainLossPercentage(AssetModel asset, Instant startTime) {
-        List<StockPriceCache> prices;
+    private StockPerformance getGainLossPercentage(AssetModel asset, Instant startTime, java.util.Map<String, com.portfolio.model.market.MarketData> marketData) {
+        double currentPrice;
+        
         if (startTime != null) {
-            prices = stockPriceRedisService.getHistoricalPrices(
+            // Use historical data for time-based analysis
+            List<StockPriceCache> prices = stockPriceRedisService.getHistoricalPrices(
                 asset.getSymbol(),
                 startTime.atZone(java.time.ZoneOffset.UTC).toLocalDateTime(),
                 LocalDateTime.now()
@@ -114,16 +123,25 @@ public class StockPerformanceService {
                 log.warn("No historical price data found for symbol: {} since {}", asset.getSymbol(), startTime);
                 return null;
             }
+            currentPrice = prices.get(prices.size() - 1).getClosePrice();
         } else {
-            var latestPrice = stockPriceRedisService.getLatestPrice(asset.getSymbol());
-            if (latestPrice.isEmpty()) {
-                log.warn("No price data found for symbol: {}", asset.getSymbol());
+            // Use market data service for current prices
+            var data = marketData.get(asset.getSymbol());
+            if (data == null) {
+                log.warn("No market data found for symbol: {}", asset.getSymbol());
                 return null;
             }
-            prices = List.of(latestPrice.get());
+
+            
+            // Access close price from OHLC data
+            if (data.getOhlc() != null && data.getLastPrice() !=null) {
+                currentPrice = data.getLastPrice();
+            } else {
+                // Fallback to last price if OHLC is not available
+                currentPrice = data.getOhlc().getClose();
+            }
         }
 
-        double currentPrice = prices.get(prices.size() - 1).getClosePrice();
         double averagePrice = asset.getAvgBuyingPrice();
         double quantity = asset.getQuantity();
         double gainLoss = (currentPrice - averagePrice) * quantity;

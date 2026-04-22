@@ -15,7 +15,7 @@ import com.portfolio.marketdata.service.NseIndicesService;
  * Auto-configuration for the Market Data API module.
  */
 @Configuration
-@EnableConfigurationProperties(value = {MarketDataApiConfig.class, NseIndicesApiConfig.class})
+@EnableConfigurationProperties(value = {MarketDataApiConfig.class})
 @ComponentScan(basePackages = "com.portfolio.marketdata")
 public class MarketDataAutoConfiguration {
 
@@ -33,7 +33,7 @@ public class MarketDataAutoConfiguration {
     
     @Bean
     @ConditionalOnMissingBean
-    public NseIndicesApiClient nseIndicesApiClient(NseIndicesApiConfig config) {
+    public NseIndicesApiClient nseIndicesApiClient(MarketDataApiConfig config) {
         return new NseIndicesApiClient(config);
     }
     

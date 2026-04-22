@@ -1,0 +1,202 @@
+{
+    "info": {
+        "_postman_id": "portfolio-basket-collection",
+        "name": "Portfolio Basket API",
+        "description": "Collection for Portfolio Basket Opportunities, Exposure Analysis, and Allocation endpoints with portfolio-aware tracking",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Get Opportunities",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"userId\": \"ssd2658\",\n    \"portfolioId\": \"163d0143-4fcb-480c-ac20-622f14e0e293\",\n    \"etfQuery\": \"NIFTY\",\n    \"userHoldings\": []\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:8060/api/v1/basket/opportunities",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "8060",
+                    "path": [
+                        "api",
+                        "v1",
+                        "basket",
+                        "opportunities"
+                    ]
+                },
+                "description": "Find basket opportunities that match user's holdings against ETFs. Returns match scores and replication details."
+            },
+            "response": []
+        },
+        {
+            "name": "Cumulative Exposure",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"userId\": \"ssd2658\",\n    \"portfolioId\": \"163d0143-4fcb-480c-ac20-622f14e0e293\",\n    \"userHoldings\": []\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:8060/api/v1/basket/exposure",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "8060",
+                    "path": [
+                        "api",
+                        "v1",
+                        "basket",
+                        "exposure"
+                    ]
+                },
+                "description": "Calculate cumulative exposure across direct holdings and indirect holdings via ETFs. Returns stock-wise and sector-wise exposure with portfolio metadata. Null values are excluded from response."
+            },
+            "response": []
+        },
+        {
+            "name": "Portfolio Allocations",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"userId\": \"ssd2658\",\n    \"portfolioId\": \"163d0143-4fcb-480c-ac20-622f14e0e293\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:8060/api/v1/basket/allocations",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "8060",
+                    "path": [
+                        "api",
+                        "v1",
+                        "basket",
+                        "allocations"
+                    ]
+                },
+                "description": "Get comprehensive portfolio allocation data for UI visualization. Includes:\n- Overview stats (total stocks, direct/indirect counts)\n- Stock-wise allocations with source breakdown\n- Sector-wise allocations with percentages\n- Direct vs indirect breakdown by portfolio and ETF\n\nAll null values are excluded from response."
+            },
+            "response": []
+        },
+        {
+            "name": "Portfolio Allocations - All Portfolios",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"userId\": \"ssd2658\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:8060/api/v1/basket/allocations",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "8060",
+                    "path": [
+                        "api",
+                        "v1",
+                        "basket",
+                        "allocations"
+                    ]
+                },
+                "description": "Get allocation data for all portfolios of a user. Aggregates holdings across multiple portfolios with source attribution."
+            },
+            "response": []
+        },
+        {
+            "name": "Portfolio Allocations - Manual Holdings",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"userId\": null,\n    \"userHoldings\": [\n        {\n            \"isin\": \"INE848E01016\",\n            \"symbol\": \"NHPC\",\n            \"sector\": \"Power Generation\",\n            \"currentValue\": 50000,\n            \"portfolioId\": \"manual-portfolio-1\",\n            \"portfolioName\": \"Test Portfolio\"\n        },\n        {\n            \"isin\": \"INE040A01034\",\n            \"symbol\": \"HDFC\",\n            \"sector\": \"Banking\",\n            \"currentValue\": 75000,\n            \"portfolioId\": \"manual-portfolio-1\",\n            \"portfolioName\": \"Test Portfolio\"\n        }\n    ]\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:8060/api/v1/basket/allocations",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "8060",
+                    "path": [
+                        "api",
+                        "v1",
+                        "basket",
+                        "allocations"
+                    ]
+                },
+                "description": "Test allocation calculation with manually provided holdings. Useful for testing without database access."
+            },
+            "response": []
+        },
+        {
+            "name": "Get Preview",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"etfIsin\": \"INF204KB14I2\",\n    \"userId\": \"ssd2658\",\n    \"portfolioId\": \"163d0143-4fcb-480c-ac20-622f14e0e293\"\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:8060/api/v1/basket/preview",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "8060",
+                    "path": [
+                        "api",
+                        "v1",
+                        "basket",
+                        "preview"
+                    ]
+                },
+                "description": "Preview basket composition for a specific ETF against user's current holdings. Shows what stocks need to be bought to replicate the ETF."
+            },
+            "response": []
+        }
+    ]
+}

@@ -38,12 +38,13 @@
             <version>${project.version}</version>
         </dependency>
 
+
+        
         <dependency>
             <groupId>com.portfolio</groupId>
-            <artifactId>portfolio-kafka</artifactId>
+            <artifactId>portfolio-basket</artifactId>
             <version>${project.version}</version>
         </dependency>
-        
 
         <!-- Spring Boot -->
         <dependency>

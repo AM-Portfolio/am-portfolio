@@ -17,10 +17,23 @@ public class BasePortfolioSummay {
 
     private Double investmentValue;
     private Double currentValue;
+    
+    // Overall performance metrics
     private Double totalGainLoss;
     private Double totalGainLossPercentage;
+    
+    // Today's performance metrics
+    private Double todayGainLoss;
+    private Double todayGainLossPercentage;
+    
+    // Portfolio statistics
     private Integer totalAssets;
     private Integer gainersCount;
     private Integer losersCount;
+    
+    // Day trading statistics
+    private Integer todayGainersCount;
+    private Integer todayLosersCount;
+    
     private LocalDateTime lastUpdated;
 }

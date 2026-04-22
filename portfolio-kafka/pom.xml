@@ -27,6 +27,13 @@
             <version>${project.version}</version>
         </dependency>
         
+        <!-- Portfolio Service -->
+        <dependency>
+            <groupId>com.portfolio</groupId>
+            <artifactId>portfolio-service</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        
         <!-- Portfolio Redis -->
         <dependency>
             <groupId>com.portfolio</groupId>
@@ -76,6 +83,11 @@
             <artifactId>spring-kafka-test</artifactId>
             <version>${spring-kafka.version}</version>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.annotation</groupId>
+            <artifactId>jakarta.annotation-api</artifactId>
+            <version>2.1.1</version>
         </dependency>
     </dependencies>
 </project>

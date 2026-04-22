@@ -20,11 +20,6 @@
           <artifactId>am-common-data-service</artifactId>
           <version>${am.common.version}</version>
         </dependency>
-     <dependency>
-          <groupId>com.am.common</groupId>
-          <artifactId>am-common-investment-model</artifactId>
-          <version>${am.common.version}</version>
-        </dependency>
         <dependency>
             <groupId>com.portfolio</groupId>
             <artifactId>portfolio-model</artifactId>

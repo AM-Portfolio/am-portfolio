@@ -130,7 +130,7 @@ public class StockPriceRedisService {
     private StockPriceCache convertToStockPriceCache(EquityPrice price) {
         return StockPriceCache.builder()
             .symbol(price.getSymbol())
-            .closePrice(price.getClose())
+            .closePrice(price.getLastPrice())
             .timestamp(price.getTime())
             .build();
     }
