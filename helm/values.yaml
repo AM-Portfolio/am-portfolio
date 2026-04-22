@@ -1,6 +1,21 @@
 # am-portfolio Universal Chart Values
 
 replicaCount: 1
+language: java
+environment: preprod
+
+# Top-level service account (Fallback)
+serviceAccountName: am-backend-sa
+
+global:
+  image:
+    registry: ghcr.io/am-portfolio
+    pullPolicy: Always
+  # Global vault settings
+  vault:
+    enabled: true
+    role: "am-backend-role"
+    serviceAccountName: "am-backend-sa"
 
 image:
   repository: am-portfolio
@@ -10,30 +25,82 @@ service:
   type: ClusterIP
   port: 8080
 
+security:
+  automountServiceAccountToken: true
+
 # Vault Secret Injection Configuration
 vault:
   enabled: true
+  serviceAccountName: am-backend-sa
   role: am-backend-role
-  secrets:
-    - name: auth
+  secretPaths:
+    auth:
       path: apps/data/preprod/services/am-auth
-    - name: infra
-      path: apps/data/preprod/infra/postgres
-    - name: portfolio
+      template: |
+        {{- range $sk, $sv := .Data.data }}
+        {{- if eq $sk "JWT_SECRET_KEY" }}
+        export JWT_SECRET="{{ $sv }}"
+        export INTERNAL_JWT_SECRET="{{ $sv }}"
+        {{- else }}
+        export {{ $sk }}="{{ $sv }}"
+        {{- end }}
+        {{- end }}
+    portfolio:
       path: apps/data/preprod/services/am-portfolio
-  
-  # Template to export secrets as environment variables
-  template: |
-    {{- with secret "apps/data/preprod/services/am-portfolio" -}}
-    {{- range $k, $v := .Data.data }}
-    export {{ $k }}="{{ $v }}"
-    {{- end }}
-    {{- end }}
-    {{- with secret "apps/data/preprod/infra/postgres" -}}
-    {{- range $k, $v := .Data.data }}
-    export {{ $k }}="{{ $v }}"
-    {{- end }}
-    {{- end }}
+      template: |
+        {{- range $sk, $sv := .Data.data }}
+        export {{ $sk }}="{{ $sv }}"
+        {{- end }}
+    mongodb:
+      path: apps/data/preprod/infra/mongodb
+      template: |
+        {{- with secret "apps/data/preprod/infra/mongodb" -}}
+        export MONGODB_URL="{{ .Data.data.url }}/portfolio?authSource=admin"
+        {{- end }}
+    kafka:
+      path: apps/data/preprod/infra/kafka
+      template: |
+        {{- range $sk, $sv := .Data.data }}
+        {{- if eq $sk "bootstrap_servers" }}
+        export KAFKA_BOOTSTRAP_SERVERS="{{ $sv }}"
+        {{- else if eq $sk "username" }}
+        export KAFKA_USERNAME="{{ $sv }}"
+        {{- else if eq $sk "password" }}
+        export KAFKA_PASSWORD="{{ $sv }}"
+        {{- end }}
+        {{- end }}
+        export KAFKA_SECURITY_PROTOCOL="SASL_PLAINTEXT"
+        export KAFKA_SASL_MECHANISM="SCRAM-SHA-256"
+        export KAFKA_JAAS_CONFIG="org.apache.kafka.common.security.scram.ScramLoginModule required username=\"$KAFKA_USERNAME\" password=\"$KAFKA_PASSWORD\";"
+    redis:
+      path: apps/data/preprod/infra/redis
+      template: |
+        {{- range $sk, $sv := .Data.data }}
+        {{- if eq $sk "host" }}
+        export REDIS_HOSTNAME="{{ $sv }}"
+        {{- else if eq $sk "port" }}
+        export REDIS_PORT="{{ $sv }}"
+        {{- else if eq $sk "password" }}
+        export REDIS_PASSWORD="{{ $sv }}"
+        {{- end }}
+        {{- end }}
+
+env:
+  MARKET_DATA_API_URL: "http://am-market-data:8092"
+  ETF_API_URL: "http://am-parser:8022"
+  SPRING_PROFILES_ACTIVE: "preprod"
+  LOG_LEVEL: "INFO"
+
+probes:
+  port: 8080
+  liveness:
+    path: /actuator/health/liveness
+    initialDelaySeconds: 150
+    periodSeconds: 15
+  readiness:
+    path: /actuator/health/readiness
+    initialDelaySeconds: 150
+    periodSeconds: 15
 
 resources:
   limits:
@@ -42,20 +109,6 @@ resources:
   requests:
     cpu: 500m
     memory: 512Mi
-
-livenessProbe:
-  httpGet:
-    path: /actuator/health/liveness
-    port: 8080
-  initialDelaySeconds: 60
-  periodSeconds: 10
-
-readinessProbe:
-  httpGet:
-    path: /actuator/health/readiness
-    port: 8080
-  initialDelaySeconds: 60
-  periodSeconds: 10
 
 ingress:
   enabled: true

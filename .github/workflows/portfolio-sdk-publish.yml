@@ -3,12 +3,12 @@ name: Portfolio SDK Publish
 on:
   push:
     paths:
-      - 'portfolio-sdk/**'
-      - 'sdk/**'
+      - "portfolio-sdk/**"
+      - "sdk/**"
   pull_request:
     paths:
-      - 'portfolio-sdk/**'
-      - 'sdk/**'
+      - "portfolio-sdk/**"
+      - "sdk/**"
   workflow_dispatch:
 
 jobs:
@@ -46,13 +46,13 @@ jobs:
     permissions:
       contents: write
       packages: write
-    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
+    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@develop
     with:
-      language: 'java'
-      working_directory: 'portfolio-sdk'
-      sdk_name: 'portfolio-sdk'
-      maven_repo_id: 'github'
-      maven_repo_url: 'https://maven.pkg.github.com/AM-Portfolio/am-portfolio'
+      language: "java"
+      working_directory: "portfolio-sdk"
+      sdk_name: "portfolio-sdk"
+      maven_repo_id: "github"
+      maven_repo_url: "https://maven.pkg.github.com/AM-Portfolio/am-portfolio"
     secrets: inherit
 
   # 3. Publish Multi-Language SDKs (Generated)
@@ -63,13 +63,13 @@ jobs:
     permissions:
       contents: write
       packages: write
-    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
+    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@develop
     with:
-      language: 'java'
-      working_directory: 'sdk/java'
-      sdk_name: 'portfolio-sdk-java'
-      maven_repo_id: 'github'
-      maven_repo_url: 'https://maven.pkg.github.com/AM-Portfolio/am-portfolio'
+      language: "java"
+      working_directory: "sdk/java"
+      sdk_name: "portfolio-sdk-java"
+      maven_repo_id: "github"
+      maven_repo_url: "https://maven.pkg.github.com/AM-Portfolio/am-portfolio"
     secrets: inherit
 
   publish-python:
@@ -79,13 +79,13 @@ jobs:
     permissions:
       contents: write
       packages: write
-    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
+    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@develop
     with:
-      language: 'python'
-      working_directory: 'sdk/python'
-      sdk_name: 'portfolio-sdk-python'
-      maven_repo_id: 'github'
-      maven_repo_url: 'https://maven.pkg.github.com/AM-Portfolio/am-portfolio'
+      language: "python"
+      working_directory: "sdk/python"
+      sdk_name: "portfolio-sdk-python"
+      maven_repo_id: "github"
+      maven_repo_url: "https://maven.pkg.github.com/AM-Portfolio/am-portfolio"
     secrets: inherit
 
   publish-flutter:
@@ -95,11 +95,11 @@ jobs:
     permissions:
       contents: write
       packages: write
-    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
+    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@develop
     with:
-      language: 'flutter'
-      working_directory: 'sdk/flutter'
-      sdk_name: 'portfolio-sdk-flutter'
-      maven_repo_id: 'github'
-      maven_repo_url: 'https://maven.pkg.github.com/AM-Portfolio/am-portfolio'
+      language: "flutter"
+      working_directory: "sdk/flutter"
+      sdk_name: "portfolio-sdk-flutter"
+      maven_repo_id: "github"
+      maven_repo_url: "https://maven.pkg.github.com/AM-Portfolio/am-portfolio"
     secrets: inherit
