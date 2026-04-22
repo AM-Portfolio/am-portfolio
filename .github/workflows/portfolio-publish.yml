@@ -31,7 +31,5 @@ jobs:
       working_directory: "."
       image_name: "am-portfolio"
       build_context: "."
-      preprod_namespace: "am-apps-preprod"
-      prod_namespace: "am-apps-prod"
       deploy_prod: true
     secrets: inherit

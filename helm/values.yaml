@@ -10,6 +10,9 @@ service:
   type: ClusterIP
   port: 8080
 
+security:
+  automountServiceAccountToken: true
+
 # Vault Secret Injection Configuration
 vault:
   enabled: true
