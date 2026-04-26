@@ -46,7 +46,7 @@ jobs:
     permissions:
       contents: write
       packages: write
-    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@develop
+    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
     with:
       language: "java"
       working_directory: "portfolio-sdk"
@@ -63,7 +63,7 @@ jobs:
     permissions:
       contents: write
       packages: write
-    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@develop
+    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
     with:
       language: "java"
       working_directory: "sdk/java"
@@ -79,7 +79,7 @@ jobs:
     permissions:
       contents: write
       packages: write
-    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@develop
+    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
     with:
       language: "python"
       working_directory: "sdk/python"
@@ -95,7 +95,7 @@ jobs:
     permissions:
       contents: write
       packages: write
-    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@develop
+    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
     with:
       language: "flutter"
       working_directory: "sdk/flutter"
