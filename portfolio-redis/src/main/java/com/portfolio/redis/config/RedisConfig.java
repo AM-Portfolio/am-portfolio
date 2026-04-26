@@ -34,6 +34,9 @@ public class RedisConfig {
     @Value("${spring.data.redis.host}")
     private String redisHost;
 
+    @Value("${spring.data.redis.port:6379}")
+    private int redisPort;
+
     @Value("${spring.data.redis.password}")
     private String redisPassword;
 
@@ -44,11 +47,11 @@ public class RedisConfig {
     public RedisConnectionFactory redisConnectionFactory() {
         RedisStandaloneConfiguration redisConfig = new RedisStandaloneConfiguration();
         
-        log.info("Redis connection details - Host: {}, Port: {}", redisHost, 6379);
+        log.info("Redis connection details - Host: {}, Port: {}", redisHost, redisPort);
         log.info("Redis password is {}", redisPassword != null && !redisPassword.isEmpty() ? "provided" : "not provided");
         
         redisConfig.setHostName(redisHost);
-        //redisConfig.setPort(6379);
+        redisConfig.setPort(redisPort);
         
         if (redisPassword != null && !redisPassword.isEmpty()) {
             log.info("Setting Redis password for authentication");

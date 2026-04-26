@@ -9,14 +9,16 @@ vault:
     mongodb:
       mappings:
         MONGODB_CONNECTION_URL: "url"
+        SPRING_DATA_MONGODB_URI: "url"
     kafka:
       mappings:
         KAFKA_BOOTSTRAP_SERVERS: "bootstrap_servers"
+        SPRING_KAFKA_BOOTSTRAP_SERVERS: "bootstrap_servers"
         KAFKA_JAAS_CONFIG: "__jaas__"
         KAFKA_USERNAME: "username"
         KAFKA_PASSWORD: "password"
     redis:
       mappings:
-        REDIS_HOSTNAME: "host"
-        REDIS_PASSWORD: "password"
-        REDIS_PORT: "port"
+        SPRING_DATA_REDIS_HOST: "host"
+        SPRING_DATA_REDIS_PASSWORD: "password"
+        SPRING_DATA_REDIS_PORT: "port"
