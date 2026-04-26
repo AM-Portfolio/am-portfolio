@@ -11,24 +11,13 @@ resources:
     memory: 512Mi
 
 vault:
-  secrets:
-    - name: auth
+  secretPaths:
+    auth:
       path: apps/data/prod/services/am-auth
-    - name: infra
+    infra:
       path: apps/data/prod/infra/postgres
-    - name: portfolio
+    portfolio:
       path: apps/data/prod/services/am-portfolio
-  template: |
-    {{- with secret "apps/data/prod/services/am-portfolio" -}}
-    {{- range $k, $v := .Data.data }}
-    export {{ $k }}="{{ $v }}"
-    {{- end }}
-    {{- end }}
-    {{- with secret "apps/data/prod/infra/postgres" -}}
-    {{- range $k, $v := .Data.data }}
-    export {{ $k }}="{{ $v }}"
-    {{- end }}
-    {{- end }}
 
 ingress:
   hosts:

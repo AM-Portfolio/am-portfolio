@@ -78,6 +78,7 @@ spring:
           ttl: 129600 # 30 Days in seconds
     mongodb:
       uri: ${MONGODB_CONNECTION_URL}
+      database: ${MONGODB_DATABASE:portfolio}
       authentication-database: admin
   # Disable JDBC auto-configuration since we're using MongoDB
   autoconfigure:
@@ -168,3 +169,29 @@ logging:
     com.am.common: INFO
     com.am.common.amcommondata: INFO
     org.springframework.kafka: INFO
+# Management/Actuator Configuration
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+      validate-group-membership: false
+      group:
+        readiness:
+          include: mongo,redis,kafka,readinessState
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+    mongo:
+      enabled: true
+    redis:
+      enabled: true
+    kafka:
+      enabled: true

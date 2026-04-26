@@ -1,0 +1,22 @@
+vault:
+  secretPaths:
+    auth:
+      mappings:
+        JWT_SECRET: "JWT_SECRET_KEY"
+        INTERNAL_JWT_SECRET: "JWT_SECRET_KEY"
+    portfolio:
+      # No mappings needed, defaults to dump-all uppercased
+    mongodb:
+      mappings:
+        MONGODB_CONNECTION_URL: "url"
+    kafka:
+      mappings:
+        KAFKA_BOOTSTRAP_SERVERS: "bootstrap_servers"
+        KAFKA_JAAS_CONFIG: "__jaas__"
+        KAFKA_USERNAME: "username"
+        KAFKA_PASSWORD: "password"
+    redis:
+      mappings:
+        REDIS_HOSTNAME: "host"
+        REDIS_PASSWORD: "password"
+        REDIS_PORT: "port"

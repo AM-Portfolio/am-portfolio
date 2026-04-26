@@ -11,12 +11,12 @@ resources:
     memory: 256Mi
 
 vault:
-  secrets:
-    - name: auth
+  secretPaths:
+    auth:
       path: apps/data/preprod/services/am-auth
-    - name: infra
+    infra:
       path: apps/data/preprod/infra/postgres
-    - name: portfolio
+    portfolio:
       path: apps/data/preprod/services/am-portfolio
 
 ingress:
