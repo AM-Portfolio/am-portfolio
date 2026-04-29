@@ -2,8 +2,8 @@ vault:
   secretPaths:
     auth:
       mappings:
-        JWT_SECRET: "JWT_SECRET_KEY"
-        INTERNAL_JWT_SECRET: "JWT_SECRET_KEY"
+        JWT_SECRET: "JWT_SECRET"
+        INTERNAL_SECRET_KEY: "SECRET_KEY"
     portfolio:
       # No mappings needed, defaults to dump-all uppercased
     mongodb:

@@ -109,7 +109,7 @@ nse:
 
 app:
   jwt:
-    internal-secret: ${INTERNAL_JWT_SECRET:internal-service-super-secret-key-32chars-minimum-change-in-prod}
+    internal-secret: ${INTERNAL_SECRET_KEY:internal-service-super-secret-key-32chars-minimum-change-in-prod}
     secret: ${JWT_SECRET:internal-service-super-secret-key-32chars-minimum-change-in-prod}
     algorithm: ${JWT_ALGORITHM:HS256}
   kafka:
