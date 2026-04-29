@@ -8,7 +8,7 @@ vault:
       # No mappings needed, defaults to dump-all uppercased
     market-data:
       mappings:
-        MARKET_DATA_API_URL: "url"
+        MARKET_DATA_API_URL: "URL"
     mongodb:
       mappings:
         MONGODB_CONNECTION_URL: "url"
