@@ -20,7 +20,7 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "app.kafka.stock-indices.consumer.enabled", havingValue = "true", matchIfMissing = false)
+@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = true)
 public class StockIndicesUpdateConsumerService {
 
     private final ObjectMapper objectMapper;

@@ -60,3 +60,6 @@ application-*.yml
 *.tmp
 *.bak
 *.orig
+
+### Secrets ###
+.env*

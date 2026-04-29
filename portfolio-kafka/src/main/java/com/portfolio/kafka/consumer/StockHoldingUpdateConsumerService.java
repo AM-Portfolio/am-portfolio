@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "app.kafka.holding.consumer.enabled", havingValue = "true", matchIfMissing = false)
+@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = true)
 public class StockHoldingUpdateConsumerService {
 
     private final ObjectMapper objectMapper;
