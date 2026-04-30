@@ -53,9 +53,13 @@ public class PortfolioCalculator {
         log.debug("Fetched market data for {} out of {} symbols", marketDataMap.size(), symbols.size());
 
         // Fetch market cap data for all symbols
+        List<String> cleanedSymbols = symbols.stream()
+                .map(marketDataService::cleanSymbol)
+                .collect(Collectors.toList());
+        
         Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap = marketDataService
-                .getMarketCapData(symbols);
-        log.debug("Fetched market cap data for {} out of {} symbols", marketCapMap.size(), symbols.size());
+                .getMarketCapData(cleanedSymbols);
+        log.debug("Fetched market cap data for {} out of {} symbols", marketCapMap.size(), cleanedSymbols.size());
 
         // Enrich each holding
         return equityHoldings.stream()
@@ -70,8 +74,9 @@ public class PortfolioCalculator {
             return holding;
 
         // Enrich with market cap data
-        if (marketCapMap != null && marketCapMap.containsKey(symbol)) {
-            var match = marketCapMap.get(symbol);
+        String cleanedSymbol = marketDataService.cleanSymbol(symbol);
+        if (marketCapMap != null && marketCapMap.containsKey(cleanedSymbol)) {
+            var match = marketCapMap.get(cleanedSymbol);
             if (match.getMarketCapValue() != null) {
                 // Convert Long to Double as EquityHoldings expects Double for marketCapValue
                 holding.setMarketCapValue(match.getMarketCapValue().doubleValue());
@@ -85,7 +90,8 @@ public class PortfolioCalculator {
             }
         }
 
-        MarketData marketData = marketDataMap.get(symbol);
+        // Use cleaned symbol for lookup as MarketDataService returns cleaned keys
+        MarketData marketData = marketDataMap.get(cleanedSymbol);
 
         Double currentPrice = null;
         Double previousClosePrice = null;

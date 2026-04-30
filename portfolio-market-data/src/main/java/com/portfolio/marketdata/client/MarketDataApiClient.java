@@ -46,7 +46,12 @@ public class MarketDataApiClient extends AbstractApiClient {
          * @return a Mono of MarketDataResponseWrapper
          */
         public Mono<MarketDataResponseWrapper> getOhlcData(List<String> symbols, String timeFrame, boolean refresh) {
-                String symbolsParam = String.join(",", symbols);
+                // Clean symbols by removing exchange prefix (e.g. NSE_EQ:) if present
+                List<String> cleanedSymbols = symbols.stream()
+                                .map(s -> s.contains(":") ? s.substring(s.indexOf(":") + 1) : s)
+                                .collect(java.util.stream.Collectors.toList());
+
+                String symbolsParam = String.join(",", cleanedSymbols);
 
                 OhlcDataRequest request = OhlcDataRequest.builder()
                                 .symbols(symbolsParam)

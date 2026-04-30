@@ -104,7 +104,7 @@ public class MarketDataService {
      * @param symbol The symbol with potential exchange prefix
      * @return The cleaned symbol without the exchange prefix
      */
-    private String cleanSymbol(String symbol) {
+    public String cleanSymbol(String symbol) {
         if (symbol == null || symbol.isEmpty()) {
             return symbol;
         }
@@ -150,9 +150,18 @@ public class MarketDataService {
     public Map<String, MarketData> getOhlcData(List<String> symbols, boolean refresh) {
         log.info("Getting OHLC data for {} symbols with refresh={}", symbols.size(), refresh);
 
+        if (symbols == null || symbols.isEmpty()) {
+            return Map.of();
+        }
+
+        // Clean symbols before sending to the client
+        List<String> cleanedSymbols = symbols.stream()
+                .map(this::cleanSymbol)
+                .collect(Collectors.toList());
+
         try {
             MarketDataResponseWrapper wrapper = marketDataApiClient
-                    .getOhlcData(symbols, TimeFrame.FIVE_MIN.getValue(), refresh).block();
+                    .getOhlcData(cleanedSymbols, TimeFrame.FIVE_MIN.getValue(), refresh).block();
             return convertToMarketDataMap(wrapper, false);
         } catch (Exception e) {
             log.error("Error fetching OHLC data: {}", e.getMessage(), e);
@@ -300,11 +309,16 @@ public class MarketDataService {
             return Collections.emptyMap();
         }
 
-        log.info("Fetching market cap data for {} symbols", symbols.size());
+        // Clean symbols before sending to the client
+        List<String> cleanedSymbols = symbols.stream()
+                .map(this::cleanSymbol)
+                .collect(Collectors.toList());
+
+        log.info("Fetching market cap data for {} symbols", cleanedSymbols.size());
         try {
             com.portfolio.marketdata.model.BatchSearchRequest request = com.portfolio.marketdata.model.BatchSearchRequest
                     .builder()
-                    .queries(symbols)
+                    .queries(cleanedSymbols)
                     .limit(1) // We only need the best match per symbol (usually exact match)
                     .minMatchScore(0.9) // High confidence for exact symbol match
                     .build();
