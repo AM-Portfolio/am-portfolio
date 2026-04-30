@@ -117,21 +117,21 @@ app:
     portfolio:
       consumer:
         id: ${PORTFOLIO_CONSUMER_GROUP}
-        enabled: true
+        enabled: ${KAFKA_ENABLED:true}
       topic: ${PORTFOLIO_TOPIC_NAME}
     stock:
       consumer:
         id: ${STOCK_CONSUMER_GROUP}
-        enabled: true
+        enabled: ${KAFKA_ENABLED:true}
       topic: ${STOCK_TOPIC_NAME}
     market-index:
       consumer:
         id: ${MARKET_INDEX_CONSUMER_GROUP}
-        enabled: true
+        enabled: ${KAFKA_ENABLED:true}
       topic: ${MARKET_INDEX_TOPIC_NAME}
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
   servlet:
     context-path: /
   tomcat:
@@ -182,7 +182,7 @@ management:
       validate-group-membership: false
       group:
         readiness:
-          include: mongo,redis,kafka,readinessState
+          include: mongo,redis,readinessState
   health:
     livenessstate:
       enabled: true
@@ -193,4 +193,4 @@ management:
     redis:
       enabled: true
     kafka:
-      enabled: true
+      enabled: ${KAFKA_ENABLED:true}
