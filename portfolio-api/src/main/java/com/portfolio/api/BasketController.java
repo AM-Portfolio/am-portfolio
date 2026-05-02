@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/v1/basket")
+@RequestMapping("/v1/basket")
 @RequiredArgsConstructor
 @Slf4j
 public class BasketController {
