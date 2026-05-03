@@ -131,7 +131,7 @@ app:
       topic: ${MARKET_INDEX_TOPIC_NAME}
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8060}
   servlet:
     context-path: /
   tomcat:
@@ -144,7 +144,7 @@ etf:
 
 market-data:
   api:
-    base-url: ${MARKET_DATA_API_URL:http://localhost:8092}
+    base-url: ${MARKET_DATA_API_URL:https://am.asrax.in/market}
     ohlc-endpoint: /v1/market-data/ohlc
     historical-data-endpoint: /v1/market-data/historical-data
     securities-endpoint: /v1/securities

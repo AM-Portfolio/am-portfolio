@@ -63,3 +63,4 @@ application-*.yml
 
 ### Secrets ###
 .env*
+seed-local-db.js
