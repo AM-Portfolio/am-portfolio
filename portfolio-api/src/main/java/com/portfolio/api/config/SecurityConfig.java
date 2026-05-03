@@ -50,19 +50,17 @@ public class SecurityConfig {
                                                                 AntPathRequestMatcher.antMatcher("/swagger-ui/**"),
                                                                 AntPathRequestMatcher.antMatcher("/v3/api-docs/**"),
                                                                 AntPathRequestMatcher.antMatcher("/api-docs/**"),
-                                                                AntPathRequestMatcher.antMatcher("/error"),
-                                                                AntPathRequestMatcher.antMatcher("/**"))
+                                                                AntPathRequestMatcher.antMatcher("/error"))
                                                 .permitAll()
 
                                                 // ✅ PROTECTED ENDPOINTS - Require valid JWT
-                                                // .requestMatchers(
-                                                // "/api/v1/portfolios/**", // All portfolio operations
-                                                // "/api/v1/portfolio-analytics/**", // Analytics endpoints
-                                                // "/api/v1/market-data/**", // Market data endpoints
-                                                // "/api/v1/market-index/**", // Market index endpoints
-                                                // "/api/v1/index-analytics/**" // Index analytics
-                                                // // endpoints
-                                                // ).authenticated()
+                                                .requestMatchers(
+                                                                AntPathRequestMatcher.antMatcher("/api/v1/portfolios/**"),
+                                                                AntPathRequestMatcher.antMatcher("/api/v1/portfolio-analytics/**"),
+                                                                AntPathRequestMatcher.antMatcher("/api/v1/market-data/**"),
+                                                                AntPathRequestMatcher.antMatcher("/api/v1/market-index/**"),
+                                                                AntPathRequestMatcher.antMatcher("/api/v1/index-analytics/**"))
+                                                .authenticated()
 
                                                 // ❌ Deny all other endpoints (fail secure)
                                                 .anyRequest().denyAll())

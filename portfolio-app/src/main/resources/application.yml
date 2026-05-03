@@ -154,7 +154,7 @@ market-data:
     connect-timeout-ms: ${MARKET_DATA_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:45000}
   api:
-    base-url: ${MARKET_DATA_API_URL:http://localhost:8092}
+    base-url: ${MARKET_DATA_API_URL:https://am.asrax.in/market}
     ohlc-endpoint: /v1/market-data/ohlc
     historical-data-endpoint: /v1/market-data/historical-data
     securities-endpoint: /v1/securities

@@ -34,7 +34,7 @@ public enum TimeInterval {
     }
 
     public static TimeInterval fromCode(String code) {
-        if (code == null) return OVERALL;
+        if (code == null || code.trim().isEmpty()) return OVERALL;
         
         for (TimeInterval interval : values()) {
             if (interval.getCode().equalsIgnoreCase(code)) {

@@ -70,6 +70,7 @@ application-*.yml
 .env.deploy
 .env.preprod
 .env.dev
+seed-local-db.js
 
 # Vault / credential dumps (scripts write gitignored .env.* only)
 vault/backups/
