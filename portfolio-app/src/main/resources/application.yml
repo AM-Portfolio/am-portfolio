@@ -178,6 +178,7 @@ logging:
     com.am.common: INFO
     com.am.common.amcommondata: INFO
     org.springframework.kafka: INFO
+
 # Management/Actuator Configuration
 management:
   endpoints:
