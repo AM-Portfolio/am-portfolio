@@ -131,7 +131,7 @@ app:
       topic: ${MARKET_INDEX_TOPIC_NAME}
 
 server:
-  port: ${SERVER_PORT:8060}
+  port: 8080
   servlet:
     context-path: /
   tomcat:
@@ -168,6 +168,7 @@ logging:
     com.am.common: INFO
     com.am.common.amcommondata: INFO
     org.springframework.kafka: INFO
+
 # Management/Actuator Configuration
 management:
   endpoints:
