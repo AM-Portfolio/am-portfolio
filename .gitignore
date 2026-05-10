@@ -82,3 +82,6 @@ credentials.json
 *.p12
 *.key
 !**/src/test/**/*.key
+
+### Custom ###
+test-portfolio
