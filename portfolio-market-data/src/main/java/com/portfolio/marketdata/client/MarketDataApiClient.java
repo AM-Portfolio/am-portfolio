@@ -85,6 +85,9 @@ public class MarketDataApiClient extends AbstractApiClient {
                                                                                         key, e);
                                                                 }
                                                         }
+                                                } else {
+                                                        log.error("Expected payload to be a Map but got {}", actualData != null ? actualData.getClass().getName() : "null");
+                                                        throw new IllegalStateException("Invalid payload structure from Market Data API: expected Map");
                                                 }
                                         }
                                         wrapper.setData(dataMap);
