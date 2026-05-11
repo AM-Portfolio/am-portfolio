@@ -1,5 +1,7 @@
 package com.portfolio.redis.config;
 
+import java.time.Duration;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -10,6 +12,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
+import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
@@ -59,8 +62,15 @@ public class RedisConfig {
         } else {
             log.warn("No Redis password provided, connecting without authentication");
         }
+
+        // Configure Lettuce client with a 5-second command timeout.
+        // This prevents health probes from hanging for 60s (Lettuce default)
+        // when Redis is in LOADING state during snapshot restore.
+        LettuceClientConfiguration clientConfig = LettuceClientConfiguration.builder()
+            .commandTimeout(Duration.ofSeconds(5))
+            .build();
         
-        return new LettuceConnectionFactory(redisConfig);
+        return new LettuceConnectionFactory(redisConfig, clientConfig);
     }
 
     @Bean

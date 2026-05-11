@@ -155,7 +155,7 @@ public class PortfolioController {
             TimeInterval timeInterval = TimeInterval.fromCode(interval);
             PortfolioSummaryV1 portfolioSummary;
 
-            if (portfolioId != null && !portfolioId.trim().isEmpty()) {
+            if (portfolioId != null && !portfolioId.trim().isEmpty() && !portfolioId.equals(userId)) {
                 // Filter by specific portfolio
                 log.info("PortfolioController - getPortfolioSummary - Filtering by portfolio: {}", portfolioId);
                 portfolioSummary = portfolioDashboardService.overviewPortfolio(userId, portfolioId, timeInterval);
@@ -200,7 +200,7 @@ public class PortfolioController {
             TimeInterval timeInterval = TimeInterval.fromCode(interval);
             PortfolioHoldings portfolioHoldings;
 
-            if (portfolioId != null && !portfolioId.trim().isEmpty()) {
+            if (portfolioId != null && !portfolioId.trim().isEmpty() && !portfolioId.equals(userId)) {
                 // Filter by specific portfolio
                 log.info("PortfolioController - getPortfolioHoldings - Filtering by portfolio: {}", portfolioId);
                 portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(userId, portfolioId, timeInterval);
