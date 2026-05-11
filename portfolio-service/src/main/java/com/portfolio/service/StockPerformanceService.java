@@ -1,10 +1,13 @@
 package com.portfolio.service;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 
@@ -15,6 +18,7 @@ import com.portfolio.model.PaginatedStockPerformance;
 import com.portfolio.model.StockPerformance;
 import com.portfolio.model.StockPerformanceGroup;
 import com.portfolio.model.cache.StockPriceCache;
+import com.portfolio.model.market.MarketData;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.redis.service.StockIndicesRedisService;
 
@@ -94,6 +98,7 @@ public class StockPerformanceService {
     public double calculateHistoricalValue(List<StockPerformance> performances, Instant startTime) {
         return performances.stream()
             .mapToDouble(performance -> {
+                // Try Redis first for cached historical prices
                 List<StockPriceCache> historicalPrices = stockPriceRedisService.getHistoricalPrices(
                     performance.getSymbol(),
                     startTime.atZone(java.time.ZoneOffset.UTC).toLocalDateTime(),
@@ -104,6 +109,26 @@ public class StockPerformanceService {
                     double historicalPrice = historicalPrices.get(0).getClosePrice();
                     return historicalPrice * performance.getQuantity();
                 }
+
+                // Fallback: fetch from market data API when Redis is empty/unavailable
+                try {
+                    LocalDate fromDate = startTime.atZone(ZoneId.systemDefault()).toLocalDate();
+                    Map<String, MarketData> historicalData = marketDataService.getHistoricalData(
+                        List.of(performance.getSymbol()),
+                        fromDate, LocalDate.now(),
+                        null, null, null, null, null, null
+                    );
+                    MarketData data = historicalData.get(performance.getSymbol());
+                    if (data != null && data.getLastPrice() > 0.0) {
+                        return data.getLastPrice() * performance.getQuantity();
+                    } else if (data != null && data.getOhlc() != null && data.getOhlc().getClose() > 0.0) {
+                        return data.getOhlc().getClose() * performance.getQuantity();
+                    }
+                } catch (Exception e) {
+                    log.warn("Fallback to market data API failed for {}: {}",
+                        performance.getSymbol(), e.getMessage());
+                }
+
                 return 0.0;
             })
             .sum();
@@ -132,13 +157,14 @@ public class StockPerformanceService {
                 return null;
             }
 
-            
-            // Access close price from OHLC data
-            if (data.getOhlc() != null && data.getLastPrice() !=null) {
+            // Priority-based price extraction: lastPrice → OHLC close → skip
+            if (data.getLastPrice() > 0.0) {
                 currentPrice = data.getLastPrice();
-            } else {
-                // Fallback to last price if OHLC is not available
+            } else if (data.getOhlc() != null && data.getOhlc().getClose() > 0.0) {
                 currentPrice = data.getOhlc().getClose();
+            } else {
+                log.warn("No price data available for symbol: {}", asset.getSymbol());
+                return null;
             }
         }
 
@@ -209,11 +235,12 @@ public class StockPerformanceService {
 
     private double calculateMedian(double[] values) {
         if (values.length == 0) return 0.0;
-        java.util.Arrays.sort(values);
-        int middle = values.length / 2;
-        if (values.length % 2 == 0) {
-            return (values[middle - 1] + values[middle]) / 2.0;
+        double[] sortedValues = values.clone();
+        java.util.Arrays.sort(sortedValues);
+        int middle = sortedValues.length / 2;
+        if (sortedValues.length % 2 == 0) {
+            return (sortedValues[middle - 1] + sortedValues[middle]) / 2.0;
         }
-        return values[middle];
+        return sortedValues[middle];
     }
 }

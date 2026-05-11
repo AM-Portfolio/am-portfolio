@@ -3,12 +3,16 @@ package com.am.common.amcommondata.model.asset.common;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import lombok.Builder;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 import java.util.List;
 
 import java.util.ArrayList;
 
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class MarketDataModel {
     private OHLCVModel latestOHLCV;
