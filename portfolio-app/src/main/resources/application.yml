@@ -148,6 +148,9 @@ market-data:
     ohlc-endpoint: /v1/market-data/ohlc
     historical-data-endpoint: /v1/market-data/historical-data
     securities-endpoint: /v1/securities
+    read-timeout: 25000
+    connection-timeout: 25000
+    max-retry-attempts: 1
 
 # OpenAPI Documentation
 springdoc:

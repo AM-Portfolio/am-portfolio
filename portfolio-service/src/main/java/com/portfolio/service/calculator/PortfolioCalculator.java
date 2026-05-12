@@ -61,9 +61,13 @@ public class PortfolioCalculator {
             marketDataMap = marketDataFuture.get(15, java.util.concurrent.TimeUnit.SECONDS);
             marketCapMap = marketCapFuture.get(15, java.util.concurrent.TimeUnit.SECONDS);
         } catch (Exception e) {
-            log.warn("Parallel market data fetch failed, falling back to sequential: {}", e.getMessage());
-            marketDataMap = marketDataService.getMarketData(symbols);
-            marketCapMap = marketDataService.getMarketCapData(symbols);
+            log.error("Parallel market data fetch timed out or failed (15s). Proceeding to check Redis cache for fallback values: {}", e.getMessage());
+            // Attempt to cancel ongoing futures
+            marketDataFuture.cancel(true);
+            marketCapFuture.cancel(true);
+            
+            marketDataMap = Map.of();
+            marketCapMap = Map.of();
         }
         log.debug("Fetched market data for {} and market cap for {} out of {} symbols",
                 marketDataMap.size(), marketCapMap.size(), symbols.size());
