@@ -11,6 +11,7 @@ vault:
         MARKET_DATA_API_URL: "URL"
     mongodb:
       mappings:
+        MONGODB_URL: "url"
         MONGODB_CONNECTION_URL: "url"
         SPRING_DATA_MONGODB_URI: "url"
     kafka:
@@ -22,6 +23,9 @@ vault:
         KAFKA_PASSWORD: "password"
     redis:
       mappings:
+        REDIS_HOSTNAME: "host"
+        REDIS_PORT: "port"
+        REDIS_PASSWORD: "password"
         SPRING_DATA_REDIS_HOST: "host"
         SPRING_DATA_REDIS_PASSWORD: "password"
         SPRING_DATA_REDIS_PORT: "port"
