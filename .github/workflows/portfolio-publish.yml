@@ -2,8 +2,7 @@ name: Portfolio Publish
 
 on:
   push:
-    branches:
-      ["main", "develop", "test/**", "feature/**", "hotfix/**", "fix/**"]
+    branches: ["main", "develop", "fix/**", "hotfix/**", "feature/**"]
     paths:
       - "portfolio-**"
       - "pom.xml"
