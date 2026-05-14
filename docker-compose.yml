@@ -38,7 +38,15 @@ services:
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       JWT_SECRET: ${JWT_SECRET}
       JWT_ALGORITHM: ${JWT_ALGORITHM}
-      
+
+      # Distributed Tracing — forward spans to the shared otel-collector (am-infra stack)
+      # The "docker" Spring profile enables JSON structured logging (logback-spring.xml)
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://otel-collector:4318/v1/traces}
+
+      # ETF / Basket API — points to the market service on the shared am-infra gateway.
+      # Fallback to production gateway URL if env var is not set in .env
+      ETF_API_URL: ${ETF_API_URL:-https://am.asrax.in/market}
+
     entrypoint: ["/bin/sh", "-c"]
     command: 
       - |

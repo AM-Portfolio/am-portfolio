@@ -17,8 +17,19 @@ import javax.crypto.spec.SecretKeySpec;
 
 /**
  * Spring Security Configuration for Portfolio Service
- * 
- * Security Model: Zero Trust (Relaxed for Local Dev)
+ *
+ * <p><b>Security Model: Gateway-Enforced Authentication</b>
+ *
+ * <p>This service is an internal microservice deployed exclusively behind
+ * {@code am-gateway}, which validates JWTs and enforces auth at the edge
+ * before forwarding requests. Direct external access is blocked by the
+ * infrastructure firewall / Traefik routing rules.
+ *
+ * <p>All endpoints are therefore open at the service level ({@code permitAll()}).
+ * The {@code jwtDecoder()} bean is available if per-service auth is needed in future.
+ *
+ * <p><b>TODO (future):</b> When the platform matures, add internal-service
+ * token validation using {@code X-Internal-Token} or mTLS.
  */
 @Configuration
 @EnableWebSecurity
@@ -34,13 +45,17 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers(AntPathRequestMatcher.antMatcher("/**")).permitAll() // ALLOW EVERYTHING FOR DEV
+                // am-portfolio is behind am-gateway which enforces JWT at the edge.
+                // All endpoints are open at the service layer — firewall blocks direct access.
+                .requestMatchers(AntPathRequestMatcher.antMatcher("/**")).permitAll()
                 .anyRequest().authenticated()
             )
             .httpBasic(basic -> basic.disable())
             .formLogin(form -> form.disable());
-            
-        // Commented out JWT validation for local development to allow direct testing
+
+        // JWT decoder is wired but not activated at service level.
+        // am-gateway is the authentication boundary for this service.
+        // Uncomment below to enable per-service JWT validation if needed:
         // .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(jwtDecoder())));
 
         return http.build();

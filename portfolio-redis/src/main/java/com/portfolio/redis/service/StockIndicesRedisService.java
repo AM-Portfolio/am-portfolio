@@ -138,6 +138,30 @@ public class StockIndicesRedisService {
         }
     }
 
+    public Map<String, StockPriceCache> getLatestPrices(List<String> symbols) {
+        if (symbols == null || symbols.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            List<String> keys = symbols.stream()
+                    .map(symbol -> stockKeyPrefix + symbol)
+                    .collect(Collectors.toList());
+            
+            List<StockPriceCache> prices = stockPriceRedisTemplate.opsForValue().multiGet(keys);
+            Map<String, StockPriceCache> priceMap = new java.util.HashMap<>();
+            
+            for (int i = 0; i < symbols.size(); i++) {
+                if (prices != null && i < prices.size() && prices.get(i) != null) {
+                    priceMap.put(symbols.get(i), prices.get(i));
+                }
+            }
+            return priceMap;
+        } catch (Exception e) {
+            log.error("Error retrieving prices batch for symbols: {}", symbols, e);
+            return Map.of();
+        }
+    }
+
     public List<StockPriceCache> getHistoricalPrices(String symbol, LocalDateTime startTime, LocalDateTime endTime) {
         try {
             String pattern = historicalKeyPrefix + symbol + ":*";

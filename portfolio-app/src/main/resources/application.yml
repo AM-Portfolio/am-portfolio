@@ -198,3 +198,35 @@ management:
       enabled: true
     kafka:
       enabled: true
+
+  # ─── Distributed Tracing (Micrometer + OTel) ────────────────────────────────
+  # Aligns am-portfolio with the am-core-services-otel stack.
+  # W3C traceparent header is the global standard used by all AM services.
+  tracing:
+    enabled: true
+    sampling:
+      probability: 1.0          # 100 % — captures every request; tune down in prod if volume is high
+    propagation:
+      type: w3c                  # Must match core-services: "traceparent" / "tracestate" headers
+
+  # OTLP exporter — sends spans to the shared otel-collector over HTTP (port 4318).
+  # In Docker: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
+  # Local dev:  no override needed; defaults to localhost:4318
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+
+# ─── Observability properties (am.observability.*) ───────────────────────────
+# Enable the request-log filter and standard MDC fields:
+# traceId, spanId, correlationId, service, request.method, request.path, http.status
+am:
+  observability:
+    enabled: true
+    request-log:
+      enabled: true
+      ignore-paths:
+        - /actuator/**
+        - /favicon.ico
+        - /swagger-ui/**
+        - /api-docs/**
+        - /v3/api-docs/**

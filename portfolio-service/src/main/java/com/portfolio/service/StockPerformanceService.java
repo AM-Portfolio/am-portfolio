@@ -22,17 +22,25 @@ import com.portfolio.model.market.MarketData;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.redis.service.StockIndicesRedisService;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class StockPerformanceService {
     private final StockIndicesRedisService stockPriceRedisService;
     private static final int DEFAULT_TOP_N = 5;
     private static final int DEFAULT_PAGE_SIZE = 5;
     private final MarketDataService marketDataService;
+    private final java.util.concurrent.Executor taskExecutor;
+
+    public StockPerformanceService(
+            StockIndicesRedisService stockPriceRedisService,
+            MarketDataService marketDataService,
+            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
+        this.stockPriceRedisService = stockPriceRedisService;
+        this.marketDataService = marketDataService;
+        this.taskExecutor = taskExecutor;
+    }
     
     public List<StockPerformance> calculateStockPerformances(List<EquityModel> equityHoldings, TimeInterval interval) {
         Instant startTime = interval != null && interval.getDuration() != null ? 
@@ -43,12 +51,24 @@ public class StockPerformanceService {
         // Get market data for all symbols at once
         var marketData = marketDataService.getMarketData(symbols);
         
-        var performances = equityHoldings.stream()
-            .map(asset -> getGainLossPercentage(asset, startTime, marketData))
-            .filter(java.util.Objects::nonNull)
-            .toList();
-
-        return performances;
+        if (startTime != null) {
+            // Fetch database/cache items concurrently using taskExecutor to avoid sequential N+1 slow paths
+            var futures = equityHoldings.stream()
+                .map(asset -> java.util.concurrent.CompletableFuture.supplyAsync(
+                    () -> getGainLossPercentage(asset, startTime, marketData), taskExecutor))
+                .toList();
+                
+            return futures.stream()
+                .map(java.util.concurrent.CompletableFuture::join)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        } else {
+            // Normal in-memory fast-path
+            return equityHoldings.stream()
+                .map(asset -> getGainLossPercentage(asset, startTime, marketData))
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        }
     }
 
     public StockPerformanceGroup calculatePerformanceGroup(
@@ -96,8 +116,9 @@ public class StockPerformanceService {
     }
 
     public double calculateHistoricalValue(List<StockPerformance> performances, Instant startTime) {
-        return performances.stream()
-            .mapToDouble(performance -> {
+        // Run all slow blocking network I/O requests for historical values concurrently
+        var futures = performances.stream()
+            .map(performance -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
                 // Try Redis first for cached historical prices
                 List<StockPriceCache> historicalPrices = stockPriceRedisService.getHistoricalPrices(
                     performance.getSymbol(),
@@ -130,7 +151,11 @@ public class StockPerformanceService {
                 }
 
                 return 0.0;
-            })
+            }, taskExecutor))
+            .toList();
+
+        return futures.stream()
+            .mapToDouble(java.util.concurrent.CompletableFuture::join)
             .sum();
     }
 

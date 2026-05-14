@@ -41,29 +41,28 @@ public class StockPriceRedisService {
     @Value("${spring.data.redis.stock.historical.ttl}")
     private Integer historicalTtl;
 
-    @Async
+    @Async("taskExecutor")
     public CompletableFuture<Void> cacheEquityPriceUpdateBatch(List<EquityPrice> priceUpdates) {
-        return CompletableFuture.runAsync(() -> {
-            if (priceUpdates == null || priceUpdates.isEmpty()) {
-                log.warn("Received empty or null price updates batch");
-                return;
+        if (priceUpdates == null || priceUpdates.isEmpty()) {
+            log.warn("Received empty or null price updates batch");
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        log.info("Starting to process {} price updates", priceUpdates.size());
+        try {
+            // Process in chunks of BATCH_SIZE
+            for (int i = 0; i < priceUpdates.size(); i += BATCH_SIZE) {
+                int end = Math.min(i + BATCH_SIZE, priceUpdates.size());
+                List<EquityPrice> batch = priceUpdates.subList(i, end);
+                log.debug("Processing batch {} to {} of {}", i, end, priceUpdates.size());
+                processBatch(batch);
             }
-            
-            log.info("Starting to process {} price updates", priceUpdates.size());
-            try {
-                // Process in chunks of BATCH_SIZE
-                for (int i = 0; i < priceUpdates.size(); i += BATCH_SIZE) {
-                    int end = Math.min(i + BATCH_SIZE, priceUpdates.size());
-                    List<EquityPrice> batch = priceUpdates.subList(i, end);
-                    log.debug("Processing batch {} to {} of {}", i, end, priceUpdates.size());
-                    processBatch(batch);
-                }
-                log.info("Successfully processed all {} price updates", priceUpdates.size());
-            } catch (Exception e) {
-                log.error("Error processing price update batch: {}", e.getMessage(), e);
-                // Not rethrowing exception as per requirement to not acknowledge failures
-            }
-        });
+            log.info("Successfully processed all {} price updates", priceUpdates.size());
+        } catch (Exception e) {
+            log.error("Error processing price update batch: {}", e.getMessage(), e);
+            // Not rethrowing exception as per requirement to not acknowledge failures
+        }
+        return CompletableFuture.completedFuture(null);
     }
 
     private void processBatch(List<EquityPrice> batch) {
@@ -143,6 +142,30 @@ public class StockPriceRedisService {
         } catch (Exception e) {
             log.error("Error retrieving price for symbol: {}", symbol, e);
             return Optional.empty();
+        }
+    }
+
+    public Map<String, StockPriceCache> getLatestPrices(List<String> symbols) {
+        if (symbols == null || symbols.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            List<String> keys = symbols.stream()
+                    .map(symbol -> stockKeyPrefix + symbol)
+                    .collect(Collectors.toList());
+            
+            List<StockPriceCache> prices = stockPriceRedisTemplate.opsForValue().multiGet(keys);
+            Map<String, StockPriceCache> priceMap = new java.util.HashMap<>();
+            
+            for (int i = 0; i < symbols.size(); i++) {
+                if (prices != null && i < prices.size() && prices.get(i) != null) {
+                    priceMap.put(symbols.get(i), prices.get(i));
+                }
+            }
+            return priceMap;
+        } catch (Exception e) {
+            log.error("Error retrieving prices batch for symbols: {}", symbols, e);
+            return Map.of();
         }
     }
 

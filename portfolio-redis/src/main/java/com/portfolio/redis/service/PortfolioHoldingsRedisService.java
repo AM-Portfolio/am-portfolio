@@ -30,11 +30,9 @@ public class PortfolioHoldingsRedisService {
     @Value("${spring.data.redis.portfolio-holdings.key-prefix}")
     private String portfolioKeyPrefix;
 
-    @Async
+    @Async("taskExecutor")
     public CompletableFuture<Void> cachePortfolioHoldings(PortfolioHoldings holdings, String userId, TimeInterval interval) {
-        
-        return CompletableFuture.runAsync(() -> {
-            String key = buildKey(userId, interval);
+        String key = buildKey(userId, interval);
         try {
             // For short intervals, use the interval duration as TTL
             Duration ttl = interval != null && interval.getDuration() != null && 
@@ -47,7 +45,7 @@ public class PortfolioHoldingsRedisService {
         } catch (Exception e) {
             log.error("Error caching portfolio holdings for key {}: {}", key, e.getMessage(), e);
         }
-    });
+        return CompletableFuture.completedFuture(null);
     }
 
     public Optional<PortfolioHoldings> getLatestHoldings(String userId, TimeInterval interval) {

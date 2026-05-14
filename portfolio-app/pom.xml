@@ -53,6 +53,31 @@
             <version>${project.version}</version>
         </dependency>
         
+        <!-- =========================================================== -->
+        <!-- Observability: Micrometer Tracing + OTel OTLP export        -->
+        <!-- Matches the stack in am-core-services-otel                  -->
+        <!-- =========================================================== -->
+
+        <!-- Bridges Micrometer Tracing API to the OTel SDK -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+
+        <!-- Exports spans to the otel-collector over HTTP (port 4318) -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+            <version>${opentelemetry.version}</version>
+        </dependency>
+
+        <!-- JSON-encoded access logs and structured log lines for production -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>${logstash-logback-encoder.version}</version>
+        </dependency>
+
         <!-- Spring Boot -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
