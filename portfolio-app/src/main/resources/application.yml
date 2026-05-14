@@ -208,3 +208,23 @@ management:
       enabled: true
     kafka:
       enabled: ${KAFKA_ENABLED:false}
+  tracing:
+    enabled: true
+    sampling:
+      probability: 1.0
+    propagation:
+      type: w3c
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+am:
+  observability:
+    enabled: true
+    request-log:
+      enabled: true
+      ignore-paths:
+        - /actuator/**
+        - /favicon.ico
+        - /swagger-ui/**
+        - /api-docs/**
+        - /v3/api-docs/**

@@ -20,12 +20,21 @@ import lombok.extern.slf4j.Slf4j;
 import java.time.LocalDateTime;
 
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class PortfolioCalculator {
 
     private final MarketDataService marketDataService;
     private final StockIndicesRedisService stockPriceRedisService;
+    private final java.util.concurrent.Executor taskExecutor;
+
+    public PortfolioCalculator(
+            MarketDataService marketDataService,
+            StockIndicesRedisService stockPriceRedisService,
+            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
+        this.marketDataService = marketDataService;
+        this.stockPriceRedisService = stockPriceRedisService;
+        this.taskExecutor = taskExecutor;
+    }
 
     /**
      * Enriches equity holdings with real-time market data (price, value, P&L).
@@ -50,9 +59,9 @@ public class PortfolioCalculator {
 
         // Fetch market data and market cap data in PARALLEL (these are independent calls)
         var marketDataFuture = java.util.concurrent.CompletableFuture.supplyAsync(
-                () -> marketDataService.getMarketData(symbols));
+                () -> marketDataService.getMarketData(symbols), taskExecutor);
         var marketCapFuture = java.util.concurrent.CompletableFuture.supplyAsync(
-                () -> marketDataService.getMarketCapData(symbols));
+                () -> marketDataService.getMarketCapData(symbols), taskExecutor);
 
         // Wait for both to complete
         Map<String, MarketData> marketDataMap;
@@ -75,13 +84,24 @@ public class PortfolioCalculator {
         // Enrich each holding
         final Map<String, MarketData> finalMarketDataMap = marketDataMap;
         final Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> finalMarketCapMap = marketCapMap;
+
+        // Pre-fetch batch price cache updates for any missing symbols from Redis to eliminate N+1 performance issues
+        List<String> missingFromApi = symbols.stream()
+                .filter(symbol -> symbol != null && !finalMarketDataMap.containsKey(symbol))
+                .collect(Collectors.toList());
+
+        log.debug("Pre-fetching Redis stock prices for {} missing symbols", missingFromApi.size());
+        final Map<String, com.portfolio.model.cache.StockPriceCache> cachedPricesMap =
+                stockPriceRedisService.getLatestPrices(missingFromApi);
+
         return equityHoldings.stream()
-                .map(holding -> enrichHolding(holding, finalMarketDataMap, finalMarketCapMap))
+                .map(holding -> enrichHolding(holding, finalMarketDataMap, finalMarketCapMap, cachedPricesMap))
                 .collect(Collectors.toList());
     }
 
     private EquityHoldings enrichHolding(EquityHoldings holding, Map<String, MarketData> marketDataMap,
-            Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap) {
+            Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap,
+            Map<String, com.portfolio.model.cache.StockPriceCache> cachedPricesMap) {
         String symbol = holding.getSymbol();
         if (symbol == null)
             return holding;
@@ -121,10 +141,10 @@ public class PortfolioCalculator {
                                                                      // change within day
             }
         } else {
-            // Fallback to Redis
-            var latestPrice = stockPriceRedisService.getLatestPrice(symbol);
-            if (latestPrice.isPresent()) {
-                currentPrice = latestPrice.get().getClosePrice();
+            // Fallback to pre-fetched batch Redis values instead of sequential blocking operations
+            var cacheItem = cachedPricesMap != null ? cachedPricesMap.get(symbol) : null;
+            if (cacheItem != null) {
+                currentPrice = cacheItem.getClosePrice();
             }
         }
 

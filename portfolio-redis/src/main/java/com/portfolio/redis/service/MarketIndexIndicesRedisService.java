@@ -43,29 +43,28 @@ public class MarketIndexIndicesRedisService {
 
     private static final int BATCH_SIZE = 100;
 
-    @Async
+    @Async("taskExecutor")
     public CompletableFuture<Void> cacheMarketIndexIndicesUpdateBatch(List<MarketIndexIndices> marketIndexIndicesUpdates) {
-        return CompletableFuture.runAsync(() -> {
-            if (marketIndexIndicesUpdates == null || marketIndexIndicesUpdates.isEmpty()) {
-                log.warn("Received empty or null market index indices updates batch");
-                return;
+        if (marketIndexIndicesUpdates == null || marketIndexIndicesUpdates.isEmpty()) {
+            log.warn("Received empty or null market index indices updates batch");
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        log.info("Starting to process {} market index indices updates", marketIndexIndicesUpdates.size());
+        try {
+            // Process in chunks of BATCH_SIZE
+            for (int i = 0; i < marketIndexIndicesUpdates.size(); i += BATCH_SIZE) {
+                int end = Math.min(i + BATCH_SIZE, marketIndexIndicesUpdates.size());
+                List<MarketIndexIndices> batch = marketIndexIndicesUpdates.subList(i, end);
+                log.debug("Processing batch {} to {} of {}", i, end, marketIndexIndicesUpdates.size());
+                processBatch(batch);
             }
-            
-            log.info("Starting to process {} market index indices updates", marketIndexIndicesUpdates.size());
-            try {
-                // Process in chunks of BATCH_SIZE
-                for (int i = 0; i < marketIndexIndicesUpdates.size(); i += BATCH_SIZE) {
-                    int end = Math.min(i + BATCH_SIZE, marketIndexIndicesUpdates.size());
-                    List<MarketIndexIndices> batch = marketIndexIndicesUpdates.subList(i, end);
-                    log.debug("Processing batch {} to {} of {}", i, end, marketIndexIndicesUpdates.size());
-                    processBatch(batch);
-                }
-                log.info("Successfully processed all {} market index indices updates", marketIndexIndicesUpdates.size());
-            } catch (Exception e) {
-                log.error("Error processing price update batch: {}", e.getMessage(), e);
-                // Not rethrowing exception as per requirement to not acknowledge failures
-            }
-        });
+            log.info("Successfully processed all {} market index indices updates", marketIndexIndicesUpdates.size());
+        } catch (Exception e) {
+            log.error("Error processing price update batch: {}", e.getMessage(), e);
+            // Not rethrowing exception as per requirement to not acknowledge failures
+        }
+        return CompletableFuture.completedFuture(null);
     }
 
     private void processBatch(List<MarketIndexIndices> batch) {
