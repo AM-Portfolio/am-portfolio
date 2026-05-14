@@ -205,16 +205,20 @@ management:
   tracing:
     enabled: true
     sampling:
-      probability: 1.0          # 100 % — captures every request; tune down in prod if volume is high
+      # Override per-environment via TRACING_SAMPLING_PROBABILITY env var.
+      # Default 0.1 (10 %) matches am-analysis / am-gateway in preprod and prevents
+      # heap pressure from buffered spans when the collector is unreachable.
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
     propagation:
       type: w3c                  # Must match core-services: "traceparent" / "tracestate" headers
 
   # OTLP exporter — sends spans to the shared otel-collector over HTTP (port 4318).
-  # In Docker: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
-  # Local dev:  no override needed; defaults to localhost:4318
+  # In k8s the collector is in the "monitoring" namespace (same as am-core-services-otel).
+  # In Docker compose:  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
+  # Local dev: no override needed.
   otlp:
     tracing:
-      endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+      endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces}
 
 # ─── Observability properties (am.observability.*) ───────────────────────────
 # Enable the request-log filter and standard MDC fields:
