@@ -4,8 +4,8 @@
 
   Profiles:
     default (local)  → colored text on stdout; easy to read during development.
-    docker / prod    → JSON on stdout via logstash-logback-encoder; each line is
-                       a self-contained JSON object that log-shippers (Loki,
+    docker / prod /  → JSON on stdout via logstash-logback-encoder; each line is
+    preprod            a self-contained JSON object that log-shippers (Loki,
                        Elasticsearch) can index field-by-field.
 
   MDC fields that are automatically included in every log line (populated by
@@ -15,13 +15,18 @@
 -->
 <configuration scan="true" scanPeriod="30 seconds">
 
+    <!--
+      Register Spring Boot's logback converters (%clr, %wEx, %wex, CONSOLE_LOG_PATTERN, etc.).
+      Without this include, patterns that use %clr or %wEx fail with
+      "There is no conversion class registered for ... [clr]" and the JVM exits.
+    -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
     <!-- ─── Local / Default Profile ─────────────────────────────────────────── -->
-    <springProfile name="!docker &amp; !prod">
+    <springProfile name="!docker &amp; !prod &amp; !preprod">
         <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
             <encoder>
-                <pattern>
-                    %clr(%d{HH:mm:ss.SSS}){faint} %clr(%5p){highlight} %clr([%15.15t]){faint} %clr([traceId=%X{traceId:-} spanId=%X{spanId:-}]){cyan} %clr(%-40.40logger{39}){magenta} %clr(:){faint} %m%n%wEx
-                </pattern>
+                <pattern>%clr(%d{HH:mm:ss.SSS}){faint} %clr(%5p) %clr([%15.15t]){faint} %clr([traceId=%X{traceId:-} spanId=%X{spanId:-}]){cyan} %clr(%-40.40logger{39}){magenta} %clr(:){faint} %m%n%wEx</pattern>
             </encoder>
         </appender>
 
@@ -35,8 +40,8 @@
         </logger>
     </springProfile>
 
-    <!-- ─── Docker / Production Profile ─────────────────────────────────────── -->
-    <springProfile name="docker,prod">
+    <!-- ─── Docker / Preprod / Prod Profile ─────────────────────────────────── -->
+    <springProfile name="docker,prod,preprod">
         <!--
           LogstashEncoder outputs one JSON object per log line.
           It automatically captures all MDC keys (traceId, spanId, etc.)
@@ -44,17 +49,13 @@
         -->
         <appender name="JSON_STDOUT" class="ch.qos.logback.core.ConsoleAppender">
             <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-                <!-- Include short class name to keep log volume manageable -->
                 <includeCallerData>false</includeCallerData>
-                <!-- Rename the default "message" key to "msg" for consistency -->
                 <fieldNames>
                     <message>msg</message>
                     <timestamp>@timestamp</timestamp>
                     <version>[ignore]</version>
                 </fieldNames>
-                <!-- Always stamp service name even if MDC is missing -->
                 <customFields>{"service":"portfolio-app"}</customFields>
-                <!-- Include MDC traceId, spanId, correlationId, etc. as top-level fields -->
                 <includeMdc>true</includeMdc>
             </encoder>
         </appender>
@@ -63,14 +64,13 @@
             <appender-ref ref="JSON_STDOUT"/>
         </root>
 
-        <!-- Suppress noisy Spring + Kafka framework logs in prod -->
+        <!-- Suppress noisy Spring + Kafka framework logs in prod-like envs -->
         <logger name="org.springframework.kafka" level="WARN"/>
         <logger name="org.apache.kafka" level="WARN"/>
         <logger name="org.mongodb.driver" level="WARN"/>
     </springProfile>
 
     <!-- ─── Always-on suppressions ───────────────────────────────────────────── -->
-    <!-- Prevent duplicate logs from embedded Tomcat access log and noisy libs -->
     <logger name="org.apache.catalina" level="WARN"/>
     <logger name="io.lettuce" level="WARN"/>
 
