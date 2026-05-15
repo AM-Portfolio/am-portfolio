@@ -16,7 +16,7 @@ COPY settings.xml /root/.m2/settings.xml
 COPY . .
 
 # Build everything in one go
-# Because am-common-data is now a module in the root POM, 
+# Because am-common-data is now a module in the root POM,
 # Maven will build it and make it available to other modules automatically.
 RUN GITHUB_PACKAGES_USERNAME=${GITHUB_PACKAGES_USERNAME} GITHUB_PACKAGES_TOKEN=${GITHUB_PACKAGES_TOKEN} \
     mvn clean package -DskipTests -B -s settings.xml -U
@@ -26,15 +26,26 @@ FROM eclipse-temurin:21-jdk-jammy
 
 WORKDIR /app
 
-# Copy the built JAR from build stage
-COPY --from=build /build/portfolio-app/target/*.jar app.jar
+# Create a non-root user/group matching the Kubernetes securityContext (UID/GID 1000).
+# Without this the container runs as root, which violates the pod's
+# runAsNonRoot: true + runAsUser: 1000 + fsGroup: 1000 security policy.
+RUN groupadd -g 1000 spring && \
+    useradd -u 1000 -g spring -s /bin/sh -m spring && \
+    mkdir -p /var/log/am-portfolio && \
+    chown -R spring:spring /app /var/log/am-portfolio
 
-# Install curl for healthcheck
+# Install curl for healthcheck (as root, before switching user)
 RUN apt-get update && \
     apt-get install -y curl && \
     rm -rf /var/lib/apt/lists/* && \
     # Set timezone
     ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
+
+# Copy the built JAR from build stage and set correct ownership
+COPY --from=build --chown=spring:spring /build/portfolio-app/target/*.jar app.jar
+
+# Drop to non-root — matches K8s securityContext runAsUser: 1000
+USER 1000:1000
 
 # Set environment variables
 ENV SPRING_PROFILES_ACTIVE=docker

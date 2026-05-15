@@ -21,14 +21,13 @@
                     "raw": "{\n    \"userId\": \"ssd2658\",\n    \"portfolioId\": \"163d0143-4fcb-480c-ac20-622f14e0e293\",\n    \"etfQuery\": \"NIFTY\",\n    \"userHoldings\": []\n}"
                 },
                 "url": {
-                    "raw": "http://localhost:8060/api/v1/basket/opportunities",
+                    "raw": "http://localhost:8062/v1/basket/opportunities",
                     "protocol": "http",
                     "host": [
                         "localhost"
                     ],
-                    "port": "8060",
+                    "port": "8062",
                     "path": [
-                        "api",
                         "v1",
                         "basket",
                         "opportunities"
@@ -53,14 +52,13 @@
                     "raw": "{\n    \"userId\": \"ssd2658\",\n    \"portfolioId\": \"163d0143-4fcb-480c-ac20-622f14e0e293\",\n    \"userHoldings\": []\n}"
                 },
                 "url": {
-                    "raw": "http://localhost:8060/api/v1/basket/exposure",
+                    "raw": "http://localhost:8062/v1/basket/exposure",
                     "protocol": "http",
                     "host": [
                         "localhost"
                     ],
-                    "port": "8060",
+                    "port": "8062",
                     "path": [
-                        "api",
                         "v1",
                         "basket",
                         "exposure"
@@ -85,14 +83,13 @@
                     "raw": "{\n    \"userId\": \"ssd2658\",\n    \"portfolioId\": \"163d0143-4fcb-480c-ac20-622f14e0e293\"\n}"
                 },
                 "url": {
-                    "raw": "http://localhost:8060/api/v1/basket/allocations",
+                    "raw": "http://localhost:8062/v1/basket/allocations",
                     "protocol": "http",
                     "host": [
                         "localhost"
                     ],
-                    "port": "8060",
+                    "port": "8062",
                     "path": [
-                        "api",
                         "v1",
                         "basket",
                         "allocations"
@@ -117,14 +114,13 @@
                     "raw": "{\n    \"userId\": \"ssd2658\"\n}"
                 },
                 "url": {
-                    "raw": "http://localhost:8060/api/v1/basket/allocations",
+                    "raw": "http://localhost:8062/v1/basket/allocations",
                     "protocol": "http",
                     "host": [
                         "localhost"
                     ],
-                    "port": "8060",
+                    "port": "8062",
                     "path": [
-                        "api",
                         "v1",
                         "basket",
                         "allocations"
@@ -149,14 +145,13 @@
                     "raw": "{\n    \"userId\": null,\n    \"userHoldings\": [\n        {\n            \"isin\": \"INE848E01016\",\n            \"symbol\": \"NHPC\",\n            \"sector\": \"Power Generation\",\n            \"currentValue\": 50000,\n            \"portfolioId\": \"manual-portfolio-1\",\n            \"portfolioName\": \"Test Portfolio\"\n        },\n        {\n            \"isin\": \"INE040A01034\",\n            \"symbol\": \"HDFC\",\n            \"sector\": \"Banking\",\n            \"currentValue\": 75000,\n            \"portfolioId\": \"manual-portfolio-1\",\n            \"portfolioName\": \"Test Portfolio\"\n        }\n    ]\n}"
                 },
                 "url": {
-                    "raw": "http://localhost:8060/api/v1/basket/allocations",
+                    "raw": "http://localhost:8062/v1/basket/allocations",
                     "protocol": "http",
                     "host": [
                         "localhost"
                     ],
-                    "port": "8060",
+                    "port": "8062",
                     "path": [
-                        "api",
                         "v1",
                         "basket",
                         "allocations"
@@ -181,14 +176,13 @@
                     "raw": "{\n    \"etfIsin\": \"INF204KB14I2\",\n    \"userId\": \"ssd2658\",\n    \"portfolioId\": \"163d0143-4fcb-480c-ac20-622f14e0e293\"\n}"
                 },
                 "url": {
-                    "raw": "http://localhost:8060/api/v1/basket/preview",
+                    "raw": "http://localhost:8062/v1/basket/preview",
                     "protocol": "http",
                     "host": [
                         "localhost"
                     ],
-                    "port": "8060",
+                    "port": "8062",
                     "path": [
-                        "api",
                         "v1",
                         "basket",
                         "preview"

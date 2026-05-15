@@ -10,6 +10,13 @@ resources:
     cpu: 250m
     memory: 256Mi
 
+# Non-secret runtime env (mirrors am-analysis preprod pattern).
+# Secrets are still injected via Vault per vault.secretPaths below.
+env:
+  SPRING_PROFILES_ACTIVE: "preprod"
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces"
+  TRACING_SAMPLING_PROBABILITY: "1.0"
+
 vault:
   secretPaths:
     auth:

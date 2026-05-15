@@ -63,3 +63,7 @@ application-*.yml
 
 ### Secrets ###
 .env*
+seed-local-db.js
+
+### Custom ###
+test-portfolio

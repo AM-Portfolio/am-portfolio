@@ -1,5 +1,5 @@
 # Infrastructure Configuration
-MONGODB_CONNECTION_URL: ${MONGODB_URL:mongodb://admin:password123@localhost:27017/portfolio?authSource=admin}
+MONGODB_CONNECTION_URL: ${SPRING_DATA_MONGODB_URI:${MONGODB_URL:mongodb://admin:password123@localhost:27017/portfolio?authSource=admin}}
 
 #Kafka
 PROJ_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
@@ -18,9 +18,9 @@ MARKET_INDEX_CONSUMER_GROUP: ${MARKET_INDEX_CONSUMER_ID:am-market-index-group-1}
 MARKET_INDEX_TOPIC_NAME: ${MARKET_INDEX_TOPIC:nse-stock-indices-update}
 
 #Redis
-PROJ_REDIS_HOSTNAME: ${REDIS_HOSTNAME:localhost}
-PROJ_REDIS_PORT: ${REDIS_PORT:6379}
-PROJ_REDIS_PASSWORD: ${REDIS_PASSWORD:password123}
+PROJ_REDIS_HOSTNAME: ${SPRING_DATA_REDIS_HOST:${REDIS_HOSTNAME:localhost}}
+PROJ_REDIS_PORT: ${SPRING_DATA_REDIS_PORT:${REDIS_PORT:6379}}
+PROJ_REDIS_PASSWORD: ${SPRING_DATA_REDIS_PASSWORD:${REDIS_PASSWORD:password123}}
 
 spring:
   application:
@@ -144,10 +144,13 @@ etf:
 
 market-data:
   api:
-    base-url: ${MARKET_DATA_API_URL:http://localhost:8092}
+    base-url: ${MARKET_DATA_API_URL:https://am.asrax.in/market}
     ohlc-endpoint: /v1/market-data/ohlc
     historical-data-endpoint: /v1/market-data/historical-data
     securities-endpoint: /v1/securities
+    read-timeout: 25000
+    connection-timeout: 25000
+    max-retry-attempts: 1
 
 # OpenAPI Documentation
 springdoc:
@@ -168,6 +171,7 @@ logging:
     com.am.common: INFO
     com.am.common.amcommondata: INFO
     org.springframework.kafka: INFO
+
 # Management/Actuator Configuration
 management:
   endpoints:
@@ -194,3 +198,39 @@ management:
       enabled: true
     kafka:
       enabled: true
+
+  # ─── Distributed Tracing (Micrometer + OTel) ────────────────────────────────
+  # Aligns am-portfolio with the am-core-services-otel stack.
+  # W3C traceparent header is the global standard used by all AM services.
+  tracing:
+    enabled: true
+    sampling:
+      # Override per-environment via TRACING_SAMPLING_PROBABILITY env var.
+      # Default 0.1 (10 %) matches am-analysis / am-gateway in preprod and prevents
+      # heap pressure from buffered spans when the collector is unreachable.
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
+    propagation:
+      type: w3c                  # Must match core-services: "traceparent" / "tracestate" headers
+
+  # OTLP exporter — sends spans to the shared otel-collector over HTTP (port 4318).
+  # In k8s the collector is in the "monitoring" namespace (same as am-core-services-otel).
+  # In Docker compose:  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
+  # Local dev: no override needed.
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces}
+
+# ─── Observability properties (am.observability.*) ───────────────────────────
+# Enable the request-log filter and standard MDC fields:
+# traceId, spanId, correlationId, service, request.method, request.path, http.status
+am:
+  observability:
+    enabled: true
+    request-log:
+      enabled: true
+      ignore-paths:
+        - /actuator/**
+        - /favicon.ico
+        - /swagger-ui/**
+        - /api-docs/**
+        - /v3/api-docs/**

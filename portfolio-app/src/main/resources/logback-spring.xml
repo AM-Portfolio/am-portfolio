@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logback configuration for am-portfolio.
+
+  Profiles:
+    default (local)  → colored text on stdout; easy to read during development.
+    docker / prod /  → JSON on stdout via logstash-logback-encoder; each line is
+    preprod            a self-contained JSON object that log-shippers (Loki,
+                       Elasticsearch) can index field-by-field.
+
+  MDC fields that are automatically included in every log line (populated by
+  Spring Boot's Micrometer auto-instrumentation + TraceContextFilter):
+    traceId, spanId, correlationId, service,
+    request.method, request.path, http.status, userId
+-->
+<configuration scan="true" scanPeriod="30 seconds">
+
+    <!--
+      Register Spring Boot's logback converters (%clr, %wEx, %wex, CONSOLE_LOG_PATTERN, etc.).
+      Without this include, patterns that use %clr or %wEx fail with
+      "There is no conversion class registered for ... [clr]" and the JVM exits.
+    -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <!-- ─── Local / Default Profile ─────────────────────────────────────────── -->
+    <springProfile name="!docker &amp; !prod &amp; !preprod">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%clr(%d{HH:mm:ss.SSS}){faint} %clr(%5p) %clr([%15.15t]){faint} %clr([traceId=%X{traceId:-} spanId=%X{spanId:-}]){cyan} %clr(%-40.40logger{39}){magenta} %clr(:){faint} %m%n%wEx</pattern>
+            </encoder>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+
+        <!-- Fine-grained portfolio logging for local debugging -->
+        <logger name="com.portfolio" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+        </logger>
+    </springProfile>
+
+    <!-- ─── Docker / Preprod / Prod Profile ─────────────────────────────────── -->
+    <springProfile name="docker,prod,preprod">
+        <!--
+          LogstashEncoder outputs one JSON object per log line.
+          It automatically captures all MDC keys (traceId, spanId, etc.)
+          as top-level JSON fields — no extra configuration needed.
+        -->
+        <appender name="JSON_STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <includeCallerData>false</includeCallerData>
+                <fieldNames>
+                    <timestamp>@timestamp</timestamp>
+                    <version>[ignore]</version>
+                </fieldNames>
+                <customFields>{"service":"am-portfolio"}</customFields>
+                <includeMdc>true</includeMdc>
+            </encoder>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="JSON_STDOUT"/>
+        </root>
+
+        <!-- Suppress noisy Spring + Kafka framework logs in prod-like envs -->
+        <logger name="org.springframework.kafka" level="WARN"/>
+        <logger name="org.apache.kafka" level="WARN"/>
+        <logger name="org.mongodb.driver" level="WARN"/>
+    </springProfile>
+
+    <!-- ─── Always-on suppressions ───────────────────────────────────────────── -->
+    <logger name="org.apache.catalina" level="WARN"/>
+    <logger name="io.lettuce" level="WARN"/>
+
+</configuration>

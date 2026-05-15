@@ -70,16 +70,24 @@ public class MarketDataApiClient extends AbstractApiClient {
 
                                         Map<String, MarketDataResponse> dataMap = new HashMap<>();
                                         if (rawMap != null) {
-                                                for (Object key : rawMap.keySet()) {
-                                                        try {
-                                                                Object value = rawMap.get(key);
-                                                                MarketDataResponse response = mapper.convertValue(value,
-                                                                                MarketDataResponse.class);
-                                                                dataMap.put(String.valueOf(key), response);
-                                                        } catch (Exception e) {
-                                                                log.error("Error converting response for symbol {}",
-                                                                                key, e);
+                                                // Unwrap {"data": {...}} if the API uses a wrapper
+                                                Object actualData = rawMap.containsKey("data") ? rawMap.get("data") : rawMap;
+                                                if (actualData instanceof Map) {
+                                                        Map<?, ?> dataToProcess = (Map<?, ?>) actualData;
+                                                        for (Object key : dataToProcess.keySet()) {
+                                                                try {
+                                                                        Object value = dataToProcess.get(key);
+                                                                        MarketDataResponse response = mapper.convertValue(value,
+                                                                                        MarketDataResponse.class);
+                                                                        dataMap.put(String.valueOf(key), response);
+                                                                } catch (Exception e) {
+                                                                        log.error("Error converting response for symbol {}",
+                                                                                        key, e);
+                                                                }
                                                         }
+                                                } else {
+                                                        log.error("Expected payload to be a Map but got {}", actualData != null ? actualData.getClass().getName() : "null");
+                                                        throw new IllegalStateException("Invalid payload structure from Market Data API: expected Map");
                                                 }
                                         }
                                         wrapper.setData(dataMap);

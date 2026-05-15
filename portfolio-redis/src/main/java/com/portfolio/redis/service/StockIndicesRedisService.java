@@ -41,29 +41,27 @@ public class StockIndicesRedisService {
     @Value("${spring.data.redis.stock.historical.ttl}")
     private Integer historicalTtl;
 
-    @Async
+    @Async("taskExecutor")
     public CompletableFuture<Void> cacheEquityPriceUpdateBatch(List<EquityPrice> priceUpdates) {
-        return CompletableFuture.runAsync(() -> {
-            if (priceUpdates == null || priceUpdates.isEmpty()) {
-                log.warn("Received empty or null price updates batch");
-                return;
+        if (priceUpdates == null || priceUpdates.isEmpty()) {
+            log.warn("Received empty or null price updates batch");
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        log.info("Starting to process {} price updates", priceUpdates.size());
+        try {
+            // Process in chunks of BATCH_SIZE
+            for (int i = 0; i < priceUpdates.size(); i += BATCH_SIZE) {
+                int end = Math.min(i + BATCH_SIZE, priceUpdates.size());
+                List<EquityPrice> batch = priceUpdates.subList(i, end);
+                log.debug("Processing batch {} to {} of {}", i, end, priceUpdates.size());
+                processBatch(batch);
             }
-            
-            log.info("Starting to process {} price updates", priceUpdates.size());
-            try {
-                // Process in chunks of BATCH_SIZE
-                for (int i = 0; i < priceUpdates.size(); i += BATCH_SIZE) {
-                    int end = Math.min(i + BATCH_SIZE, priceUpdates.size());
-                    List<EquityPrice> batch = priceUpdates.subList(i, end);
-                    log.debug("Processing batch {} to {} of {}", i, end, priceUpdates.size());
-                    processBatch(batch);
-                }
-                log.info("Successfully processed all {} price updates", priceUpdates.size());
-            } catch (Exception e) {
-                log.error("Error processing price update batch: {}", e.getMessage(), e);
-                // Not rethrowing exception as per requirement to not acknowledge failures
-            }
-        });
+            log.info("Successfully processed all {} price updates", priceUpdates.size());
+        } catch (Exception e) {
+            log.error("Error processing price update batch: {}", e.getMessage(), e);
+        }
+        return CompletableFuture.completedFuture(null);
     }
 
     private void processBatch(List<EquityPrice> batch) {
@@ -72,28 +70,22 @@ public class StockIndicesRedisService {
             
             Map<String, StockPriceCache> realtimeUpdates = batch.stream()
                 .map(this::convertToStockPriceCache)
-                .peek(price -> log.info("Creating realtime key for symbol: {}, price: {}", 
+                .peek(price -> log.debug("Creating realtime key for symbol: {}, price: {}", 
                     price.getSymbol(), price.getClosePrice()))
                 .collect(Collectors.toMap(
-                    price -> {
-                        String key = stockKeyPrefix + price.getSymbol();
-                        log.info("Generated realtime key: {}", key);
-                        return key;
-                    },
-                    price -> price
+                    price -> stockKeyPrefix + price.getSymbol(),
+                    price -> price,
+                    (existing, replacement) -> replacement // Keep the latest price
                 ));
 
             Map<String, StockPriceCache> historicalUpdates = batch.stream()
                 .map(this::convertToStockPriceCache)
-                .peek(price -> log.info("Creating historical key for symbol: {}, timestamp: {}, price: {}", 
-                    price.getSymbol(), price.getTimestamp(), price.getClosePrice()))
+                .peek(price -> log.debug("Creating historical key for symbol: {}, timestamp: {}", 
+                    price.getSymbol(), price.getTimestamp()))
                 .collect(Collectors.toMap(
-                    price -> {
-                        String key = historicalKeyPrefix + price.getSymbol() + ":" + price.getTimestamp().toString();
-                        log.info("Generated historical key: {}", key);
-                        return key;
-                    },
-                    price -> price
+                    price -> historicalKeyPrefix + price.getSymbol() + ":" + price.getTimestamp().toString(),
+                    price -> price,
+                    (existing, replacement) -> replacement // Keep the latest in case of exact timestamp collision
                 ));
 
             try {
@@ -101,7 +93,7 @@ public class StockIndicesRedisService {
                 stockPriceRedisTemplate.opsForValue().multiSet(realtimeUpdates);
                 realtimeUpdates.keySet().forEach(key -> {
                     boolean success = stockPriceRedisTemplate.expire(key, Duration.ofSeconds(stockTtl)).booleanValue();
-                    log.info("Set TTL for realtime key: {}, success: {}", key, success);
+                    log.debug("Set TTL for realtime key: {}, success: {}", key, success);
                 });
                 log.debug("Successfully cached realtime price updates");
             } catch (Exception e) {
@@ -113,7 +105,7 @@ public class StockIndicesRedisService {
                 stockPriceRedisTemplate.opsForValue().multiSet(historicalUpdates);
                 historicalUpdates.keySet().forEach(key -> {
                     boolean success = stockPriceRedisTemplate.expire(key, Duration.ofSeconds(historicalTtl)).booleanValue();
-                    log.info("Set TTL for historical key: {}, success: {}", key, success);
+                    log.debug("Set TTL for historical key: {}, success: {}", key, success);
                 });
                 log.debug("Successfully cached historical price updates");
             } catch (Exception e) {
@@ -146,14 +138,38 @@ public class StockIndicesRedisService {
         }
     }
 
+    public Map<String, StockPriceCache> getLatestPrices(List<String> symbols) {
+        if (symbols == null || symbols.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            List<String> keys = symbols.stream()
+                    .map(symbol -> stockKeyPrefix + symbol)
+                    .collect(Collectors.toList());
+            
+            List<StockPriceCache> prices = stockPriceRedisTemplate.opsForValue().multiGet(keys);
+            Map<String, StockPriceCache> priceMap = new java.util.HashMap<>();
+            
+            for (int i = 0; i < symbols.size(); i++) {
+                if (prices != null && i < prices.size() && prices.get(i) != null) {
+                    priceMap.put(symbols.get(i), prices.get(i));
+                }
+            }
+            return priceMap;
+        } catch (Exception e) {
+            log.error("Error retrieving prices batch for symbols: {}", symbols, e);
+            return Map.of();
+        }
+    }
+
     public List<StockPriceCache> getHistoricalPrices(String symbol, LocalDateTime startTime, LocalDateTime endTime) {
         try {
             String pattern = historicalKeyPrefix + symbol + ":*";
             List<StockPriceCache> historicalPrices = new ArrayList<>();
             
-            log.info("Searching with pattern: {} for time range: {} to {}", pattern, startTime, endTime);
+            log.debug("Searching with pattern: {} for time range: {} to {}", pattern, startTime, endTime);
             var keys = stockPriceRedisTemplate.keys(pattern);
-            log.info("Found {} keys matching pattern {}", keys.size(), pattern);
+            log.debug("Found {} keys matching pattern {}", keys.size(), pattern);
             
             // Sort keys to get most recent first
             List<String> sortedKeys = new ArrayList<>(keys);
@@ -161,13 +177,13 @@ public class StockIndicesRedisService {
             
             for (String key : sortedKeys) {
                 StockPriceCache price = stockPriceRedisTemplate.opsForValue().get(key);
-                log.info("Key: {}, Price: {}", key, price);
+                log.debug("Key: {}, Price: {}", key, price);
                 if (price != null && price.getTimestamp() != null) {
                     // Add the most recent price we find, regardless of time range
                     // This ensures we always get at least one price if available
                     if (historicalPrices.isEmpty()) {
                         historicalPrices.add(price);
-                        log.info("Added most recent price for key: {}, timestamp: {}", key, price.getTimestamp());
+                        log.debug("Added most recent price for key: {}, timestamp: {}", key, price.getTimestamp());
                         break;  // We only need the most recent price
                     }
                 } else {

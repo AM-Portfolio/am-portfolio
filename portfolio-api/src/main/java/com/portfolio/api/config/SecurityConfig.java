@@ -17,72 +17,53 @@ import javax.crypto.spec.SecretKeySpec;
 
 /**
  * Spring Security Configuration for Portfolio Service
- * 
- * Security Model: Zero Trust
- * - Validates JWT signature using INTERNAL_JWT_SECRET
- * - Trusts API Gateway ONLY if it presents a valid, signed Service Token
- * - Protected endpoints require valid JWT with correct signature
+ *
+ * <p><b>Security Model: Gateway-Enforced Authentication</b>
+ *
+ * <p>This service is an internal microservice deployed exclusively behind
+ * {@code am-gateway}, which validates JWTs and enforces auth at the edge
+ * before forwarding requests. Direct external access is blocked by the
+ * infrastructure firewall / Traefik routing rules.
+ *
+ * <p>All endpoints are therefore open at the service level ({@code permitAll()}).
+ * The {@code jwtDecoder()} bean is available if per-service auth is needed in future.
+ *
+ * <p><b>TODO (future):</b> When the platform matures, add internal-service
+ * token validation using {@code X-Internal-Token} or mTLS.
  */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
 
-        @Value("${app.jwt.secret}")
-        private String jwtSecret;
+    @Value("${app.jwt.secret}")
+    private String jwtSecret;
 
-        @Bean
-        @Order(Ordered.HIGHEST_PRECEDENCE)
-        public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-                http
-                                // Disable CSRF (stateless REST API with JWT)
-                                .csrf(csrf -> csrf.disable())
+    @Bean
+    @Order(Ordered.HIGHEST_PRECEDENCE)
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(csrf -> csrf.disable())
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(auth -> auth
+                // am-portfolio is behind am-gateway which enforces JWT at the edge.
+                // All endpoints are open at the service layer — firewall blocks direct access.
+                .requestMatchers(AntPathRequestMatcher.antMatcher("/**")).permitAll()
+                .anyRequest().authenticated()
+            )
+            .httpBasic(basic -> basic.disable())
+            .formLogin(form -> form.disable());
 
-                                // Stateless session management (no cookies, JWT-based)
-                                .sessionManagement(session -> session
-                                                .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+        // JWT decoder is wired but not activated at service level.
+        // am-gateway is the authentication boundary for this service.
+        // Uncomment below to enable per-service JWT validation if needed:
+        // .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(jwtDecoder())));
 
-                                // Configure authorization rules
-                                .authorizeHttpRequests(auth -> auth
-                                                // ✅ PUBLIC ENDPOINTS - No authentication required
-                                                .requestMatchers(
-                                                                AntPathRequestMatcher.antMatcher("/api/v1/basket/**"),
-                                                                AntPathRequestMatcher.antMatcher("/actuator/health/**"),
-                                                                AntPathRequestMatcher.antMatcher("/swagger-ui/**"),
-                                                                AntPathRequestMatcher.antMatcher("/v3/api-docs/**"),
-                                                                AntPathRequestMatcher.antMatcher("/api-docs/**"),
-                                                                AntPathRequestMatcher.antMatcher("/error"),
-                                                                AntPathRequestMatcher.antMatcher("/**"))
-                                                .permitAll()
+        return http.build();
+    }
 
-                                                // ✅ PROTECTED ENDPOINTS - Require valid JWT
-                                                // .requestMatchers(
-                                                // "/api/v1/portfolios/**", // All portfolio operations
-                                                // "/api/v1/portfolio-analytics/**", // Analytics endpoints
-                                                // "/api/v1/market-data/**", // Market data endpoints
-                                                // "/api/v1/market-index/**", // Market index endpoints
-                                                // "/api/v1/index-analytics/**" // Index analytics
-                                                // // endpoints
-                                                // ).authenticated()
-
-                                                // ❌ Deny all other endpoints (fail secure)
-                                                .anyRequest().denyAll())
-
-                                // ✅ ZERO TRUST: Enforce JWT Validation
-                                .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(jwtDecoder())))
-
-                                // Disable HTTP Basic authentication (not needed, using JWT)
-                                .httpBasic(basic -> basic.disable())
-
-                                // Disable form login (API Gateway handles authentication)
-                                .formLogin(form -> form.disable());
-
-                return http.build();
-        }
-
-        @Bean
-        public JwtDecoder jwtDecoder() {
-                // Use HS256 (Symmetric Key) to match Auth Service
-                SecretKey key = new SecretKeySpec(jwtSecret.getBytes(), "HmacSHA256");
-                return NimbusJwtDecoder.withSecretKey(key).build();
-        }
+    @Bean
+    public JwtDecoder jwtDecoder() {
+        SecretKey key = new SecretKeySpec(jwtSecret.getBytes(), "HmacSHA256");
+        return NimbusJwtDecoder.withSecretKey(key).build();
+    }
 }

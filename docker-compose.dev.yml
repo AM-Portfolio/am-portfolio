@@ -13,7 +13,7 @@ services:
       - "8072:8080"
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=am_kafka:9092
-      - MONGODB_URL=mongodb://admin:password123@host.docker.internal:27017/portfolio?authSource=admin
+      - MONGODB_URL=mongodb://admin:placeholder_password@host.docker.internal:27017/portfolio?authSource=admin
       - MARKET_DATA_API_URL=http://host.docker.internal:8092
       - ETF_API_URL=http://host.docker.internal:8022
     volumes:
