@@ -60,9 +60,6 @@ public class PortfolioCalculationService {
             PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(enrichedHoldings,
                     totalInvestment);
 
-            // Update the original holdings object with the enriched list so the mapper picks it up
-            holdings.setEquityHoldings(enrichedHoldings);
-
             // 3. Map to Event
             PortfolioUpdateEvent updateEvent = mapToUpdateEvent(holdings, summary, userId, portfolioId);
 

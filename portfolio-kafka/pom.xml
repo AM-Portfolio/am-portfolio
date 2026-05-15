@@ -11,6 +11,7 @@
     <artifactId>portfolio-kafka</artifactId>
     <name>portfolio-kafka</name>
     <description>Portfolio Kafka Module</description>
+
     <dependencies>
         <dependency>
           <groupId>com.portfolio</groupId>

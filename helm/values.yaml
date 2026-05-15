@@ -38,8 +38,6 @@ vault:
       path: apps/data/preprod/services/am-auth
     portfolio:
       path: apps/data/preprod/services/am-portfolio
-    market-data:
-      path: apps/data/preprod/services/am-market-data
     mongodb:
       path: apps/data/preprod/infra/mongodb
     kafka:
@@ -48,6 +46,7 @@ vault:
       path: apps/data/preprod/infra/redis
 
 env:
+  MARKET_DATA_API_URL: "http://am-market-data:8092"
   ETF_API_URL: "http://am-parser:8022"
   SPRING_PROFILES_ACTIVE: "preprod"
   LOG_LEVEL: "INFO"

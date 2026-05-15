@@ -2,7 +2,7 @@ name: Portfolio Common Lib Publish
 
 on:
   push:
-    branches: ["main", "develop", "fix/**", "hotfix/**", "feature/**"]
+    branches: ["main", "develop", "test/**"]
     paths:
       - "am-common-data/**"
   pull_request:

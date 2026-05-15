@@ -13,7 +13,6 @@
     <name>portfolio-api</name>
     <description>Portfolio API Module</description>
 
-
     <dependencies>
         <!-- Portfolio Model Module -->
         <dependency>
