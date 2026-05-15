@@ -10,6 +10,15 @@ resources:
     cpu: 250m
     memory: 256Mi
 
+vault:
+  secretPaths:
+    auth:
+      path: apps/data/dev/services/am-auth
+    infra:
+      path: apps/data/dev/infra/postgres
+    portfolio:
+      path: apps/data/dev/services/am-portfolio
+
 hostAliases:
   - ip: "203.174.22.129"
     hostnames:
