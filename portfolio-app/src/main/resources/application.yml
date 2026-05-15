@@ -1,5 +1,5 @@
 # Infrastructure Configuration
-MONGODB_CONNECTION_URL: ${SPRING_DATA_MONGODB_URI:${MONGODB_URL:mongodb://admin:password123@localhost:27017/portfolio?authSource=admin}}
+MONGODB_CONNECTION_URL: ${MONGODB_URL:mongodb://admin:password123@localhost:27017/portfolio?authSource=admin}
 
 #Kafka
 PROJ_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
@@ -75,7 +75,7 @@ spring:
           key-prefix: "stock-indices:historical-data:"
           ttl: 129600 # 30 Days in seconds
     mongodb:
-      uri: ${SPRING_DATA_MONGODB_URI:${MONGODB_URI}}
+      uri: ${MONGODB_CONNECTION_URL}
       database: ${MONGODB_DATABASE:portfolio}
       authentication-database: admin
   # Disable JDBC auto-configuration since we're using MongoDB
@@ -131,7 +131,7 @@ app:
       topic: ${MARKET_INDEX_TOPIC_NAME}
 
 server:
-  port: 8081
+  port: 8080
   servlet:
     context-path: /
   tomcat:

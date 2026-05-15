@@ -7,7 +7,7 @@
     "build:all": "npm run build",
     "build:common": "mvn clean install -f am-common-data/pom.xml -DskipTests",
     "build:module": "mvn clean install -am -amd -DskipTests -pl",
-    "run": "npx -y dotenv-cli -- mvn -s settings.xml -pl portfolio-app spring-boot:run -U",
+    "run": "npx -y dotenv-cli -- mvn -pl portfolio-app spring-boot:run",
     "run:preprod": "npx -y dotenv-cli -e .env.preprod -- mvn -pl portfolio-app spring-boot:run",
     "test": "mvn test",
     "sdk:generate:java": "npx @openapitools/openapi-generator-cli generate -i http://localhost:8080/v3/api-docs -g java -o sdk/java --skip-validate-spec",
