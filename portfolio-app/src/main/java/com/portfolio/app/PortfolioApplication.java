@@ -8,8 +8,8 @@ import org.springframework.context.annotation.ComponentScans;
 import org.springframework.context.annotation.Import;
 
 import com.am.common.amcommondata.config.SecurityServiceAutoConfiguration;
-//import com.portfolio.app.config.DatabaseConfig;
 import com.portfolio.app.config.MarketDataApiConfigResolver;
+import reactor.core.publisher.Hooks;
 
 @Import({ MarketDataApiConfigResolver.class /*, SecurityServiceAutoConfiguration.class */ })
 @ComponentScans({
@@ -34,6 +34,8 @@ import com.portfolio.app.config.MarketDataApiConfigResolver;
 @SpringBootApplication
 public class PortfolioApplication {
     public static void main(String[] args) {
+        // Enable automatic context propagation for MDC in reactive chains
+        Hooks.enableAutomaticContextPropagation();
         SpringApplication.run(PortfolioApplication.class, args);
     }
 }

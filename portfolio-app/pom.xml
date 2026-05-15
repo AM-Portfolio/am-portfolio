@@ -64,6 +64,13 @@
             <artifactId>micrometer-tracing-bridge-otel</artifactId>
         </dependency>
 
+        <!-- Required for MDC propagation in Reactive/WebClient chains (Spring Boot 3.2+) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>context-propagation</artifactId>
+            <version>1.0.6</version>
+        </dependency>
+
         <!-- Exports spans to the otel-collector over HTTP (port 4318) -->
         <dependency>
             <groupId>io.opentelemetry</groupId>
