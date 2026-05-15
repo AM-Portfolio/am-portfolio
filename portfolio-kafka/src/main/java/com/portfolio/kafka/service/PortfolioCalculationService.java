@@ -61,7 +61,8 @@ public class PortfolioCalculationService {
                     totalInvestment);
 
             // 3. Map to Event
-            PortfolioUpdateEvent updateEvent = mapToUpdateEvent(holdings, summary, userId, portfolioId);
+            String eventPortfolioId = (portfolioId != null && !portfolioId.isEmpty()) ? portfolioId : "GLOBAL";
+            PortfolioUpdateEvent updateEvent = mapToUpdateEvent(holdings, summary, userId, eventPortfolioId);
 
             // 4. Publish to Kafka
             log.info("Publishing calculated portfolio update for UserID: {}, PortfolioID: {}", userId, portfolioId);
