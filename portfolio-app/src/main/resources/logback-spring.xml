@@ -51,11 +51,10 @@
             <encoder class="net.logstash.logback.encoder.LogstashEncoder">
                 <includeCallerData>false</includeCallerData>
                 <fieldNames>
-                    <message>msg</message>
                     <timestamp>@timestamp</timestamp>
                     <version>[ignore]</version>
                 </fieldNames>
-                <customFields>{"service":"portfolio-app"}</customFields>
+                <customFields>{"service":"am-portfolio"}</customFields>
                 <includeMdc>true</includeMdc>
             </encoder>
         </appender>
