@@ -1,5 +1,6 @@
 package com.portfolio.app.integration;
 
+import com.portfolio.app.util.TestSecurityHelper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -27,7 +28,8 @@ class SecurityIntegrationTest extends BaseIntegrationTest {
         // Verifying that our current configuration permits all requests
         // We use a dummy userId to trigger a 404 from the controller logic, 
         // which proves it passed the security filter.
-        mockMvc.perform(get("/v1/portfolios/list").param("userId", "non-existent-user"))
+        mockMvc.perform(get("/v1/portfolios/list")
+                        .with(TestSecurityHelper.mockJwtUser("non-existent-user")))
                 .andExpect(status().isNotFound()); 
     }
 
@@ -35,14 +37,16 @@ class SecurityIntegrationTest extends BaseIntegrationTest {
     void testCsrfIsDisabled() throws Exception {
         // Since CSRF is disabled in SecurityConfig, a POST request without a token should NOT return 403.
         // It might return 405 if the path matches a controller but the method is wrong.
-        mockMvc.perform(post("/v1/portfolios/dummy"))
+        mockMvc.perform(post("/v1/portfolios/dummy")
+                        .with(TestSecurityHelper.mockJwtUser("non-existent-user")))
                 .andExpect(status().isMethodNotAllowed()); // 405 means it reached the dispatcher, not blocked by CSRF
     }
 
     @Test
     void testSessionIsStateless() throws Exception {
         // Verifying that the response does not contain session-related headers like 'Set-Cookie'
-        mockMvc.perform(get("/v1/portfolios/list").param("userId", "any"))
+        mockMvc.perform(get("/v1/portfolios/list")
+                        .with(TestSecurityHelper.mockJwtUser("non-existent-user")))
                 .andExpect(result -> {
                     String cookie = result.getResponse().getHeader("Set-Cookie");
                     if (cookie != null) {

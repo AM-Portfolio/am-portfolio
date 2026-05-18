@@ -1,6 +1,7 @@
 package com.portfolio.api;
 
 import com.portfolio.basket.model.BasketOpportunity;
+import com.am.security.context.UserContext;
 import com.portfolio.basket.service.BasketAllocationService;
 import com.portfolio.basket.service.BasketEngineService;
 import com.portfolio.model.portfolio.EquityHoldings;
@@ -25,10 +26,11 @@ public class BasketController {
 
     @PostMapping("/opportunities")
     public List<BasketOpportunity> getOpportunities(@RequestBody OpportunityRequest request) {
-        log.info("Received Basket Opportunities Request - User: {}, Portfolio: {}, Query: {}",
-                request.getUserId(), request.getPortfolioId(), request.getEtfQuery());
+        String userId = UserContext.getUserIdOrThrow();
+        log.info("Received Basket Opportunities Request - User: {} (extracted), Portfolio: {}, Query: {}",
+                userId, request.getPortfolioId(), request.getEtfQuery());
 
-        List<EquityHoldings> userHoldings = resolveUserHoldings(request.getUserId(),
+        List<EquityHoldings> userHoldings = resolveUserHoldings(userId,
                 request.getPortfolioId(), request.getUserHoldings());
 
         log.info("Generating opportunities for {} holdings", userHoldings.size());
@@ -37,10 +39,11 @@ public class BasketController {
 
     @PostMapping("/exposure")
     public com.portfolio.model.basket.ExposureResponse getExposure(@RequestBody OpportunityRequest request) {
-        log.info("DIAGNOSTIC: Entered getExposure - User: {}, Portfolio: {}",
-                request.getUserId(), request.getPortfolioId());
+        String userId = UserContext.getUserIdOrThrow();
+        log.info("DIAGNOSTIC: Entered getExposure - User: {} (extracted), Portfolio: {}",
+                userId, request.getPortfolioId());
 
-        List<EquityHoldings> userHoldings = resolveUserHoldings(request.getUserId(),
+        List<EquityHoldings> userHoldings = resolveUserHoldings(userId,
                 request.getPortfolioId(), request.getUserHoldings());
 
         log.info("Calculating cumulative exposure for {} holdings", userHoldings.size());
@@ -49,7 +52,7 @@ public class BasketController {
                 .calculateCumulativeExposure(userHoldings);
 
         // Enrich response with request context
-        response.setUserId(request.getUserId());
+        response.setUserId(userId);
         response.setPortfolioId(request.getPortfolioId());
 
         return response;
@@ -58,10 +61,11 @@ public class BasketController {
     @PostMapping("/allocations")
     public com.portfolio.model.basket.PortfolioAllocationResponse getAllocations(
             @RequestBody OpportunityRequest request) {
-        log.info("Calculating portfolio allocations - User: {}, Portfolio: {}",
-                request.getUserId(), request.getPortfolioId());
+        String userId = UserContext.getUserIdOrThrow();
+        log.info("Calculating portfolio allocations - User: {} (extracted), Portfolio: {}",
+                userId, request.getPortfolioId());
 
-        List<EquityHoldings> userHoldings = resolveUserHoldings(request.getUserId(),
+        List<EquityHoldings> userHoldings = resolveUserHoldings(userId,
                 request.getPortfolioId(), request.getUserHoldings());
 
         log.info("Generating allocations for {} holdings", userHoldings.size());
@@ -70,7 +74,7 @@ public class BasketController {
                 .calculatePortfolioAllocation(userHoldings);
 
         // Enrich with request context
-        allocation.setUserId(request.getUserId());
+        allocation.setUserId(userId);
         allocation.setPortfolioId(request.getPortfolioId());
 
         return allocation;
@@ -78,10 +82,11 @@ public class BasketController {
 
     @PostMapping("/preview")
     public BasketOpportunity getPreview(@RequestBody PreviewRequest request) {
-        log.info("Received Basket Preview Request - ETF: {}, User: {}, Portfolio: {}",
-                request.getEtfIsin(), request.getUserId(), request.getPortfolioId());
+        String userId = UserContext.getUserIdOrThrow();
+        log.info("Received Basket Preview Request - ETF: {}, User: {} (extracted), Portfolio: {}",
+                request.getEtfIsin(), userId, request.getPortfolioId());
 
-        List<EquityHoldings> userHoldings = resolveUserHoldings(request.getUserId(),
+        List<EquityHoldings> userHoldings = resolveUserHoldings(userId,
                 request.getPortfolioId(), request.getUserHoldings());
 
         log.info("Fetch User Holdings complete. Count: {}", userHoldings.size());

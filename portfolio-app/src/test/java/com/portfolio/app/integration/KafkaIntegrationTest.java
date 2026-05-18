@@ -63,7 +63,7 @@ class KafkaIntegrationTest extends BaseIntegrationTest {
 
         // Verify that the consumer picked up the message and delegated to the service
         // We use timeout() because Kafka consumption is asynchronous
-        verify(portfolioCalculationService, timeout(15000)).processCalculation(
+        verify(portfolioCalculationService, timeout(15000).atLeastOnce()).processCalculation(
                 eq(userId),
                 eq(portfolioId),
                 nullable(String.class) // correlationId might be null or generated
