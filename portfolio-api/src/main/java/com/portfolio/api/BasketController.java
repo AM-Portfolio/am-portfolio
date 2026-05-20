@@ -147,7 +147,6 @@ public class BasketController {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class PreviewRequest {
         private String etfIsin;
-        private String userId;
         private String portfolioId;
         private List<EquityHoldings> userHoldings;
     }
@@ -155,7 +154,6 @@ public class BasketController {
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class OpportunityRequest {
-        private String userId;
         private String portfolioId;
         private String etfQuery;
         private String etfIsin; // Added to handle requests with specific ETF ISINs
