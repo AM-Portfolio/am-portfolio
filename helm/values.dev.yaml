@@ -1,0 +1,72 @@
+# am-portfolio Dev environment overrides
+# Mirrors the pattern used by am-analysis and am-gateway dev configs
+environment: dev
+
+replicaCount: 1
+
+# Minimal resources for shared dev namespace
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+# Vault paths pointing to DEV secrets (not preprod!)
+vault:
+  enabled: true
+  secretPaths:
+    auth:
+      path: "apps/data/dev/services/am-auth"
+    portfolio:
+      path: "apps/data/dev/services/am-portfolio"
+    market-data:
+      path: "apps/data/dev/services/am-market-data"
+    mongodb:
+      path: "apps/data/dev/infra/mongodb"
+    kafka:
+      path: "apps/data/dev/infra/kafka"
+    redis:
+      path: "apps/data/dev/infra/redis"
+
+# Dev-specific env vars
+env:
+  ETF_API_URL: "http://am-parser:8022"
+  SPRING_PROFILES_ACTIVE: "dev"
+  LOG_LEVEL: "INFO"
+  KAFKA_SECURITY_PROTOCOL: "SASL_PLAINTEXT"
+  KAFKA_SASL_MECHANISM: "SCRAM-SHA-256"
+
+hostAliases:
+  - ip: "203.174.22.129"
+    hostnames:
+      - "redis.asrax.in"
+      - "mongodb.asrax.in"
+      - "kafka.asrax.in"
+
+probes:
+  port: 8080
+  startup:
+    path: "/actuator/health"
+    failureThreshold: 30 # 30 * 10s = 300s (5 min) for Spring Boot cold start
+    periodSeconds: 10
+  liveness:
+    path: "/actuator/health"
+  readiness:
+    path: "/actuator/health"
+
+ingress:
+  enabled: true
+  className: "traefik"
+  annotations:
+    kubernetes.io/ingress.class: "traefik"
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.middlewares: >-
+      am-apps-dev-dev-global-cors@kubernetescrd,
+      am-apps-dev-dev-strip-prefix@kubernetescrd
+  hosts:
+    - host: am-dev.asrax.in
+      paths:
+        - path: /portfolio
+          pathType: Prefix
