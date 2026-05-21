@@ -8,11 +8,10 @@ vault:
       # No mappings needed, defaults to dump-all uppercased
     parser:
       mappings:
-        ETF_API_URL: "url"
-      # No mappings needed, defaults to dump-all uppercased
+        ETF_API_URL: "URL"
     market:
       mappings:
-        MARKET_DATA_API_URL: "url"
+        MARKET_DATA_API_URL: "URL"
     logging:
       mappings:
         OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
