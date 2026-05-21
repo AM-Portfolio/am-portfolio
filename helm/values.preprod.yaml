@@ -18,6 +18,18 @@ vault:
       path: apps/data/preprod/infra/postgres
     portfolio:
       path: apps/data/preprod/services/am-portfolio
+    parser:
+      path: apps/data/preprod/services/am-parser
+    logging:
+      path: apps/data/preprod/services/logging
+    market:
+      path: apps/data/preprod/services/am-market-data
+    mongodb:
+      path: apps/data/preprod/infra/mongodb
+    kafka:
+      path: apps/data/preprod/infra/kafka
+    redis:
+      path: apps/data/preprod/infra/redis
 
 ingress:
   hosts:

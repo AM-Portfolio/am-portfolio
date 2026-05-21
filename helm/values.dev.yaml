@@ -18,6 +18,18 @@ vault:
       path: apps/data/dev/infra/postgres
     portfolio:
       path: apps/data/dev/services/am-portfolio
+    parser:
+      path: apps/data/dev/services/am-parser
+    logging:
+      path: apps/data/dev/services/logging
+    market:
+      path: apps/data/dev/services/am-market-data
+    mongodb:
+      path: apps/data/dev/infra/mongodb
+    kafka:
+      path: apps/data/dev/infra/kafka
+    redis:
+      path: apps/data/dev/infra/redis
 
 hostAliases:
   - ip: "203.174.22.129"

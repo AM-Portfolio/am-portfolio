@@ -33,26 +33,11 @@ vault:
   enabled: true
   serviceAccountName: am-backend-sa
   role: am-backend-role
-  secretPaths:
-    auth:
-      path: apps/data/preprod/services/am-auth
-    portfolio:
-      path: apps/data/preprod/services/am-portfolio
-    mongodb:
-      path: apps/data/preprod/infra/mongodb
-    kafka:
-      path: apps/data/preprod/infra/kafka
-    redis:
-      path: apps/data/preprod/infra/redis
 
 env:
-  MARKET_DATA_API_URL: "http://am-market-data:8092"
-  ETF_API_URL: "http://am-parser:8022"
   SPRING_PROFILES_ACTIVE: "preprod"
-  LOG_LEVEL: "INFO"
   KAFKA_SECURITY_PROTOCOL: "SASL_PLAINTEXT"
   KAFKA_SASL_MECHANISM: "SCRAM-SHA-256"
-  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces"
   TRACING_SAMPLING_PROBABILITY: "0.1"
 
 probes:
