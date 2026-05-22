@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = false)
 public class PortfolioCalculationService {
 
     private final PortfolioHoldingsService portfolioHoldingsService;

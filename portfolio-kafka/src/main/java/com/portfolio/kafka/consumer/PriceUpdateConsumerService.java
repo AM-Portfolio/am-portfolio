@@ -18,7 +18,7 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = false)
 public class PriceUpdateConsumerService {
 
     private final ObjectMapper objectMapper;

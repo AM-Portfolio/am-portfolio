@@ -61,5 +61,23 @@ application-*.yml
 *.bak
 *.orig
 
-### Secrets ###
+### Secrets — only .env.template is committed; copy to .env.preprod / .env.dev locally ###
 .env*
+!.env.template
+.env.secrets
+**/.env.secrets
+.env.local
+.env.deploy
+.env.preprod
+.env.dev
+
+# Vault / credential dumps (scripts write gitignored .env.* only)
+vault/backups/
+**/vault/backups/
+**/vault/*backup*.json
+credentials.json
+**/credentials.json
+*.pem
+*.p12
+*.key
+!**/src/test/**/*.key

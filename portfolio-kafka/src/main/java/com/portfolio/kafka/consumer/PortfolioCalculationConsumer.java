@@ -19,7 +19,7 @@ import jakarta.annotation.PostConstruct;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = false)
 public class PortfolioCalculationConsumer {
 
     private final ObjectMapper objectMapper;

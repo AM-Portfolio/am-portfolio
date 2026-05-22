@@ -30,6 +30,8 @@ spring:
       - api
   kafka:
     bootstrap-servers: ${PROJ_KAFKA_BOOTSTRAP_SERVERS}
+    listener:
+      auto-startup: ${KAFKA_ENABLED:false}
     consumer:
       group-id: ${PORTFOLIO_CONSUMER_GROUP}
       auto-offset-reset: latest
@@ -113,25 +115,25 @@ app:
     secret: ${JWT_SECRET:internal-service-super-secret-key-32chars-minimum-change-in-prod}
     algorithm: ${JWT_ALGORITHM:HS256}
   kafka:
-    enabled: ${KAFKA_ENABLED:true}
+    enabled: ${KAFKA_ENABLED:false}
     portfolio:
       consumer:
         id: ${PORTFOLIO_CONSUMER_GROUP}
-        enabled: true
+        enabled: ${KAFKA_ENABLED:false}
       topic: ${PORTFOLIO_TOPIC_NAME}
     stock:
       consumer:
         id: ${STOCK_CONSUMER_GROUP}
-        enabled: true
+        enabled: ${KAFKA_ENABLED:false}
       topic: ${STOCK_TOPIC_NAME}
     market-index:
       consumer:
         id: ${MARKET_INDEX_CONSUMER_GROUP}
-        enabled: true
+        enabled: ${KAFKA_ENABLED:false}
       topic: ${MARKET_INDEX_TOPIC_NAME}
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
   servlet:
     context-path: /
   tomcat:
@@ -142,7 +144,15 @@ server:
 etf:
   url: ${ETF_API_URL:http://localhost:8022}
 
+basket:
+  holdings:
+    enrichment:
+      enabled: ${BASKET_HOLDINGS_ENRICHMENT:true}
+
 market-data:
+  client:
+    connect-timeout-ms: ${MARKET_DATA_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:45000}
   api:
     base-url: ${MARKET_DATA_API_URL:http://localhost:8092}
     ohlc-endpoint: /v1/market-data/ohlc
@@ -193,4 +203,4 @@ management:
     redis:
       enabled: true
     kafka:
-      enabled: true
+      enabled: ${KAFKA_ENABLED:false}
