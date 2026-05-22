@@ -42,7 +42,7 @@ public class PortfolioController {
             @ApiResponse(responseCode = "400", description = "Invalid portfolio ID format"),
             @ApiResponse(responseCode = "404", description = "Portfolio not found")
     })
-    @GetMapping("/{portfolioId}")
+    @GetMapping("/{portfolioId:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}}")
     public ResponseEntity<PortfolioModelV1> getPortfolioById(
             @Parameter(description = "Portfolio ID (UUID format)") @PathVariable String portfolioId) {
         log.info("PortfolioController - getPortfolioById called with portfolioId: {}", portfolioId);
@@ -105,7 +105,7 @@ public class PortfolioController {
 
     @Hidden
     @Operation(summary = "Get portfolio analysis", description = "Retrieves detailed analysis for a specific portfolio (hidden from API docs)")
-    @GetMapping("/{portfolioId}/analysis")
+    @GetMapping("/{portfolioId:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}}/analysis")
     public ResponseEntity<PortfolioAnalysis> getPortfolioAnalysis(
             @PathVariable String portfolioId,
             @RequestParam(required = false) Integer page,
