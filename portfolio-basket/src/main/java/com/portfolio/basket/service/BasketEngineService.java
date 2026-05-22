@@ -169,10 +169,15 @@ public class BasketEngineService {
                 .collect(Collectors.groupingBy(EquityHoldings::getSector));
 
         List<BasketOpportunity> opportunities = new ArrayList<>();
+        Map<String, EtfData> etfDataByInput = etfApiClient.fetchEtfHoldingsBatch(new ArrayList<>(etfIsins));
 
         for (String etfIsin : etfIsins) {
-            // Get Data (Cache or API)
-            EtfData etf = getEtfData(etfIsin);
+            EtfData etf = etfDataByInput.get(etfIsin);
+            if (etf != null && etf.getHoldings() != null) {
+                etfApiClient.enrichHoldings(etf.getHoldings());
+            } else {
+                etf = getEtfData(etfIsin);
+            }
             if (etf == null)
                 continue;
 
