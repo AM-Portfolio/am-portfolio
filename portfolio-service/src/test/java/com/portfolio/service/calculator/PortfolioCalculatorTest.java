@@ -117,7 +117,7 @@ class PortfolioCalculatorTest {
         assertEquals(3000.0, summary.getTotalGainLoss());
         assertEquals(10.0, summary.getTotalGainLossPercentage());
         assertEquals(1000.0, summary.getTodayGainLoss());
-        assertEquals(3.03, summary.getTodayGainLossPercentage()); // (1000/33000)*100
+        assertEquals(3.13, summary.getTodayGainLossPercentage()); // (1000/32000)*100
         assertEquals(1, summary.getTotalAssets());
         assertEquals(1, summary.getGainersCount());
         assertEquals(1, summary.getTodayGainersCount());
