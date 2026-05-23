@@ -34,6 +34,7 @@ public class MarketDataConverter {
         MarketDataBuilder builder = MarketData.builder()
             .instrumentToken(response.getInstrumentToken())
             .lastPrice(response.getLastPrice())
+            .previousClose(response.getPreviousClose())
             .ohlc(response.getOhlc())
             .timestamp(response.getTimestamp())
             .timeFrame(response.getTimeFrame())
