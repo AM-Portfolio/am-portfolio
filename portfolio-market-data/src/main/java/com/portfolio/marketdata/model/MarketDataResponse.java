@@ -23,6 +23,7 @@ import java.util.List;
 public class MarketDataResponse {
     private long instrumentToken;
     private double lastPrice;
+    private Double previousClose;
     private OhlcData ohlc;
     
     // Fields for historical data context

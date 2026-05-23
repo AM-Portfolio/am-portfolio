@@ -25,7 +25,7 @@ class PortfolioCalculationConsumerTest {
         String json = "{\"userId\":\"u1\",\"portfolioId\":\"p1\"}";
         ConsumerRecord<String, String> record = new ConsumerRecord<>("am-trigger-calculation", 0, 0, null, json);
         consumer.listen(record);
-        verify(calculationService).processCalculation("u1", "p1", null);
+        verify(calculationService).processCalculation(eq("u1"), eq("p1"), anyString());
     }
 
     @Test void listen_withCorrelationId_propagatesTraceId() {
@@ -36,7 +36,7 @@ class PortfolioCalculationConsumerTest {
                 "am-trigger-calculation", 0, 0, ConsumerRecord.NO_TIMESTAMP, null,
                 0, 0, null, json, headers, java.util.Optional.empty());
         consumer.listen(record);
-        verify(calculationService).processCalculation("u1", "p1", "trace-123");
+        verify(calculationService).processCalculation(eq("u1"), eq("p1"), eq("trace-123"));
     }
 
     @Test void listen_missingUserId_doesNotDelegate() {
@@ -50,7 +50,7 @@ class PortfolioCalculationConsumerTest {
         String json = "{\"userId\":\"u1\"}";
         ConsumerRecord<String, String> record = new ConsumerRecord<>("am-trigger-calculation", 0, 0, null, json);
         consumer.listen(record);
-        verify(calculationService).processCalculation("u1", null, null);
+        verify(calculationService).processCalculation(eq("u1"), isNull(), anyString());
     }
 
     @Test void listen_invalidJson_doesNotThrow() {

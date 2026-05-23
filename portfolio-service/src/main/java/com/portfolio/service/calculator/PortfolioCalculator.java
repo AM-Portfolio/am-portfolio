@@ -136,7 +136,9 @@ public class PortfolioCalculator {
             }
 
             // Determine previous close (for day's gain/loss)
-            if (marketData.getOhlc() != null) {
+            if (marketData.getPreviousClose() != null) {
+                previousClosePrice = marketData.getPreviousClose();
+            } else if (marketData.getOhlc() != null) {
                 previousClosePrice = marketData.getOhlc().getOpen(); // Using Open as proxy for prev close for today's
                                                                      // change within day
             }
@@ -148,19 +150,19 @@ public class PortfolioCalculator {
             }
         }
 
-        // Local development fallback to prevent UI from showing 0.0 values
+        // Local development fallback to prevent UI from showing 0.0 values, but avoid fabricating data
         if (currentPrice == null) {
-            log.debug("No market data or Redis data for {}. Using local dev fallback price.", symbol);
+            log.debug("No market data or Redis data for {}. Using investment cost as fallback.", symbol);
             if (holding.getAverageBuyingPrice() != null && holding.getAverageBuyingPrice() > 0) {
-                currentPrice = holding.getAverageBuyingPrice() * 1.05; // 5% mock gain
-                previousClosePrice = holding.getAverageBuyingPrice() * 1.02; // Mock previous close
+                currentPrice = holding.getAverageBuyingPrice();
+                previousClosePrice = holding.getAverageBuyingPrice();
             } else if (holding.getInvestmentCost() != null && holding.getQuantity() != null && holding.getQuantity() > 0) {
                 double impliedAvgPrice = holding.getInvestmentCost() / holding.getQuantity();
-                currentPrice = impliedAvgPrice * 1.05;
-                previousClosePrice = impliedAvgPrice * 1.02;
+                currentPrice = impliedAvgPrice;
+                previousClosePrice = impliedAvgPrice;
             } else {
-                currentPrice = 100.0;
-                previousClosePrice = 95.0;
+                currentPrice = 0.0;
+                previousClosePrice = 0.0;
             }
         }
 

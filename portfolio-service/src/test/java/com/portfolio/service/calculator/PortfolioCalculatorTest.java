@@ -98,8 +98,8 @@ class PortfolioCalculatorTest {
 
         List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
 
-        // Fallback is 5% gain: 3000 * 1.05 = 3150
-        assertEquals(3150.0, results.get(0).getCurrentPrice());
+        // Fallback is 0% gain (same as avg buying price) since mock data was removed
+        assertEquals(3000.0, results.get(0).getCurrentPrice());
     }
 
     @Test
