@@ -9,7 +9,9 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -98,8 +100,19 @@ public class BasketController {
 
     @PostMapping("/calculate-quantities")
     public BasketOpportunity calculateQuantities(@RequestBody CalculationRequest request) {
+        if (request == null || request.getInvestmentAmount() == null || request.getInvestmentAmount() <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "investmentAmount is required and must be greater than 0");
+        }
+        BasketOpportunity opportunity = request.getOpportunity();
+        if (opportunity == null || opportunity.getComposition() == null || opportunity.getComposition().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "opportunity.composition is required. Call POST /v1/basket/preview first and pass the full "
+                            + "BasketOpportunity response (etfIsin, composition with etfWeight per stock). "
+                            + "Fields like etfSymbol/holdings are not used.");
+        }
         log.info("Calculating quantities for investment amount: {}", request.getInvestmentAmount());
-        return basketService.calculateBasketQuantities(request.getInvestmentAmount(), request.getOpportunity(), true);
+        return basketService.calculateBasketQuantities(request.getInvestmentAmount(), opportunity, true);
     }
 
     @Data

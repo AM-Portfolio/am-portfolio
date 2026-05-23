@@ -122,7 +122,7 @@ public class BasketEngineService {
                 .sum();
 
         // 1. Discover ETFs
-        Set<String> allIsins = new HashSet<>();
+        Set<String> allIsins = new LinkedHashSet<>();
 
         if (etfQuery != null && !etfQuery.trim().isEmpty()) {
             if (etfQuery.contains(",")) {
@@ -169,12 +169,17 @@ public class BasketEngineService {
                 .collect(Collectors.groupingBy(EquityHoldings::getSector));
 
         List<BasketOpportunity> opportunities = new ArrayList<>();
+        Map<String, EtfData> etfDataByInput = etfApiClient.fetchEtfHoldingsBatch(new ArrayList<>(etfIsins));
 
         for (String etfIsin : etfIsins) {
-            // Get Data (Cache or API)
-            EtfData etf = getEtfData(etfIsin);
-            if (etf == null)
+            EtfData etf = etfDataByInput.get(etfIsin);
+            if (etf != null && etf.getHoldings() != null) {
+                etfApiClient.enrichHoldings(etf.getHoldings());
+            }
+            if (etf == null) {
+                log.warn("No ETF resolved for query '{}' after batch lookup", etfIsin);
                 continue;
+            }
 
             BasketOpportunity opportunity = calculateOverlap(etfIsin, etf, userMap, userSectorMap);
             // Add all opportunities, sorting happens at top level
