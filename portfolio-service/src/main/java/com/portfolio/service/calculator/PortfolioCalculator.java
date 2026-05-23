@@ -219,12 +219,8 @@ public class PortfolioCalculator {
                 .mapToDouble(EquityHoldings::getTodayGainLoss)
                 .sum();
 
-        // For today's gain %, we interpret it against the current value (as per
-        // original logic logic usually)
-        // OR against yesterday's value.
-        // Original logic: currentValue > 0 ? (todayGainLoss / currentValue) * 100 :
-        // 0.0;
-        double todayGainLossPct = currentValue > 0 ? (todayGainLoss / currentValue) * 100 : 0.0;
+        double previousValue = currentValue - todayGainLoss;
+        double todayGainLossPct = previousValue > 0 ? (todayGainLoss / previousValue) * 100 : 0.0;
 
         int gainers = count(enrichedHoldings, false, true);
         int losers = count(enrichedHoldings, false, false);
