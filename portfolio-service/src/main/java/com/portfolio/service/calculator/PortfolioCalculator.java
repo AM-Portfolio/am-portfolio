@@ -63,18 +63,31 @@ public class PortfolioCalculator {
         var marketCapFuture = java.util.concurrent.CompletableFuture.supplyAsync(
                 () -> marketDataService.getMarketCapData(symbols), taskExecutor);
 
-        // Wait for both to complete
+        // Wait for BOTH futures simultaneously with a single shared timeout.
+        // Using allOf().orTimeout() is better than sequential .get(15s) x2 because:
+        //   1. Both futures truly run in parallel and we wait for both at once.
+        //   2. orTimeout() internally cancels the future on expiry, signalling the
+        //      underlying WebClient subscription to stop — avoiding the reactor
+        //      "did not observe any item or terminal signal" warning.
         Map<String, MarketData> marketDataMap;
         Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap;
         try {
-            marketDataMap = marketDataFuture.get(15, java.util.concurrent.TimeUnit.SECONDS);
-            marketCapMap = marketCapFuture.get(15, java.util.concurrent.TimeUnit.SECONDS);
-        } catch (Exception e) {
-            log.error("Parallel market data fetch timed out or failed (15s). Proceeding to check Redis cache for fallback values: {}", e.getMessage());
-            // Attempt to cancel ongoing futures
+            java.util.concurrent.CompletableFuture
+                    .allOf(marketDataFuture, marketCapFuture)
+                    .orTimeout(14, java.util.concurrent.TimeUnit.SECONDS) // < WebClient read-timeout (12s) budget + retry
+                    .join(); // propagates CancellationException / TimeoutException
+            marketDataMap = marketDataFuture.join();
+            marketCapMap = marketCapFuture.join();
+        } catch (java.util.concurrent.CancellationException e) {
+            log.warn("Parallel market data fetch cancelled (timeout). Falling back to Redis cache.");
             marketDataFuture.cancel(true);
             marketCapFuture.cancel(true);
-            
+            marketDataMap = Map.of();
+            marketCapMap = Map.of();
+        } catch (Exception e) {
+            log.error("Parallel market data fetch failed: {}. Falling back to Redis cache.", e.getMessage());
+            marketDataFuture.cancel(true);
+            marketCapFuture.cancel(true);
             marketDataMap = Map.of();
             marketCapMap = Map.of();
         }
