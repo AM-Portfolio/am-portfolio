@@ -79,13 +79,23 @@ public class PortfolioCalculator {
             marketDataMap = marketDataFuture.join();
             marketCapMap = marketCapFuture.join();
         } catch (java.util.concurrent.CancellationException e) {
-            log.warn("Parallel market data fetch cancelled (timeout). Falling back to Redis cache.");
+            log.warn("Parallel market data fetch cancelled. Falling back to Redis cache.");
+            marketDataFuture.cancel(true);
+            marketCapFuture.cancel(true);
+            marketDataMap = Map.of();
+            marketCapMap = Map.of();
+        } catch (java.util.concurrent.CompletionException e) {
+            if (e.getCause() instanceof java.util.concurrent.TimeoutException) {
+                log.warn("Parallel market data fetch timed out (14s). Falling back to Redis cache.");
+            } else {
+                log.error("Parallel market data fetch failed: {}. Falling back to Redis cache.", e.getMessage());
+            }
             marketDataFuture.cancel(true);
             marketCapFuture.cancel(true);
             marketDataMap = Map.of();
             marketCapMap = Map.of();
         } catch (Exception e) {
-            log.error("Parallel market data fetch failed: {}. Falling back to Redis cache.", e.getMessage());
+            log.error("Parallel market data fetch failed unexpectedly: {}. Falling back to Redis cache.", e.getMessage());
             marketDataFuture.cancel(true);
             marketCapFuture.cancel(true);
             marketDataMap = Map.of();
