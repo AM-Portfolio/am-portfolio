@@ -43,7 +43,7 @@ public class BasketRecommendationScheduler {
             if (holdings == null || holdings.isEmpty())
                 return;
 
-            List<BasketOpportunity> opportunities = basketService.findOpportunities(holdings, null);
+            List<BasketOpportunity> opportunities = basketService.findOpportunities(holdings, "NIFTY, SENSEX");
 
             if (!opportunities.isEmpty()) {
                 log.info("User {}: Found {} opportunities", userId, opportunities.size());
