@@ -53,10 +53,9 @@ public class SecurityConfig {
             .httpBasic(basic -> basic.disable())
             .formLogin(form -> form.disable());
 
-        // JWT decoder is wired but not activated at service level.
-        // am-gateway is the authentication boundary for this service.
-        // Uncomment below to enable per-service JWT validation if needed:
-        // .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(jwtDecoder())));
+        // JWT decoder is wired and activated at service level.
+        // am-portfolio is accessed directly via Traefik, so it must validate tokens.
+        http.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(jwtDecoder())));
 
         return http.build();
     }
