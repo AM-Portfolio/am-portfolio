@@ -74,7 +74,7 @@ class PortfolioControllerTest {
         
         when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(Arrays.asList(p1));
 
-        mockMvc.perform(get("/v1/portfolios").param("userId", userId))
+        mockMvc.perform(get("/v1/portfolios").header("X-User-ID", userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].name").value("P1"));
@@ -85,14 +85,14 @@ class PortfolioControllerTest {
         String userId = "empty-user";
         when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(Collections.emptyList());
 
-        mockMvc.perform(get("/v1/portfolios/list").param("userId", userId))
+        mockMvc.perform(get("/v1/portfolios/list").header("X-User-ID", userId))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     void getPortfolioAnalysis_InvalidInterval_ReturnsBadRequest() throws Exception {
         mockMvc.perform(get("/v1/portfolios/{id}/analysis", UUID.randomUUID().toString())
-                .param("userId", "u1")
+                .header("X-User-ID", "u1")
                 .param("interval", "invalid"))
                 .andExpect(status().isBadRequest());
     }
