@@ -63,7 +63,7 @@ public class PortfolioController {
     })
     @GetMapping
     public ResponseEntity<List<PortfolioModelV1>> getPortfolios(
-            @Parameter(description = "User ID to fetch portfolios for") @RequestParam String userId) {
+            @Parameter(description = "User ID to fetch portfolios for") @RequestHeader("X-User-ID") String userId) {
         log.info("PortfolioController - getPortfolios called with userId: {}", userId);
 
         List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
@@ -80,7 +80,7 @@ public class PortfolioController {
     })
     @GetMapping("/list")
     public ResponseEntity<List<PortfolioBasicInfo>> getPortfolioBasicDetails(
-            @Parameter(description = "User ID to fetch portfolio basic details for") @RequestParam String userId) {
+            @Parameter(description = "User ID to fetch portfolio basic details for") @RequestHeader("X-User-ID") String userId) {
         log.info("PortfolioController - getPortfolioBasicDetails called with userId: {}", userId);
 
         List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
@@ -107,7 +107,7 @@ public class PortfolioController {
     @GetMapping("/{portfolioId}/analysis")
     public ResponseEntity<PortfolioAnalysis> getPortfolioAnalysis(
             @PathVariable String portfolioId,
-            @RequestParam String userId,
+            @RequestHeader("X-User-ID") String userId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
@@ -142,7 +142,7 @@ public class PortfolioController {
     })
     @GetMapping("/summary")
     public ResponseEntity<PortfolioSummaryV1> getPortfolioSummary(
-            @Parameter(description = "User ID to fetch portfolio summary for") @RequestParam String userId,
+            @Parameter(description = "User ID to fetch portfolio summary for") @RequestHeader("X-User-ID") String userId,
             @Parameter(description = "Optional portfolio ID to filter results for specific portfolio") @RequestParam(required = false) String portfolioId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
@@ -187,7 +187,7 @@ public class PortfolioController {
     })
     @GetMapping("/holdings")
     public ResponseEntity<PortfolioHoldings> getPortfolioHoldings(
-            @Parameter(description = "User ID to fetch portfolio holdings for") @RequestParam String userId,
+            @Parameter(description = "User ID to fetch portfolio holdings for") @RequestHeader("X-User-ID") String userId,
             @Parameter(description = "Optional portfolio ID to filter results for specific portfolio") @RequestParam(required = false) String portfolioId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,

@@ -27,7 +27,7 @@ class SecurityIntegrationTest extends BaseIntegrationTest {
         // Verifying that our current configuration permits all requests
         // We use a dummy userId to trigger a 404 from the controller logic, 
         // which proves it passed the security filter.
-        mockMvc.perform(get("/v1/portfolios/list").param("userId", "non-existent-user"))
+        mockMvc.perform(get("/v1/portfolios/list").header("X-User-ID", "non-existent-user"))
                 .andExpect(status().isNotFound()); 
     }
 
@@ -42,7 +42,7 @@ class SecurityIntegrationTest extends BaseIntegrationTest {
     @Test
     void testSessionIsStateless() throws Exception {
         // Verifying that the response does not contain session-related headers like 'Set-Cookie'
-        mockMvc.perform(get("/v1/portfolios/list").param("userId", "any"))
+        mockMvc.perform(get("/v1/portfolios/list").header("X-User-ID", "any"))
                 .andExpect(result -> {
                     String cookie = result.getResponse().getHeader("Set-Cookie");
                     if (cookie != null) {
