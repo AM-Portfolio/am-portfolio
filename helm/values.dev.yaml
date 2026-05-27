@@ -1,0 +1,81 @@
+# Dev Environment Overrides — am-portfolio
+# Registers am-portfolio on https://am-dev.asrax.in/portfolio/* via Traefik.
+# The Traefik middleware "am-apps-dev-dev-strip-prefix" strips the /portfolio
+# prefix before forwarding the request to the pod, so the service only ever
+# sees /v1/portfolios/... (matching its Spring context-path).
+environment: dev
+replicaCount: 1
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 768Mi
+  requests:
+    cpu: 250m
+    memory: 384Mi
+
+vault:
+  enabled: true
+  secretPaths:
+    auth:
+      path: apps/data/dev/services/am-auth
+    portfolio:
+      path: apps/data/dev/services/am-portfolio
+    market-data:
+      path: apps/data/dev/services/am-market-data
+    mongodb:
+      path: apps/data/dev/infra/mongodb
+    kafka:
+      path: apps/data/dev/infra/kafka
+    redis:
+      path: apps/data/dev/infra/redis
+
+# Hostnames that resolve to the shared dev VPS (203.174.22.129).
+# Needed because in-cluster DNS does not resolve external names.
+hostAliases:
+  - ip: "203.174.22.129"
+    hostnames:
+      - "redis.asrax.in"
+      - "mongodb.asrax.in"
+      - "kafka.asrax.in"
+
+probes:
+  port: 8080
+  startup:
+    path: /actuator/health
+    failureThreshold: 30
+    periodSeconds: 10
+  liveness:
+    path: /actuator/health/liveness
+    initialDelaySeconds: 60
+    periodSeconds: 15
+  readiness:
+    path: /actuator/health/readiness
+    initialDelaySeconds: 60
+    periodSeconds: 15
+
+ingress:
+  enabled: true
+  className: "traefik"
+  annotations:
+    kubernetes.io/ingress.class: "traefik"
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    # strip-prefix middleware removes /portfolio before passing to the pod.
+    # global-cors middleware adds the needed CORS headers for the Flutter web app.
+    traefik.ingress.kubernetes.io/router.middlewares: >-
+      am-apps-dev-dev-global-cors@kubernetescrd,
+      am-apps-dev-dev-strip-prefix@kubernetescrd
+  hosts:
+    - host: am-dev.asrax.in
+      paths:
+        - path: /portfolio
+          pathType: Prefix
+
+env:
+  SPRING_PROFILES_ACTIVE: "dev"
+  LOG_LEVEL: "INFO"
+  KAFKA_SECURITY_PROTOCOL: "SASL_PLAINTEXT"
+  KAFKA_SASL_MECHANISM: "SCRAM-SHA-256"
+  ETF_API_URL: "http://am-parser:8022"
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces"
+  TRACING_SAMPLING_PROBABILITY: "0.1"

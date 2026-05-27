@@ -63,18 +63,41 @@ public class PortfolioCalculator {
         var marketCapFuture = java.util.concurrent.CompletableFuture.supplyAsync(
                 () -> marketDataService.getMarketCapData(symbols), taskExecutor);
 
-        // Wait for both to complete
+        // Wait for BOTH futures simultaneously with a single shared timeout.
+        // Using allOf().orTimeout() is better than sequential .get(15s) x2 because:
+        //   1. Both futures truly run in parallel and we wait for both at once.
+        //   2. orTimeout() internally cancels the future on expiry, signalling the
+        //      underlying WebClient subscription to stop — avoiding the reactor
+        //      "did not observe any item or terminal signal" warning.
         Map<String, MarketData> marketDataMap;
         Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap;
         try {
-            marketDataMap = marketDataFuture.get(15, java.util.concurrent.TimeUnit.SECONDS);
-            marketCapMap = marketCapFuture.get(15, java.util.concurrent.TimeUnit.SECONDS);
-        } catch (Exception e) {
-            log.error("Parallel market data fetch timed out or failed (15s). Proceeding to check Redis cache for fallback values: {}", e.getMessage());
-            // Attempt to cancel ongoing futures
+            java.util.concurrent.CompletableFuture
+                    .allOf(marketDataFuture, marketCapFuture)
+                    .orTimeout(14, java.util.concurrent.TimeUnit.SECONDS) // < WebClient read-timeout (12s) budget + retry
+                    .join(); // propagates CancellationException / TimeoutException
+            marketDataMap = marketDataFuture.join();
+            marketCapMap = marketCapFuture.join();
+        } catch (java.util.concurrent.CancellationException e) {
+            log.warn("Parallel market data fetch cancelled. Falling back to Redis cache.");
             marketDataFuture.cancel(true);
             marketCapFuture.cancel(true);
-            
+            marketDataMap = Map.of();
+            marketCapMap = Map.of();
+        } catch (java.util.concurrent.CompletionException e) {
+            if (e.getCause() instanceof java.util.concurrent.TimeoutException) {
+                log.warn("Parallel market data fetch timed out (14s). Falling back to Redis cache.");
+            } else {
+                log.error("Parallel market data fetch failed: {}. Falling back to Redis cache.", e.getMessage());
+            }
+            marketDataFuture.cancel(true);
+            marketCapFuture.cancel(true);
+            marketDataMap = Map.of();
+            marketCapMap = Map.of();
+        } catch (Exception e) {
+            log.error("Parallel market data fetch failed unexpectedly: {}. Falling back to Redis cache.", e.getMessage());
+            marketDataFuture.cancel(true);
+            marketCapFuture.cancel(true);
             marketDataMap = Map.of();
             marketCapMap = Map.of();
         }
@@ -136,7 +159,9 @@ public class PortfolioCalculator {
             }
 
             // Determine previous close (for day's gain/loss)
-            if (marketData.getOhlc() != null) {
+            if (marketData.getPreviousClose() != null) {
+                previousClosePrice = marketData.getPreviousClose();
+            } else if (marketData.getOhlc() != null) {
                 previousClosePrice = marketData.getOhlc().getOpen(); // Using Open as proxy for prev close for today's
                                                                      // change within day
             }
@@ -148,19 +173,19 @@ public class PortfolioCalculator {
             }
         }
 
-        // Local development fallback to prevent UI from showing 0.0 values
+        // Local development fallback to prevent UI from showing 0.0 values, but avoid fabricating data
         if (currentPrice == null) {
-            log.debug("No market data or Redis data for {}. Using local dev fallback price.", symbol);
+            log.debug("No market data or Redis data for {}. Using investment cost as fallback.", symbol);
             if (holding.getAverageBuyingPrice() != null && holding.getAverageBuyingPrice() > 0) {
-                currentPrice = holding.getAverageBuyingPrice() * 1.05; // 5% mock gain
-                previousClosePrice = holding.getAverageBuyingPrice() * 1.02; // Mock previous close
+                currentPrice = holding.getAverageBuyingPrice();
+                previousClosePrice = holding.getAverageBuyingPrice();
             } else if (holding.getInvestmentCost() != null && holding.getQuantity() != null && holding.getQuantity() > 0) {
                 double impliedAvgPrice = holding.getInvestmentCost() / holding.getQuantity();
-                currentPrice = impliedAvgPrice * 1.05;
-                previousClosePrice = impliedAvgPrice * 1.02;
+                currentPrice = impliedAvgPrice;
+                previousClosePrice = impliedAvgPrice;
             } else {
-                currentPrice = 100.0;
-                previousClosePrice = 95.0;
+                currentPrice = 0.0;
+                previousClosePrice = 0.0;
             }
         }
 
@@ -219,12 +244,8 @@ public class PortfolioCalculator {
                 .mapToDouble(EquityHoldings::getTodayGainLoss)
                 .sum();
 
-        // For today's gain %, we interpret it against the current value (as per
-        // original logic logic usually)
-        // OR against yesterday's value.
-        // Original logic: currentValue > 0 ? (todayGainLoss / currentValue) * 100 :
-        // 0.0;
-        double todayGainLossPct = currentValue > 0 ? (todayGainLoss / currentValue) * 100 : 0.0;
+        double previousValue = currentValue - todayGainLoss;
+        double todayGainLossPct = previousValue > 0 ? (todayGainLoss / previousValue) * 100 : 0.0;
 
         int gainers = count(enrichedHoldings, false, true);
         int losers = count(enrichedHoldings, false, false);

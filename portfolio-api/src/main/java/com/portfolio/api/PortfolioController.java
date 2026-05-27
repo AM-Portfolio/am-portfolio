@@ -62,8 +62,8 @@ public class PortfolioController {
             @ApiResponse(responseCode = "404", description = "No portfolios found for user")
     })
     @GetMapping
-    public ResponseEntity<List<PortfolioModelV1>> getPortfolios(
-            @Parameter(description = "User ID to fetch portfolios for") @RequestParam String userId) {
+    public ResponseEntity<List<PortfolioModelV1>> getPortfolios() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
         log.info("PortfolioController - getPortfolios called with userId: {}", userId);
 
         List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
@@ -79,8 +79,8 @@ public class PortfolioController {
             @ApiResponse(responseCode = "404", description = "No portfolios found for user")
     })
     @GetMapping("/list")
-    public ResponseEntity<List<PortfolioBasicInfo>> getPortfolioBasicDetails(
-            @Parameter(description = "User ID to fetch portfolio basic details for") @RequestParam String userId) {
+    public ResponseEntity<List<PortfolioBasicInfo>> getPortfolioBasicDetails() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
         log.info("PortfolioController - getPortfolioBasicDetails called with userId: {}", userId);
 
         List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
@@ -107,10 +107,10 @@ public class PortfolioController {
     @GetMapping("/{portfolioId}/analysis")
     public ResponseEntity<PortfolioAnalysis> getPortfolioAnalysis(
             @PathVariable String portfolioId,
-            @RequestParam String userId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
         log.info(
                 "PortfolioController - getPortfolioAnalysis called - Portfolio: {}, User: {}, Page: {}, Size: {}, Interval: {}",
                 portfolioId, userId, page, size, interval != null ? interval : "null");
@@ -142,11 +142,11 @@ public class PortfolioController {
     })
     @GetMapping("/summary")
     public ResponseEntity<PortfolioSummaryV1> getPortfolioSummary(
-            @Parameter(description = "User ID to fetch portfolio summary for") @RequestParam String userId,
             @Parameter(description = "Optional portfolio ID to filter results for specific portfolio") @RequestParam(required = false) String portfolioId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
         log.info(
                 "PortfolioController - getPortfolioSummary called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}",
                 userId, portfolioId != null ? portfolioId : "all", page, size, interval != null ? interval : "null");
@@ -187,11 +187,11 @@ public class PortfolioController {
     })
     @GetMapping("/holdings")
     public ResponseEntity<PortfolioHoldings> getPortfolioHoldings(
-            @Parameter(description = "User ID to fetch portfolio holdings for") @RequestParam String userId,
             @Parameter(description = "Optional portfolio ID to filter results for specific portfolio") @RequestParam(required = false) String portfolioId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
         log.info(
                 "PortfolioController - getPortfolioHoldings called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}",
                 userId, portfolioId != null ? portfolioId : "all", page, size, interval != null ? interval : "null");
