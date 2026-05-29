@@ -37,3 +37,6 @@ vault:
         SPRING_DATA_REDIS_HOST: "host"
         SPRING_DATA_REDIS_PASSWORD: "password"
         SPRING_DATA_REDIS_PORT: "port"
+
+# Vault mappings intentionally left empty.
+# Explicit templates are defined in values.yaml and values.dev.yaml instead.
