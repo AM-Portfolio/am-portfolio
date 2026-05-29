@@ -21,20 +21,52 @@ vault:
       path: apps/data/dev/services/am-auth
     infra:
       path: apps/data/dev/infra/postgres
+      template: |
+        {{`{{- range $k, $v := .Data.data }}`}}
+        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
+        {{`{{ end }}`}}
     portfolio:
       path: apps/data/dev/services/am-portfolio
+      template: |
+        {{`{{- range $k, $v := .Data.data }}`}}
+        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
+        {{`{{ end }}`}}
     parser:
       path: apps/data/dev/services/am-parser
+      template: |
+        {{`{{- range $k, $v := .Data.data }}`}}
+        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
+        {{`{{ end }}`}}
     logging:
       path: apps/data/dev/services/logging
+      template: |
+        {{`{{- range $k, $v := .Data.data }}`}}
+        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
+        {{`{{ end }}`}}
     market:
       path: apps/data/dev/services/am-market-data
+      template: |
+        {{`{{- range $k, $v := .Data.data }}`}}
+        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
+        {{`{{ end }}`}}
     mongodb:
       path: apps/data/dev/infra/mongodb
+      template: |
+        {{`{{- range $k, $v := .Data.data }}`}}
+        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
+        {{`{{ end }}`}}
     kafka:
       path: apps/data/dev/infra/kafka
+      template: |
+        {{`{{- range $k, $v := .Data.data }}`}}
+        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
+        {{`{{ end }}`}}
     redis:
       path: apps/data/dev/infra/redis
+      template: |
+        {{`{{- range $k, $v := .Data.data }}`}}
+        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
+        {{`{{ end }}`}}
 
 # Hostnames that resolve to the shared dev VPS (203.174.22.129).
 # Needed because in-cluster DNS does not resolve external names.
