@@ -111,3 +111,7 @@ ingress:
     - secretName: portfolio-tls
       hosts:
         - portfolio.preprod.am-portfolio.com
+
+config:
+  batchSearch:
+    enabled: false
