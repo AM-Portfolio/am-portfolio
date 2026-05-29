@@ -74,3 +74,6 @@ ingress:
     - secretName: portfolio-tls
       hosts:
         - portfolio.preprod.am-portfolio.com
+
+# Fix for universal-chart nil pointer exception
+config: {}
