@@ -14,8 +14,8 @@ resources:
     cpu: 250m
     memory: 384Mi
 
+# Dev Vault secret paths — key mappings are in vault-mappings.yaml
 vault:
-  enabled: true
   secretPaths:
     auth:
       path: apps/data/dev/services/am-auth
@@ -45,28 +45,14 @@ vault:
         {{`{{ end }}`}}
     market:
       path: apps/data/dev/services/am-market-data
-      template: |
-        {{`{{- range $k, $v := .Data.data }}`}}
-        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
-        {{`{{ end }}`}}
+    market-data:
+      path: apps/data/dev/services/am-market-data
     mongodb:
       path: apps/data/dev/infra/mongodb
-      template: |
-        {{`{{- range $k, $v := .Data.data }}`}}
-        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
-        {{`{{ end }}`}}
     kafka:
       path: apps/data/dev/infra/kafka
-      template: |
-        {{`{{- range $k, $v := .Data.data }}`}}
-        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
-        {{`{{ end }}`}}
     redis:
       path: apps/data/dev/infra/redis
-      template: |
-        {{`{{- range $k, $v := .Data.data }}`}}
-        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
-        {{`{{ end }}`}}
 
 # Hostnames that resolve to the shared dev VPS (203.174.22.129).
 # Needed because in-cluster DNS does not resolve external names.
@@ -114,9 +100,9 @@ env:
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces"
   TRACING_SAMPLING_PROBABILITY: "0.1"
 
-# Required by universal-chart _batch-search-env.tpl template.
-# Prevents nil pointer crash until chart registry is updated.
+# Config block required by universal-chart templates.
+# batchSearch is not used by am-portfolio — disabled to prevent nil pointer
+# in universal-chart templates (matches am-trade-management pattern).
 config:
   batchSearch:
     enabled: false
-

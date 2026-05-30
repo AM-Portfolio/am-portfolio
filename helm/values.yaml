@@ -1,6 +1,7 @@
 # am-portfolio Universal Chart Values
 
 replicaCount: 1
+port: 8080
 language: java
 environment: preprod
 
@@ -29,52 +30,17 @@ security:
   automountServiceAccountToken: true
 
 # Vault Secret Injection Configuration
+# Secret paths and key mappings are defined in vault-mappings.yaml
 vault:
   enabled: true
   serviceAccountName: am-backend-sa
   role: am-backend-role
-  secretPaths:
-    auth:
-      path: apps/data/preprod/services/am-auth
-      template: |
-        {{`{{- range $k, $v := .Data.data }}`}}
-        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
-        {{`{{ end }}`}}
-    portfolio:
-      path: apps/data/preprod/services/am-portfolio
-      template: |
-        {{`{{- range $k, $v := .Data.data }}`}}
-        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
-        {{`{{ end }}`}}
-    market-data:
-      path: apps/data/preprod/services/am-market-data
-      template: |
-        {{`{{- range $k, $v := .Data.data }}`}}
-        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
-        {{`{{ end }}`}}
-    mongodb:
-      path: apps/data/preprod/infra/mongodb
-      template: |
-        {{`{{- range $k, $v := .Data.data }}`}}
-        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
-        {{`{{ end }}`}}
-    kafka:
-      path: apps/data/preprod/infra/kafka
-      template: |
-        {{`{{- range $k, $v := .Data.data }}`}}
-        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
-        {{`{{ end }}`}}
-    redis:
-      path: apps/data/preprod/infra/redis
-      template: |
-        {{`{{- range $k, $v := .Data.data }}`}}
-        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
-        {{`{{ end }}`}}
 
 env:
   SPRING_PROFILES_ACTIVE: "preprod"
   KAFKA_SECURITY_PROTOCOL: "SASL_PLAINTEXT"
   KAFKA_SASL_MECHANISM: "SCRAM-SHA-256"
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces"
   TRACING_SAMPLING_PROBABILITY: "0.1"
 
 probes:
@@ -112,6 +78,9 @@ ingress:
       hosts:
         - portfolio.preprod.am-portfolio.com
 
+# Config block required by universal-chart templates.
+# batchSearch is not used by am-portfolio — disabled to prevent nil pointer
+# in universal-chart templates (matches am-trade-management pattern).
 config:
   batchSearch:
     enabled: false
