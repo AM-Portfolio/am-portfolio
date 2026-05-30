@@ -23,6 +23,8 @@ PROJ_REDIS_PORT: ${SPRING_DATA_REDIS_PORT:${REDIS_PORT:6379}}
 PROJ_REDIS_PASSWORD: ${SPRING_DATA_REDIS_PASSWORD:${REDIS_PASSWORD:password123}}
 
 spring:
+  main:
+    lazy-initialization: true
   application:
     name: portfolio-app
   profiles:
