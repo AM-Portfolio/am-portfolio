@@ -31,20 +31,7 @@ vault:
         {{`{{- range $k, $v := .Data.data }}`}}
         export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
         {{`{{ end }}`}}
-    parser:
-      path: apps/data/dev/services/am-parser
-      template: |
-        {{`{{- range $k, $v := .Data.data }}`}}
-        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
-        {{`{{ end }}`}}
-    logging:
-      path: apps/data/dev/services/logging
-      template: |
-        {{`{{- range $k, $v := .Data.data }}`}}
-        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
-        {{`{{ end }}`}}
-    market:
-      path: apps/data/dev/services/am-market-data
+
     market-data:
       path: apps/data/dev/services/am-market-data
     mongodb:
