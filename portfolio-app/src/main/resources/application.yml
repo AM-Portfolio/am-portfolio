@@ -198,7 +198,7 @@ management:
       validate-group-membership: false
       group:
         readiness:
-          include: mongo,redis,kafka,readinessState
+          include: mongo,readinessState
   health:
     livenessstate:
       enabled: true
