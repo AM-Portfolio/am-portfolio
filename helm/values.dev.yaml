@@ -53,13 +53,13 @@ hostAliases:
 probes:
   port: 8080
   startup:
-    path: "/actuator/health"
+    path: "/actuator/health/liveness"
     failureThreshold: 30
     periodSeconds: 10
   liveness:
-    path: "/actuator/health"
+    path: "/actuator/health/liveness"
   readiness:
-    path: "/actuator/health"
+    path: "/actuator/health/readiness"
 
 ingress:
   enabled: true
