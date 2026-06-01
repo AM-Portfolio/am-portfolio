@@ -54,7 +54,7 @@ probes:
   port: 8080
   startup:
     path: "/actuator/health/liveness"
-    failureThreshold: 30
+    failureThreshold: 60
     periodSeconds: 10
   liveness:
     path: "/actuator/health/liveness"
