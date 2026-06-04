@@ -21,26 +21,14 @@ vault:
       path: apps/data/dev/services/am-auth
     infra:
       path: apps/data/dev/infra/postgres
-      template: |
-        {{`{{- range $k, $v := .Data.data }}`}}
-        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
-        {{`{{ end }}`}}
     portfolio:
       path: apps/data/dev/services/am-portfolio
-      template: |
-        {{`{{- range $k, $v := .Data.data }}`}}
-        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
-        {{`{{ end }}`}}
     parser:
       path: apps/data/dev/services/am-parser
     logging:
       path: apps/data/dev/services/logging
     market:
       path: apps/data/dev/services/am-market-data
-      template: |
-        {{`{{- range $k, $v := .Data.data }}`}}
-        export {{`{{ $k | toUpper }}`}}="{{`{{ $v }}`}}"
-        {{`{{ end }}`}}
     market-data:
       path: apps/data/dev/services/am-market-data
     mongodb:
