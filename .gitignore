@@ -86,3 +86,12 @@ credentials.json
 ### Custom ###
 test-portfolio
 dev_deploy.ps1
+
+# Local dev PowerShell helper scripts — never committed
+*.ps1
+
+# Binary dumps and build artefacts accidentally left in workspace
+pods.json
+build_err.txt
+*.txt
+!**/src/**/*.txt

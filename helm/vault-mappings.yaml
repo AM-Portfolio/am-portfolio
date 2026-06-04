@@ -7,6 +7,16 @@ vault:
     portfolio:
       # No mappings needed, defaults to dump-all uppercased
       # No mappings needed — vault will dump-all keys uppercased (PORTFOLIO_TOPIC)
+    parser:
+      mappings:
+        ETF_API_URL: "URL"
+    logging:
+      mappings:
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+        LOG_LEVEL: "LOG_LEVEL"
+    market:
+      mappings:
+        MARKET_DATA_API_URL: "URL"
     market-data:
       mappings:
         MARKET_DATA_API_URL: "URL"
