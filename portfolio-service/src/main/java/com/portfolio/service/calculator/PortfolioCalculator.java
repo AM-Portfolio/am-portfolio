@@ -161,31 +161,30 @@ public class PortfolioCalculator {
             // Determine previous close (for day's gain/loss)
             if (marketData.getPreviousClose() != null) {
                 previousClosePrice = marketData.getPreviousClose();
-            } else if (marketData.getOhlc() != null) {
-                previousClosePrice = marketData.getOhlc().getOpen(); // Using Open as proxy for prev close for today's
-                                                                     // change within day
+            } else {
+                log.warn("Missing previousClose for symbol {}. Daily P&L will not be calculated for this holding.", symbol);
             }
         } else {
             // Fallback to pre-fetched batch Redis values instead of sequential blocking operations
             var cacheItem = cachedPricesMap != null ? cachedPricesMap.get(symbol) : null;
             if (cacheItem != null) {
                 currentPrice = cacheItem.getClosePrice();
+                previousClosePrice = cacheItem.getPreviousClosePrice();
             }
         }
 
-        // Local development fallback to prevent UI from showing 0.0 values, but avoid fabricating data
+        // Local development fallback to prevent UI from showing null values, but avoid fabricating Daily P&L
         if (currentPrice == null) {
-            log.debug("No market data or Redis data for {}. Using investment cost as fallback.", symbol);
+            log.debug("No market data or Redis data for {}. Using investment cost as price fallback.", symbol);
             if (holding.getAverageBuyingPrice() != null && holding.getAverageBuyingPrice() > 0) {
                 currentPrice = holding.getAverageBuyingPrice();
-                previousClosePrice = holding.getAverageBuyingPrice();
+                // Do NOT set previousClosePrice here — daily P&L must remain null, not fabricated
             } else if (holding.getInvestmentCost() != null && holding.getQuantity() != null && holding.getQuantity() > 0) {
                 double impliedAvgPrice = holding.getInvestmentCost() / holding.getQuantity();
                 currentPrice = impliedAvgPrice;
-                previousClosePrice = impliedAvgPrice;
+                // Do NOT set previousClosePrice here — daily P&L must remain null, not fabricated
             } else {
                 currentPrice = 0.0;
-                previousClosePrice = 0.0;
             }
         }
 

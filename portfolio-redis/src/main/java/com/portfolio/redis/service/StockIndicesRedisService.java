@@ -120,9 +120,12 @@ public class StockIndicesRedisService {
     }
 
     private StockPriceCache convertToStockPriceCache(EquityPrice price) {
+        Double prevClose = price.getPreviousClose();
+        
         return StockPriceCache.builder()
             .symbol(price.getSymbol())
             .closePrice(price.getLastPrice())
+            .previousClosePrice(prevClose)
             .timestamp(price.getTime())
             .build();
     }

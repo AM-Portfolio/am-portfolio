@@ -43,8 +43,16 @@ public class StockPerformanceService {
     }
     
     public List<StockPerformance> calculateStockPerformances(List<EquityModel> equityHoldings, TimeInterval interval) {
-        Instant startTime = interval != null && interval.getDuration() != null ? 
-            Instant.now().minus(interval.getDuration()) : null;
+        Instant startTime;
+        if (interval == TimeInterval.YTD) {
+            startTime = java.time.ZonedDateTime.now(java.time.ZoneId.systemDefault())
+                    .withDayOfYear(1)
+                    .truncatedTo(java.time.temporal.ChronoUnit.DAYS)
+                    .toInstant();
+        } else {
+            startTime = interval != null && interval.getDuration() != null ? 
+                Instant.now().minus(interval.getDuration()) : null;
+        }
 
         var symbols = equityHoldings.stream().map(EquityModel::getSymbol).filter(java.util.Objects::nonNull).toList();
 
