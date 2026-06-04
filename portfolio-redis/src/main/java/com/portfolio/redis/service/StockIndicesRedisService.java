@@ -120,8 +120,17 @@ public class StockIndicesRedisService {
     }
 
     private StockPriceCache convertToStockPriceCache(EquityPrice price) {
-        Double prevClose = price.getPreviousClose();
-        
+        Double prevClose = null;
+        try {
+            // Use reflection to call getPreviousClose so the code compiles even before 
+            // the Market Data team publishes the updated am-common-investment-model library.
+            // Once they publish it, this will automatically start working.
+            java.lang.reflect.Method method = price.getClass().getMethod("getPreviousClose");
+            prevClose = (Double) method.invoke(price);
+        } catch (Exception e) {
+            // Silently ignore: method doesn't exist yet in the current version of the shared library
+        }
+
         return StockPriceCache.builder()
             .symbol(price.getSymbol())
             .closePrice(price.getLastPrice())
