@@ -24,6 +24,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.portfolio.model.market.IndexIndices;
 import com.portfolio.model.cache.StockIndicesEventDataCache;
 import com.portfolio.model.cache.StockPriceCache;
+import com.portfolio.model.analytics.Heatmap;
 import com.portfolio.model.portfolio.PortfolioAnalysis;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
@@ -129,6 +130,11 @@ public class RedisConfig {
     @Bean
     public RedisTemplate<String, PortfolioSummaryV1> portfolioSummaryRedisTemplate(RedisConnectionFactory connectionFactory) {
         return createRedisTemplate(connectionFactory, PortfolioSummaryV1.class);
+    }
+
+    @Bean
+    public RedisTemplate<String, Heatmap> portfolioHeatmapRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, Heatmap.class);
     }
 
     @Bean

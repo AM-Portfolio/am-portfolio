@@ -17,6 +17,8 @@ import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import com.portfolio.redis.service.PortfolioHeatmapRedisService;
+
 /**
  * Provider for portfolio sector heatmap analytics
  */
@@ -24,8 +26,11 @@ import java.util.stream.Collectors;
 @Slf4j
 public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider<Heatmap> {
 
-    public PortfolioHeatmapProvider(PortfolioService portfolioService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService) {
+    private final PortfolioHeatmapRedisService heatmapRedisService;
+
+    public PortfolioHeatmapProvider(PortfolioService portfolioService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService, PortfolioHeatmapRedisService heatmapRedisService) {
         super(portfolioService, marketDataService, securityDetailsService);
+        this.heatmapRedisService = heatmapRedisService;
     }
 
     @Override
@@ -38,6 +43,13 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         log.info("Generating sector heatmap for portfolio: {}", request.getCoreIdentifiers().getPortfolioId());
         
         String portfolioId = request.getCoreIdentifiers().getPortfolioId();
+        
+        // Check cache first
+        Optional<Heatmap> cached = heatmapRedisService.getCachedHeatmap(portfolioId, request.getTimeFrameRequest());
+        if (cached.isPresent()) {
+            return cached.get();
+        }
+
         return processPortfolioData(
             portfolioId,
             request.getTimeFrameRequest(),
@@ -69,6 +81,8 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 heatmap.sortSectorsByPerformance();
                 
                 log.info("Generated heatmap with {} sectors for portfolio: {}", sectorPerformances.size(), portfolioId);
+                
+                heatmapRedisService.cacheHeatmap(heatmap, portfolioId, request.getTimeFrameRequest());
                 
                 return heatmap;
             }

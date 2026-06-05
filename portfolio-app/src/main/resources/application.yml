@@ -57,6 +57,9 @@ spring:
       portfolio-summary:
         ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:summary:"
+      portfolio-heatmap:
+        ttl: 900 # 15 minutes in seconds
+        key-prefix: "portfolio:heatmap:"
       portfolio-holdings:
         ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:holdings:"
@@ -160,7 +163,7 @@ market-data:
     ohlc-endpoint: /v1/market-data/ohlc
     historical-data-endpoint: /v1/market-data/historical-data
     securities-endpoint: /v1/securities
-    read-timeout: 12000      # Must be < PortfolioCalculator.enrichHoldings() 15s blocking wait
+    read-timeout: 30000      # Must be < PortfolioCalculator.enrichHoldings() 34s blocking wait
     connection-timeout: 5000
     max-retry-attempts: 1
 
