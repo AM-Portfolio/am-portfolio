@@ -23,6 +23,10 @@ vault:
       path: apps/data/prod/infra/kafka
     redis:
       path: apps/data/prod/infra/redis
+    identity-oidc:
+      path: apps/data/prod/services/am-identity
+    service-oauth:
+      path: apps/data/prod/services/am-portfolio
 
 ingress:
   enabled: true

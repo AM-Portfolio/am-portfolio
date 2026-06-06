@@ -33,3 +33,11 @@ vault:
         SPRING_DATA_REDIS_HOST: "host"
         SPRING_DATA_REDIS_PASSWORD: "password"
         SPRING_DATA_REDIS_PORT: "port"
+    identity-oidc:
+      mappings:
+        OIDC_JWKS_URI: "OIDC_JWKS_URL"
+        OIDC_ISSUER_URI: "OIDC_ISSUER"
+    service-oauth:
+      mappings:
+        OAUTH2_CLIENT_ID: "AM_PORTFOLIO_CLIENT_ID"
+        OAUTH2_CLIENT_SECRET: "AM_PORTFOLIO_CLIENT_SECRET"
