@@ -6,6 +6,7 @@ on:
       ["main", "develop", "test/**", "feature/**", "hotfix/**", "fix/**"]
     paths:
       - "portfolio-**"
+      - "helm/**"
       - "pom.xml"
       - "Dockerfile"
       - ".github/workflows/portfolio-publish.yml"
@@ -14,6 +15,7 @@ on:
       ["main", "develop", "test/**", "feature/**", "hotfix/**", "fix/**"]
     paths:
       - "portfolio-**"
+      - "helm/**"
       - "pom.xml"
       - "Dockerfile"
       - ".github/workflows/portfolio-publish.yml"

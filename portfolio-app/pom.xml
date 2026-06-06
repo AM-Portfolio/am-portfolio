@@ -26,11 +26,7 @@
             <artifactId>portfolio-api</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <dependency>
-            <groupId>com.portfolio</groupId>
-            <artifactId>portfolio-model</artifactId>
-            <version>${project.version}</version>
-        </dependency>
+
         <dependency>
             <groupId>com.portfolio</groupId>
             <artifactId>portfolio-redis</artifactId>
@@ -57,6 +53,38 @@
             <version>${project.version}</version>
         </dependency>
         
+        <!-- =========================================================== -->
+        <!-- Observability: Micrometer Tracing + OTel OTLP export        -->
+        <!-- Matches the stack in am-core-services-otel                  -->
+        <!-- =========================================================== -->
+
+        <!-- Bridges Micrometer Tracing API to the OTel SDK -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+
+        <!-- Required for MDC propagation in Reactive/WebClient chains (Spring Boot 3.2+) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>context-propagation</artifactId>
+            <version>1.0.6</version>
+        </dependency>
+
+        <!-- Exports spans to the otel-collector over HTTP (port 4318) -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+            <version>${opentelemetry.version}</version>
+        </dependency>
+
+        <!-- JSON-encoded access logs and structured log lines for production -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>${logstash-logback-encoder.version}</version>
+        </dependency>
+
         <!-- Spring Boot -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -83,6 +111,11 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -98,6 +131,41 @@
                         <goals>
                             <goal>repackage</goal>
                         </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                        <configuration>
+                            <excludes>
+                                <exclude>**/model/**</exclude>
+                                <exclude>**/dto/**</exclude>
+                                <exclude>**/config/**</exclude>
+                                <exclude>**/exception/**</exclude>
+                                <exclude>**/entity/**</exclude>
+                                <exclude>**/client/**</exclude>
+                                <exclude>**/constants/**</exclude>
+                                <exclude>**/*Application.class</exclude>
+                                <exclude>**/*Config.class</exclude>
+                                <exclude>**/*Exception.class</exclude>
+                                <exclude>**/*Constants.class</exclude>
+                                <exclude>**/*Properties.class</exclude>
+                                <exclude>**/mapper/**</exclude>
+                            </excludes>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

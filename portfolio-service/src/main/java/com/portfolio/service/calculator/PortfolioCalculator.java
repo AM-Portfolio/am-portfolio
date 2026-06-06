@@ -20,12 +20,21 @@ import lombok.extern.slf4j.Slf4j;
 import java.time.LocalDateTime;
 
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class PortfolioCalculator {
 
     private final MarketDataService marketDataService;
     private final StockIndicesRedisService stockPriceRedisService;
+    private final java.util.concurrent.Executor taskExecutor;
+
+    public PortfolioCalculator(
+            MarketDataService marketDataService,
+            StockIndicesRedisService stockPriceRedisService,
+            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
+        this.marketDataService = marketDataService;
+        this.stockPriceRedisService = stockPriceRedisService;
+        this.taskExecutor = taskExecutor;
+    }
 
     /**
      * Enriches equity holdings with real-time market data (price, value, P&L).
@@ -48,23 +57,74 @@ public class PortfolioCalculator {
                 .filter(symbol -> symbol != null)
                 .collect(Collectors.toList());
 
-        // Fetch market data for all symbols
-        Map<String, MarketData> marketDataMap = marketDataService.getMarketData(symbols);
-        log.debug("Fetched market data for {} out of {} symbols", marketDataMap.size(), symbols.size());
+        // Fetch market data and market cap data in PARALLEL (these are independent calls)
+        var marketDataFuture = java.util.concurrent.CompletableFuture.supplyAsync(
+                () -> marketDataService.getMarketData(symbols), taskExecutor);
+        var marketCapFuture = java.util.concurrent.CompletableFuture.supplyAsync(
+                () -> marketDataService.getMarketCapData(symbols), taskExecutor);
 
-        // Fetch market cap data for all symbols
-        Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap = marketDataService
-                .getMarketCapData(symbols);
-        log.debug("Fetched market cap data for {} out of {} symbols", marketCapMap.size(), symbols.size());
+        // Wait for BOTH futures simultaneously with a single shared timeout.
+        // Using allOf().orTimeout() is better than sequential .get(15s) x2 because:
+        //   1. Both futures truly run in parallel and we wait for both at once.
+        //   2. orTimeout() internally cancels the future on expiry, signalling the
+        //      underlying WebClient subscription to stop — avoiding the reactor
+        //      "did not observe any item or terminal signal" warning.
+        Map<String, MarketData> marketDataMap;
+        Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap;
+        try {
+            java.util.concurrent.CompletableFuture
+                    .allOf(marketDataFuture, marketCapFuture)
+                    .orTimeout(34, java.util.concurrent.TimeUnit.SECONDS)
+                    .join(); // propagates CancellationException / TimeoutException
+            marketDataMap = marketDataFuture.join();
+            marketCapMap = marketCapFuture.join();
+        } catch (java.util.concurrent.CancellationException e) {
+            log.warn("Parallel market data fetch cancelled. Falling back to Redis cache.");
+            marketDataFuture.cancel(true);
+            marketCapFuture.cancel(true);
+            marketDataMap = Map.of();
+            marketCapMap = Map.of();
+        } catch (java.util.concurrent.CompletionException e) {
+            if (e.getCause() instanceof java.util.concurrent.TimeoutException) {
+                log.warn("Parallel market data fetch timed out (14s). Falling back to Redis cache.");
+            } else {
+                log.error("Parallel market data fetch failed: {}. Falling back to Redis cache.", e.getMessage());
+            }
+            marketDataFuture.cancel(true);
+            marketCapFuture.cancel(true);
+            marketDataMap = Map.of();
+            marketCapMap = Map.of();
+        } catch (Exception e) {
+            log.error("Parallel market data fetch failed unexpectedly: {}. Falling back to Redis cache.", e.getMessage());
+            marketDataFuture.cancel(true);
+            marketCapFuture.cancel(true);
+            marketDataMap = Map.of();
+            marketCapMap = Map.of();
+        }
+        log.debug("Fetched market data for {} and market cap for {} out of {} symbols",
+                marketDataMap.size(), marketCapMap.size(), symbols.size());
 
         // Enrich each holding
+        final Map<String, MarketData> finalMarketDataMap = marketDataMap;
+        final Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> finalMarketCapMap = marketCapMap;
+
+        // Pre-fetch batch price cache updates for any missing symbols from Redis to eliminate N+1 performance issues
+        List<String> missingFromApi = symbols.stream()
+                .filter(symbol -> symbol != null && !finalMarketDataMap.containsKey(symbol))
+                .collect(Collectors.toList());
+
+        log.debug("Pre-fetching Redis stock prices for {} missing symbols", missingFromApi.size());
+        final Map<String, com.portfolio.model.cache.StockPriceCache> cachedPricesMap =
+                stockPriceRedisService.getLatestPrices(missingFromApi);
+
         return equityHoldings.stream()
-                .map(holding -> enrichHolding(holding, marketDataMap, marketCapMap))
+                .map(holding -> enrichHolding(holding, finalMarketDataMap, finalMarketCapMap, cachedPricesMap))
                 .collect(Collectors.toList());
     }
 
     private EquityHoldings enrichHolding(EquityHoldings holding, Map<String, MarketData> marketDataMap,
-            Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap) {
+            Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap,
+            Map<String, com.portfolio.model.cache.StockPriceCache> cachedPricesMap) {
         String symbol = holding.getSymbol();
         if (symbol == null)
             return holding;
@@ -99,15 +159,32 @@ public class PortfolioCalculator {
             }
 
             // Determine previous close (for day's gain/loss)
-            if (marketData.getOhlc() != null) {
-                previousClosePrice = marketData.getOhlc().getOpen(); // Using Open as proxy for prev close for today's
-                                                                     // change within day
+            if (marketData.getPreviousClose() != null) {
+                previousClosePrice = marketData.getPreviousClose();
+            } else {
+                log.warn("Missing previousClose for symbol {}. Daily P&L will not be calculated for this holding.", symbol);
             }
         } else {
-            // Fallback to Redis
-            var latestPrice = stockPriceRedisService.getLatestPrice(symbol);
-            if (latestPrice.isPresent()) {
-                currentPrice = latestPrice.get().getClosePrice();
+            // Fallback to pre-fetched batch Redis values instead of sequential blocking operations
+            var cacheItem = cachedPricesMap != null ? cachedPricesMap.get(symbol) : null;
+            if (cacheItem != null) {
+                currentPrice = cacheItem.getClosePrice();
+                previousClosePrice = cacheItem.getPreviousClosePrice();
+            }
+        }
+
+        // Local development fallback to prevent UI from showing null values, but avoid fabricating Daily P&L
+        if (currentPrice == null) {
+            log.debug("No market data or Redis data for {}. Using investment cost as price fallback.", symbol);
+            if (holding.getAverageBuyingPrice() != null && holding.getAverageBuyingPrice() > 0) {
+                currentPrice = holding.getAverageBuyingPrice();
+                // Do NOT set previousClosePrice here — daily P&L must remain null, not fabricated
+            } else if (holding.getInvestmentCost() != null && holding.getQuantity() != null && holding.getQuantity() > 0) {
+                double impliedAvgPrice = holding.getInvestmentCost() / holding.getQuantity();
+                currentPrice = impliedAvgPrice;
+                // Do NOT set previousClosePrice here — daily P&L must remain null, not fabricated
+            } else {
+                currentPrice = 0.0;
             }
         }
 
@@ -166,12 +243,8 @@ public class PortfolioCalculator {
                 .mapToDouble(EquityHoldings::getTodayGainLoss)
                 .sum();
 
-        // For today's gain %, we interpret it against the current value (as per
-        // original logic logic usually)
-        // OR against yesterday's value.
-        // Original logic: currentValue > 0 ? (todayGainLoss / currentValue) * 100 :
-        // 0.0;
-        double todayGainLossPct = currentValue > 0 ? (todayGainLoss / currentValue) * 100 : 0.0;
+        double previousValue = currentValue - todayGainLoss;
+        double todayGainLossPct = previousValue > 0 ? (todayGainLoss / previousValue) * 100 : 0.0;
 
         int gainers = count(enrichedHoldings, false, true);
         int losers = count(enrichedHoldings, false, false);

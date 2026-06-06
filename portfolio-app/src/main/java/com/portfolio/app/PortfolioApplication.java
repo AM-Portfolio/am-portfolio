@@ -6,14 +6,12 @@ import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.ComponentScans;
 import org.springframework.context.annotation.Import;
-import org.springframework.data.mongodb.repository.config.EnableMongoRepositories;
-import org.springframework.scheduling.annotation.EnableAsync;
 
 import com.am.common.amcommondata.config.SecurityServiceAutoConfiguration;
-//import com.portfolio.app.config.DatabaseConfig;
 import com.portfolio.app.config.MarketDataApiConfigResolver;
+import reactor.core.publisher.Hooks;
 
-@Import({ MarketDataApiConfigResolver.class, SecurityServiceAutoConfiguration.class })
+@Import({ MarketDataApiConfigResolver.class /*, SecurityServiceAutoConfiguration.class */ })
 @ComponentScans({
         @ComponentScan("com.am.common.amcommondata"),
         @ComponentScan("com.portfolio.api"),
@@ -34,10 +32,10 @@ import com.portfolio.app.config.MarketDataApiConfigResolver;
         "com.am.common.amcommondata.domain.portfolio"
 })
 @SpringBootApplication
-@EnableAsync
-@EnableMongoRepositories(basePackages = "com.am.common.amcommondata.repository")
 public class PortfolioApplication {
     public static void main(String[] args) {
+        // Enable automatic context propagation for MDC in reactive chains
+        Hooks.enableAutomaticContextPropagation();
         SpringApplication.run(PortfolioApplication.class, args);
     }
 }

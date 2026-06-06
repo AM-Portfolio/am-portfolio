@@ -34,20 +34,16 @@ public class TopMoverUtils {
         
         marketData.forEach((symbol, data) -> {
             if (data.getOhlc() != null) {
-                double closePrice = data.getOhlc().getClose();
-                double openPrice = data.getOhlc().getOpen();
-                
-                if (openPrice > 0 && closePrice > 0) {
-                    // Calculate change from open to current price
-                    double changePercent = ((data.getLastPrice() - openPrice) / openPrice) * 100;
-                    symbolToChangePercent.put(symbol, changePercent);
+                if (data.getPreviousClose() != null && data.getPreviousClose() > 0) {
+                    double previousClose = data.getPreviousClose();
+                    double lastPrice = data.getLastPrice();
                     
-                    // Performance score based on price movement relative to previous close
-                    double performanceScore = ((data.getLastPrice() - closePrice) / closePrice) * 100;
-                    symbolToPerformance.put(symbol, performanceScore);
+                    double changePercent = ((lastPrice - previousClose) / previousClose) * 100;
+                    symbolToChangePercent.put(symbol, changePercent);
+                    symbolToPerformance.put(symbol, changePercent);
                     
                     log.trace("Symbol: {}, Performance: {}, Change: {}%", 
-                            symbol, performanceScore, changePercent);
+                            symbol, changePercent, changePercent);
                 }
             }
         });
@@ -135,8 +131,10 @@ public class TopMoverUtils {
                     }
                     
                     double lastPrice = data.getLastPrice();
-                    double openPrice = data.getOhlc().getOpen();
-                    double changeAmount = lastPrice - openPrice;
+                    double changeAmount = 0.0;
+                    if (data.getPreviousClose() != null && data.getPreviousClose() > 0) {
+                        changeAmount = lastPrice - data.getPreviousClose();
+                    }
                     double changePercent = symbolToChangePercent.getOrDefault(symbol, 0.0);
                     
                     // Round values to 2 decimal places

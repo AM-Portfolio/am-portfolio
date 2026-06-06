@@ -23,6 +23,8 @@ PROJ_REDIS_PORT: ${REDIS_PORT:6379}
 PROJ_REDIS_PASSWORD: ${REDIS_PASSWORD:password123}
 
 spring:
+  main:
+    lazy-initialization: true
   application:
     name: portfolio-app
   profiles:
@@ -55,6 +57,9 @@ spring:
       portfolio-summary:
         ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:summary:"
+      portfolio-heatmap:
+        ttl: 900 # 15 minutes in seconds
+        key-prefix: "portfolio:heatmap:"
       portfolio-holdings:
         ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:holdings:"
@@ -154,10 +159,13 @@ market-data:
     connect-timeout-ms: ${MARKET_DATA_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:45000}
   api:
-    base-url: ${MARKET_DATA_API_URL:http://localhost:8092}
+    base-url: ${MARKET_DATA_API_URL:https://am.asrax.in/market}
     ohlc-endpoint: /v1/market-data/ohlc
     historical-data-endpoint: /v1/market-data/historical-data
     securities-endpoint: /v1/securities
+    read-timeout: 30000      # Must be < PortfolioCalculator.enrichHoldings() 34s blocking wait
+    connection-timeout: 5000
+    max-retry-attempts: 1
 
 # OpenAPI Documentation
 springdoc:
@@ -178,6 +186,7 @@ logging:
     com.am.common: INFO
     com.am.common.amcommondata: INFO
     org.springframework.kafka: INFO
+
 # Management/Actuator Configuration
 management:
   endpoints:
@@ -192,7 +201,7 @@ management:
       validate-group-membership: false
       group:
         readiness:
-          include: mongo,redis,kafka,readinessState
+          include: mongo,readinessState
   health:
     livenessstate:
       enabled: true
@@ -204,3 +213,35 @@ management:
       enabled: true
     kafka:
       enabled: ${KAFKA_ENABLED:false}
+  tracing:
+    enabled: true
+    sampling:
+      # Override per-environment via TRACING_SAMPLING_PROBABILITY env var.
+      # Default 0.1 (10 %) matches am-analysis / am-gateway in preprod and prevents
+      # heap pressure from buffered spans when the collector is unreachable.
+      probability: 1.0
+    propagation:
+      type: w3c                  # Must match core-services: "traceparent" / "tracestate" headers
+
+  # OTLP exporter — sends spans to the shared otel-collector over HTTP (port 4318).
+  # In k8s the collector is in the "monitoring" namespace (same as am-core-services-otel).
+  # In Docker compose:  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
+  # Local dev: no override needed.
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+
+# ─── Observability properties (am.observability.*) ───────────────────────────
+# Enable the request-log filter and standard MDC fields:
+# traceId, spanId, correlationId, service, request.method, request.path, http.status
+am:
+  observability:
+    enabled: true
+    request-log:
+      enabled: true
+      ignore-paths:
+        - /actuator/**
+        - /favicon.ico
+        - /swagger-ui/**
+        - /api-docs/**
+        - /v3/api-docs/**

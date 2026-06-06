@@ -54,7 +54,7 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
     private MarketCapAllocation generateMarketCapAllocation(String portfolioId, TimeFrameRequest timeFrameRequest) {
         return processPortfolioData(
             portfolioId,
-            timeFrameRequest,
+            null, // Force fetching fast current market data instead of heavy historical data
             this::createEmptyResult,
             (portfolio, portfolioSymbols, marketData) -> {
         
