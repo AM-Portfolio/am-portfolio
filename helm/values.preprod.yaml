@@ -52,4 +52,4 @@ ingress:
         - portfolio.preprod.am-portfolio.com
 
 env:
-  SPRING_PROFILES_ACTIVE: "preprod"
+  SPRING_PROFILES_ACTIVE: "preprod,security"

@@ -45,4 +45,4 @@ ingress:
         - portfolio.am-portfolio.com
 
 env:
-  SPRING_PROFILES_ACTIVE: "prod"
+  SPRING_PROFILES_ACTIVE: "prod,security"
