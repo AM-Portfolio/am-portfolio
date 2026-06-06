@@ -3,7 +3,6 @@
 replicaCount: 1
 port: 8080
 language: java
-environment: preprod
 
 # Top-level service account (Fallback)
 serviceAccountName: am-backend-sa
@@ -30,14 +29,12 @@ security:
   automountServiceAccountToken: true
 
 # Vault Secret Injection Configuration
-# Secret paths and key mappings are defined in vault-mappings.yaml
 vault:
   enabled: true
   serviceAccountName: am-backend-sa
   role: am-backend-role
 
 env:
-  SPRING_PROFILES_ACTIVE: "preprod"
   SPRING_MAIN_ALLOW_BEAN_DEFINITION_OVERRIDING: "true"
   KAFKA_ENABLED: "true"
   KAFKA_SECURITY_PROTOCOL: "SASL_PLAINTEXT"
@@ -47,6 +44,10 @@ env:
 
 probes:
   port: 8080
+  startup:
+    path: "/actuator/health/liveness"
+    failureThreshold: 60
+    periodSeconds: 10
   liveness:
     path: /actuator/health/liveness
     initialDelaySeconds: 150
@@ -64,25 +65,7 @@ resources:
     cpu: 500m
     memory: 512Mi
 
-ingress:
-  enabled: true
-  className: nginx
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-  hosts:
-    - host: portfolio.preprod.am-portfolio.com
-      paths:
-        - path: /
-          pathType: ImplementationSpecific
-  tls:
-    - secretName: portfolio-tls
-      hosts:
-        - portfolio.preprod.am-portfolio.com
-
 # Config block required by universal-chart templates.
-# batchSearch is not used by am-portfolio — disabled to prevent nil pointer
-# in universal-chart templates (matches am-trade-management pattern).
 config:
   batchSearch:
     enabled: false

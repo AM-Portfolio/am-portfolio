@@ -1,21 +1,9 @@
 # Dev Environment Overrides — am-portfolio
 # Registers am-portfolio on https://am-dev.asrax.in/portfolio/* via Traefik.
-# The Traefik middleware "am-apps-dev-dev-strip-prefix" strips the /portfolio
-# prefix before forwarding the request to the pod, so the service only ever
-# sees /v1/portfolios/... (matching its Spring context-path).
 environment: dev
-replicaCount: 1
 
-resources:
-  limits:
-    cpu: 500m
-    memory: 768Mi
-  requests:
-    cpu: 250m
-    memory: 384Mi
 
 # Dev Vault secret paths — key mappings are in vault-mappings.yaml
-# NO custom templates here — the universal-chart renders them via vault-mappings.yaml
 vault:
   secretPaths:
     auth:
@@ -38,7 +26,6 @@ vault:
       path: apps/data/dev/infra/redis
 
 # Hostnames that resolve to the shared dev VPS (203.174.22.129).
-# Needed because in-cluster DNS does not resolve external names.
 hostAliases:
   - ip: "203.174.22.129"
     hostnames:
@@ -46,25 +33,12 @@ hostAliases:
       - "mongodb.asrax.in"
       - "kafka.asrax.in"
 
-probes:
-  port: 8080
-  startup:
-    path: "/actuator/health/liveness"
-    failureThreshold: 60
-    periodSeconds: 10
-  liveness:
-    path: "/actuator/health/liveness"
-  readiness:
-    path: "/actuator/health/readiness"
-
 ingress:
   enabled: true
   className: "traefik"
   annotations:
     kubernetes.io/ingress.class: "traefik"
     traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
-    # strip-prefix middleware removes /portfolio before passing to the pod.
-    # global-cors middleware adds the needed CORS headers for the Flutter web app.
     traefik.ingress.kubernetes.io/router.middlewares: >-
       am-apps-dev-dev-global-cors@kubernetescrd,
       am-apps-dev-dev-strip-prefix@kubernetescrd
@@ -76,16 +50,3 @@ ingress:
 
 env:
   SPRING_PROFILES_ACTIVE: "dev"
-  SPRING_MAIN_ALLOW_BEAN_DEFINITION_OVERRIDING: "true"
-  KAFKA_ENABLED: "true"
-  KAFKA_SECURITY_PROTOCOL: "SASL_PLAINTEXT"
-  KAFKA_SASL_MECHANISM: "SCRAM-SHA-256"
-  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces"
-  TRACING_SAMPLING_PROBABILITY: "0.1"
-
-# Config block required by universal-chart templates.
-# batchSearch is not used by am-portfolio — disabled to prevent nil pointer
-# in universal-chart templates (matches am-trade-management pattern).
-config:
-  batchSearch:
-    enabled: false
