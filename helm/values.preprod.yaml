@@ -30,6 +30,10 @@ vault:
       path: apps/data/preprod/infra/kafka
     redis:
       path: apps/data/preprod/infra/redis
+    identity-oidc:
+      path: apps/data/preprod/services/am-identity
+    service-oauth:
+      path: apps/data/preprod/services/am-portfolio
 
 ingress:
   enabled: true
@@ -48,4 +52,4 @@ ingress:
         - portfolio.preprod.am-portfolio.com
 
 env:
-  SPRING_PROFILES_ACTIVE: "preprod"
+  SPRING_PROFILES_ACTIVE: "preprod,security"
