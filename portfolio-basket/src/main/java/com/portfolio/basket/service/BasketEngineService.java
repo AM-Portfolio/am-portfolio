@@ -126,18 +126,11 @@ public class BasketEngineService {
 
         if (etfQuery != null && !etfQuery.trim().isEmpty()) {
             if (etfQuery.contains(",")) {
-                log.info("Processing comma-separated query: {}", etfQuery);
+                log.info("Processing explicit ISIN list: {}", etfQuery);
                 Arrays.stream(etfQuery.split(","))
                         .map(String::trim)
                         .filter(s -> !s.isEmpty())
-                        .forEach(s -> {
-                            // Basic ISIN validation: 12 alphanumeric characters
-                            if (s.length() == 12 && s.matches("^[a-zA-Z0-9]+$")) {
-                                allIsins.add(s);
-                            } else {
-                                allIsins.addAll(etfApiClient.searchEtfs(s));
-                            }
-                        });
+                        .forEach(allIsins::add);
             } else {
                 log.info("Discovering ETFs via search query: {}", etfQuery);
                 allIsins.addAll(etfApiClient.searchEtfs(etfQuery));
