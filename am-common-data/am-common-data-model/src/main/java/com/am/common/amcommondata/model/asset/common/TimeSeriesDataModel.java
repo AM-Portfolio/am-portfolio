@@ -2,6 +2,8 @@ package com.am.common.amcommondata.model.asset.common;
 
 import lombok.Data;
 import lombok.Builder;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -10,6 +12,8 @@ import com.fasterxml.jackson.annotation.JsonInclude.Include;
 
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @JsonInclude(Include.NON_NULL)
 public class TimeSeriesDataModel {
     private UUID id;

@@ -38,6 +38,11 @@ public class MarketData {
      * Current/latest OHLC data
      */
     private OhlcData ohlc;
+
+    /**
+     * Previous day's close price
+     */
+    private Double previousClose;
     
     /**
      * Timestamp of the data

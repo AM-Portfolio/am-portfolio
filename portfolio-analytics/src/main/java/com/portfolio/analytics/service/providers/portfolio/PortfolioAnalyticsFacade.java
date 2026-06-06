@@ -13,20 +13,29 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import org.springframework.beans.factory.annotation.Qualifier;
+
 /**
  * Facade service for portfolio analytics that delegates to the appropriate providers
  * This service follows the same pattern as IndexAnalyticsFacade but for portfolio-specific analytics
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class PortfolioAnalyticsFacade {
     
     private final AnalyticsFactory analyticsFactory;
+    private final Executor taskExecutor;
+
+    public PortfolioAnalyticsFacade(AnalyticsFactory analyticsFactory, @Qualifier("taskExecutor") Executor taskExecutor) {
+        this.analyticsFactory = analyticsFactory;
+        this.taskExecutor = taskExecutor;
+    }
     
     /**
      * Generate sector heatmap for a portfolio
-     * @param portfolioId The portfolio ID to generate heatmap for
+     * @param request The request containing the portfolio ID
      * @return Heatmap containing sector performances
      */
     public Heatmap generateSectorHeatmap(AdvancedAnalyticsRequest request) {
@@ -36,8 +45,7 @@ public class PortfolioAnalyticsFacade {
     
     /**
      * Get top gainers and losers for a portfolio
-     * @param portfolioId The portfolio ID
-     * @param limit Number of top gainers/losers to return
+     * @param request The request
      * @return GainerLoser object containing top performers and underperformers
      */
     public GainerLoser getTopGainersLosers(AdvancedAnalyticsRequest request) {
@@ -47,7 +55,7 @@ public class PortfolioAnalyticsFacade {
     
     /**
      * Calculate sector and industry allocation percentages for a portfolio`
-     * @param portfolioId The portfolio ID
+     * @param request The request
      * @return SectorAllocation containing sector and industry weights
      */
     public SectorAllocation calculateSectorAllocations(AdvancedAnalyticsRequest request) {
@@ -57,7 +65,7 @@ public class PortfolioAnalyticsFacade {
     
     /**
      * Calculate market capitalization allocation for a portfolio
-     * @param portfolioId The portfolio ID
+     * @param request The request
      * @return MarketCapAllocation containing breakdown by market cap segments
      */
     public MarketCapAllocation calculateMarketCapAllocations(AdvancedAnalyticsRequest request) {
@@ -89,30 +97,43 @@ public class PortfolioAnalyticsFacade {
         // Build analytics component with requested features
         AnalyticsComponent.AnalyticsComponentBuilder analyticsBuilder = AnalyticsComponent.builder();
         
-        // Include heatmap if requested
+        CompletableFuture<Heatmap> heatmapFuture = null;
+        CompletableFuture<GainerLoser> moversFuture = null;
+        CompletableFuture<SectorAllocation> sectorAllocationFuture = null;
+        CompletableFuture<MarketCapAllocation> marketCapAllocationFuture = null;
+
+        // Start futures
         if (request.getFeatureToggles().isIncludeHeatmap()) {
-            Heatmap heatmap = generateSectorHeatmap(request);
-            analyticsBuilder.heatmap(heatmap);
+            heatmapFuture = CompletableFuture.supplyAsync(() -> generateSectorHeatmap(request), taskExecutor);
         }
         
-        // Include top movers if requested
         if (request.getFeatureToggles().isIncludeMovers()) {
-            int limit = request.getFeatureConfiguration().getMoversLimit() != null && request.getFeatureConfiguration().getMoversLimit() > 0 
-                    ? request.getFeatureConfiguration().getMoversLimit() : 5; // Default to 5 if not specified
-            GainerLoser movers = getTopGainersLosers(request);
-            analyticsBuilder.movers(movers);
+            moversFuture = CompletableFuture.supplyAsync(() -> getTopGainersLosers(request), taskExecutor);
         }
         
-        // Include sector allocation if requested
         if (request.getFeatureToggles().isIncludeSectorAllocation()) {
-            SectorAllocation sectorAllocation = calculateSectorAllocations(request);
-            analyticsBuilder.sectorAllocation(sectorAllocation);
+            sectorAllocationFuture = CompletableFuture.supplyAsync(() -> calculateSectorAllocations(request), taskExecutor);
         }
         
-        // Include market cap allocation if requested
         if (request.getFeatureToggles().isIncludeMarketCapAllocation()) {
-            MarketCapAllocation marketCapAllocation = calculateMarketCapAllocations(request);
-            analyticsBuilder.marketCapAllocation(marketCapAllocation);
+            marketCapAllocationFuture = CompletableFuture.supplyAsync(() -> calculateMarketCapAllocations(request), taskExecutor);
+        }
+        
+        // Join futures and populate builder
+        if (heatmapFuture != null) {
+            analyticsBuilder.heatmap(heatmapFuture.join());
+        }
+        
+        if (moversFuture != null) {
+            analyticsBuilder.movers(moversFuture.join());
+        }
+        
+        if (sectorAllocationFuture != null) {
+            analyticsBuilder.sectorAllocation(sectorAllocationFuture.join());
+        }
+        
+        if (marketCapAllocationFuture != null) {
+            analyticsBuilder.marketCapAllocation(marketCapAllocationFuture.join());
         }
         
         // Add the analytics component to the response

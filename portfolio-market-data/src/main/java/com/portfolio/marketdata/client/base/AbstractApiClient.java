@@ -328,6 +328,10 @@ public abstract class AbstractApiClient implements ApiClient {
      * @param requestBody the request body object (can be null)
      */
     private <R> void logCurlCommand(String requestId, String method, String url, String queryParams, R requestBody) {
+        if (!log.isDebugEnabled()) {
+            return;
+        }
+        
         StringBuilder curlCommand = new StringBuilder("curl -X ").append(method).append(" '");
         
         // Add URL and query parameters

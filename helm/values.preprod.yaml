@@ -1,6 +1,5 @@
-# am-portfolio Preprod Overrides
-
-replicaCount: 1
+# Preprod Environment Overrides — am-portfolio
+environment: preprod
 
 resources:
   limits:
@@ -10,6 +9,7 @@ resources:
     cpu: 250m
     memory: 256Mi
 
+# Preprod Vault secret paths — key mappings are in vault-mappings.yaml
 vault:
   secretPaths:
     auth:
@@ -32,6 +32,11 @@ vault:
       path: apps/data/preprod/infra/redis
 
 ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
   hosts:
     - host: portfolio.preprod.am-portfolio.com
       paths:
@@ -41,3 +46,6 @@ ingress:
     - secretName: portfolio-tls
       hosts:
         - portfolio.preprod.am-portfolio.com
+
+env:
+  SPRING_PROFILES_ACTIVE: "preprod"

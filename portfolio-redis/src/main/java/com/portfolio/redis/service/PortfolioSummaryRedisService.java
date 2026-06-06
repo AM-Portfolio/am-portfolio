@@ -29,31 +29,30 @@ public class PortfolioSummaryRedisService {
     @Value("${spring.data.redis.portfolio-summary.key-prefix}")
     private String portfolioSummaryKeyPrefix;
 
-    @Async
+    @Async("taskExecutor")
     public CompletableFuture<Void> cachePortfolioSummary(PortfolioSummaryV1 summary, String userId, TimeInterval interval) {
         log.info("Starting async caching of portfolio summary - User: {}, Interval: {}", 
             userId, interval != null ? interval.getCode() : "null");
         
-        return CompletableFuture.runAsync(() -> {
-            String key = buildKey(userId, interval);
-            log.debug("Generated cache key: {} for user: {}", key, userId);
+        String key = buildKey(userId, interval);
+        log.debug("Generated cache key: {} for user: {}", key, userId);
+        
+        try {
+            // For short intervals, use the interval duration as TTL
+            Duration ttl = interval != null && interval.getDuration() != null && 
+                          interval.getDuration().compareTo(Duration.ofSeconds(portfolioSummaryTtl)) < 0 
+                          ? interval.getDuration() 
+                          : Duration.ofSeconds(portfolioSummaryTtl);
             
-            try {
-                // For short intervals, use the interval duration as TTL
-                Duration ttl = interval != null && interval.getDuration() != null && 
-                              interval.getDuration().compareTo(Duration.ofSeconds(portfolioSummaryTtl)) < 0 
-                              ? interval.getDuration() 
-                              : Duration.ofSeconds(portfolioSummaryTtl);
-                
-                log.debug("Setting cache with TTL: {} seconds for key: {}", ttl.getSeconds(), key);
-                portfolioSummaryRedisTemplate.opsForValue().set(key, summary, ttl);
-                log.info("Successfully cached portfolio summary - User: {}, Key: {}, TTL: {} seconds", 
-                    userId, key, ttl.getSeconds());
-            } catch (Exception e) {
-                log.error("Error caching portfolio summary - User: {}, Key: {}, Error: {}", 
-                    userId, key, e.getMessage(), e);
-            }
-        });
+            log.debug("Setting cache with TTL: {} seconds for key: {}", ttl.getSeconds(), key);
+            portfolioSummaryRedisTemplate.opsForValue().set(key, summary, ttl);
+            log.info("Successfully cached portfolio summary - User: {}, Key: {}, TTL: {} seconds", 
+                userId, key, ttl.getSeconds());
+        } catch (Exception e) {
+            log.error("Error caching portfolio summary - User: {}, Key: {}, Error: {}", 
+                userId, key, e.getMessage(), e);
+        }
+        return CompletableFuture.completedFuture(null);
     }
 
     public Optional<PortfolioSummaryV1> getLatestSummary(String userId, TimeInterval interval) {

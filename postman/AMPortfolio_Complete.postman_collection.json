@@ -1,0 +1,543 @@
+{
+    "info": {
+        "_postman_id": "am-portfolio-complete-collection",
+        "name": "AM Portfolio Complete API",
+        "description": "Comprehensive Postman collection covering all Portfolio, Basket, Market Index, and Advanced Analytics endpoints for am-portfolio",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Portfolio Management",
+            "item": [
+                {
+                    "name": "Get Portfolio by ID",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://127.0.0.1:8062/v1/portfolios/{{portfolioId}}",
+                            "protocol": "http",
+                            "host": [
+                                "127.0.0.1"
+                            ],
+                            "port": "8062",
+                            "path": [
+                                "v1",
+                                "portfolios",
+                                "{{portfolioId}}"
+                            ]
+                        },
+                        "description": "Retrieves detailed portfolio information for a specific portfolio ID (UUID format)"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get All Portfolios for User",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://127.0.0.1:8062/v1/portfolios?userId={{userId}}",
+                            "protocol": "http",
+                            "host": [
+                                "127.0.0.1"
+                            ],
+                            "port": "8062",
+                            "path": [
+                                "v1",
+                                "portfolios"
+                            ],
+                            "query": [
+                                {
+                                    "key": "userId",
+                                    "value": "{{userId}}"
+                                }
+                            ]
+                        },
+                        "description": "Retrieves all portfolios associated with a specific user ID"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Portfolio IDs and Names",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://127.0.0.1:8062/v1/portfolios/list?userId={{userId}}",
+                            "protocol": "http",
+                            "host": [
+                                "127.0.0.1"
+                            ],
+                            "port": "8062",
+                            "path": [
+                                "v1",
+                                "portfolios",
+                                "list"
+                            ],
+                            "query": [
+                                {
+                                    "key": "userId",
+                                    "value": "{{userId}}"
+                                }
+                            ]
+                        },
+                        "description": "Retrieves a lightweight list of portfolio IDs and names for all user portfolios"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Portfolio Analysis",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://127.0.0.1:8062/v1/portfolios/{{portfolioId}}/analysis?userId={{userId}}&interval=1M",
+                            "protocol": "http",
+                            "host": [
+                                "127.0.0.1"
+                            ],
+                            "port": "8062",
+                            "path": [
+                                "v1",
+                                "portfolios",
+                                "{{portfolioId}}",
+                                "analysis"
+                            ],
+                            "query": [
+                                {
+                                    "key": "userId",
+                                    "value": "{{userId}}"
+                                },
+                                {
+                                    "key": "interval",
+                                    "value": "1M",
+                                    "description": "Time interval (e.g., 1D, 1W, 1M, 3M, 6M, 1Y, ALL)"
+                                }
+                            ]
+                        },
+                        "description": "Retrieves detailed analysis for a specific portfolio (performance, allocation, historical returns)"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Portfolio Summary",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://127.0.0.1:8062/v1/portfolios/summary?userId={{userId}}&interval=1M",
+                            "protocol": "http",
+                            "host": [
+                                "127.0.0.1"
+                            ],
+                            "port": "8062",
+                            "path": [
+                                "v1",
+                                "portfolios",
+                                "summary"
+                            ],
+                            "query": [
+                                {
+                                    "key": "userId",
+                                    "value": "{{userId}}"
+                                },
+                                {
+                                    "key": "portfolioId",
+                                    "value": "{{portfolioId}}",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "interval",
+                                    "value": "1M"
+                                }
+                            ]
+                        },
+                        "description": "Retrieves a summary of all portfolios for a user with performance metrics. Optionally filter by specific portfolio ID."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Portfolio Holdings",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://127.0.0.1:8062/v1/portfolios/holdings?userId={{userId}}&interval=1M",
+                            "protocol": "http",
+                            "host": [
+                                "127.0.0.1"
+                            ],
+                            "port": "8062",
+                            "path": [
+                                "v1",
+                                "portfolios",
+                                "holdings"
+                            ],
+                            "query": [
+                                {
+                                    "key": "userId",
+                                    "value": "{{userId}}"
+                                },
+                                {
+                                    "key": "portfolioId",
+                                    "value": "{{portfolioId}}",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "interval",
+                                    "value": "1M"
+                                }
+                            ]
+                        },
+                        "description": "Retrieves all holdings across portfolios for a user with current values. Optionally filter by specific portfolio ID."
+                    },
+                    "response": []
+                }
+            ],
+            "description": "Manage, list, and analyze user portfolios, holdings, and summary metrics."
+        },
+        {
+            "name": "Portfolio Basket Analysis",
+            "item": [
+                {
+                    "name": "Get Opportunities",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"userId\": \"{{userId}}\",\n    \"portfolioId\": \"{{portfolioId}}\",\n    \"etfQuery\": \"NIFTY\",\n    \"userHoldings\": []\n}"
+                        },
+                        "url": {
+                            "raw": "http://127.0.0.1:8062/v1/basket/opportunities",
+                            "protocol": "http",
+                            "host": [
+                                "127.0.0.1"
+                            ],
+                            "port": "8062",
+                            "path": [
+                                "v1",
+                                "basket",
+                                "opportunities"
+                            ]
+                        },
+                        "description": "Find basket opportunities that match user's holdings against ETFs. Returns match scores and replication details."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Cumulative Exposure",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"userId\": \"{{userId}}\",\n    \"portfolioId\": \"{{portfolioId}}\",\n    \"userHoldings\": []\n}"
+                        },
+                        "url": {
+                            "raw": "http://127.0.0.1:8062/v1/basket/exposure",
+                            "protocol": "http",
+                            "host": [
+                                "127.0.0.1"
+                            ],
+                            "port": "8062",
+                            "path": [
+                                "v1",
+                                "basket",
+                                "exposure"
+                            ]
+                        },
+                        "description": "Calculate cumulative exposure across direct holdings and indirect holdings via ETFs."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Portfolio Allocations",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"userId\": \"{{userId}}\",\n    \"portfolioId\": \"{{portfolioId}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://127.0.0.1:8062/v1/basket/allocations",
+                            "protocol": "http",
+                            "host": [
+                                "127.0.0.1"
+                            ],
+                            "port": "8062",
+                            "path": [
+                                "v1",
+                                "basket",
+                                "allocations"
+                            ]
+                        },
+                        "description": "Get comprehensive portfolio allocation data for UI visualization (sector, stock-wise, and direct/indirect breakdown)."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Preview",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"etfIsin\": \"INF204KB14I2\",\n    \"userId\": \"{{userId}}\",\n    \"portfolioId\": \"{{portfolioId}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://127.0.0.1:8062/v1/basket/preview",
+                            "protocol": "http",
+                            "host": [
+                                "127.0.0.1"
+                            ],
+                            "port": "8062",
+                            "path": [
+                                "v1",
+                                "basket",
+                                "preview"
+                            ]
+                        },
+                        "description": "Preview basket composition for a specific ETF against user's current holdings."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Calculate Quantities",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"investmentAmount\": 150000.00,\n    \"opportunity\": {\n        \"etfIsin\": \"INF204KB14I2\",\n        \"etfName\": \"NIPPON INDIA ETF NIFTY BEES\",\n        \"matchPercentage\": 45.5,\n        \"components\": []\n    }\n}"
+                        },
+                        "url": {
+                            "raw": "http://127.0.0.1:8062/v1/basket/calculate-quantities",
+                            "protocol": "http",
+                            "host": [
+                                "127.0.0.1"
+                            ],
+                            "port": "8062",
+                            "path": [
+                                "v1",
+                                "basket",
+                                "calculate-quantities"
+                            ]
+                        },
+                        "description": "Calculate exact asset quantities to purchase for a specific investment amount under an ETF basket opportunity."
+                    },
+                    "response": []
+                }
+            ],
+            "description": "Endpoints to match holdings against ETFs, calculate cumulative exposure, and preview allocations."
+        },
+        {
+            "name": "Market Indices & Analytics",
+            "item": [
+                {
+                    "name": "Get All Market Indices",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://127.0.0.1:8062/v1/market-index/all?interval=1M&type=SECTOR",
+                            "protocol": "http",
+                            "host": [
+                                "127.0.0.1"
+                            ],
+                            "port": "8062",
+                            "path": [
+                                "v1",
+                                "market-index",
+                                "all"
+                            ],
+                            "query": [
+                                {
+                                    "key": "interval",
+                                    "value": "1M"
+                                },
+                                {
+                                    "key": "type",
+                                    "value": "SECTOR"
+                                }
+                            ]
+                        },
+                        "description": "Retrieves all market indices with optional filtering by interval and type"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Advanced Index Analytics",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"timeFrame\": \"1M\",\n    \"fromDate\": \"2026-04-01\",\n    \"toDate\": \"2026-05-01\",\n    \"coreIdentifiers\": {\n        \"indexSymbol\": \"NIFTY50\"\n    },\n    \"pagination\": {\n        \"returnAllData\": true\n    }\n}"
+                        },
+                        "url": {
+                            "raw": "http://127.0.0.1:8062/v1/analytics/index/NIFTY50/advanced",
+                            "protocol": "http",
+                            "host": [
+                                "127.0.0.1"
+                            ],
+                            "port": "8062",
+                            "path": [
+                                "v1",
+                                "analytics",
+                                "index",
+                                "NIFTY50",
+                                "advanced"
+                            ]
+                        },
+                        "description": "Retrieves comprehensive analytics for a market index with customizable components and timeframes"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Advanced Portfolio Analytics",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"timeFrame\": \"1M\",\n    \"coreIdentifiers\": {\n        \"portfolioId\": \"{{portfolioId}}\"\n    }\n}"
+                        },
+                        "url": {
+                            "raw": "http://127.0.0.1:8062/v1/analytics/portfolio/{{portfolioId}}/advanced",
+                            "protocol": "http",
+                            "host": [
+                                "127.0.0.1"
+                            ],
+                            "port": "8062",
+                            "path": [
+                                "v1",
+                                "analytics",
+                                "portfolio",
+                                "{{portfolioId}}",
+                                "advanced"
+                            ]
+                        },
+                        "description": "Retrieves comprehensive analytics for a portfolio with customizable components and timeframes"
+                    },
+                    "response": []
+                }
+            ],
+            "description": "Fetch real-time index data, performance metrics, and advanced statistical analyses."
+        },
+        {
+            "name": "Debug Tools",
+            "item": [
+                {
+                    "name": "Get Raw Market Data",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://127.0.0.1:8062/v1/debug/market-data/raw?symbols=NIFTY 50,INFY,TCS",
+                            "protocol": "http",
+                            "host": [
+                                "127.0.0.1"
+                            ],
+                            "port": "8062",
+                            "path": [
+                                "v1",
+                                "debug",
+                                "market-data",
+                                "raw"
+                            ],
+                            "query": [
+                                {
+                                    "key": "symbols",
+                                    "value": "NIFTY 50,INFY,TCS"
+                                }
+                            ]
+                        },
+                        "description": "Get raw market data response for debugging purposes (calls internal microservice on port 8084)"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Raw NSE Indices Data",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://127.0.0.1:8062/v1/debug/nse-indices/raw?indexSymbol=NIFTY50",
+                            "protocol": "http",
+                            "host": [
+                                "127.0.0.1"
+                            ],
+                            "port": "8062",
+                            "path": [
+                                "v1",
+                                "debug",
+                                "nse-indices",
+                                "raw"
+                            ],
+                            "query": [
+                                {
+                                    "key": "indexSymbol",
+                                    "value": "NIFTY50"
+                                }
+                            ]
+                        },
+                        "description": "Get raw NSE indices response for debugging purposes (calls internal microservice on port 8084)"
+                    },
+                    "response": []
+                }
+            ],
+            "description": "Developer only debug utilities to fetch raw values directly from upstream providers."
+        }
+    ],
+    "event": [],
+    "variable": [
+        {
+            "key": "userId",
+            "value": "b75743c9-fe0e-4c54-8ee0-8da350cc27b3",
+            "type": "string"
+        },
+        {
+            "key": "portfolioId",
+            "value": "P001",
+            "type": "string"
+        }
+    ]
+}

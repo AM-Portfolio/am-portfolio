@@ -50,29 +50,28 @@ public class StockIndicesEventRedisService {
      * @param indicesEvents List of stock indices events to cache
      * @return CompletableFuture<Void> representing the completion of the caching operation
      */
-    @Async
+    @Async("taskExecutor")
     public CompletableFuture<Void> cacheStockIndicesEventDataBatch(List<StockInsidicesEventData> indicesEvents) {
-        return CompletableFuture.runAsync(() -> {
-            if (indicesEvents == null || indicesEvents.isEmpty()) {
-                log.warn("Received empty or null stock indices events batch");
-                return;
+        if (indicesEvents == null || indicesEvents.isEmpty()) {
+            log.warn("Received empty or null stock indices events batch");
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        log.info("Starting to process {} stock indices events", indicesEvents.size());
+        try {
+            // Process in chunks of BATCH_SIZE
+            for (int i = 0; i < indicesEvents.size(); i += BATCH_SIZE) {
+                int end = Math.min(i + BATCH_SIZE, indicesEvents.size());
+                List<StockInsidicesEventData> batch = indicesEvents.subList(i, end);
+                log.debug("Processing batch {} to {} of {}", i, end, indicesEvents.size());
+                processBatch(batch);
             }
-            
-            log.info("Starting to process {} stock indices events", indicesEvents.size());
-            try {
-                // Process in chunks of BATCH_SIZE
-                for (int i = 0; i < indicesEvents.size(); i += BATCH_SIZE) {
-                    int end = Math.min(i + BATCH_SIZE, indicesEvents.size());
-                    List<StockInsidicesEventData> batch = indicesEvents.subList(i, end);
-                    log.debug("Processing batch {} to {} of {}", i, end, indicesEvents.size());
-                    processBatch(batch);
-                }
-                log.info("Successfully processed all {} stock indices events", indicesEvents.size());
-            } catch (Exception e) {
-                log.error("Error processing stock indices event batch: {}", e.getMessage(), e);
-                // Not rethrowing exception as per requirement to not acknowledge failures
-            }
-        });
+            log.info("Successfully processed all {} stock indices events", indicesEvents.size());
+        } catch (Exception e) {
+            log.error("Error processing stock indices event batch: {}", e.getMessage(), e);
+            // Not rethrowing exception as per requirement to not acknowledge failures
+        }
+        return CompletableFuture.completedFuture(null);
     }
 
     /**
@@ -152,15 +151,25 @@ public class StockIndicesEventRedisService {
      * @return StockIndicesEventDataCache
      */
     private StockIndicesEventDataCache convertToStockIndicesEventDataCache(StockInsidicesEventData event) {
+        Double prevClose = null;
+        if (event.getMetadata() != null) {
+            prevClose = event.getMetadata().getPreviousClose();
+        }
+
+        java.time.Instant ts = null;
+        if (event.getTimestamp() != null && !event.getTimestamp().isBlank()) {
+            try {
+                ts = java.time.Instant.parse(event.getTimestamp());
+            } catch (Exception e) {
+                log.warn("Could not parse timestamp '{}' for index '{}'. Defaulting to now.", event.getTimestamp(), event.getName());
+                ts = java.time.Instant.now();
+            }
+        }
+
         return StockIndicesEventDataCache.builder()
             .indexName(event.getName())
-            // .indexSymbol(event.get())
-            // .indexValue(event.getValue())
-            // .previousClose(event.getPreviousClose())
-            // .change(event.getChange())
-            // .changePercent(event.getChangePercent())
-            // .timestamp(event.getTimestamp())
-            // .constituents(event.getConstituents())
+            .previousClose(prevClose)
+            .timestamp(ts)
             .build();
     }
 

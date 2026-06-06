@@ -148,11 +148,19 @@ public class MarketDataService {
      * @return Map of symbols to their respective market data
      */
     public Map<String, MarketData> getOhlcData(List<String> symbols, boolean refresh) {
-        log.info("Getting OHLC data for {} symbols with refresh={}", symbols.size(), refresh);
+        List<String> validSymbols = symbols.stream()
+                .filter(s -> s != null && !s.trim().isEmpty())
+                .collect(Collectors.toList());
+
+        if (validSymbols.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        log.info("Getting OHLC data for {} symbols with refresh={}", validSymbols.size(), refresh);
 
         try {
             MarketDataResponseWrapper wrapper = marketDataApiClient
-                    .getOhlcData(symbols, TimeFrame.FIVE_MIN.getValue(), refresh).block();
+                    .getOhlcData(validSymbols, TimeFrame.FIVE_MIN.getValue(), refresh).block();
             return convertToMarketDataMap(wrapper, false);
         } catch (Exception e) {
             log.error("Error fetching OHLC data: {}", e.getMessage(), e);

@@ -19,6 +19,8 @@ import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import org.springframework.cache.annotation.Cacheable;
+
 /**
  * Abstract base class for portfolio analytics providers
  * @param <T> The type of analytics data returned
@@ -47,6 +49,7 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
      * @param portfolioId The portfolio ID to fetch data for
      * @return Portfolio model or null if not found
      */
+    @Cacheable(value = "portfolioCache", key = "#portfolioId")
     protected PortfolioModelV1 getPortfolio(String portfolioId) {
         log.info("Fetching portfolio data for ID: {}", portfolioId);
         try {

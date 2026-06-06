@@ -1,0 +1,45 @@
+name: Manual Deploy (Portfolio Service)
+
+# This workflow deploys a pre-built am-portfolio Docker image to a target
+# Kubernetes environment using the shared central-deploy pipeline.
+# It does NOT build the image — use portfolio-publish.yml for that.
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Select Image Tag"
+        required: true
+        default: "latest"
+        type: choice
+        options:
+          - latest
+          - custom
+      custom_tag:
+        description: "If 'custom' selected, enter tag here"
+        required: false
+        type: string
+      environment:
+        description: "Target Environment"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - preprod
+          - prod
+
+jobs:
+  deploy:
+    name: Deploy Portfolio Service to ${{ github.event.inputs.environment }}
+    uses: AM-Portfolio/am-pipelines/.github/workflows/central-deploy.yml@develop
+    with:
+      service_name: "am-portfolio"
+      working_directory: "."
+      language: "java"
+      environment: ${{ github.event.inputs.environment }}
+      image_tag: ${{ github.event.inputs.image_tag == 'custom' && github.event.inputs.custom_tag || github.event.inputs.image_tag }}
+      namespace: >-
+        ${{ github.event.inputs.environment == 'prod' && 'am-apps-prod'
+            || github.event.inputs.environment == 'preprod' && 'am-apps-preprod'
+            || 'am-apps-dev' }}
+    secrets: inherit

@@ -38,10 +38,20 @@
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
         <am.investment.version>1.6.24-SNAPSHOT</am.investment.version>
-        <am.common.version>1.4.0-SNAPSHOT</am.common.version>
+        <am.common.version>1.4.1-SNAPSHOT</am.common.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <am-common-investment.version>1.6.24-SNAPSHOT</am-common-investment.version>
-        <am-common-data-parent.version>1.4.0-SNAPSHOT</am-common-data-parent.version>
+        <am-common-data-parent.version>1.4.1-SNAPSHOT</am-common-data-parent.version>
+        <!--
+          Observability - pinned to Spring Boot 3.2.3's OTel line.
+          Spring Boot 3.2.3 ships opentelemetry-exporter-common 1.31.0; if we let the
+          exporter-otlp drift to 1.34.x the runtime crashes with
+          NoSuchMethodError: HttpExporterBuilder.addConstantHeaders. Keep all
+          io.opentelemetry:* artifacts on the same 1.31.x line via the BOM below.
+        -->
+        <micrometer-tracing.version>1.2.3</micrometer-tracing.version>
+        <opentelemetry.version>1.31.0</opentelemetry.version>
+        <logstash-logback-encoder.version>7.4</logstash-logback-encoder.version>
     </properties>
 
     <dependencyManagement>
@@ -53,8 +63,59 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!-- Micrometer Tracing BOM — aligned with Spring Boot 3.2.3 -->
+            <dependency>
+                <groupId>io.micrometer</groupId>
+                <artifactId>micrometer-tracing-bom</artifactId>
+                <version>${micrometer-tracing.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!--
+              Align ALL io.opentelemetry:* artifacts on one minor line.
+              Without this, Spring Boot 3.2 pins opentelemetry-exporter-common 1.31.x while
+              opentelemetry-exporter-otlp resolves at 1.34.x, causing a NoSuchMethodError on
+              HttpExporterBuilder.addConstantHeaders at startup (preprod CrashLoopBackOff).
+            -->
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom</artifactId>
+                <version>${opentelemetry.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>1.19.7</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mongodb</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 
     <repositories>
         <repository>
@@ -88,6 +149,43 @@
                 </plugin>
             </plugins>
         </pluginManagement>
+        <plugins>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.11</version>
+                <configuration>
+                    <excludes>
+                        <exclude>**/model/**</exclude>
+                        <exclude>**/dto/**</exclude>
+                        <exclude>**/config/**</exclude>
+                        <exclude>**/exception/**</exclude>
+                        <exclude>**/entity/**</exclude>
+                        <exclude>**/client/**</exclude>
+                        <exclude>**/constants/**</exclude>
+                        <exclude>**/*Application.class</exclude>
+                        <exclude>**/*Config.class</exclude>
+                        <exclude>**/*Exception.class</exclude>
+                        <exclude>**/*Constants.class</exclude>
+                        <exclude>**/*Properties.class</exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
     </build>
 
     <distributionManagement>
