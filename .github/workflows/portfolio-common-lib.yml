@@ -24,4 +24,6 @@ jobs:
       sdk_name: "am-common-data-lib"
       maven_repo_id: "github"
       maven_repo_url: "https://maven.pkg.github.com/AM-Portfolio/am-portfolio"
+      use_release_version: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+      advance_snapshot: true
     secrets: inherit
