@@ -53,6 +53,8 @@ jobs:
       sdk_name: "portfolio-sdk"
       maven_repo_id: "github"
       maven_repo_url: "https://maven.pkg.github.com/AM-Portfolio/am-portfolio"
+      use_release_version: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+      advance_snapshot: true
     secrets: inherit
 
   # 3. Publish Multi-Language SDKs (Generated)
@@ -70,6 +72,8 @@ jobs:
       sdk_name: "portfolio-sdk-java"
       maven_repo_id: "github"
       maven_repo_url: "https://maven.pkg.github.com/AM-Portfolio/am-portfolio"
+      use_release_version: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+      advance_snapshot: true
     secrets: inherit
 
   publish-python:
