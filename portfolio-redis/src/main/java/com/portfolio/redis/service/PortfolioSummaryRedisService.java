@@ -31,10 +31,15 @@ public class PortfolioSummaryRedisService {
 
     @Async("taskExecutor")
     public CompletableFuture<Void> cachePortfolioSummary(PortfolioSummaryV1 summary, String userId, TimeInterval interval) {
+        return cachePortfolioSummary(summary, userId, interval, null);
+    }
+
+    @Async("taskExecutor")
+    public CompletableFuture<Void> cachePortfolioSummary(PortfolioSummaryV1 summary, String userId, TimeInterval interval, String portfolioId) {
         log.info("Starting async caching of portfolio summary - User: {}, Interval: {}", 
             userId, interval != null ? interval.getCode() : "null");
         
-        String key = buildKey(userId, interval);
+        String key = buildKey(userId, interval, portfolioId);
         log.debug("Generated cache key: {} for user: {}", key, userId);
         
         try {
@@ -56,10 +61,14 @@ public class PortfolioSummaryRedisService {
     }
 
     public Optional<PortfolioSummaryV1> getLatestSummary(String userId, TimeInterval interval) {
+        return getLatestSummary(userId, interval, null);
+    }
+
+    public Optional<PortfolioSummaryV1> getLatestSummary(String userId, TimeInterval interval, String portfolioId) {
         log.info("Retrieving latest portfolio summary - User: {}, Interval: {}", 
             userId, interval != null ? interval.getCode() : "null");
             
-        String key = buildKey(userId, interval);
+        String key = buildKey(userId, interval, portfolioId);
         log.debug("Generated cache key: {} for user: {}", key, userId);
         
         try {
@@ -97,9 +106,10 @@ public class PortfolioSummaryRedisService {
         return Optional.empty();
     }
 
-    private String buildKey(String userId, TimeInterval interval) {
+    private String buildKey(String userId, TimeInterval interval, String portfolioId) {
         String intervalCode = interval != null ? interval.getCode() : "all";
-        String key = portfolioSummaryKeyPrefix + userId + ":" + intervalCode;
+        String portPart = (portfolioId != null && !portfolioId.isEmpty()) ? portfolioId : "all";
+        String key = portfolioSummaryKeyPrefix + userId + ":" + portPart + ":" + intervalCode;
         log.trace("Built cache key: {} for user: {}, interval: {}", key, userId, intervalCode);
         return key;
     }
