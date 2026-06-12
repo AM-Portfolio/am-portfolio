@@ -6,9 +6,17 @@ vault:
         INTERNAL_SECRET_KEY: "SECRET_KEY"
     portfolio:
       # No mappings needed, defaults to dump-all uppercased
-    market-data:
+    parser:
+      mappings:
+        ETF_API_URL: "URL"
+    market:
       mappings:
         MARKET_DATA_API_URL: "URL"
+    logging:
+      mappings:
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+        LOG_LEVEL: "LOG_LEVEL"
+      # No mappings needed, defaults to dump-all uppercased
     mongodb:
       mappings:
         MONGODB_URL: "url"

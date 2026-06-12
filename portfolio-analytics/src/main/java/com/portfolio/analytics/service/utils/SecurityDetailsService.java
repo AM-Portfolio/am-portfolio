@@ -33,7 +33,7 @@ public class SecurityDetailsService {
      * @param symbols List of security symbols to retrieve details for
      * @return Map of symbols to their corresponding SecurityModel objects
      */
-    //@Cacheable(value = "securityDetails", key = "#symbols.toString()")
+    @Cacheable(value = "securityDetails", key = "#symbols.toString()")
     public Map<String, SecurityModel> getSecurityDetails(List<String> symbols) {
         if (symbols == null || symbols.isEmpty()) {
             log.info("No symbols provided for security details lookup");
@@ -128,7 +128,7 @@ public class SecurityDetailsService {
      * @param symbols List of security symbols to group
      * @return Map of sectors to lists of symbols in each sector
      */
-    //@Cacheable(value = "sectorGroupings", key = "#symbols.toString()")
+    @Cacheable(value = "sectorGroupings", key = "#symbols.toString()")
     public Map<String, List<String>> groupSymbolsBySector(List<String> symbols) {
         if (symbols == null || symbols.isEmpty()) {
             log.info("No symbols provided for sector grouping");
@@ -164,7 +164,7 @@ public class SecurityDetailsService {
      * @param symbols List of security symbols to group
      * @return Map of industries to lists of symbols in each industry
      */
-    //@Cacheable(value = "industryGroupings", key = "#symbols.toString()")
+    @Cacheable(value = "industryGroupings", key = "#symbols.toString()")
     public Map<String, List<String>> groupSymbolsByIndustry(List<String> symbols) {
         if (symbols == null || symbols.isEmpty()) {
             log.info("No symbols provided for industry grouping");
@@ -200,7 +200,7 @@ public class SecurityDetailsService {
      * @param symbols List of security symbols to group
      * @return Map of market types to lists of symbols in each market type
      */
-    //@Cacheable(value = "marketTypeGroupings", key = "#symbols.toString()")
+    @Cacheable(value = "marketTypeGroupings", key = "#symbols.toString()")
     public Map<String, List<String>> groupSymbolsByMarketType(List<String> symbols) {
         if (symbols == null || symbols.isEmpty()) {
             log.info("No symbols provided for market type grouping");

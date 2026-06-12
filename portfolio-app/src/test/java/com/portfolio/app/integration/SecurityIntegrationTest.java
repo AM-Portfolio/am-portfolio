@@ -9,6 +9,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import com.am.security.context.UserContext;
 
 /**
  * Integration test for security configuration.
@@ -24,10 +25,8 @@ class SecurityIntegrationTest extends BaseIntegrationTest {
 
     @Test
     void testPublicEndpointAccessibility() throws Exception {
-        // Verifying that our current configuration permits all requests
-        // We use a dummy userId to trigger a 404 from the controller logic, 
-        // which proves it passed the security filter.
-        mockMvc.perform(get("/v1/portfolios/list").param("userId", "non-existent-user"))
+        UserContext.setUserId("non-existent-user");
+        mockMvc.perform(get("/v1/portfolios/list"))
                 .andExpect(status().isNotFound()); 
     }
 
@@ -41,8 +40,8 @@ class SecurityIntegrationTest extends BaseIntegrationTest {
 
     @Test
     void testSessionIsStateless() throws Exception {
-        // Verifying that the response does not contain session-related headers like 'Set-Cookie'
-        mockMvc.perform(get("/v1/portfolios/list").param("userId", "any"))
+        UserContext.setUserId("any");
+        mockMvc.perform(get("/v1/portfolios/list"))
                 .andExpect(result -> {
                     String cookie = result.getResponse().getHeader("Set-Cookie");
                     if (cookie != null) {

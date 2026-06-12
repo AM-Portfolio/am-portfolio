@@ -1,8 +1,8 @@
 # am-portfolio Universal Chart Values
 
 replicaCount: 1
+port: 8080
 language: java
-environment: preprod
 
 # Top-level service account (Fallback)
 serviceAccountName: am-backend-sa
@@ -33,29 +33,21 @@ vault:
   enabled: true
   serviceAccountName: am-backend-sa
   role: am-backend-role
-  secretPaths:
-    auth:
-      path: apps/data/preprod/services/am-auth
-    portfolio:
-      path: apps/data/preprod/services/am-portfolio
-    market-data:
-      path: apps/data/preprod/services/am-market-data
-    mongodb:
-      path: apps/data/preprod/infra/mongodb
-    kafka:
-      path: apps/data/preprod/infra/kafka
-    redis:
-      path: apps/data/preprod/infra/redis
 
 env:
-  ETF_API_URL: "http://am-parser:8022"
-  SPRING_PROFILES_ACTIVE: "preprod"
-  LOG_LEVEL: "INFO"
+  SPRING_MAIN_ALLOW_BEAN_DEFINITION_OVERRIDING: "true"
+  KAFKA_ENABLED: "true"
   KAFKA_SECURITY_PROTOCOL: "SASL_PLAINTEXT"
   KAFKA_SASL_MECHANISM: "SCRAM-SHA-256"
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces"
+  TRACING_SAMPLING_PROBABILITY: "0.1"
 
 probes:
   port: 8080
+  startup:
+    path: "/actuator/health/liveness"
+    failureThreshold: 60
+    periodSeconds: 10
   liveness:
     path: /actuator/health/liveness
     initialDelaySeconds: 150
@@ -73,18 +65,7 @@ resources:
     cpu: 500m
     memory: 512Mi
 
-ingress:
-  enabled: true
-  className: nginx
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-  hosts:
-    - host: portfolio.preprod.am-portfolio.com
-      paths:
-        - path: /
-          pathType: ImplementationSpecific
-  tls:
-    - secretName: portfolio-tls
-      hosts:
-        - portfolio.preprod.am-portfolio.com
+# Config block required by universal-chart templates.
+config:
+  batchSearch:
+    enabled: false

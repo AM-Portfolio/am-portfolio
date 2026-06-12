@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = false)
 public class PortfolioCalculationService {
 
     private final PortfolioHoldingsService portfolioHoldingsService;
@@ -60,11 +60,9 @@ public class PortfolioCalculationService {
             PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(enrichedHoldings,
                     totalInvestment);
 
-            // Update the original holdings object with the enriched list so the mapper picks it up
-            holdings.setEquityHoldings(enrichedHoldings);
-
             // 3. Map to Event
-            PortfolioUpdateEvent updateEvent = mapToUpdateEvent(holdings, summary, userId, portfolioId);
+            String eventPortfolioId = (portfolioId != null && !portfolioId.isEmpty()) ? portfolioId : "GLOBAL";
+            PortfolioUpdateEvent updateEvent = mapToUpdateEvent(holdings, summary, userId, eventPortfolioId);
 
             // 4. Publish to Kafka
             log.info("Publishing calculated portfolio update for UserID: {}, PortfolioID: {}", userId, portfolioId);

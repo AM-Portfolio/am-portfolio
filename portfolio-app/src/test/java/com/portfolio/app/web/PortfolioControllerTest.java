@@ -18,6 +18,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import com.am.security.context.UserContext;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -44,6 +47,11 @@ class PortfolioControllerTest {
     @MockBean
     private PortfolioService portfolioService;
 
+    @AfterEach
+    void tearDown() {
+        UserContext.clear();
+    }
+
     @Test
     void getPortfolioById_ValidUuid_ReturnsPortfolio() throws Exception {
         UUID portfolioId = UUID.randomUUID();
@@ -69,12 +77,13 @@ class PortfolioControllerTest {
     @Test
     void getPortfolios_ReturnsList() throws Exception {
         String userId = "user-123";
+        UserContext.setUserId(userId);
         PortfolioModelV1 p1 = new PortfolioModelV1();
         p1.setName("P1");
         
         when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(Arrays.asList(p1));
 
-        mockMvc.perform(get("/v1/portfolios").param("userId", userId))
+        mockMvc.perform(get("/v1/portfolios"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].name").value("P1"));
@@ -83,16 +92,17 @@ class PortfolioControllerTest {
     @Test
     void getPortfolioBasicDetails_NoPortfolios_ReturnsNotFound() throws Exception {
         String userId = "empty-user";
+        UserContext.setUserId(userId);
         when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(Collections.emptyList());
 
-        mockMvc.perform(get("/v1/portfolios/list").param("userId", userId))
+        mockMvc.perform(get("/v1/portfolios/list"))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     void getPortfolioAnalysis_InvalidInterval_ReturnsBadRequest() throws Exception {
+        UserContext.setUserId("u1");
         mockMvc.perform(get("/v1/portfolios/{id}/analysis", UUID.randomUUID().toString())
-                .param("userId", "u1")
                 .param("interval", "invalid"))
                 .andExpect(status().isBadRequest());
     }

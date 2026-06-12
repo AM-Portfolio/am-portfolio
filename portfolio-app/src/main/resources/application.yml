@@ -18,11 +18,13 @@ MARKET_INDEX_CONSUMER_GROUP: ${MARKET_INDEX_CONSUMER_ID:am-market-index-group-1}
 MARKET_INDEX_TOPIC_NAME: ${MARKET_INDEX_TOPIC:nse-stock-indices-update}
 
 #Redis
-PROJ_REDIS_HOSTNAME: ${SPRING_DATA_REDIS_HOST:${REDIS_HOSTNAME:localhost}}
-PROJ_REDIS_PORT: ${SPRING_DATA_REDIS_PORT:${REDIS_PORT:6379}}
-PROJ_REDIS_PASSWORD: ${SPRING_DATA_REDIS_PASSWORD:${REDIS_PASSWORD:password123}}
+PROJ_REDIS_HOSTNAME: ${REDIS_HOSTNAME:localhost}
+PROJ_REDIS_PORT: ${REDIS_PORT:6379}
+PROJ_REDIS_PASSWORD: ${REDIS_PASSWORD:password123}
 
 spring:
+  main:
+    lazy-initialization: true
   application:
     name: portfolio-app
   profiles:
@@ -30,6 +32,8 @@ spring:
       - api
   kafka:
     bootstrap-servers: ${PROJ_KAFKA_BOOTSTRAP_SERVERS}
+    listener:
+      auto-startup: ${KAFKA_ENABLED:false}
     consumer:
       group-id: ${PORTFOLIO_CONSUMER_GROUP}
       auto-offset-reset: latest
@@ -53,6 +57,9 @@ spring:
       portfolio-summary:
         ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:summary:"
+      portfolio-heatmap:
+        ttl: 900 # 15 minutes in seconds
+        key-prefix: "portfolio:heatmap:"
       portfolio-holdings:
         ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:holdings:"
@@ -113,31 +120,31 @@ app:
     secret: ${JWT_SECRET:internal-service-super-secret-key-32chars-minimum-change-in-prod}
     algorithm: ${JWT_ALGORITHM:HS256}
   kafka:
-    enabled: ${KAFKA_ENABLED:true}
+    enabled: ${KAFKA_ENABLED:false}
     portfolio:
       consumer:
         id: ${PORTFOLIO_CONSUMER_GROUP}
-        enabled: ${KAFKA_ENABLED:true}
+        enabled: ${KAFKA_ENABLED:false}
       topic: ${PORTFOLIO_TOPIC_NAME}
     stock:
       consumer:
         id: ${STOCK_CONSUMER_GROUP}
-        enabled: ${KAFKA_ENABLED:true}
+        enabled: ${KAFKA_ENABLED:false}
       topic: ${STOCK_TOPIC_NAME}
     market-index:
       consumer:
         id: ${MARKET_INDEX_CONSUMER_GROUP}
-        enabled: ${KAFKA_ENABLED:true}
+        enabled: ${KAFKA_ENABLED:false}
       topic: ${MARKET_INDEX_TOPIC_NAME}
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
   servlet:
     context-path: /
   tomcat:
-    max-threads: 200
-    min-spare-threads: 50
-    max-connections: 1000
+    max-threads: 20
+    min-spare-threads: 10
+    max-connections: 200
 
 etf:
   url: ${ETF_API_URL:http://localhost:8022}
@@ -149,16 +156,16 @@ basket:
 
 market-data:
   client:
-    connect-timeout-ms: ${MARKET_DATA_CONNECT_TIMEOUT_MS:3000}
-    read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:10000}
+    connect-timeout-ms: ${MARKET_DATA_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:45000}
   api:
     base-url: ${MARKET_DATA_API_URL:https://am.asrax.in/market}
     ohlc-endpoint: /v1/market-data/ohlc
     historical-data-endpoint: /v1/market-data/historical-data
     securities-endpoint: /v1/securities
-    read-timeout: 10000      # Fast-fail to Redis fallback if market-data is slow
-    connection-timeout: 3000
-    max-retry-attempts: 0    # No retry — fail fast, use Redis cache instead
+    read-timeout: 30000      # Must be < PortfolioCalculator.enrichHoldings() 34s blocking wait
+    connection-timeout: 5000
+    max-retry-attempts: 1
 
 # OpenAPI Documentation
 springdoc:
@@ -194,7 +201,7 @@ management:
       validate-group-membership: false
       group:
         readiness:
-          include: mongo,redis,kafka,readinessState
+          include: mongo,readinessState
   health:
     livenessstate:
       enabled: true
@@ -205,18 +212,14 @@ management:
     redis:
       enabled: true
     kafka:
-      enabled: true
-
-  # ─── Distributed Tracing (Micrometer + OTel) ────────────────────────────────
-  # Aligns am-portfolio with the am-core-services-otel stack.
-  # W3C traceparent header is the global standard used by all AM services.
+      enabled: ${KAFKA_ENABLED:false}
   tracing:
     enabled: true
     sampling:
       # Override per-environment via TRACING_SAMPLING_PROBABILITY env var.
       # Default 0.1 (10 %) matches am-analysis / am-gateway in preprod and prevents
       # heap pressure from buffered spans when the collector is unreachable.
-      probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
+      probability: 1.0
     propagation:
       type: w3c                  # Must match core-services: "traceparent" / "tracestate" headers
 
@@ -226,7 +229,7 @@ management:
   # Local dev: no override needed.
   otlp:
     tracing:
-      endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces}
+      endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
 
 # ─── Observability properties (am.observability.*) ───────────────────────────
 # Enable the request-log filter and standard MDC fields:

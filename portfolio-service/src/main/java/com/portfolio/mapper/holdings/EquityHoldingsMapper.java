@@ -12,7 +12,7 @@ public class EquityHoldingsMapper {
             .isin(equityModel.getIsin())
             .symbol(equityModel.getSymbol())
             .name(equityModel.getName())
-            .sector(equityModel.getIndustry())
+            .sector(equityModel.getSector())
             .industry(equityModel.getIndustry())
             .marketCap(equityModel.getMarketCap())
             .quantity(equityModel.getQuantity())

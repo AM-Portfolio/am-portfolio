@@ -1,15 +1,8 @@
-# am-portfolio Production Overrides
+# Prod Environment Overrides — am-portfolio
+environment: prod
+replicaCount: 2  # Production requires 2 replicas for high availability
 
-replicaCount: 2
-
-resources:
-  limits:
-    cpu: 1000m
-    memory: 1024Mi
-  requests:
-    cpu: 500m
-    memory: 512Mi
-
+# Prod Vault secret paths — key mappings are in vault-mappings.yaml
 vault:
   secretPaths:
     auth:
@@ -18,8 +11,25 @@ vault:
       path: apps/data/prod/infra/postgres
     portfolio:
       path: apps/data/prod/services/am-portfolio
+    parser:
+      path: apps/data/prod/services/am-parser
+    logging:
+      path: apps/data/prod/services/logging
+    market:
+      path: apps/data/prod/services/am-market-data
+    mongodb:
+      path: apps/data/prod/infra/mongodb
+    kafka:
+      path: apps/data/prod/infra/kafka
+    redis:
+      path: apps/data/prod/infra/redis
 
 ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
   hosts:
     - host: portfolio.am-portfolio.com
       paths:
@@ -29,3 +39,6 @@ ingress:
     - secretName: portfolio-tls-prod
       hosts:
         - portfolio.am-portfolio.com
+
+env:
+  SPRING_PROFILES_ACTIVE: "prod"

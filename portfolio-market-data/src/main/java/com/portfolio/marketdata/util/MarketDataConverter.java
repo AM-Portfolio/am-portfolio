@@ -79,7 +79,7 @@ public class MarketDataConverter {
         List<MarketData.MarketDataPoint> dataPoints = new ArrayList<>();
         for (OHLCVTPoint point : response.getData().getDataPoints()) {
             dataPoints.add(MarketData.MarketDataPoint.builder()
-                .timestamp(Instant.now()) // In a real implementation, use point's timestamp
+                .timestamp(point.getTime() != null ? point.getTime().toInstant(java.time.ZoneOffset.UTC) : Instant.now())
                 .ohlcData(OhlcData.builder()
                     .open(point.getOpen())
                     .high(point.getHigh())

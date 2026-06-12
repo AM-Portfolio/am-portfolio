@@ -61,9 +61,37 @@ application-*.yml
 *.bak
 *.orig
 
-### Secrets ###
+### Secrets — only .env.template is committed; copy to .env.preprod / .env.dev locally ###
 .env*
+!.env.template
+.env.secrets
+**/.env.secrets
+.env.local
+.env.deploy
+.env.preprod
+.env.dev
 seed-local-db.js
+
+# Vault / credential dumps (scripts write gitignored .env.* only)
+vault/backups/
+**/vault/backups/
+**/vault/*backup*.json
+credentials.json
+**/credentials.json
+*.pem
+*.p12
+*.key
+!**/src/test/**/*.key
 
 ### Custom ###
 test-portfolio
+dev_deploy.ps1
+
+# Local dev PowerShell helper scripts — never committed
+*.ps1
+
+# Binary dumps and build artefacts accidentally left in workspace
+pods.json
+build_err.txt
+*.txt
+!**/src/**/*.txt

@@ -16,7 +16,7 @@ import com.portfolio.model.events.StockHoldingUpdateEvent;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = false)
 public class KafkaProducerService {
 
     private final KafkaTemplate<String, Object> kafkaTemplate;

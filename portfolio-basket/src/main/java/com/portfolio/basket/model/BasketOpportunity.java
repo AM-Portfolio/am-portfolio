@@ -1,5 +1,6 @@
 package com.portfolio.basket.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;
 import lombok.Builder;
 import lombok.AllArgsConstructor;
@@ -10,6 +11,7 @@ import java.util.List;
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class BasketOpportunity {
     private String etfIsin;
     private String etfName;

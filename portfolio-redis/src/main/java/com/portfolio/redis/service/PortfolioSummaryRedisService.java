@@ -31,15 +31,10 @@ public class PortfolioSummaryRedisService {
 
     @Async("taskExecutor")
     public CompletableFuture<Void> cachePortfolioSummary(PortfolioSummaryV1 summary, String userId, TimeInterval interval) {
-        return cachePortfolioSummary(summary, userId, interval, null);
-    }
-
-    @Async("taskExecutor")
-    public CompletableFuture<Void> cachePortfolioSummary(PortfolioSummaryV1 summary, String userId, TimeInterval interval, String portfolioId) {
-        log.info("Starting async caching of portfolio summary - User: {}, Portfolio: {}, Interval: {}", 
-            userId, portfolioId != null ? portfolioId : "all", interval != null ? interval.getCode() : "null");
+        log.info("Starting async caching of portfolio summary - User: {}, Interval: {}", 
+            userId, interval != null ? interval.getCode() : "null");
         
-        String key = buildKey(userId, interval, portfolioId);
+        String key = buildKey(userId, interval);
         log.debug("Generated cache key: {} for user: {}", key, userId);
         
         try {
@@ -61,22 +56,36 @@ public class PortfolioSummaryRedisService {
     }
 
     public Optional<PortfolioSummaryV1> getLatestSummary(String userId, TimeInterval interval) {
-        return getLatestSummary(userId, interval, null);
-    }
-
-    public Optional<PortfolioSummaryV1> getLatestSummary(String userId, TimeInterval interval, String portfolioId) {
-        log.info("Retrieving latest portfolio summary - User: {}, Portfolio: {}, Interval: {}", 
-            userId, portfolioId != null ? portfolioId : "all", interval != null ? interval.getCode() : "null");
+        log.info("Retrieving latest portfolio summary - User: {}, Interval: {}", 
+            userId, interval != null ? interval.getCode() : "null");
             
-        String key = buildKey(userId, interval, portfolioId);
+        String key = buildKey(userId, interval);
         log.debug("Generated cache key: {} for user: {}", key, userId);
         
         try {
             PortfolioSummaryV1 summary = portfolioSummaryRedisTemplate.opsForValue().get(key);
             
             if (summary != null) {
-                log.info("Found portfolio summary in cache - User: {}, Key: {}", userId, key);
-                return Optional.of(summary);
+                log.debug("Found portfolio summary in cache - User: {}, Key: {}", userId, key);
+                
+                // Check if the summary is still fresh (within the interval duration)
+                if (interval != null && interval.getDuration() != null) {
+                    Instant cutoff = Instant.now().minus(interval.getDuration());
+                    
+                    if (summary.getLastUpdated().toInstant(ZoneOffset.UTC).isAfter(cutoff)) {
+                        log.info("Found fresh portfolio summary in cache - User: {}, Key: {}, LastUpdated: {}", 
+                            userId, key, summary.getLastUpdated());
+                        return Optional.of(summary);
+                    } else {
+                        log.info("Found stale portfolio summary in cache - User: {}, Key: {}, LastUpdated: {}, deleting", 
+                            userId, key, summary.getLastUpdated());
+                        portfolioSummaryRedisTemplate.delete(key);
+                    }
+                } else {
+                    log.info("Found portfolio summary in cache with no interval constraint - User: {}, Key: {}", 
+                        userId, key);
+                    return Optional.of(summary);
+                }
             } else {
                 log.debug("No portfolio summary found in cache - User: {}, Key: {}", userId, key);
             }
@@ -88,10 +97,9 @@ public class PortfolioSummaryRedisService {
         return Optional.empty();
     }
 
-    private String buildKey(String userId, TimeInterval interval, String portfolioId) {
-        String intervalCode = interval != null ? interval.getCode() : "default";
-        String portPart = (portfolioId != null && !portfolioId.isEmpty()) ? portfolioId : "all";
-        String key = portfolioSummaryKeyPrefix + userId + ":" + portPart + ":" + intervalCode;
+    private String buildKey(String userId, TimeInterval interval) {
+        String intervalCode = interval != null ? interval.getCode() : "all";
+        String key = portfolioSummaryKeyPrefix + userId + ":" + intervalCode;
         log.trace("Built cache key: {} for user: {}, interval: {}", key, userId, intervalCode);
         return key;
     }

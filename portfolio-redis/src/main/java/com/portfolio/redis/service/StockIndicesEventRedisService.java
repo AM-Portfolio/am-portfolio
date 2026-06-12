@@ -151,15 +151,25 @@ public class StockIndicesEventRedisService {
      * @return StockIndicesEventDataCache
      */
     private StockIndicesEventDataCache convertToStockIndicesEventDataCache(StockInsidicesEventData event) {
+        Double prevClose = null;
+        if (event.getMetadata() != null) {
+            prevClose = event.getMetadata().getPreviousClose();
+        }
+
+        java.time.Instant ts = null;
+        if (event.getTimestamp() != null && !event.getTimestamp().isBlank()) {
+            try {
+                ts = java.time.Instant.parse(event.getTimestamp());
+            } catch (Exception e) {
+                log.warn("Could not parse timestamp '{}' for index '{}'. Defaulting to now.", event.getTimestamp(), event.getName());
+                ts = java.time.Instant.now();
+            }
+        }
+
         return StockIndicesEventDataCache.builder()
             .indexName(event.getName())
-            // .indexSymbol(event.get())
-            // .indexValue(event.getValue())
-            // .previousClose(event.getPreviousClose())
-            // .change(event.getChange())
-            // .changePercent(event.getChangePercent())
-            // .timestamp(event.getTimestamp())
-            // .constituents(event.getConstituents())
+            .previousClose(prevClose)
+            .timestamp(ts)
             .build();
     }
 

@@ -1,6 +1,5 @@
-# am-portfolio Preprod Overrides
-
-replicaCount: 1
+# Preprod Environment Overrides — am-portfolio
+environment: preprod
 
 resources:
   limits:
@@ -10,13 +9,7 @@ resources:
     cpu: 250m
     memory: 256Mi
 
-# Non-secret runtime env (mirrors am-analysis preprod pattern).
-# Secrets are still injected via Vault per vault.secretPaths below.
-env:
-  SPRING_PROFILES_ACTIVE: "preprod"
-  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces"
-  TRACING_SAMPLING_PROBABILITY: "1.0"
-
+# Preprod Vault secret paths — key mappings are in vault-mappings.yaml
 vault:
   secretPaths:
     auth:
@@ -25,8 +18,25 @@ vault:
       path: apps/data/preprod/infra/postgres
     portfolio:
       path: apps/data/preprod/services/am-portfolio
+    parser:
+      path: apps/data/preprod/services/am-parser
+    logging:
+      path: apps/data/preprod/services/logging
+    market:
+      path: apps/data/preprod/services/am-market-data
+    mongodb:
+      path: apps/data/preprod/infra/mongodb
+    kafka:
+      path: apps/data/preprod/infra/kafka
+    redis:
+      path: apps/data/preprod/infra/redis
 
 ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
   hosts:
     - host: portfolio.preprod.am-portfolio.com
       paths:
@@ -36,3 +46,6 @@ ingress:
     - secretName: portfolio-tls
       hosts:
         - portfolio.preprod.am-portfolio.com
+
+env:
+  SPRING_PROFILES_ACTIVE: "preprod"

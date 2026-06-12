@@ -3,7 +3,6 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-
     <parent>
         <groupId>com.portfolio</groupId>
         <artifactId>am-portfolio</artifactId>
@@ -12,7 +11,6 @@
     <artifactId>portfolio-api</artifactId>
     <name>portfolio-api</name>
     <description>Portfolio API Module</description>
-
 
     <dependencies>
         <!-- Portfolio Model Module -->
@@ -61,6 +59,12 @@
         </dependency>
 
         <!-- Utilities -->
+        <dependency>
+            <groupId>com.am.libraries</groupId>
+            <artifactId>am-security-lib</artifactId>
+            <version>1.0.0-SNAPSHOT</version>
+        </dependency>
+
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

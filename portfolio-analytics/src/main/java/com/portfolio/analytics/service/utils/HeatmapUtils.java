@@ -75,16 +75,17 @@ public class HeatmapUtils {
         
         for (MarketData stock : stocks) {
             if (stock.getOhlc() != null) {
-                double closePrice = stock.getOhlc().getClose();
+                double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0) 
+                        ? stock.getPreviousClose() : stock.getOhlc().getClose();
                 double openPrice = stock.getOhlc().getOpen();
                 
-                if (openPrice > 0 && closePrice > 0) {
+                if (openPrice > 0 && previousClose > 0) {
                     // Calculate change from open to current price
                     double changePercent = ((stock.getLastPrice() - openPrice) / openPrice) * 100;
                     totalChangePercent += changePercent;
                     
                     // Performance score based on price movement relative to previous close
-                    double performanceScore = ((stock.getLastPrice() - closePrice) / closePrice) * 100;
+                    double performanceScore = ((stock.getLastPrice() - previousClose) / previousClose) * 100;
                     totalPerformance += performanceScore;
                     
                     validStockCount++;
@@ -139,16 +140,17 @@ public class HeatmapUtils {
             double value = stock.getLastPrice() * quantity;
             totalValue += value;
             
-            double closePrice = stock.getOhlc().getClose();
+            double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0) 
+                    ? stock.getPreviousClose() : stock.getOhlc().getClose();
             double openPrice = stock.getOhlc().getOpen();
             
-            if (openPrice > 0) {
+            if (openPrice > 0 && previousClose > 0) {
                 // Calculate intraday change percentage
                 double changePercent = ((stock.getLastPrice() - openPrice) / openPrice) * 100;
                 totalChangePercent += changePercent * value; // Weight by value
                 
                 // Performance score based on price movement relative to previous close
-                double performanceScore = ((stock.getLastPrice() - closePrice) / closePrice) * 100;
+                double performanceScore = ((stock.getLastPrice() - previousClose) / previousClose) * 100;
                 totalPerformance += performanceScore * value; // Weight by value
             }
         }
@@ -261,7 +263,9 @@ public class HeatmapUtils {
             .build();
         
         // Use domain methods to calculate values
-        BigDecimal previousPrice = BigDecimal.valueOf(data.getOhlc().getClose());
+        double previousCloseVal = (data.getPreviousClose() != null && data.getPreviousClose() > 0) 
+                ? data.getPreviousClose() : data.getOhlc().getClose();
+        BigDecimal previousPrice = BigDecimal.valueOf(previousCloseVal);
         stockDetail.calculateChange(previousPrice)
                   .calculateChangePercent(previousPrice)
                   .calculateValue()
