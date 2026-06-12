@@ -160,7 +160,7 @@ public class MarketDataService {
 
         try {
             MarketDataResponseWrapper wrapper = marketDataApiClient
-                    .getOhlcData(validSymbols, TimeFrame.ONE_DAY.getValue(), refresh).block();
+                    .getOhlcData(validSymbols, TimeFrame.DAY.getValue(), refresh).block();
             return convertToMarketDataMap(wrapper, false);
         } catch (Exception e) {
             log.error("Error fetching OHLC data: {}", e.getMessage(), e);
@@ -179,7 +179,7 @@ public class MarketDataService {
     public CompletableFuture<Map<String, MarketData>> getOhlcDataAsync(List<String> symbols, boolean refresh) {
         log.info("Getting OHLC data asynchronously for {} symbols with refresh={}", symbols.size(), refresh);
 
-        return marketDataApiClient.getOhlcData(symbols, TimeFrame.ONE_DAY.getValue(), refresh)
+        return marketDataApiClient.getOhlcData(symbols, TimeFrame.DAY.getValue(), refresh)
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(wrapper -> convertToMarketDataMap(wrapper, true))
                 .onErrorResume(e -> {
