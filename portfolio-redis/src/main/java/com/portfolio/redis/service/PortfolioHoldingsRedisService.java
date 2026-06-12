@@ -1,8 +1,6 @@
 package com.portfolio.redis.service;
 
 import java.time.Duration;
-import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
@@ -32,7 +30,12 @@ public class PortfolioHoldingsRedisService {
 
     @Async("taskExecutor")
     public CompletableFuture<Void> cachePortfolioHoldings(PortfolioHoldings holdings, String userId, TimeInterval interval) {
-        String key = buildKey(userId, interval);
+        return cachePortfolioHoldings(holdings, userId, interval, null);
+    }
+
+    @Async("taskExecutor")
+    public CompletableFuture<Void> cachePortfolioHoldings(PortfolioHoldings holdings, String userId, TimeInterval interval, String portfolioId) {
+        String key = buildKey(userId, interval, portfolioId);
         try {
             // For short intervals, use the interval duration as TTL
             Duration ttl = interval != null && interval.getDuration() != null && 
@@ -49,21 +52,16 @@ public class PortfolioHoldingsRedisService {
     }
 
     public Optional<PortfolioHoldings> getLatestHoldings(String userId, TimeInterval interval) {
-        String key = buildKey(userId, interval);
+        return getLatestHoldings(userId, interval, null);
+    }
+
+    public Optional<PortfolioHoldings> getLatestHoldings(String userId, TimeInterval interval, String portfolioId) {
+        String key = buildKey(userId, interval, portfolioId);
         try {
             PortfolioHoldings holdings = portfolioHoldingsRedisTemplate.opsForValue().get(key);
             if (holdings != null) {
-                // Check if the holdings are still fresh (within the interval duration)
-                if (interval != null && interval.getDuration() != null) {
-                    Instant cutoff = Instant.now().minus(interval.getDuration());
-                    if (holdings.getLastUpdated().toInstant(ZoneOffset.UTC).isAfter(cutoff)) {
-                        log.debug("Found fresh portfolio holdings in cache for key: {}", key);
-                        return Optional.of(holdings);
-                    } else {
-                        log.debug("Found stale portfolio holdings in cache for key: {}, deleting", key);
-                        portfolioHoldingsRedisTemplate.delete(key);
-                    }
-                }
+                log.debug("Found portfolio holdings in cache for key: {}", key);
+                return Optional.of(holdings);
             }
         } catch (Exception e) {
             log.error("Error retrieving portfolio holdings from cache for key {}: {}", key, e.getMessage(), e);
@@ -71,8 +69,9 @@ public class PortfolioHoldingsRedisService {
         return Optional.empty();
     }
 
-    private String buildKey(String userId, TimeInterval interval) {
-        return portfolioKeyPrefix + userId + ":" + 
-               (interval != null ? interval.getCode() : "default");
+    private String buildKey(String userId, TimeInterval interval, String portfolioId) {
+        String intervalCode = interval != null ? interval.getCode() : "default";
+        String portPart = (portfolioId != null && !portfolioId.isEmpty()) ? portfolioId : "all";
+        return portfolioKeyPrefix + userId + ":" + portPart + ":" + intervalCode;
     }
 }

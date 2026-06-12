@@ -15,12 +15,13 @@
                         "method": "GET",
                         "header": [],
                         "url": {
-                            "raw": "http://127.0.0.1:8062/v1/portfolios/{{portfolioId}}",
-                            "protocol": "http",
+                            "raw": "https://am-dev.asrax.in/v1/portfolios/{{portfolioId}}",
+                            "protocol": "https",
                             "host": [
-                                "127.0.0.1"
+                                "am-dev",
+                                "asrax",
+                                "in"
                             ],
-                            "port": "8062",
                             "path": [
                                 "v1",
                                 "portfolios",
@@ -37,12 +38,13 @@
                         "method": "GET",
                         "header": [],
                         "url": {
-                            "raw": "http://127.0.0.1:8062/v1/portfolios?userId={{userId}}",
-                            "protocol": "http",
+                            "raw": "https://am-dev.asrax.in/v1/portfolios?userId={{userId}}",
+                            "protocol": "https",
                             "host": [
-                                "127.0.0.1"
+                                "am-dev",
+                                "asrax",
+                                "in"
                             ],
-                            "port": "8062",
                             "path": [
                                 "v1",
                                 "portfolios"
@@ -64,12 +66,13 @@
                         "method": "GET",
                         "header": [],
                         "url": {
-                            "raw": "http://127.0.0.1:8062/v1/portfolios/list?userId={{userId}}",
-                            "protocol": "http",
+                            "raw": "https://am-dev.asrax.in/v1/portfolios/list?userId={{userId}}",
+                            "protocol": "https",
                             "host": [
-                                "127.0.0.1"
+                                "am-dev",
+                                "asrax",
+                                "in"
                             ],
-                            "port": "8062",
                             "path": [
                                 "v1",
                                 "portfolios",
@@ -92,12 +95,13 @@
                         "method": "GET",
                         "header": [],
                         "url": {
-                            "raw": "http://127.0.0.1:8062/v1/portfolios/{{portfolioId}}/analysis?userId={{userId}}&interval=1M",
-                            "protocol": "http",
+                            "raw": "https://am-dev.asrax.in/v1/portfolios/{{portfolioId}}/analysis?userId={{userId}}&interval=1M",
+                            "protocol": "https",
                             "host": [
-                                "127.0.0.1"
+                                "am-dev",
+                                "asrax",
+                                "in"
                             ],
-                            "port": "8062",
                             "path": [
                                 "v1",
                                 "portfolios",
@@ -126,12 +130,13 @@
                         "method": "GET",
                         "header": [],
                         "url": {
-                            "raw": "http://127.0.0.1:8062/v1/portfolios/summary?userId={{userId}}&interval=1M",
-                            "protocol": "http",
+                            "raw": "https://am-dev.asrax.in/v1/portfolios/summary?userId={{userId}}&interval=1M",
+                            "protocol": "https",
                             "host": [
-                                "127.0.0.1"
+                                "am-dev",
+                                "asrax",
+                                "in"
                             ],
-                            "port": "8062",
                             "path": [
                                 "v1",
                                 "portfolios",
@@ -163,12 +168,13 @@
                         "method": "GET",
                         "header": [],
                         "url": {
-                            "raw": "http://127.0.0.1:8062/v1/portfolios/holdings?userId={{userId}}&interval=1M",
-                            "protocol": "http",
+                            "raw": "https://am-dev.asrax.in/v1/portfolios/holdings?userId={{userId}}&interval=1M",
+                            "protocol": "https",
                             "host": [
-                                "127.0.0.1"
+                                "am-dev",
+                                "asrax",
+                                "in"
                             ],
-                            "port": "8062",
                             "path": [
                                 "v1",
                                 "portfolios",
@@ -215,12 +221,13 @@
                             "raw": "{\n    \"userId\": \"{{userId}}\",\n    \"portfolioId\": \"{{portfolioId}}\",\n    \"etfQuery\": \"NIFTY\",\n    \"userHoldings\": []\n}"
                         },
                         "url": {
-                            "raw": "http://127.0.0.1:8062/v1/basket/opportunities",
-                            "protocol": "http",
+                            "raw": "https://am-dev.asrax.in/v1/basket/opportunities",
+                            "protocol": "https",
                             "host": [
-                                "127.0.0.1"
+                                "am-dev",
+                                "asrax",
+                                "in"
                             ],
-                            "port": "8062",
                             "path": [
                                 "v1",
                                 "basket",
@@ -246,12 +253,13 @@
                             "raw": "{\n    \"userId\": \"{{userId}}\",\n    \"portfolioId\": \"{{portfolioId}}\",\n    \"userHoldings\": []\n}"
                         },
                         "url": {
-                            "raw": "http://127.0.0.1:8062/v1/basket/exposure",
-                            "protocol": "http",
+                            "raw": "https://am-dev.asrax.in/v1/basket/exposure",
+                            "protocol": "https",
                             "host": [
-                                "127.0.0.1"
+                                "am-dev",
+                                "asrax",
+                                "in"
                             ],
-                            "port": "8062",
                             "path": [
                                 "v1",
                                 "basket",
@@ -277,12 +285,13 @@
                             "raw": "{\n    \"userId\": \"{{userId}}\",\n    \"portfolioId\": \"{{portfolioId}}\"\n}"
                         },
                         "url": {
-                            "raw": "http://127.0.0.1:8062/v1/basket/allocations",
-                            "protocol": "http",
+                            "raw": "https://am-dev.asrax.in/v1/basket/allocations",
+                            "protocol": "https",
                             "host": [
-                                "127.0.0.1"
+                                "am-dev",
+                                "asrax",
+                                "in"
                             ],
-                            "port": "8062",
                             "path": [
                                 "v1",
                                 "basket",
@@ -308,12 +317,13 @@
                             "raw": "{\n    \"etfIsin\": \"INF204KB14I2\",\n    \"userId\": \"{{userId}}\",\n    \"portfolioId\": \"{{portfolioId}}\"\n}"
                         },
                         "url": {
-                            "raw": "http://127.0.0.1:8062/v1/basket/preview",
-                            "protocol": "http",
+                            "raw": "https://am-dev.asrax.in/v1/basket/preview",
+                            "protocol": "https",
                             "host": [
-                                "127.0.0.1"
+                                "am-dev",
+                                "asrax",
+                                "in"
                             ],
-                            "port": "8062",
                             "path": [
                                 "v1",
                                 "basket",
@@ -339,12 +349,13 @@
                             "raw": "{\n    \"investmentAmount\": 150000.00,\n    \"opportunity\": {\n        \"etfIsin\": \"INF204KB14I2\",\n        \"etfName\": \"NIPPON INDIA ETF NIFTY BEES\",\n        \"matchPercentage\": 45.5,\n        \"components\": []\n    }\n}"
                         },
                         "url": {
-                            "raw": "http://127.0.0.1:8062/v1/basket/calculate-quantities",
-                            "protocol": "http",
+                            "raw": "https://am-dev.asrax.in/v1/basket/calculate-quantities",
+                            "protocol": "https",
                             "host": [
-                                "127.0.0.1"
+                                "am-dev",
+                                "asrax",
+                                "in"
                             ],
-                            "port": "8062",
                             "path": [
                                 "v1",
                                 "basket",
@@ -367,12 +378,13 @@
                         "method": "GET",
                         "header": [],
                         "url": {
-                            "raw": "http://127.0.0.1:8062/v1/market-index/all?interval=1M&type=SECTOR",
-                            "protocol": "http",
+                            "raw": "https://am-dev.asrax.in/v1/market-index/all?interval=1M&type=SECTOR",
+                            "protocol": "https",
                             "host": [
-                                "127.0.0.1"
+                                "am-dev",
+                                "asrax",
+                                "in"
                             ],
-                            "port": "8062",
                             "path": [
                                 "v1",
                                 "market-index",
@@ -408,12 +420,13 @@
                             "raw": "{\n    \"timeFrame\": \"1M\",\n    \"fromDate\": \"2026-04-01\",\n    \"toDate\": \"2026-05-01\",\n    \"coreIdentifiers\": {\n        \"indexSymbol\": \"NIFTY50\"\n    },\n    \"pagination\": {\n        \"returnAllData\": true\n    }\n}"
                         },
                         "url": {
-                            "raw": "http://127.0.0.1:8062/v1/analytics/index/NIFTY50/advanced",
-                            "protocol": "http",
+                            "raw": "https://am-dev.asrax.in/v1/analytics/index/NIFTY50/advanced",
+                            "protocol": "https",
                             "host": [
-                                "127.0.0.1"
+                                "am-dev",
+                                "asrax",
+                                "in"
                             ],
-                            "port": "8062",
                             "path": [
                                 "v1",
                                 "analytics",
@@ -441,12 +454,13 @@
                             "raw": "{\n    \"timeFrame\": \"1M\",\n    \"coreIdentifiers\": {\n        \"portfolioId\": \"{{portfolioId}}\"\n    }\n}"
                         },
                         "url": {
-                            "raw": "http://127.0.0.1:8062/v1/analytics/portfolio/{{portfolioId}}/advanced",
-                            "protocol": "http",
+                            "raw": "https://am-dev.asrax.in/v1/analytics/portfolio/{{portfolioId}}/advanced",
+                            "protocol": "https",
                             "host": [
-                                "127.0.0.1"
+                                "am-dev",
+                                "asrax",
+                                "in"
                             ],
-                            "port": "8062",
                             "path": [
                                 "v1",
                                 "analytics",
@@ -471,12 +485,13 @@
                         "method": "GET",
                         "header": [],
                         "url": {
-                            "raw": "http://127.0.0.1:8062/v1/debug/market-data/raw?symbols=NIFTY 50,INFY,TCS",
-                            "protocol": "http",
+                            "raw": "https://am-dev.asrax.in/v1/debug/market-data/raw?symbols=NIFTY 50,INFY,TCS",
+                            "protocol": "https",
                             "host": [
-                                "127.0.0.1"
+                                "am-dev",
+                                "asrax",
+                                "in"
                             ],
-                            "port": "8062",
                             "path": [
                                 "v1",
                                 "debug",
@@ -500,12 +515,13 @@
                         "method": "GET",
                         "header": [],
                         "url": {
-                            "raw": "http://127.0.0.1:8062/v1/debug/nse-indices/raw?indexSymbol=NIFTY50",
-                            "protocol": "http",
+                            "raw": "https://am-dev.asrax.in/v1/debug/nse-indices/raw?indexSymbol=NIFTY50",
+                            "protocol": "https",
                             "host": [
-                                "127.0.0.1"
+                                "am-dev",
+                                "asrax",
+                                "in"
                             ],
-                            "port": "8062",
                             "path": [
                                 "v1",
                                 "debug",

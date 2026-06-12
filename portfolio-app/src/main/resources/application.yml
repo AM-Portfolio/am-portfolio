@@ -1,5 +1,5 @@
 # Infrastructure Configuration
-MONGODB_CONNECTION_URL: ${SPRING_DATA_MONGODB_URI:${MONGODB_URL:mongodb://admin:password123@localhost:27017/portfolio?authSource=admin}}
+MONGODB_CONNECTION_URL: ${MONGODB_URL:mongodb://admin:password123@localhost:27017/portfolio?authSource=admin}
 
 #Kafka
 PROJ_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
@@ -117,17 +117,17 @@ app:
     portfolio:
       consumer:
         id: ${PORTFOLIO_CONSUMER_GROUP}
-        enabled: true
+        enabled: ${KAFKA_ENABLED:true}
       topic: ${PORTFOLIO_TOPIC_NAME}
     stock:
       consumer:
         id: ${STOCK_CONSUMER_GROUP}
-        enabled: true
+        enabled: ${KAFKA_ENABLED:true}
       topic: ${STOCK_TOPIC_NAME}
     market-index:
       consumer:
         id: ${MARKET_INDEX_CONSUMER_GROUP}
-        enabled: true
+        enabled: ${KAFKA_ENABLED:true}
       topic: ${MARKET_INDEX_TOPIC_NAME}
 
 server:
@@ -135,22 +135,30 @@ server:
   servlet:
     context-path: /
   tomcat:
-    max-threads: 20
-    min-spare-threads: 10
-    max-connections: 200
+    max-threads: 200
+    min-spare-threads: 50
+    max-connections: 1000
 
 etf:
   url: ${ETF_API_URL:http://localhost:8022}
 
+basket:
+  holdings:
+    enrichment:
+      enabled: ${BASKET_HOLDINGS_ENRICHMENT:true}
+
 market-data:
+  client:
+    connect-timeout-ms: ${MARKET_DATA_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:10000}
   api:
     base-url: ${MARKET_DATA_API_URL:https://am.asrax.in/market}
     ohlc-endpoint: /v1/market-data/ohlc
     historical-data-endpoint: /v1/market-data/historical-data
     securities-endpoint: /v1/securities
-    read-timeout: 12000      # Must be < PortfolioCalculator.enrichHoldings() 15s blocking wait
-    connection-timeout: 5000
-    max-retry-attempts: 1
+    read-timeout: 10000      # Fast-fail to Redis fallback if market-data is slow
+    connection-timeout: 3000
+    max-retry-attempts: 0    # No retry — fail fast, use Redis cache instead
 
 # OpenAPI Documentation
 springdoc:
