@@ -161,12 +161,10 @@ public class PortfolioCalculator {
             // Determine previous close (for day's gain/loss)
             if (marketData.getPreviousClose() != null && marketData.getPreviousClose() > 0) {
                 previousClosePrice = marketData.getPreviousClose();
-            } else if (marketData.getOhlc() != null && marketData.getOhlc().getClose() > 0) {
+            } else if (marketData.getOhlc() != null && marketData.getOhlc().getClose() != null && marketData.getOhlc().getClose() > 0) {
                 // Fallback: use today's OHLC close as approximation of previous close
                 log.warn("previousClose is 0.0 for {}. Attempting OHLC close fallback.", symbol);
-                if (marketData.getLastPrice() != null && marketData.getOhlc().getClose() != marketData.getLastPrice()) {
-                    previousClosePrice = marketData.getOhlc().getClose();
-                }
+                previousClosePrice = marketData.getOhlc().getClose();
             } else {
                 log.warn("Missing previousClose for symbol {}. Daily P&L will not be calculated for this holding.", symbol);
             }
