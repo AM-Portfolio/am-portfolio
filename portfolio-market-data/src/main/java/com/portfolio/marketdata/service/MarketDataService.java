@@ -19,6 +19,7 @@ import com.portfolio.marketdata.model.HistoricalDataResponseWrapper;
 import com.portfolio.marketdata.model.InstrumentType;
 import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.model.MarketDataResponseWrapper;
+import com.portfolio.marketdata.util.AmMarketApiConstants;
 import com.portfolio.marketdata.util.MarketDataConverter;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.market.TimeFrame;
@@ -160,7 +161,7 @@ public class MarketDataService {
 
         try {
             MarketDataResponseWrapper wrapper = marketDataApiClient
-                    .getOhlcData(validSymbols, TimeFrame.DAY.getValue(), refresh).block();
+                    .getOhlcData(validSymbols, AmMarketApiConstants.TIMEFRAME_1DAY, refresh).block();
             return convertToMarketDataMap(wrapper, false);
         } catch (Exception e) {
             log.error("Error fetching OHLC data: {}", e.getMessage(), e);
@@ -179,7 +180,7 @@ public class MarketDataService {
     public CompletableFuture<Map<String, MarketData>> getOhlcDataAsync(List<String> symbols, boolean refresh) {
         log.info("Getting OHLC data asynchronously for {} symbols with refresh={}", symbols.size(), refresh);
 
-        return marketDataApiClient.getOhlcData(symbols, TimeFrame.DAY.getValue(), refresh)
+        return marketDataApiClient.getOhlcData(symbols, AmMarketApiConstants.TIMEFRAME_1DAY, refresh)
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(wrapper -> convertToMarketDataMap(wrapper, true))
                 .onErrorResume(e -> {
