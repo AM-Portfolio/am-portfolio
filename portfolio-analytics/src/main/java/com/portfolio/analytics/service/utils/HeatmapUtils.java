@@ -140,6 +140,13 @@ public class HeatmapUtils {
             double value = stock.getLastPrice() * quantity;
             totalValue += value;
             
+            // Guard against missing OHLC data
+            if (stock.getOhlc() == null) {
+                log.warn("Skipping stock in weighted metrics — no OHLC data. Symbol index: {}, lastPrice: {}",
+                        i, stock.getLastPrice());
+                continue;
+            }
+            
             double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0) 
                     ? stock.getPreviousClose() : stock.getOhlc().getClose();
             double openPrice = stock.getOhlc().getOpen();

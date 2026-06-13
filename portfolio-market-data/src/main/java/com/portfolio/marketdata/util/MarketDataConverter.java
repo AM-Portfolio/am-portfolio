@@ -14,10 +14,13 @@ import com.portfolio.model.market.MarketData.MarketDataBuilder;
 import com.portfolio.model.market.OhlcData;
 import com.portfolio.model.market.TimeFrame;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Utility class for converting between different market data model formats.
  * Provides conversion methods between the unified MarketData model and other models.
  */
+@Slf4j
 public class MarketDataConverter {
 
     /**
@@ -31,10 +34,20 @@ public class MarketDataConverter {
             return null;
         }
         
+        // Derive previousClose if missing
+        Double effectivePreviousClose = response.getPreviousClose();
+        if ((effectivePreviousClose == null || effectivePreviousClose <= 0)
+                && response.getOhlc() != null
+                && response.getOhlc().getOpen() > 0) {
+            effectivePreviousClose = response.getOhlc().getOpen();
+            log.debug("Derived previousClose={} from OHLC open for instrument token {}",
+                    effectivePreviousClose, response.getInstrumentToken());
+        }
+        
         MarketDataBuilder builder = MarketData.builder()
             .instrumentToken(response.getInstrumentToken())
             .lastPrice(response.getLastPrice())
-            .previousClose(response.getPreviousClose())
+            .previousClose(effectivePreviousClose)
             .ohlc(response.getOhlc())
             .timestamp(response.getTimestamp())
             .timeFrame(response.getTimeFrame())
