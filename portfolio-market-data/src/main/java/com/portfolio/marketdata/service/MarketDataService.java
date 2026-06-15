@@ -34,10 +34,19 @@ import reactor.core.scheduler.Schedulers;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class MarketDataService {
 
     private final MarketDataApiClient marketDataApiClient;
+    
+    @org.springframework.lang.Nullable
+    private final com.portfolio.redis.service.PortfolioMarketDataRedisService marketDataRedisService;
+
+    public MarketDataService(
+            MarketDataApiClient marketDataApiClient,
+            @org.springframework.lang.Nullable com.portfolio.redis.service.PortfolioMarketDataRedisService marketDataRedisService) {
+        this.marketDataApiClient = marketDataApiClient;
+        this.marketDataRedisService = marketDataRedisService;
+    }
 
     /**
      * Convert historical data responses to market data responses.
@@ -279,22 +288,67 @@ public class MarketDataService {
     }
 
     public Map<String, MarketData> getMarketData(List<String> symbols) {
-        if (symbols.isEmpty()) {
+        if (symbols == null || symbols.isEmpty()) {
             return Collections.emptyMap();
         }
 
-        log.info("Fetching market data for {} symbols", symbols.size());
+        log.info("[MarketData] Fetching live OHLC for {} symbols", symbols.size());
+
+        // Step 1: Attempt live fetch from am-market-data
+        Map<String, MarketData> liveData = Collections.emptyMap();
         try {
-            Map<String, MarketData> marketData = getOhlcData(symbols, false);
-            if (marketData == null) {
-                log.warn("Market data service returned null response");
-                return Collections.emptyMap();
-            }
-            return marketData;
+            liveData = getOhlcData(symbols, false);
+            if (liveData == null) liveData = Collections.emptyMap();
         } catch (Exception e) {
-            log.error("Error fetching market data: {}", e.getMessage(), e);
-            return Collections.emptyMap();
+            log.error("[MarketData] Live fetch failed: {}. Serving fully from cache.", e.getMessage());
         }
+
+        // Step 2: Persist all successfully fetched symbols to Redis
+        if (marketDataRedisService != null && !liveData.isEmpty()) {
+            try {
+                marketDataRedisService.cacheMarketData(liveData);
+            } catch (Exception e) {
+                log.warn("[MarketData] Cache write failed (non-fatal): {}", e.getMessage());
+            }
+        }
+
+        // Step 3: Find missing symbols
+        final Map<String, MarketData> liveSnapshot = liveData;
+        List<String> missedSymbols = symbols.stream()
+            .filter(s -> !liveSnapshot.containsKey(s))
+            .collect(Collectors.toList());
+
+        // All symbols came back live - ideal case
+        if (missedSymbols.isEmpty()) {
+            log.info("[MarketData] All {}/{} symbols fetched live.", liveData.size(), symbols.size());
+            return liveData;
+        }
+
+        // Step 4: Fill gaps from Redis cache (stale-serve)
+        log.warn("[MarketData] Live fetch missing {} symbol(s): {}. Attempting cache fill.",
+            missedSymbols.size(), missedSymbols);
+
+        Map<String, MarketData> cachedFill = Collections.emptyMap();
+        if (marketDataRedisService != null) {
+            try {
+                cachedFill = marketDataRedisService.getMarketData(missedSymbols);
+                if (cachedFill == null) cachedFill = Collections.emptyMap();
+            } catch (Exception e) {
+                log.warn("[MarketData] Cache read failed (non-fatal): {}", e.getMessage());
+            }
+        }
+
+        // Step 5: Merge live + cache into one complete result
+        Map<String, MarketData> merged = new HashMap<>(liveData);
+        merged.putAll(cachedFill);
+
+        int stillMissing = (int) symbols.stream().filter(s -> !merged.containsKey(s)).count();
+        log.info("[MarketData] Result: {}/{} live, {}/{} from cache, {}/{} still missing.",
+            liveData.size(), symbols.size(),
+            cachedFill.size(), missedSymbols.size(),
+            stillMissing, symbols.size());
+
+        return merged;
     }
 
     /**

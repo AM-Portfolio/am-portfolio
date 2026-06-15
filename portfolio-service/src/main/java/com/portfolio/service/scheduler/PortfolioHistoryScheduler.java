@@ -23,7 +23,7 @@ public class PortfolioHistoryScheduler {
 
     // Runs every day at 17:00 (5 PM) Server Time
     // Cron: Second, Minute, Hour, Day of Month, Month, Day of Week
-    @Scheduled(cron = "0 0 17 * * *")
+    @Scheduled(cron = "0 0 17 * * *", zone = "Asia/Kolkata")
     public void runEndOfDayJob() {
         log.info("Starting End-of-Day Portfolio History Job at {}", LocalDateTime.now());
 

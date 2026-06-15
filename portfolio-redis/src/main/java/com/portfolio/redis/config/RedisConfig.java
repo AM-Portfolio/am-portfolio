@@ -173,4 +173,9 @@ public class RedisConfig {
         
         return template;
     }
+
+    @Bean
+    public RedisTemplate<String, com.portfolio.model.market.MarketData> portfolioMarketDataRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, com.portfolio.model.market.MarketData.class);
+    }
 }

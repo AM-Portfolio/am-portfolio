@@ -27,8 +27,11 @@ public class MarketDataAutoConfiguration {
     
     @Bean
     @ConditionalOnMissingBean
-    public MarketDataService marketDataService(MarketDataApiClient marketDataApiClient) {
-        return new MarketDataService(marketDataApiClient);
+    public MarketDataService marketDataService(
+            MarketDataApiClient marketDataApiClient,
+            @org.springframework.context.annotation.Lazy @org.springframework.beans.factory.annotation.Autowired(required = false) 
+            com.portfolio.redis.service.PortfolioMarketDataRedisService marketDataRedisService) {
+        return new MarketDataService(marketDataApiClient, marketDataRedisService);
     }
     
     @Bean
