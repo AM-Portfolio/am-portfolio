@@ -77,11 +77,10 @@ public class HeatmapUtils {
             if (stock.getOhlc() != null) {
                 double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0) 
                         ? stock.getPreviousClose() : stock.getOhlc().getClose();
-                double openPrice = stock.getOhlc().getOpen();
                 
-                if (openPrice > 0 && previousClose > 0) {
-                    // Calculate change from open to current price
-                    double changePercent = ((stock.getLastPrice() - openPrice) / openPrice) * 100;
+                if (previousClose > 0) {
+                    // Calculate change percentage relative to previous close (acts as baseline for timeframe)
+                    double changePercent = ((stock.getLastPrice() - previousClose) / previousClose) * 100;
                     totalChangePercent += changePercent;
                     
                     // Performance score based on price movement relative to previous close
@@ -138,22 +137,22 @@ public class HeatmapUtils {
             MarketData stock = sectorStocks.get(i);
             double quantity = quantities.get(i);
             double value = stock.getLastPrice() * quantity;
-            totalValue += value;
-            
-            // Guard against missing OHLC data
+            // Guard against missing OHLC data BEFORE calculating weighted sums
             if (stock.getOhlc() == null) {
                 log.warn("Skipping stock in weighted metrics — no OHLC data. Symbol index: {}, lastPrice: {}",
                         i, stock.getLastPrice());
                 continue;
             }
             
+            // Only add to total value if the stock has valid OHLC data
+            totalValue += value;
+            
             double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0) 
                     ? stock.getPreviousClose() : stock.getOhlc().getClose();
-            double openPrice = stock.getOhlc().getOpen();
             
-            if (openPrice > 0 && previousClose > 0) {
-                // Calculate intraday change percentage
-                double changePercent = ((stock.getLastPrice() - openPrice) / openPrice) * 100;
+            if (previousClose > 0) {
+                // Calculate timeframe change percentage based on previous close
+                double changePercent = ((stock.getLastPrice() - previousClose) / previousClose) * 100;
                 totalChangePercent += changePercent * value; // Weight by value
                 
                 // Performance score based on price movement relative to previous close

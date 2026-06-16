@@ -108,7 +108,7 @@ public class PortfolioSummaryRedisService {
 
     private String buildKey(String userId, TimeInterval interval, String portfolioId) {
         String intervalCode = interval != null ? interval.getCode() : "all";
-        String portPart = (portfolioId != null && !portfolioId.isEmpty()) ? portfolioId : "all";
+        String portPart = (portfolioId != null && !portfolioId.trim().isEmpty()) ? portfolioId : "all";
         String key = portfolioSummaryKeyPrefix + userId + ":" + portPart + ":" + intervalCode;
         log.trace("Built cache key: {} for user: {}, interval: {}", key, userId, intervalCode);
         return key;

@@ -34,16 +34,12 @@ public class MarketDataConverter {
             return null;
         }
         
-        // Derive previousClose if missing
+        // Derive previousClose if missing (for live data, ohlc.close usually represents yesterday's close)
         Double effectivePreviousClose = response.getPreviousClose();
-        if ((effectivePreviousClose == null || effectivePreviousClose <= 0)
-                && response.getOhlc() != null
-                && response.getOhlc().getOpen() > 0) {
-            effectivePreviousClose = response.getOhlc().getOpen();
-            log.debug("Derived previousClose={} from OHLC open for instrument token {}",
-                    effectivePreviousClose, response.getInstrumentToken());
+        if ((effectivePreviousClose == null || effectivePreviousClose <= 0) && response.getOhlc() != null) {
+            effectivePreviousClose = response.getOhlc().getClose();
         }
-        
+
         MarketDataBuilder builder = MarketData.builder()
             .instrumentToken(response.getInstrumentToken())
             .lastPrice(response.getLastPrice())
@@ -113,9 +109,15 @@ public class MarketDataConverter {
 
         if (!dataPoints.isEmpty()) {
             MarketData.MarketDataPoint latestPoint = dataPoints.get(dataPoints.size() - 1);
+            MarketData.MarketDataPoint firstPoint = dataPoints.get(0);
+            
             builder.ohlc(latestPoint.getOhlcData());
             if (latestPoint.getOhlcData() != null) {
                 builder.lastPrice(latestPoint.getOhlcData().getClose());
+            }
+            if (firstPoint.getOhlcData() != null) {
+                // For historical timeframe, the "previous close" acts as the timeframe baseline
+                builder.previousClose(firstPoint.getOhlcData().getClose());
             }
         }
         

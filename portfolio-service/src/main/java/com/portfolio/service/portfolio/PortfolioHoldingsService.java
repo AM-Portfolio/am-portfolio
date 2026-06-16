@@ -89,6 +89,11 @@ public class PortfolioHoldingsService {
         log.info("Starting getPortfolioHoldings for specific portfolio - User: {}, Portfolio: {}, Interval: {}",
                 userId, portfolioId, interval != null ? interval.getCode() : "null");
 
+        if (portfolioId == null || portfolioId.trim().isEmpty()) {
+            log.warn("Blank portfolioId provided for specific portfolio request - User: {}", userId);
+            throw new IllegalArgumentException("portfolioId cannot be blank");
+        }
+
         if (enrich) {
             Optional<PortfolioHoldings> cachedHoldings = portfolioHoldingsRedisService.getLatestHoldings(userId, interval, portfolioId);
             if (cachedHoldings.isPresent()) {

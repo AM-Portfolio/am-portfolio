@@ -82,7 +82,7 @@ public class PortfolioHoldingsRedisService {
 
     private String buildKey(String userId, TimeInterval interval, String portfolioId) {
         String intervalCode = interval != null ? interval.getCode() : "default";
-        String portPart = (portfolioId != null && !portfolioId.isEmpty()) ? portfolioId : "all";
+        String portPart = (portfolioId != null && !portfolioId.trim().isEmpty()) ? portfolioId : "all";
         return portfolioKeyPrefix + userId + ":" + portPart + ":" + intervalCode;
     }
 }

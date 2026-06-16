@@ -69,6 +69,11 @@ public class PortfolioOverviewService {
         log.info("Starting overviewPortfolio for specific portfolio - User: {}, Portfolio: {}, Interval: {}",
                 userId, portfolioId, interval != null ? interval.getCode() : "null");
 
+        if (portfolioId == null || portfolioId.trim().isEmpty()) {
+            log.warn("Blank portfolioId provided for specific portfolio overview - User: {}", userId);
+            throw new IllegalArgumentException("portfolioId cannot be blank");
+        }
+
         Optional<PortfolioSummaryV1> cachedSummary = portfolioSummaryRedisService.getLatestSummary(userId, interval, portfolioId);
         if (cachedSummary.isPresent()) {
             log.info("Returning cached portfolio summary for user: {} and portfolio: {}", userId, portfolioId);
