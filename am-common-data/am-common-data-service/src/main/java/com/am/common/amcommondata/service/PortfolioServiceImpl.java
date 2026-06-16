@@ -36,10 +36,48 @@ public class PortfolioServiceImpl implements PortfolioService {
 
     @Transactional
     public PortfolioModelV1 createPortfolio(PortfolioModelV1 portfolioModel) {
+        if (portfolioModel.getBrokerType() != null && portfolioModel.getOwner() != null) {
+            String owner = portfolioModel.getOwner();
+            com.am.common.amcommondata.model.enums.BrokerType brokerType = portfolioModel.getBrokerType();
+            String baseName = brokerType.getCode();
+            
+            List<PortfolioDocument> existingPortfolios = portfolioDocumentRepository.findByOwner(owner)
+                    .stream()
+                    .filter(p -> p.getBrokerType() == brokerType)
+                    .collect(Collectors.toList());
+            
+            int count = existingPortfolios.size();
+            
+            if (count >= 5) {
+                throw new IllegalStateException("MAX_VERSIONS_EXCEEDED");
+            }
+            
+            if (count == 0) {
+                portfolioModel.setName(baseName);
+            } else if (count == 1) {
+                PortfolioDocument first = existingPortfolios.get(0);
+                if (first.getName() == null || first.getName().equalsIgnoreCase(baseName)) {
+                    first.setName(baseName + "-V1");
+                    portfolioDocumentRepository.save(first);
+                }
+                portfolioModel.setName(baseName + "-V2");
+            } else {
+                portfolioModel.setName(baseName + "-V" + (count + 1));
+            }
+        }
+        
         PortfolioDocument document = portfolioMapper.toDocument(portfolioModel);
         return portfolioMapper.toModel(portfolioDocumentRepository.save(document));
     }
     
+    @Override
+    public int getPortfolioCountByUserIdAndBrokerType(String userId, com.am.common.amcommondata.model.enums.BrokerType brokerType) {
+        return (int) portfolioDocumentRepository.findByOwner(userId)
+                .stream()
+                .filter(p -> p.getBrokerType() == brokerType)
+                .count();
+    }
+
     @Override
     public List<String> getAllUserIds() {
         return portfolioDocumentRepository.findAllDistinctOwners();
