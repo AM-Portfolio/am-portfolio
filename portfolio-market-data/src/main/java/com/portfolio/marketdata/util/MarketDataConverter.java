@@ -103,13 +103,22 @@ public class MarketDataConverter {
                 .build());
         }
         
-        return MarketData.builder()
+        MarketDataBuilder builder = MarketData.builder()
             .symbol(response.getSymbol())
             .fromDate(response.getFromDate())
             .toDate(response.getToDate())
             .timeFrame(timeFrame)
             .historical(true)
-            .dataPoints(dataPoints)
-            .build();
+            .dataPoints(dataPoints);
+
+        if (!dataPoints.isEmpty()) {
+            MarketData.MarketDataPoint latestPoint = dataPoints.get(dataPoints.size() - 1);
+            builder.ohlc(latestPoint.getOhlcData());
+            if (latestPoint.getOhlcData() != null) {
+                builder.lastPrice(latestPoint.getOhlcData().getClose());
+            }
+        }
+        
+        return builder.build();
     }
 }
