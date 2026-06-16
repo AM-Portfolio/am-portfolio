@@ -46,6 +46,11 @@ public class PortfolioUpdateConsumerService {
 
     private void processMessage(PortfolioUpdateEvent event) {
         PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
-        portfolioService.createPortfolio(portfolioModel);
+        
+        if ("TRADE".equalsIgnoreCase(event.getSource())) {
+            portfolioService.updateTradePortfolio(portfolioModel);
+        } else {
+            portfolioService.createPortfolio(portfolioModel);
+        }
     }
 }

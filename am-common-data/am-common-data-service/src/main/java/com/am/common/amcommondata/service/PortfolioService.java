@@ -10,5 +10,5 @@ public interface PortfolioService {
     PortfolioModelV1 getPortfolioById(UUID id);
     PortfolioModelV1 createPortfolio(PortfolioModelV1 portfolio);
     List<String> getAllUserIds();
-    int getPortfolioCountByUserIdAndBrokerType(String userId, com.am.common.amcommondata.model.enums.BrokerType brokerType);
+    PortfolioModelV1 updateTradePortfolio(PortfolioModelV1 portfolioModel);
 }

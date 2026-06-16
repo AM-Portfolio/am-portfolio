@@ -35,6 +35,24 @@ public class PortfolioServiceImpl implements PortfolioService {
     }
 
     @Transactional
+    public PortfolioModelV1 updateTradePortfolio(PortfolioModelV1 portfolioModel) {
+        if (portfolioModel.getName() != null) { // name contains portfolioId from mapper
+            String portfolioId = portfolioModel.getName();
+            PortfolioDocument existing = portfolioDocumentRepository.findById(portfolioId).orElse(null);
+            
+            if (existing != null) {
+                // Update existing equities
+                if (portfolioModel.getEquityModels() != null) {
+                    existing.setEquities(portfolioMapper.toDocument(portfolioModel).getEquities());
+                }
+                existing.setTotalValue(portfolioModel.getTotalValue());
+                return portfolioMapper.toModel(portfolioDocumentRepository.save(existing));
+            }
+        }
+        return null;
+    }
+
+    @Transactional
     public PortfolioModelV1 createPortfolio(PortfolioModelV1 portfolioModel) {
         if (portfolioModel.getBrokerType() != null && portfolioModel.getOwner() != null) {
             String owner = portfolioModel.getOwner();
@@ -49,7 +67,15 @@ public class PortfolioServiceImpl implements PortfolioService {
             int count = existingPortfolios.size();
             
             if (count >= 5) {
-                throw new IllegalStateException("MAX_VERSIONS_EXCEEDED");
+                // Find oldest portfolio
+                PortfolioDocument oldest = existingPortfolios.stream()
+                    .min(java.util.Comparator.comparing(p -> p.getAudit() != null && p.getAudit().getCreatedAt() != null ? 
+                        p.getAudit().getCreatedAt() : java.time.LocalDateTime.MAX))
+                    .orElse(existingPortfolios.get(0));
+                
+                portfolioDocumentRepository.delete(oldest);
+                existingPortfolios.remove(oldest);
+                count--;
             }
             
             if (count == 0) {
@@ -62,7 +88,18 @@ public class PortfolioServiceImpl implements PortfolioService {
                 }
                 portfolioModel.setName(baseName + "-V2");
             } else {
-                portfolioModel.setName(baseName + "-V" + (count + 1));
+                // Find max version to prevent V3 colliding with V3 after a delete
+                int maxVersion = 0;
+                for (PortfolioDocument p : existingPortfolios) {
+                    if (p.getName() != null && p.getName().startsWith(baseName + "-V")) {
+                        try {
+                            int v = Integer.parseInt(p.getName().substring((baseName + "-V").length()));
+                            if (v > maxVersion) maxVersion = v;
+                        } catch (Exception e) {}
+                    }
+                }
+                if (maxVersion == 0) maxVersion = count;
+                portfolioModel.setName(baseName + "-V" + (maxVersion + 1));
             }
         }
         
@@ -70,14 +107,6 @@ public class PortfolioServiceImpl implements PortfolioService {
         return portfolioMapper.toModel(portfolioDocumentRepository.save(document));
     }
     
-    @Override
-    public int getPortfolioCountByUserIdAndBrokerType(String userId, com.am.common.amcommondata.model.enums.BrokerType brokerType) {
-        return (int) portfolioDocumentRepository.findByOwner(userId)
-                .stream()
-                .filter(p -> p.getBrokerType() == brokerType)
-                .count();
-    }
-
     @Override
     public List<String> getAllUserIds() {
         return portfolioDocumentRepository.findAllDistinctOwners();

@@ -102,29 +102,6 @@ public class PortfolioController {
         return ResponseEntity.ok(basicInfoList);
     }
 
-    @Operation(summary = "Get portfolio count by broker type", description = "Retrieves the count of portfolios for a user specific to a broker type to enforce limits")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Count retrieved successfully"),
-            @ApiResponse(responseCode = "400", description = "Invalid broker type")
-    })
-    @GetMapping("/count")
-    public ResponseEntity<Integer> getPortfolioCount(
-            @Parameter(description = "Broker Type Code (e.g., Zerodha)") @RequestParam String brokerType) {
-        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
-        log.info("PortfolioController - getPortfolioCount called with userId: {}, brokerType: {}", userId, brokerType);
-
-        com.am.common.amcommondata.model.enums.BrokerType type = com.am.common.amcommondata.model.enums.BrokerType.fromCode(brokerType);
-        if (type == null) {
-            log.warn("PortfolioController - getPortfolioCount - Invalid broker type: {}", brokerType);
-            return ResponseEntity.badRequest().build();
-        }
-
-        int count = portfolioService.getPortfolioCountByUserIdAndBrokerType(userId, type);
-        log.info("PortfolioController - getPortfolioCount - Found {} portfolios for user: {} and brokerType: {}", count, userId, brokerType);
-        
-        return ResponseEntity.ok(count);
-    }
-
     @Hidden
     @Operation(summary = "Get portfolio analysis", description = "Retrieves detailed analysis for a specific portfolio (hidden from API docs)")
     @GetMapping("/{portfolioId}/analysis")
