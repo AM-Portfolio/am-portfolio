@@ -107,6 +107,43 @@ public class PortfolioServiceImpl implements PortfolioService {
         return portfolioMapper.toModel(portfolioDocumentRepository.save(document));
     }
     
+    @Transactional
+    public PortfolioModelV1 upsertDocumentPortfolio(PortfolioModelV1 portfolioModel) {
+        if (portfolioModel.getOwner() == null || portfolioModel.getBrokerType() == null) {
+            return null;
+        }
+
+        String owner = portfolioModel.getOwner();
+        com.am.common.amcommondata.model.enums.BrokerType brokerType = portfolioModel.getBrokerType();
+
+        java.util.List<PortfolioDocument> existingDocs =
+            portfolioDocumentRepository.findByOwnerAndBrokerType(owner, brokerType);
+
+        if (existingDocs != null && !existingDocs.isEmpty()) {
+            // Take the first one (most recent usually if sorted, or just the first found)
+            PortfolioDocument doc = existingDocs.get(0);
+            
+            // Optional: clean up any legacy duplicates (V1, V2, etc.) to ensure 1-per-broker strictly
+            if (existingDocs.size() > 1) {
+                for (int i = 1; i < existingDocs.size(); i++) {
+                    portfolioDocumentRepository.delete(existingDocs.get(i));
+                }
+            }
+
+            PortfolioDocument incoming = portfolioMapper.toDocument(portfolioModel);
+            doc.setEquities(incoming.getEquities());
+            doc.setTotalValue(portfolioModel.getTotalValue());
+            if (doc.getAudit() != null) {
+                doc.getAudit().setUpdatedAt(java.time.LocalDateTime.now());
+            }
+            return portfolioMapper.toModel(portfolioDocumentRepository.save(doc));
+        } else {
+            portfolioModel.setName(brokerType.getCode());
+            PortfolioDocument document = portfolioMapper.toDocument(portfolioModel);
+            return portfolioMapper.toModel(portfolioDocumentRepository.save(document));
+        }
+    }
+    
     @Override
     public List<String> getAllUserIds() {
         return portfolioDocumentRepository.findAllDistinctOwners();

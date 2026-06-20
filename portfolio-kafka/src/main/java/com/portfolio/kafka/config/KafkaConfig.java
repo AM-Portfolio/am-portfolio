@@ -11,17 +11,25 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.core.*;
 import org.springframework.kafka.support.serializer.JsonSerializer;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
 import java.util.Map;
 
 @Configuration
-@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = false)
+@EnableKafka
+@Slf4j
 public class KafkaConfig {
+
+    @jakarta.annotation.PostConstruct
+    public void init() {
+        log.info(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> KAFKA CONFIG INSTANTIATED <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<");
+    }
 
     @Value("${spring.kafka.bootstrap-servers}")
     private String bootstrapServers;

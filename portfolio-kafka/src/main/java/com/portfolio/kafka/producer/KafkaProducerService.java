@@ -21,7 +21,7 @@ public class KafkaProducerService {
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
-    @Value("${app.kafka.portfolio.topic:am-portfolio-update}")
+    @Value("${app.kafka.portfolio.publish-topic:am-portfolio-update}")
     private String topicName;
 
     @Value("${app.kafka.portfolio.stream.topic:am-portfolio-stream}")

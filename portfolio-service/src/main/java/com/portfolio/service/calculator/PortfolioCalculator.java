@@ -86,7 +86,7 @@ public class PortfolioCalculator {
             marketCapMap = Map.of();
         } catch (java.util.concurrent.CompletionException e) {
             if (e.getCause() instanceof java.util.concurrent.TimeoutException) {
-                log.warn("Parallel market data fetch timed out (34s). Falling back to Redis cache.");
+                log.warn("Parallel market data fetch timed out (14s). Falling back to Redis cache.");
             } else {
                 log.error("Parallel market data fetch failed: {}. Falling back to Redis cache.", e.getMessage());
             }

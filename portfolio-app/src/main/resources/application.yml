@@ -129,6 +129,7 @@ app:
         id: ${PORTFOLIO_CONSUMER_GROUP}
         enabled: ${KAFKA_ENABLED:false}
       topic: ${PORTFOLIO_TOPIC_NAME}
+      publish-topic: ${PORTFOLIO_PUBLISH_TOPIC:am-portfolio-update}
     stock:
       consumer:
         id: ${STOCK_CONSUMER_GROUP}

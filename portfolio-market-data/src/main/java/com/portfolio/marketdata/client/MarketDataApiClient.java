@@ -52,7 +52,7 @@ public class MarketDataApiClient extends AbstractApiClient {
                                 .symbols(symbolsParam)
                                 .timeFrame(timeFrame)
                                 .refresh(refresh)
-                                .indexSymbol(true)
+                                .indexSymbol(false)
                                 .build();
 
                 log.debug("Fetching OHLC data for {} with timeFrame={} from {} with refresh={}",

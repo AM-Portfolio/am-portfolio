@@ -13,6 +13,7 @@ import com.am.common.amcommondata.repository.base.BaseRepository;
 public interface PortfolioDocumentRepository extends BaseRepository<PortfolioDocument> {
     List<PortfolioDocument> findByOwner(String owner);
     Optional<PortfolioDocument> findById(String id);
+    List<PortfolioDocument> findByOwnerAndBrokerType(String owner, com.am.common.amcommondata.model.enums.BrokerType brokerType);
 
     @Aggregation(pipeline = { "{ '$group': { '_id': '$owner' } }" })
     List<String> findAllDistinctOwners();

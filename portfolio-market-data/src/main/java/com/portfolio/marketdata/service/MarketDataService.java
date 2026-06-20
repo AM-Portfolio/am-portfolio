@@ -292,59 +292,63 @@ public class MarketDataService {
             return Collections.emptyMap();
         }
 
-        log.info("[MarketData] Fetching OHLC for {} symbols (Cache-First)", symbols.size());
+        log.info("[MarketData] Fetching live OHLC for {} symbols", symbols.size());
 
-        Map<String, MarketData> result = new HashMap<>();
+        // Step 1: Attempt live fetch from am-market-data
+        Map<String, MarketData> liveData = Collections.emptyMap();
+        try {
+            liveData = getOhlcData(symbols, false);
+            if (liveData == null) liveData = Collections.emptyMap();
+        } catch (Exception e) {
+            log.error("[MarketData] Live fetch failed: {}. Serving fully from cache.", e.getMessage());
+        }
 
-        // Step 1: Attempt to load from Redis cache first
+        // Step 2: Persist all successfully fetched symbols to Redis
+        if (marketDataRedisService != null && !liveData.isEmpty()) {
+            try {
+                marketDataRedisService.cacheMarketData(liveData);
+            } catch (Exception e) {
+                log.warn("[MarketData] Cache write failed (non-fatal): {}", e.getMessage());
+            }
+        }
+
+        // Step 3: Find missing symbols
+        final Map<String, MarketData> liveSnapshot = liveData;
+        List<String> missedSymbols = symbols.stream()
+            .filter(s -> !liveSnapshot.containsKey(s))
+            .collect(Collectors.toList());
+
+        // All symbols came back live - ideal case
+        if (missedSymbols.isEmpty()) {
+            log.info("[MarketData] All {}/{} symbols fetched live.", liveData.size(), symbols.size());
+            return liveData;
+        }
+
+        // Step 4: Fill gaps from Redis cache (stale-serve)
+        log.warn("[MarketData] Live fetch missing {} symbol(s): {}. Attempting cache fill.",
+            missedSymbols.size(), missedSymbols);
+
+        Map<String, MarketData> cachedFill = Collections.emptyMap();
         if (marketDataRedisService != null) {
             try {
-                Map<String, MarketData> cachedData = marketDataRedisService.getMarketData(symbols);
-                if (cachedData != null) {
-                    result.putAll(cachedData);
-                }
+                cachedFill = marketDataRedisService.getMarketData(missedSymbols);
+                if (cachedFill == null) cachedFill = Collections.emptyMap();
             } catch (Exception e) {
                 log.warn("[MarketData] Cache read failed (non-fatal): {}", e.getMessage());
             }
         }
 
-        // Step 2: Find missing symbols
-        List<String> missedSymbols = symbols.stream()
-            .filter(s -> !result.containsKey(s))
-            .collect(Collectors.toList());
+        // Step 5: Merge live + cache into one complete result
+        Map<String, MarketData> merged = new HashMap<>(liveData);
+        merged.putAll(cachedFill);
 
-        // All symbols came back from cache - ideal case
-        if (missedSymbols.isEmpty()) {
-            log.info("[MarketData] All {}/{} symbols fetched from cache.", result.size(), symbols.size());
-            return result;
-        }
-
-        // Step 3: Fetch missing from API
-        log.info("[MarketData] Cache miss for {} symbols. Fetching live.", missedSymbols.size());
-        try {
-            Map<String, MarketData> liveData = getOhlcData(missedSymbols, false);
-            if (liveData != null && !liveData.isEmpty()) {
-                result.putAll(liveData);
-                // Update cache with new data
-                if (marketDataRedisService != null) {
-                    try {
-                        marketDataRedisService.cacheMarketData(liveData);
-                    } catch (Exception e) {
-                        log.warn("[MarketData] Cache write failed: {}", e.getMessage());
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.error("[MarketData] Live fetch failed for missing symbols: {}", e.getMessage());
-        }
-
-        int stillMissing = (int) symbols.stream().filter(s -> !result.containsKey(s)).count();
-        log.info("[MarketData] Result: {}/{} from cache, {}/{} live fetched, {}/{} still missing.",
-            symbols.size() - missedSymbols.size(), symbols.size(),
-            result.size() - (symbols.size() - missedSymbols.size()), missedSymbols.size(),
+        int stillMissing = (int) symbols.stream().filter(s -> !merged.containsKey(s)).count();
+        log.info("[MarketData] Result: {}/{} live, {}/{} from cache, {}/{} still missing.",
+            liveData.size(), symbols.size(),
+            cachedFill.size(), missedSymbols.size(),
             stillMissing, symbols.size());
 
-        return result;
+        return merged;
     }
 
     /**

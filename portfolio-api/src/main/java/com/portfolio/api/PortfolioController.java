@@ -102,6 +102,101 @@ public class PortfolioController {
         return ResponseEntity.ok(basicInfoList);
     }
 
+    @Operation(summary = "Get all combined portfolios", description = "Retrieves a merged portfolio of all brokers for the user")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Combined portfolio retrieved successfully"),
+            @ApiResponse(responseCode = "404", description = "No portfolios found for user")
+    })
+    @GetMapping("/all-combined")
+    public ResponseEntity<PortfolioModelV1> getAllCombined() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        log.info("PortfolioController - getAllCombined called with userId: {}", userId);
+
+        List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
+        
+        if (portfolios == null || portfolios.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        java.util.Map<String, com.am.common.amcommondata.model.asset.equity.EquityModel> mergedEquitiesMap = new java.util.HashMap<>();
+        double combinedTotalValue = 0.0;
+        
+        for (PortfolioModelV1 p : portfolios) {
+            combinedTotalValue += p.getTotalValue() != null ? p.getTotalValue() : 0.0;
+            if (p.getEquityModels() != null) {
+                for (com.am.common.amcommondata.model.asset.equity.EquityModel eq : p.getEquityModels()) {
+                    String symbol = eq.getSymbol();
+                    if (mergedEquitiesMap.containsKey(symbol)) {
+                        com.am.common.amcommondata.model.asset.equity.EquityModel existing = mergedEquitiesMap.get(symbol);
+                        
+                        double existingCost = existing.getQuantity() != null && existing.getAvgBuyingPrice() != null ? existing.getQuantity() * existing.getAvgBuyingPrice() : 0;
+                        double newCost = eq.getQuantity() != null && eq.getAvgBuyingPrice() != null ? eq.getQuantity() * eq.getAvgBuyingPrice() : 0;
+                        double newTotalQty = (existing.getQuantity() != null ? existing.getQuantity() : 0) + (eq.getQuantity() != null ? eq.getQuantity() : 0);
+                        
+                        existing.setQuantity(newTotalQty);
+                        existing.setAvgBuyingPrice(newTotalQty > 0 ? (existingCost + newCost) / newTotalQty : 0);
+                        
+                        double existingCurrentValue = existing.getCurrentValue() != null ? existing.getCurrentValue() : 0;
+                        double newCurrentValue = eq.getCurrentValue() != null ? eq.getCurrentValue() : 0;
+                        existing.setCurrentValue(existingCurrentValue + newCurrentValue);
+                        
+                        double existingInvestValue = existing.getInvestmentValue() != null ? existing.getInvestmentValue() : 0;
+                        double newInvestValue = eq.getInvestmentValue() != null ? eq.getInvestmentValue() : 0;
+                        existing.setInvestmentValue(existingInvestValue + newInvestValue);
+                        
+                        double existingPl = existing.getProfitLoss() != null ? existing.getProfitLoss() : 0;
+                        double newPl = eq.getProfitLoss() != null ? eq.getProfitLoss() : 0;
+                        existing.setProfitLoss(existingPl + newPl);
+                        
+                        if (existing.getInvestmentValue() != null && existing.getInvestmentValue() > 0 && existing.getProfitLoss() != null) {
+                            existing.setProfitLossPercentage((existing.getProfitLoss() / existing.getInvestmentValue()) * 100);
+                        }
+                    } else {
+                        // Clone the model just to be safe from modifying original DTO list in cache/DB contexts
+                        com.am.common.amcommondata.model.asset.equity.EquityModel cloned = com.am.common.amcommondata.model.asset.equity.EquityModel.builder()
+                            .id(eq.getId())
+                            .symbol(eq.getSymbol())
+                            .name(eq.getName())
+                            .description(eq.getDescription())
+                            .assetType(eq.getAssetType())
+                            .quantity(eq.getQuantity())
+                            .avgBuyingPrice(eq.getAvgBuyingPrice())
+                            .currentPrice(eq.getCurrentPrice())
+                            .currentValue(eq.getCurrentValue())
+                            .investmentValue(eq.getInvestmentValue())
+                            .brokerType(null) // Reset broker type for combined
+                            .profitLoss(eq.getProfitLoss())
+                            .profitLossPercentage(eq.getProfitLossPercentage())
+                            .todayProfitLoss(eq.getTodayProfitLoss())
+                            .todayProfitLossPercentage(eq.getTodayProfitLossPercentage())
+                            .companyName(eq.getCompanyName())
+                            .sector(eq.getSector())
+                            .industry(eq.getIndustry())
+                            .marketCap(eq.getMarketCap())
+                            .exchange(eq.getExchange())
+                            .build();
+                        mergedEquitiesMap.put(symbol, cloned);
+                    }
+                }
+            }
+        }
+        
+        PortfolioModelV1 combined = PortfolioModelV1.builder()
+            .id(UUID.randomUUID())
+            .name("All Portfolios")
+            .owner(userId)
+            .equityModels(new java.util.ArrayList<>(mergedEquitiesMap.values()))
+            .totalValue(combinedTotalValue)
+            .assetCount(mergedEquitiesMap.size())
+            .build();
+            
+        log.info("PortfolioController - getAllCombined - Successfully aggregated {} portfolios into {} equities for user: {}",
+                portfolios.size(), combined.getAssetCount(), userId);
+                
+        return ResponseEntity.ok(combined);
+    }
+
+
     @Hidden
     @Operation(summary = "Get portfolio analysis", description = "Retrieves detailed analysis for a specific portfolio (hidden from API docs)")
     @GetMapping("/{portfolioId}/analysis")
@@ -223,6 +318,16 @@ public class PortfolioController {
         } catch (IllegalArgumentException e) {
             log.error("PortfolioController - getPortfolioHoldings - Invalid interval: {}", interval, e);
             return ResponseEntity.badRequest().build();
+        }
+    }
+
+    @GetMapping("/kafka-debug")
+    public ResponseEntity<String> debugKafka() {
+        try {
+            Class.forName("org.springframework.kafka.core.KafkaTemplate");
+            return ResponseEntity.ok("KafkaTemplate is ON the classpath!");
+        } catch (ClassNotFoundException e) {
+            return ResponseEntity.ok("KafkaTemplate is MISSING from classpath!");
         }
     }
 }

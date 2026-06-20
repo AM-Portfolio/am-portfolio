@@ -13,16 +13,26 @@ import com.portfolio.model.mapper.PortfolioMapperv1;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.portfolio.kafka.publisher.PortfolioEventPublisher;
+import org.springframework.context.annotation.Lazy;
 
 @Slf4j
 @Service
+@Lazy(false)
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "app.kafka.portfolio.consumer.enabled", havingValue = "true", matchIfMissing = false)
 public class PortfolioUpdateConsumerService {
 
     private final ObjectMapper objectMapper;
     private final PortfolioMapperv1 portfolioMapper;
     private final PortfolioService portfolioService;
+    private final PortfolioEventPublisher portfolioEventPublisher;
+
+    @jakarta.annotation.PostConstruct
+    public void init() {
+        log.info("==========================================================================");
+        log.info("PORTFOLIO UPDATE CONSUMER SERVICE INSTANTIATED AND READY TO CONSUME KAFKA!");
+        log.info("==========================================================================");
+    }
 
     @KafkaListener(topics = "${app.kafka.portfolio.topic}", groupId = "${app.kafka.portfolio.consumer.id}", containerFactory = "kafkaListenerContainerFactory")
     public void consume(String message, Acknowledgment acknowledgment) {
@@ -46,11 +56,16 @@ public class PortfolioUpdateConsumerService {
 
     private void processMessage(PortfolioUpdateEvent event) {
         PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
+        PortfolioModelV1 saved;
         
         if ("TRADE".equalsIgnoreCase(event.getSource())) {
-            portfolioService.updateTradePortfolio(portfolioModel);
+            saved = portfolioService.updateTradePortfolio(portfolioModel);
         } else {
-            portfolioService.createPortfolio(portfolioModel);
+            saved = portfolioService.upsertDocumentPortfolio(portfolioModel);
+        }
+
+        if (saved != null) {
+            portfolioEventPublisher.publishPortfolioUpdate(saved);
         }
     }
 }
