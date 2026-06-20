@@ -13,9 +13,9 @@ vault:
       mappings:
         MARKET_DATA_API_URL: "URL"
     logging:
-      mappings:
-        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
-        LOG_LEVEL: "LOG_LEVEL"
+      template: |
+        export LOG_LEVEL="{{ index .Data.data "LOG_LEVEL" }}"
+        export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="{{ index .Data.data "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" | trimSpace }}"
       # No mappings needed, defaults to dump-all uppercased
     mongodb:
       mappings:
@@ -37,3 +37,11 @@ vault:
         SPRING_DATA_REDIS_HOST: "host"
         SPRING_DATA_REDIS_PASSWORD: "password"
         SPRING_DATA_REDIS_PORT: "port"
+    identity-oidc:
+      mappings:
+        OIDC_JWKS_URI: "OIDC_JWKS_URL"
+        OIDC_ISSUER_URI: "OIDC_ISSUER"
+    service-oauth:
+      mappings:
+        OAUTH2_CLIENT_ID: "AM_PORTFOLIO_CLIENT_ID"
+        OAUTH2_CLIENT_SECRET: "AM_PORTFOLIO_CLIENT_SECRET"
