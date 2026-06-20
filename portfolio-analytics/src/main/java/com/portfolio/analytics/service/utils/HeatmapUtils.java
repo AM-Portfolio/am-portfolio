@@ -75,6 +75,10 @@ public class HeatmapUtils {
         
         for (MarketData stock : stocks) {
             if (stock.getOhlc() != null) {
+                if (stock.getLastPrice() == null) {
+                    log.debug("Skipping stock — null lastPrice in calculateSectorMetrics");
+                    continue;
+                }
                 double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0) 
                         ? stock.getPreviousClose() : stock.getOhlc().getClose();
                 
@@ -136,13 +140,14 @@ public class HeatmapUtils {
         for (int i = 0; i < sectorStocks.size(); i++) {
             MarketData stock = sectorStocks.get(i);
             double quantity = quantities.get(i);
-            double value = stock.getLastPrice() * quantity;
-            // Guard against missing OHLC data BEFORE calculating weighted sums
-            if (stock.getOhlc() == null) {
-                log.warn("Skipping stock in weighted metrics — no OHLC data. Symbol index: {}, lastPrice: {}",
+            // Guard against missing OHLC or lastPrice data BEFORE calculating weighted sums
+            if (stock.getOhlc() == null || stock.getLastPrice() == null) {
+                log.warn("Skipping stock in weighted metrics — no OHLC or lastPrice data. Symbol index: {}, lastPrice: {}",
                         i, stock.getLastPrice());
                 continue;
             }
+            
+            double value = stock.getLastPrice() * quantity;
             
             // Only add to total value if the stock has valid OHLC data
             totalValue += value;

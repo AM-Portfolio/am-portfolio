@@ -45,7 +45,9 @@ public class PortfolioServiceImpl implements PortfolioService {
                 if (portfolioModel.getEquityModels() != null) {
                     existing.setEquities(portfolioMapper.toDocument(portfolioModel).getEquities());
                 }
-                existing.setTotalValue(portfolioModel.getTotalValue());
+                if (portfolioModel.getTotalValue() != null) {
+                    existing.setTotalValue(portfolioModel.getTotalValue());
+                }
                 return portfolioMapper.toModel(portfolioDocumentRepository.save(existing));
             }
         }
@@ -132,7 +134,9 @@ public class PortfolioServiceImpl implements PortfolioService {
 
             PortfolioDocument incoming = portfolioMapper.toDocument(portfolioModel);
             doc.setEquities(incoming.getEquities());
-            doc.setTotalValue(portfolioModel.getTotalValue());
+            if (portfolioModel.getTotalValue() != null) {
+                doc.setTotalValue(portfolioModel.getTotalValue());
+            }
             if (doc.getAudit() != null) {
                 doc.getAudit().setUpdatedAt(java.time.LocalDateTime.now());
             }

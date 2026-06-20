@@ -314,7 +314,11 @@ public class MarketDataService {
 
         // Step 3: Find missing symbols
         final Map<String, MarketData> liveSnapshot = liveData;
-        List<String> missedSymbols = symbols.stream()
+        List<String> normalizedSymbols = symbols.stream()
+            .map(this::cleanSymbol)
+            .collect(Collectors.toList());
+
+        List<String> missedSymbols = normalizedSymbols.stream()
             .filter(s -> !liveSnapshot.containsKey(s))
             .collect(Collectors.toList());
 
@@ -342,7 +346,7 @@ public class MarketDataService {
         Map<String, MarketData> merged = new HashMap<>(liveData);
         merged.putAll(cachedFill);
 
-        int stillMissing = (int) symbols.stream().filter(s -> !merged.containsKey(s)).count();
+        int stillMissing = (int) normalizedSymbols.stream().filter(s -> !merged.containsKey(s)).count();
         log.info("[MarketData] Result: {}/{} live, {}/{} from cache, {}/{} still missing.",
             liveData.size(), symbols.size(),
             cachedFill.size(), missedSymbols.size(),

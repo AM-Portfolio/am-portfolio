@@ -13,20 +13,22 @@ services:
       - "8072:8080"
     environment:
       - SPRING_PROFILES_ACTIVE=docker,api
-      - KAFKA_ENABLED=true
-      - APP_KAFKA_ENABLED=true
-      - APP_KAFKA_PORTFOLIO_CONSUMER_ENABLED=true
-      - SPRING_KAFKA_LISTENER_AUTO_STARTUP=true
+      - KAFKA_ENABLED=false
+      - APP_KAFKA_ENABLED=false
+      - APP_KAFKA_PORTFOLIO_CONSUMER_ENABLED=false
+      - SPRING_KAFKA_LISTENER_AUTO_STARTUP=false
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - KAFKA_SECURITY_PROTOCOL=PLAINTEXT
       - KAFKA_JAAS_CONFIG=
+      - KAFKA_USERNAME=
+      - KAFKA_PASSWORD=
       - MONGODB_URL=mongodb://admin:password123@infra-mongo:27017/portfolio?authSource=admin
       - REDIS_HOSTNAME=infra-redis
       - REDIS_PASSWORD=
       - MARKET_DATA_API_URL=http://host.docker.internal:8092
       - ETF_API_URL=http://host.docker.internal:8022
     volumes:
-      - ./portfolio-app/target/portfolio-app-1.0-SNAPSHOT.jar:/app/app.jar
+      - ./portfolio-app/target/portfolio-app-1.0.1-SNAPSHOT.jar:/app/app.jar
     command: ["java", "-jar", "/app/app.jar", "--app.kafka.enabled=true", "--app.kafka.portfolio.consumer.enabled=true", "--spring.kafka.listener.auto-startup=true", "--management.endpoints.web.exposure.include=*"]
     networks:
       - am-net

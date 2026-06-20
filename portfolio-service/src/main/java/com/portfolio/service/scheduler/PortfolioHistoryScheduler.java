@@ -21,7 +21,7 @@ public class PortfolioHistoryScheduler {
     private final PortfolioService portfolioService;
     private final PortfolioHoldingsService portfolioHoldingsService;
 
-    // Runs every day at 17:00 (5 PM) Server Time
+    // Runs every day at 17:00 (5 PM) IST (Asia/Kolkata)
     // Cron: Second, Minute, Hour, Day of Month, Month, Day of Week
     @Scheduled(cron = "0 0 17 * * *", zone = "Asia/Kolkata")
     public void runEndOfDayJob() {

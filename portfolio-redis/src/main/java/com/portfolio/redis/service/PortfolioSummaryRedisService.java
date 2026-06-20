@@ -65,7 +65,7 @@ public class PortfolioSummaryRedisService {
     }
 
     public Optional<PortfolioSummaryV1> getLatestSummary(String userId, TimeInterval interval, String portfolioId) {
-        log.info("Retrieving latest portfolio summary - User: {}, Interval: {}", 
+        log.debug("Retrieving latest portfolio summary - User: {}, Interval: {}", 
             userId, interval != null ? interval.getCode() : "null");
             
         String key = buildKey(userId, interval, portfolioId);
@@ -82,16 +82,16 @@ public class PortfolioSummaryRedisService {
                     Instant cutoff = Instant.now().minus(interval.getDuration());
                     
                     if (summary.getLastUpdated().toInstant(ZoneOffset.UTC).isAfter(cutoff)) {
-                        log.info("Found fresh portfolio summary in cache - User: {}, Key: {}, LastUpdated: {}", 
+                        log.debug("Found fresh portfolio summary in cache - User: {}, Key: {}, LastUpdated: {}", 
                             userId, key, summary.getLastUpdated());
                         return Optional.of(summary);
                     } else {
-                        log.info("Found stale portfolio summary in cache - User: {}, Key: {}, LastUpdated: {}, deleting", 
+                        log.debug("Found stale portfolio summary in cache - User: {}, Key: {}, LastUpdated: {}, deleting", 
                             userId, key, summary.getLastUpdated());
                         portfolioSummaryRedisTemplate.delete(key);
                     }
                 } else {
-                    log.info("Found portfolio summary in cache with no interval constraint - User: {}, Key: {}", 
+                    log.debug("Found portfolio summary in cache with no interval constraint - User: {}, Key: {}", 
                         userId, key);
                     return Optional.of(summary);
                 }

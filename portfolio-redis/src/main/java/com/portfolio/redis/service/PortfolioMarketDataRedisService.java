@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.*;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -30,15 +31,26 @@ public class PortfolioMarketDataRedisService {
     public void cacheMarketData(Map<String, MarketData> data) {
         if (data == null || data.isEmpty()) return;
         Duration ttl = computeSmartTtl();
-        log.info("[MktDataCache] Caching {} symbols with TTL={}", data.size(), ttl);
-        data.forEach((symbol, marketData) -> {
-            try {
-                portfolioMarketDataRedisTemplate.opsForValue()
-                    .set(keyPrefix + symbol, marketData, ttl);
-            } catch (Exception e) {
-                log.warn("[MktDataCache] Failed to cache symbol {}: {}", symbol, e.getMessage());
-            }
-        });
+        
+        try {
+            portfolioMarketDataRedisTemplate.executePipelined((org.springframework.data.redis.connection.RedisConnection connection) -> {
+                data.forEach((symbol, marketData) -> {
+                    try {
+                        byte[] key = ((org.springframework.data.redis.serializer.RedisSerializer<String>) portfolioMarketDataRedisTemplate.getKeySerializer()).serialize(keyPrefix + symbol);
+                        byte[] value = ((org.springframework.data.redis.serializer.RedisSerializer<MarketData>) portfolioMarketDataRedisTemplate.getValueSerializer()).serialize(marketData);
+                        if (key != null && value != null) {
+                            connection.setEx(key, ttl.getSeconds(), value);
+                        }
+                    } catch (Exception e) {
+                        log.warn("[MktDataCache] Failed to serialize symbol {}: {}", symbol, e.getMessage());
+                    }
+                });
+                return null;
+            });
+            log.info("[MktDataCache] Pipelined cache of {} symbols with TTL={}", data.size(), ttl);
+        } catch (Exception e) {
+            log.warn("[MktDataCache] Failed to execute pipeline cache: {}", e.getMessage());
+        }
     }
 
     /**
@@ -46,17 +58,24 @@ public class PortfolioMarketDataRedisService {
      */
     public Map<String, MarketData> getMarketData(List<String> symbols) {
         if (symbols == null || symbols.isEmpty()) return Collections.emptyMap();
+        
+        List<String> keys = symbols.stream().map(s -> keyPrefix + s).collect(Collectors.toList());
         Map<String, MarketData> result = new HashMap<>();
-        symbols.forEach(symbol -> {
-            try {
-                MarketData cached = portfolioMarketDataRedisTemplate.opsForValue()
-                    .get(keyPrefix + symbol);
-                if (cached != null) result.put(symbol, cached);
-            } catch (Exception e) {
-                log.warn("[MktDataCache] Failed to read symbol {}: {}", symbol, e.getMessage());
+        
+        try {
+            List<MarketData> values = portfolioMarketDataRedisTemplate.opsForValue().multiGet(keys);
+            if (values != null) {
+                for (int i = 0; i < symbols.size(); i++) {
+                    if (values.get(i) != null) {
+                        result.put(symbols.get(i), values.get(i));
+                    }
+                }
             }
-        });
-        log.debug("[MktDataCache] Cache hit {}/{} symbols", result.size(), symbols.size());
+        } catch (Exception e) {
+            log.warn("[MktDataCache] Failed to read batch of symbols: {}", e.getMessage());
+        }
+        
+        log.debug("[MktDataCache] multiGet hit {}/{} symbols", result.size(), symbols.size());
         return result;
     }
 

@@ -19,6 +19,7 @@ import org.springframework.context.annotation.Lazy;
 @Slf4j
 @Service
 @Lazy(false)
+@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = false)
 @RequiredArgsConstructor
 public class PortfolioUpdateConsumerService {
 

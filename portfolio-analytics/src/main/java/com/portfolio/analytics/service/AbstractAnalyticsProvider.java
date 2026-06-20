@@ -91,8 +91,8 @@ public abstract class AbstractAnalyticsProvider<T, I> {
         LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
         if (timeFrameRequest.getFromDate() != null && timeFrameRequest.getFromDate().isEqual(today) &&
             timeFrameRequest.getToDate() != null && timeFrameRequest.getToDate().isEqual(today)) {
-            log.info("[SmartRoute] Same-day range detected for {} symbols, routing to Live Data (cache-enabled) instead of Historical", symbols.size());
-            return getMarketData(symbols);
+            log.info("[SmartRoute] Same-day range detected for {} symbols, routing to cache-enabled Live Data instead of Historical", symbols.size());
+            return marketDataService.getMarketData(symbols);
         }
         
         log.info("Fetching historical data for {} symbols with time frame: {} to {}, interval: {}", 
