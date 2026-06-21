@@ -134,6 +134,11 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         
         for (String symbol : marketData.keySet()) {
             MarketData data = marketData.get(symbol);
+            if (data == null) {
+                log.warn("Null market data encountered for symbol: {}", symbol);
+                continue;
+            }
+
             String sector = symbolToSector.getOrDefault(symbol, "Unknown");
             
             sectorMarketDataMap.computeIfAbsent(sector, k -> new ArrayList<>())
@@ -143,9 +148,13 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             sectorQuantitiesMap.computeIfAbsent(sector, k -> new ArrayList<>())
                 .add(quantity);
                 
-            if (data.getLastPrice() != null) {
-                totalPortfolioValue[0] += data.getLastPrice() * quantity;
+            double resolvedPrice = 0.0;
+            if (data.getLastPrice() != null && data.getLastPrice() > 0) {
+                resolvedPrice = data.getLastPrice();
+            } else if (data.getOhlc() != null && data.getOhlc().getClose() > 0) {
+                resolvedPrice = data.getOhlc().getClose();
             }
+            totalPortfolioValue[0] += resolvedPrice * quantity;
         }
     }
     

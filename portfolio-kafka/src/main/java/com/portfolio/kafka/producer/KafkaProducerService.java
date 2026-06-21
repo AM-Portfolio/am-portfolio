@@ -24,10 +24,10 @@ public class KafkaProducerService {
     @Value("${app.kafka.portfolio.publish-topic:am-portfolio-update}")
     private String topicName;
 
-    @Value("${app.kafka.portfolio.stream.topic:am-portfolio-stream}")
+    @Value("${app.kafka.portfolio.stream.topic}")
     private String portfolioStreamTopicName;
 
-    @Value("${app.kafka.holding.topic:am-holding-update}")
+    @Value("${app.kafka.holding.topic}")
     private String holdingTopicName;
 
     public void sendPortfolioStreamMessage(PortfolioUpdateEvent portfolioUpdateEvent, String correlationId) {

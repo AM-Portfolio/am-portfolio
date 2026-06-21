@@ -67,6 +67,9 @@ public class PortfolioUpdateConsumerService {
 
         if (saved != null) {
             portfolioEventPublisher.publishPortfolioUpdate(saved);
+        } else {
+            log.warn("[Consumer] Portfolio save returned null for source='{}', portfolioId='{}'. Event will NOT be published downstream.",
+                     event.getSource(), event.getPortfolioId());
         }
     }
 }

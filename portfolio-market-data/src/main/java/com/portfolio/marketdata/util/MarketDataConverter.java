@@ -40,6 +40,11 @@ public class MarketDataConverter {
             effectivePreviousClose = response.getOhlc().getClose();
         }
 
+        // Avoid emitting previousClose without a usable lastPrice (prevents NPEs and -100% drops)
+        if (response.getLastPrice() <= 0) {
+            effectivePreviousClose = null;
+        }
+
         MarketDataBuilder builder = MarketData.builder()
             .instrumentToken(response.getInstrumentToken())
             .lastPrice(response.getLastPrice())
@@ -115,8 +120,9 @@ public class MarketDataConverter {
             if (latestPoint.getOhlcData() != null) {
                 builder.lastPrice(latestPoint.getOhlcData().getClose());
             }
-            if (firstPoint.getOhlcData() != null) {
+            if (firstPoint.getOhlcData() != null && latestPoint.getOhlcData() != null && latestPoint.getOhlcData().getClose() > 0) {
                 // For historical timeframe, the "previous close" acts as the timeframe baseline
+                // Avoid emitting previousClose without a usable lastPrice
                 builder.previousClose(firstPoint.getOhlcData().getClose());
             }
         }

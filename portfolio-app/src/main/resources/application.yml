@@ -16,6 +16,9 @@ STOCK_CONSUMER_GROUP: ${STOCK_CONSUMER_ID:am-stock-group.v2}
 STOCK_TOPIC_NAME: ${STOCK_TOPIC:am-stock-price-update}
 MARKET_INDEX_CONSUMER_GROUP: ${MARKET_INDEX_CONSUMER_ID:am-market-index-group-1}
 MARKET_INDEX_TOPIC_NAME: ${MARKET_INDEX_TOPIC:nse-stock-indices-update}
+HOLDING_CONSUMER_GROUP: ${HOLDING_CONSUMER_ID:am-portfolio-holding-group}
+HOLDING_TOPIC_NAME: ${HOLDING_TOPIC:am-holding-update}
+PORTFOLIO_STREAM_TOPIC_NAME: ${PORTFOLIO_STREAM_TOPIC:am-portfolio-stream}
 
 #Redis
 PROJ_REDIS_HOSTNAME: ${REDIS_HOSTNAME:localhost}
@@ -135,6 +138,13 @@ app:
         id: ${STOCK_CONSUMER_GROUP}
         enabled: ${KAFKA_ENABLED:false}
       topic: ${STOCK_TOPIC_NAME}
+    holding:
+      consumer:
+        id: ${HOLDING_CONSUMER_GROUP}
+        enabled: ${KAFKA_ENABLED:false}
+      topic: ${HOLDING_TOPIC_NAME}
+    stream:
+      topic: ${PORTFOLIO_STREAM_TOPIC_NAME}
     market-index:
       consumer:
         id: ${MARKET_INDEX_CONSUMER_GROUP}
