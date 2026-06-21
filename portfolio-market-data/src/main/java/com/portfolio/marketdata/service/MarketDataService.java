@@ -152,7 +152,9 @@ public class MarketDataService {
 
     /**
      * Get OHLC data for the specified symbols.
-     * 
+     * Splits large symbol lists into parallel chunks of max 20 symbols to prevent
+     * downstream API timeouts (previously a 59-symbol single request took 29-30s).
+     *
      * @param symbols List of symbols to fetch data for
      * @param refresh Whether to refresh the data or use cached data
      * @return Map of symbols to their respective market data
@@ -168,14 +170,36 @@ public class MarketDataService {
 
         log.info("Getting OHLC data for {} symbols with refresh={}", validSymbols.size(), refresh);
 
-        try {
-            MarketDataResponseWrapper wrapper = marketDataApiClient
-                    .getOhlcData(validSymbols, AmMarketApiConstants.TIMEFRAME_1DAY, refresh).block();
-            return convertToMarketDataMap(wrapper, false);
-        } catch (Exception e) {
-            log.error("Error fetching OHLC data: {}", e.getMessage(), e);
-            return Map.of();
+        // Partition into chunks of 20 to avoid massive single-batch timeouts
+        final int CHUNK_SIZE = 20;
+        List<List<String>> chunks = new java.util.ArrayList<>();
+        for (int i = 0; i < validSymbols.size(); i += CHUNK_SIZE) {
+            chunks.add(validSymbols.subList(i, Math.min(i + CHUNK_SIZE, validSymbols.size())));
         }
+
+        // Fire all chunk requests concurrently and merge results
+        List<java.util.concurrent.CompletableFuture<Map<String, MarketData>>> futures = chunks.stream()
+            .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                try {
+                    MarketDataResponseWrapper w = marketDataApiClient
+                            .getOhlcData(chunk, AmMarketApiConstants.TIMEFRAME_1DAY, refresh).block();
+                    return convertToMarketDataMap(w, true);
+                } catch (Exception e) {
+                    log.warn("[OHLC chunk] Failed for chunk of {}: {}", chunk.size(), e.getMessage());
+                    return Collections.<String, MarketData>emptyMap();
+                }
+            }))
+            .collect(Collectors.toList());
+
+        Map<String, MarketData> merged = new java.util.HashMap<>();
+        for (java.util.concurrent.CompletableFuture<Map<String, MarketData>> f : futures) {
+            try {
+                merged.putAll(f.get(30, java.util.concurrent.TimeUnit.SECONDS));
+            } catch (Exception e) {
+                log.warn("[OHLC chunk] Chunk future failed or timed out: {}", e.getMessage());
+            }
+        }
+        return merged;
     }
 
     /**
@@ -201,13 +225,15 @@ public class MarketDataService {
 
     /**
      * Get current prices for multiple symbols.
-     * 
+     * Guards against null lastPrice to prevent NullPointerException.
+     *
      * @param symbols List of symbols to fetch prices for
      * @return Map of symbols to their respective current prices
      */
     public Map<String, Double> getCurrentPrices(List<String> symbols) {
         Map<String, MarketData> data = getOhlcData(symbols, false);
         return data.entrySet().stream()
+                .filter(e -> e.getValue() != null && e.getValue().getLastPrice() != null)
                 .collect(Collectors.toMap(
                         Map.Entry::getKey,
                         entry -> entry.getValue().getLastPrice()));
