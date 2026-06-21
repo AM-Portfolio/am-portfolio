@@ -28,12 +28,6 @@ public class PortfolioUpdateConsumerService {
     private final PortfolioService portfolioService;
     private final PortfolioEventPublisher portfolioEventPublisher;
 
-    @jakarta.annotation.PostConstruct
-    public void init() {
-        log.info("==========================================================================");
-        log.info("PORTFOLIO UPDATE CONSUMER SERVICE INSTANTIATED AND READY TO CONSUME KAFKA!");
-        log.info("==========================================================================");
-    }
 
     @KafkaListener(topics = "${app.kafka.portfolio.topic}", groupId = "${app.kafka.portfolio.consumer.id}", containerFactory = "kafkaListenerContainerFactory")
     public void consume(String message, Acknowledgment acknowledgment) {

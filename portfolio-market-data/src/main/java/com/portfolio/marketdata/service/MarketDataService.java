@@ -19,7 +19,6 @@ import com.portfolio.marketdata.model.HistoricalDataResponseWrapper;
 import com.portfolio.marketdata.model.InstrumentType;
 import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.model.MarketDataResponseWrapper;
-import com.portfolio.marketdata.util.AmMarketApiConstants;
 import com.portfolio.marketdata.util.MarketDataConverter;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.market.TimeFrame;
@@ -182,7 +181,7 @@ public class MarketDataService {
             .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
                 try {
                     MarketDataResponseWrapper w = marketDataApiClient
-                            .getOhlcData(chunk, AmMarketApiConstants.TIMEFRAME_1DAY, refresh).block();
+                            .getOhlcData(chunk, TimeFrame.DAY.getValue(), refresh).block();
                     return convertToMarketDataMap(w, true);
                 } catch (Exception e) {
                     log.warn("[OHLC chunk] Failed for chunk of {}: {}", chunk.size(), e.getMessage());
@@ -213,7 +212,7 @@ public class MarketDataService {
     public CompletableFuture<Map<String, MarketData>> getOhlcDataAsync(List<String> symbols, boolean refresh) {
         log.info("Getting OHLC data asynchronously for {} symbols with refresh={}", symbols.size(), refresh);
 
-        return marketDataApiClient.getOhlcData(symbols, AmMarketApiConstants.TIMEFRAME_1DAY, refresh)
+        return marketDataApiClient.getOhlcData(symbols, TimeFrame.DAY.getValue(), refresh)
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(wrapper -> convertToMarketDataMap(wrapper, true))
                 .onErrorResume(e -> {
@@ -313,105 +312,51 @@ public class MarketDataService {
         return getHistoricalData(request);
     }
 
-    private boolean isNseMarketOpen() {
-        java.time.ZonedDateTime nowIst = java.time.ZonedDateTime.now(java.time.ZoneId.of("Asia/Kolkata"));
-        java.time.DayOfWeek day = nowIst.getDayOfWeek();
-        if (day == java.time.DayOfWeek.SATURDAY || day == java.time.DayOfWeek.SUNDAY) {
-            return false;
-        }
-        java.time.LocalTime time = nowIst.toLocalTime();
-        java.time.LocalTime open = java.time.LocalTime.of(9, 15);
-        java.time.LocalTime close = java.time.LocalTime.of(15, 30);
-        return !time.isBefore(open) && time.isBefore(close);
-    }
-
     public Map<String, MarketData> getMarketData(List<String> symbols) {
         if (symbols == null || symbols.isEmpty()) {
             return Collections.emptyMap();
         }
 
-        boolean isMarketOpen = isNseMarketOpen();
-        Map<String, MarketData> resultData = new HashMap<>();
+        Map<String, MarketData> result = new HashMap<>();
+        List<String> normalized = symbols.stream().map(this::cleanSymbol).collect(Collectors.toList());
 
-        // If market is closed, attempt to serve entirely from cache first to preserve Friday close data
-        if (!isMarketOpen && marketDataRedisService != null) {
-            log.info("[MarketData] Market is CLOSED. Attempting to serve from cache first.");
+        // 1. Try market data cache first (populated by am-market service or last live fetch)
+        if (marketDataRedisService != null) {
             try {
-                Map<String, MarketData> cached = marketDataRedisService.getMarketData(symbols);
-                if (cached != null) {
-                    resultData.putAll(cached);
-                }
+                Map<String, MarketData> cached = marketDataRedisService.getMarketData(normalized);
+                if (cached != null) result.putAll(cached);
             } catch (Exception e) {
                 log.warn("[MarketData] Cache read failed: {}", e.getMessage());
             }
         }
 
-        // Find symbols that are still missing (either market is open, or cache was empty)
-        List<String> normalizedSymbols = symbols.stream()
-            .map(this::cleanSymbol)
+        // 2. Find symbols still missing after cache lookup
+        List<String> missing = normalized.stream()
+            .filter(s -> !result.containsKey(s))
             .collect(Collectors.toList());
 
-        List<String> missingSymbols = normalizedSymbols.stream()
-            .filter(s -> !resultData.containsKey(s))
-            .collect(Collectors.toList());
-
-        if (missingSymbols.isEmpty()) {
-            log.info("[MarketData] All {}/{} symbols served from cache (market closed).", resultData.size(), symbols.size());
-            return resultData;
+        if (missing.isEmpty()) {
+            log.info("[MarketData] All {} symbols served from cache.", result.size());
+            return result;
         }
 
-        if (isMarketOpen) {
-            log.info("[MarketData] Market OPEN. Fetching live OHLC for {} symbols", missingSymbols.size());
-            try {
-                Map<String, MarketData> fetchedData = getOhlcData(missingSymbols, false);
-                if (fetchedData != null && !fetchedData.isEmpty()) {
-                    resultData.putAll(fetchedData);
-                    // Persist to Redis (TTL will be 15 mins during market hours)
-                    if (marketDataRedisService != null) {
-                        marketDataRedisService.cacheMarketData(fetchedData);
-                    }
+        // 3. Fetch missing from OHLC API
+        log.info("[MarketData] Cache miss for {} symbols. Fetching from API.", missing.size());
+        try {
+            Map<String, MarketData> fetched = getOhlcData(missing, false);
+            if (fetched != null && !fetched.isEmpty()) {
+                result.putAll(fetched);
+                // Store in cache with SmartTTL
+                if (marketDataRedisService != null) {
+                    marketDataRedisService.cacheMarketData(fetched);
                 }
-            } catch (Exception e) {
-                log.error("[MarketData] Live fetch failed: {}", e.getMessage());
             }
-        } else {
-            log.info("[MarketData] Market CLOSED. Cache miss for {} symbols. Fetching historical fallback.", missingSymbols.size());
-            try {
-                // Fetch historical data for the last 5 days to ensure we get at least 2 trading days
-                LocalDate toDate = LocalDate.now();
-                LocalDate fromDate = toDate.minusDays(5);
-                Map<String, MarketData> historicalData = getHistoricalData(
-                    missingSymbols, fromDate, toDate, TimeFrame.DAY, InstrumentType.STOCK, FilterType.START_END, null, false, false);
-                
-                if (historicalData != null && !historicalData.isEmpty()) {
-                    resultData.putAll(historicalData);
-                    // Persist to Redis (Smart TTL will keep it until Monday 9:15 AM)
-                    if (marketDataRedisService != null) {
-                        marketDataRedisService.cacheMarketData(historicalData);
-                    }
-                }
-            } catch (Exception e) {
-                log.error("[MarketData] Historical fallback fetch failed: {}", e.getMessage());
-            }
+        } catch (Exception e) {
+            log.error("[MarketData] OHLC fetch failed: {}", e.getMessage());
         }
 
-        // If STILL missing (e.g. live API failed while market open), attempt stale cache fill
-        List<String> stillMissing = normalizedSymbols.stream()
-            .filter(s -> !resultData.containsKey(s))
-            .collect(Collectors.toList());
-
-        if (!stillMissing.isEmpty() && isMarketOpen && marketDataRedisService != null) {
-            log.warn("[MarketData] Live fetch missed {} symbols. Attempting stale cache fill.", stillMissing.size());
-            try {
-                Map<String, MarketData> cachedFill = marketDataRedisService.getMarketData(stillMissing);
-                if (cachedFill != null) resultData.putAll(cachedFill);
-            } catch (Exception e) {
-                log.warn("[MarketData] Stale cache read failed: {}", e.getMessage());
-            }
-        }
-
-        log.info("[MarketData] Result: {}/{} total symbols returned.", resultData.size(), symbols.size());
-        return resultData;
+        log.info("[MarketData] Result: {}/{} symbols returned.", result.size(), symbols.size());
+        return result;
     }
 
     /**

@@ -26,10 +26,6 @@ import java.util.Map;
 @Slf4j
 public class KafkaConfig {
 
-    @jakarta.annotation.PostConstruct
-    public void init() {
-        log.info(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> KAFKA CONFIG INSTANTIATED <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<");
-    }
 
     @Value("${spring.kafka.bootstrap-servers}")
     private String bootstrapServers;

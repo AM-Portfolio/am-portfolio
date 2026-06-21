@@ -1,10 +1,10 @@
 # Infrastructure Configuration
-MONGODB_CONNECTION_URL: ${MONGODB_URL}
+MONGODB_CONNECTION_URL: ${MONGODB_URL:mongodb://admin:password123@localhost:27017/portfolio?authSource=admin}
 
 #Kafka
 PROJ_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-PROJ_KAFKA_USERNAME: ${KAFKA_USERNAME:}
-PROJ_KAFKA_PASSWORD: ${KAFKA_PASSWORD:}
+PROJ_KAFKA_USERNAME: ${KAFKA_USERNAME:admin}
+PROJ_KAFKA_PASSWORD: ${KAFKA_PASSWORD:password123}
 PROJ_KAFKA_JAAS_CONFIG: ${KAFKA_JAAS_CONFIG:org.apache.kafka.common.security.scram.ScramLoginModule required username="${PROJ_KAFKA_USERNAME}" password="${PROJ_KAFKA_PASSWORD}";}
 PROJ_KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:SASL_PLAINTEXT}
 PROJ_KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:SCRAM-SHA-256}
@@ -16,14 +16,11 @@ STOCK_CONSUMER_GROUP: ${STOCK_CONSUMER_ID:am-stock-group.v2}
 STOCK_TOPIC_NAME: ${STOCK_TOPIC:am-stock-price-update}
 MARKET_INDEX_CONSUMER_GROUP: ${MARKET_INDEX_CONSUMER_ID:am-market-index-group-1}
 MARKET_INDEX_TOPIC_NAME: ${MARKET_INDEX_TOPIC:nse-stock-indices-update}
-HOLDING_CONSUMER_GROUP: ${HOLDING_CONSUMER_ID:am-portfolio-holding-group}
-HOLDING_TOPIC_NAME: ${HOLDING_TOPIC:am-holding-update}
-PORTFOLIO_STREAM_TOPIC_NAME: ${PORTFOLIO_STREAM_TOPIC:am-portfolio-stream}
 
 #Redis
 PROJ_REDIS_HOSTNAME: ${REDIS_HOSTNAME:localhost}
 PROJ_REDIS_PORT: ${REDIS_PORT:6379}
-PROJ_REDIS_PASSWORD: ${REDIS_PASSWORD}
+PROJ_REDIS_PASSWORD: ${REDIS_PASSWORD:password123}
 
 spring:
   main:
@@ -61,8 +58,8 @@ spring:
         ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:summary:"
       portfolio-heatmap:
+        ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:heatmap:"
-        # Note: TTL is computed dynamically based on market hours
       portfolio-market-data:
         key-prefix: "portfolio:mktdata:"
         # Note: TTL is computed dynamically by PortfolioMarketDataRedisService.computeSmartTtl()
@@ -134,7 +131,7 @@ app:
       topic: ${PORTFOLIO_TOPIC_NAME}
       publish-topic: ${PORTFOLIO_PUBLISH_TOPIC:am-portfolio-update}
       stream:
-        topic: ${PORTFOLIO_STREAM_TOPIC_NAME}
+        topic: ${PORTFOLIO_STREAM_TOPIC:am-portfolio-stream}
     stock:
       consumer:
         id: ${STOCK_CONSUMER_GROUP}
@@ -142,9 +139,9 @@ app:
       topic: ${STOCK_TOPIC_NAME}
     holding:
       consumer:
-        id: ${HOLDING_CONSUMER_GROUP}
+        id: ${HOLDING_CONSUMER_ID:am-portfolio-holding-group}
         enabled: ${KAFKA_ENABLED:false}
-      topic: ${HOLDING_TOPIC_NAME}
+      topic: ${HOLDING_TOPIC:am-holding-update}
     market-index:
       consumer:
         id: ${MARKET_INDEX_CONSUMER_GROUP}

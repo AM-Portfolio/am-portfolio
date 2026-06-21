@@ -20,10 +20,13 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class PortfolioHeatmapRedisService {
     private final RedisTemplate<String, Heatmap> portfolioHeatmapRedisTemplate;
-    private final PortfolioMarketDataRedisService marketDataRedisService;
+
 
     @Value("${spring.data.redis.portfolio-heatmap.key-prefix:portfolio:heatmap:}")
     private String portfolioHeatmapKeyPrefix;
+
+    @Value("${spring.data.redis.portfolio-heatmap.ttl:900}")
+    private Integer portfolioHeatmapTtl;
 
     @Async("taskExecutor")
     public CompletableFuture<Void> cacheHeatmap(Heatmap heatmap, String portfolioId, TimeFrameRequest interval) {
@@ -34,8 +37,8 @@ public class PortfolioHeatmapRedisService {
         log.debug("Generated cache key: {} for portfolio: {}", key, portfolioId);
         
         try {
-            Duration ttl = marketDataRedisService.computeSmartTtl();
-            log.debug("Setting cache with SmartTTL: {} for key: {}", ttl, key);
+            Duration ttl = Duration.ofSeconds(portfolioHeatmapTtl);
+            log.debug("Setting cache with TTL: {} seconds for key: {}", ttl.getSeconds(), key);
             portfolioHeatmapRedisTemplate.opsForValue().set(key, heatmap, ttl);
             log.info("Successfully cached portfolio heatmap - Portfolio: {}, Key: {}, TTL: {} seconds", 
                 portfolioId, key, ttl.getSeconds());

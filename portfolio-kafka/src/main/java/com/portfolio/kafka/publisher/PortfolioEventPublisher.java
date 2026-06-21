@@ -19,12 +19,12 @@ public class PortfolioEventPublisher {
 
     public void publishPortfolioUpdate(PortfolioModelV1 savedPortfolio) {
         if (kafkaProducerService == null) {
-            log.debug("Kafka disabled — skipping portfolio update publish for user: {}",
+            log.debug("Kafka disabled - skipping portfolio update publish for user: {}",
                       savedPortfolio != null ? savedPortfolio.getOwner() : "null");
             return;
         }
         if (savedPortfolio == null || savedPortfolio.getOwner() == null) {
-            log.warn("Skipping publish — savedPortfolio is null or has no owner");
+            log.warn("Skipping publish - savedPortfolio is null or has no owner");
             return;
         }
 
