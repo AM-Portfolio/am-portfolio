@@ -82,7 +82,7 @@ public class PortfolioMarketDataRedisService {
     /**
      * Compute TTL based on IST day-of-week and current time.
      */
-    Duration computeSmartTtl() {
+    public Duration computeSmartTtl() {
         ZonedDateTime nowIst = ZonedDateTime.now(IST);
         DayOfWeek day = nowIst.getDayOfWeek();
         LocalTime time = nowIst.toLocalTime();

@@ -61,8 +61,8 @@ spring:
         ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:summary:"
       portfolio-heatmap:
-        ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:heatmap:"
+        # Note: TTL is computed dynamically based on market hours
       portfolio-market-data:
         key-prefix: "portfolio:mktdata:"
         # Note: TTL is computed dynamically by PortfolioMarketDataRedisService.computeSmartTtl()

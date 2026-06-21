@@ -313,72 +313,105 @@ public class MarketDataService {
         return getHistoricalData(request);
     }
 
+    private boolean isNseMarketOpen() {
+        java.time.ZonedDateTime nowIst = java.time.ZonedDateTime.now(java.time.ZoneId.of("Asia/Kolkata"));
+        java.time.DayOfWeek day = nowIst.getDayOfWeek();
+        if (day == java.time.DayOfWeek.SATURDAY || day == java.time.DayOfWeek.SUNDAY) {
+            return false;
+        }
+        java.time.LocalTime time = nowIst.toLocalTime();
+        java.time.LocalTime open = java.time.LocalTime.of(9, 15);
+        java.time.LocalTime close = java.time.LocalTime.of(15, 30);
+        return !time.isBefore(open) && time.isBefore(close);
+    }
+
     public Map<String, MarketData> getMarketData(List<String> symbols) {
         if (symbols == null || symbols.isEmpty()) {
             return Collections.emptyMap();
         }
 
-        log.info("[MarketData] Fetching live OHLC for {} symbols", symbols.size());
+        boolean isMarketOpen = isNseMarketOpen();
+        Map<String, MarketData> resultData = new HashMap<>();
 
-        // Step 1: Attempt live fetch from am-market-data
-        Map<String, MarketData> liveData = Collections.emptyMap();
-        try {
-            liveData = getOhlcData(symbols, false);
-            if (liveData == null) liveData = Collections.emptyMap();
-        } catch (Exception e) {
-            log.error("[MarketData] Live fetch failed: {}. Serving fully from cache.", e.getMessage());
-        }
-
-        // Step 2: Persist all successfully fetched symbols to Redis
-        if (marketDataRedisService != null && !liveData.isEmpty()) {
+        // If market is closed, attempt to serve entirely from cache first to preserve Friday close data
+        if (!isMarketOpen && marketDataRedisService != null) {
+            log.info("[MarketData] Market is CLOSED. Attempting to serve from cache first.");
             try {
-                marketDataRedisService.cacheMarketData(liveData);
+                Map<String, MarketData> cached = marketDataRedisService.getMarketData(symbols);
+                if (cached != null) {
+                    resultData.putAll(cached);
+                }
             } catch (Exception e) {
-                log.warn("[MarketData] Cache write failed (non-fatal): {}", e.getMessage());
+                log.warn("[MarketData] Cache read failed: {}", e.getMessage());
             }
         }
 
-        // Step 3: Find missing symbols
-        final Map<String, MarketData> liveSnapshot = liveData;
+        // Find symbols that are still missing (either market is open, or cache was empty)
         List<String> normalizedSymbols = symbols.stream()
             .map(this::cleanSymbol)
             .collect(Collectors.toList());
 
-        List<String> missedSymbols = normalizedSymbols.stream()
-            .filter(s -> !liveSnapshot.containsKey(s))
+        List<String> missingSymbols = normalizedSymbols.stream()
+            .filter(s -> !resultData.containsKey(s))
             .collect(Collectors.toList());
 
-        // All symbols came back live - ideal case
-        if (missedSymbols.isEmpty()) {
-            log.info("[MarketData] All {}/{} symbols fetched live.", liveData.size(), symbols.size());
-            return liveData;
+        if (missingSymbols.isEmpty()) {
+            log.info("[MarketData] All {}/{} symbols served from cache (market closed).", resultData.size(), symbols.size());
+            return resultData;
         }
 
-        // Step 4: Fill gaps from Redis cache (stale-serve)
-        log.warn("[MarketData] Live fetch missing {} symbol(s): {}. Attempting cache fill.",
-            missedSymbols.size(), missedSymbols);
-
-        Map<String, MarketData> cachedFill = Collections.emptyMap();
-        if (marketDataRedisService != null) {
+        if (isMarketOpen) {
+            log.info("[MarketData] Market OPEN. Fetching live OHLC for {} symbols", missingSymbols.size());
             try {
-                cachedFill = marketDataRedisService.getMarketData(missedSymbols);
-                if (cachedFill == null) cachedFill = Collections.emptyMap();
+                Map<String, MarketData> fetchedData = getOhlcData(missingSymbols, false);
+                if (fetchedData != null && !fetchedData.isEmpty()) {
+                    resultData.putAll(fetchedData);
+                    // Persist to Redis (TTL will be 15 mins during market hours)
+                    if (marketDataRedisService != null) {
+                        marketDataRedisService.cacheMarketData(fetchedData);
+                    }
+                }
             } catch (Exception e) {
-                log.warn("[MarketData] Cache read failed (non-fatal): {}", e.getMessage());
+                log.error("[MarketData] Live fetch failed: {}", e.getMessage());
+            }
+        } else {
+            log.info("[MarketData] Market CLOSED. Cache miss for {} symbols. Fetching historical fallback.", missingSymbols.size());
+            try {
+                // Fetch historical data for the last 5 days to ensure we get at least 2 trading days
+                LocalDate toDate = LocalDate.now();
+                LocalDate fromDate = toDate.minusDays(5);
+                Map<String, MarketData> historicalData = getHistoricalData(
+                    missingSymbols, fromDate, toDate, TimeFrame.DAY, InstrumentType.STOCK, FilterType.START_END, null, false, false);
+                
+                if (historicalData != null && !historicalData.isEmpty()) {
+                    resultData.putAll(historicalData);
+                    // Persist to Redis (Smart TTL will keep it until Monday 9:15 AM)
+                    if (marketDataRedisService != null) {
+                        marketDataRedisService.cacheMarketData(historicalData);
+                    }
+                }
+            } catch (Exception e) {
+                log.error("[MarketData] Historical fallback fetch failed: {}", e.getMessage());
             }
         }
 
-        // Step 5: Merge live + cache into one complete result
-        Map<String, MarketData> merged = new HashMap<>(liveData);
-        merged.putAll(cachedFill);
+        // If STILL missing (e.g. live API failed while market open), attempt stale cache fill
+        List<String> stillMissing = normalizedSymbols.stream()
+            .filter(s -> !resultData.containsKey(s))
+            .collect(Collectors.toList());
 
-        int stillMissing = (int) normalizedSymbols.stream().filter(s -> !merged.containsKey(s)).count();
-        log.info("[MarketData] Result: {}/{} live, {}/{} from cache, {}/{} still missing.",
-            liveData.size(), symbols.size(),
-            cachedFill.size(), missedSymbols.size(),
-            stillMissing, symbols.size());
+        if (!stillMissing.isEmpty() && isMarketOpen && marketDataRedisService != null) {
+            log.warn("[MarketData] Live fetch missed {} symbols. Attempting stale cache fill.", stillMissing.size());
+            try {
+                Map<String, MarketData> cachedFill = marketDataRedisService.getMarketData(stillMissing);
+                if (cachedFill != null) resultData.putAll(cachedFill);
+            } catch (Exception e) {
+                log.warn("[MarketData] Stale cache read failed: {}", e.getMessage());
+            }
+        }
 
-        return merged;
+        log.info("[MarketData] Result: {}/{} total symbols returned.", resultData.size(), symbols.size());
+        return resultData;
     }
 
     /**
