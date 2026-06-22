@@ -26,6 +26,7 @@ public class PortfolioUpdateEvent {
     private UUID id;
     private BrokerType brokerType;
     private String source; // "TRADE" or "DOCUMENT"
+    private String tradeAction; // "BUY" or "SELL" — from trade-management
     private String userId;
     private String portfolioId;
 

@@ -50,6 +50,8 @@ public class PortfolioUpdateConsumerService {
     }
 
     private void processMessage(PortfolioUpdateEvent event) {
+        log.info("[Consumer] tradeAction='{}' for portfolioId='{}'", event.getTradeAction(), event.getPortfolioId());
+        
         PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
         PortfolioModelV1 saved;
         

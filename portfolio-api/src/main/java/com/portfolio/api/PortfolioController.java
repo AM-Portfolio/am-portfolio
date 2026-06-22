@@ -1,7 +1,9 @@
 package com.portfolio.api;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.PortfolioSnapshotModel;
 import com.am.common.amcommondata.service.PortfolioService;
+import com.am.common.amcommondata.service.PortfolioSnapshotService;
 import com.portfolio.api.model.PortfolioBasicInfo;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.PortfolioAnalysis;
@@ -34,6 +36,7 @@ public class PortfolioController {
 
     private final PortfolioDashboardService portfolioDashboardService;
     private final PortfolioService portfolioService;
+    private final PortfolioSnapshotService portfolioSnapshotService;
 
     @Operation(summary = "Get portfolio by ID", description = "Retrieves detailed portfolio information for a specific portfolio ID")
     @ApiResponses(value = {
@@ -229,4 +232,12 @@ public class PortfolioController {
         }
     }
 
+    @GetMapping("/{id}/history")
+    public ResponseEntity<List<PortfolioSnapshotModel>> getPortfolioHistory(
+            @PathVariable String id,
+            @RequestParam(defaultValue = "1W") String timeFrame) {
+        
+        List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(id, timeFrame);
+        return ResponseEntity.ok(history);
+    }
 }

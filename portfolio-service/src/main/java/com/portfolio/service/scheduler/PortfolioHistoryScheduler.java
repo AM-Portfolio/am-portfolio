@@ -8,7 +8,9 @@ import org.springframework.stereotype.Component;
 
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.model.TimeInterval;
+import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.service.portfolio.PortfolioHoldingsService;
+import com.am.common.amcommondata.service.PortfolioSnapshotService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,10 +22,11 @@ public class PortfolioHistoryScheduler {
 
     private final PortfolioService portfolioService;
     private final PortfolioHoldingsService portfolioHoldingsService;
+    private final PortfolioSnapshotService portfolioSnapshotService;
 
-    // Runs every day at 17:00 (5 PM) IST (Asia/Kolkata)
+    // Runs every day at 16:00 (4 PM) IST (Asia/Kolkata)
     // Cron: Second, Minute, Hour, Day of Month, Month, Day of Week
-    @Scheduled(cron = "0 0 17 * * *", zone = "Asia/Kolkata")
+    @Scheduled(cron = "0 0 16 * * *", zone = "Asia/Kolkata")
     public void runEndOfDayJob() {
         log.info("Starting End-of-Day Portfolio History Job at {}", LocalDateTime.now());
 
@@ -38,7 +41,30 @@ public class PortfolioHistoryScheduler {
                 try {
                     // Force enrichment (true) to calculate using closing prices and cache to Redis
                     // This acts as our "Daily Snapshot"
-                    portfolioHoldingsService.getPortfolioHoldings(userId, TimeInterval.ONE_DAY, true);
+                    PortfolioHoldings holdings = portfolioHoldingsService.getPortfolioHoldings(userId, TimeInterval.ONE_DAY, true);
+                    
+                    if (holdings != null && holdings.getEquityHoldings() != null) {
+                        double totalInvestment = holdings.getEquityHoldings().stream()
+                                .filter(h -> h.getInvestmentCost() != null)
+                                .mapToDouble(com.portfolio.model.portfolio.EquityHoldings::getInvestmentCost)
+                                .sum();
+                                
+                        double totalValue = holdings.getEquityHoldings().stream()
+                                .filter(h -> h.getCurrentValue() != null)
+                                .mapToDouble(com.portfolio.model.portfolio.EquityHoldings::getCurrentValue)
+                                .sum();
+                                
+                        double totalGainLoss = totalValue - totalInvestment;
+                        double totalGainLossPercentage = totalInvestment > 0 ? (totalGainLoss / totalInvestment) * 100 : 0.0;
+
+                        // Save snapshot to MongoDB
+                        String portfolioId = holdings.getPortfolioId();
+                        if (portfolioId != null) {
+                            portfolioSnapshotService.saveSnapshot(portfolioId, userId, totalValue, totalInvestment, totalGainLoss, totalGainLossPercentage);
+                        } else {
+                            log.warn("PortfolioHistoryScheduler - portfolioId is null for userId: {}. Snapshot skipped.", userId);
+                        }
+                    }
                     processed++;
                 } catch (Exception e) {
                     log.error("Failed to generate history for user: {}", userId, e);

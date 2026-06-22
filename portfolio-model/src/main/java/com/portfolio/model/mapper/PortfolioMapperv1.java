@@ -26,6 +26,7 @@ public class PortfolioMapperv1 {
                 .brokerType(portfolioEvent.getBrokerType())
                 .fundType(FundType.DEFAULT)
                 .status("Active")
+                .lastTradeAction(portfolioEvent.getTradeAction())
                 .createdBy(portfolioEvent.getUserId())
                 .equityModels(portfolioEvent.getEquities())
                 .assetCount(calculateAssetCount(portfolioEvent.getEquities()))

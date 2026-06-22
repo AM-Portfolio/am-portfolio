@@ -1,0 +1,73 @@
+{
+  "info": {
+    "_postman_id": "aa123b3a-5c12-4f32-841f-1234567890ab",
+    "name": "Feature Testing - Portfolio History",
+    "description": "Postman collection to test the newly implemented Portfolio Historical Chart API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Get Portfolio History (1W - 5 Days)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8072/v1/portfolios/{{portfolio_id}}/history?timeFrame=1W",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8072",
+          "path": [
+            "v1",
+            "portfolios",
+            "{{portfolio_id}}",
+            "history"
+          ],
+          "query": [
+            {
+              "key": "timeFrame",
+              "value": "1W"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Portfolio History (1M - 22 Days)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8072/v1/portfolios/{{portfolio_id}}/history?timeFrame=1M",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "v1",
+            "portfolios",
+            "{{portfolio_id}}",
+            "history"
+          ],
+          "query": [
+            {
+              "key": "timeFrame",
+              "value": "1M"
+            }
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "portfolio_id",
+      "value": "replace-with-your-portfolio-id",
+      "type": "string"
+    }
+  ]
+}

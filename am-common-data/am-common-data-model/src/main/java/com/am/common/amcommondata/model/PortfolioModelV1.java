@@ -37,5 +37,6 @@ public class PortfolioModelV1 {
     private LocalDateTime updatedAt;
     private String createdBy;
     private String updatedBy;
+    private String lastTradeAction; // "BUY" or "SELL"
     private Long version;
 }

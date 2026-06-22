@@ -1,0 +1,125 @@
+{
+  "info": {
+    "_postman_id": "aa123b3a-5c12-4f32-841f-1234567890ab",
+    "name": "AM Portfolio - Perfect Testing",
+    "description": "Perfectly configured collection bypassing the deleted debug endpoint by using Kafka-UI directly.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Produce BUY Trade (via Kafka UI)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"partition\": 0,\n  \"key\": \"test-portfolio-123\",\n  \"content\": \"{\\\"id\\\":\\\"e44d3209-645b-4026-9fba-37053cbbecdb\\\",\\\"brokerType\\\":\\\"ZERODHA\\\",\\\"source\\\":\\\"TRADE\\\",\\\"tradeAction\\\":\\\"BUY\\\",\\\"userId\\\":\\\"user-123\\\",\\\"portfolioId\\\":\\\"test-portfolio-123\\\",\\\"totalValue\\\":15000.0,\\\"equities\\\":[{\\\"isin\\\":\\\"INE009A01021\\\",\\\"companyName\\\":\\\"INFOSYS\\\",\\\"quantity\\\":10,\\\"avgBuyPrice\\\":1500.0,\\\"lastPrice\\\":1500.0,\\\"currentValue\\\":15000.0,\\\"sector\\\":\\\"IT\\\"}]}\",\n  \"keySerde\": \"String\",\n  \"valueSerde\": \"String\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8081/api/clusters/local-infra/topics/am-portfolio/messages",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8081",
+          "path": [
+            "api",
+            "clusters",
+            "local-infra",
+            "topics",
+            "am-portfolio",
+            "messages"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "2. Get Portfolio History (1W)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8072/v1/portfolios/{{portfolio_id}}/history?timeFrame=1W",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8072",
+          "path": [
+            "v1",
+            "portfolios",
+            "{{portfolio_id}}",
+            "history"
+          ],
+          "query": [
+            {
+              "key": "timeFrame",
+              "value": "1W"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "3. Get Portfolio History (1M)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8072/v1/portfolios/{{portfolio_id}}/history?timeFrame=1M",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8072",
+          "path": [
+            "v1",
+            "portfolios",
+            "{{portfolio_id}}",
+            "history"
+          ],
+          "query": [
+            {
+              "key": "timeFrame",
+              "value": "1M"
+            }
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "portfolio_id",
+      "value": "test-portfolio-123"
+    }
+  ]
+}

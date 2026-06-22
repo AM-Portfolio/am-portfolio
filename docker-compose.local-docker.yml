@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  am-portfolio-local-docker:
+    container_name: am-portfolio-local-docker
+    image: eclipse-temurin:21-jre-jammy
+    volumes:
+      - ./portfolio-app/target/portfolio-app-1.0.1-SNAPSHOT.jar:/app/app.jar
+    command: ["java", "-jar", "/app/app.jar"]
+    env_file:
+        - .env
+    environment:
+      # Force Spring profile to 'local'
+      SPRING_PROFILES_ACTIVE: local
+      # Override the SERVER_PORT from .env to ensure it listens on 8080 inside the container
+      SERVER_PORT: 8080
+      
+      # Match the exact working config from dev compose
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      MONGODB_URL: mongodb://admin:password123@mongo:27017/portfolio?authSource=admin
+      MARKET_DATA_API_URL: http://host.docker.internal:8092
+      ETF_API_URL: http://host.docker.internal:8022
+      
+    ports:
+      - "8072:8080"
+    networks:
+      - am-net
+    restart: unless-stopped
+
+networks:
+  am-net:
+    external: true
+    name: am-infra_am-net
