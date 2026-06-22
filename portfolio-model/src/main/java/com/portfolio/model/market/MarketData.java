@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -169,10 +170,14 @@ public class MarketData {
     }
     
     /**
-     * Convenience method to get the latest data point
+     * Convenience method to get the latest data point.
      * 
+     * @JsonIgnore prevents Jackson from treating this getter as a JSON property
+     * (which caused Redis cache reads to crash with "Unrecognized field latestDataPoint").
+     *
      * @return The latest data point or null if no data points exist
      */
+    @JsonIgnore
     public MarketDataPoint getLatestDataPoint() {
         if (dataPoints == null || dataPoints.isEmpty()) {
             return null;

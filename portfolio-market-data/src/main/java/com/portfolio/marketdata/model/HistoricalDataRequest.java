@@ -3,6 +3,7 @@ package com.portfolio.marketdata.model;
 import java.time.LocalDate;
 import java.util.Map;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import lombok.AllArgsConstructor;
@@ -17,8 +18,10 @@ import lombok.NoArgsConstructor;
 public class HistoricalDataRequest {
     private String symbols;
     @JsonProperty("from")
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
     private LocalDate fromDate;
     @JsonProperty("to")
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
     private LocalDate toDate;
     @JsonProperty("interval")
     private String interval;

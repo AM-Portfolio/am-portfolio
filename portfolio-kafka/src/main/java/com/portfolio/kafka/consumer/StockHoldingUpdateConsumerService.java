@@ -37,7 +37,7 @@ public class StockHoldingUpdateConsumerService {
     private final PortfolioCalculator portfolioCalculator;
     private final KafkaProducerService kafkaProducerService;
 
-    @KafkaListener(topics = "${app.kafka.holding.topic:am-holding-update}", groupId = "${app.kafka.holding.consumer.id:am-portfolio-holding-group}", containerFactory = "kafkaListenerContainerFactory")
+    @KafkaListener(topics = "${app.kafka.holding.topic}", groupId = "${app.kafka.holding.consumer.id}", containerFactory = "kafkaListenerContainerFactory")
     public void consume(String message, Acknowledgment acknowledgment) {
         try {
             log.info("Received holding update message: {}", message);
@@ -70,7 +70,7 @@ public class StockHoldingUpdateConsumerService {
                         event.getPortfolioId());
 
                 log.info("Publishing REAL-TIME portfolio update event for user: {}", event.getUserId());
-                kafkaProducerService.sendMessage(updateEvent, null);
+                kafkaProducerService.sendPortfolioStreamMessage(updateEvent, null);
             }
 
             acknowledgment.acknowledge();
@@ -87,13 +87,15 @@ public class StockHoldingUpdateConsumerService {
         event.setPortfolioId(portfolioId);
         event.setTimestamp(LocalDateTime.now());
 
-        // Map Summary Data
-        event.setTotalValue(summary.getCurrentValue());
-        event.setTotalInvestment(summary.getInvestmentValue());
-        event.setTotalGainLoss(summary.getTotalGainLoss());
-        event.setTotalGainLossPercentage(summary.getTotalGainLossPercentage());
-        event.setTodayGainLoss(summary.getTodayGainLoss());
-        event.setTodayGainLossPercentage(summary.getTodayGainLossPercentage());
+        // Map Summary Data (guard against null if calculateSummary returns null)
+        if (summary != null) {
+            event.setTotalValue(summary.getCurrentValue());
+            event.setTotalInvestment(summary.getInvestmentValue());
+            event.setTotalGainLoss(summary.getTotalGainLoss());
+            event.setTotalGainLossPercentage(summary.getTotalGainLossPercentage());
+            event.setTodayGainLoss(summary.getTodayGainLoss());
+            event.setTodayGainLossPercentage(summary.getTodayGainLossPercentage());
+        }
 
         // Map Holdings
         if (holdings.getEquityHoldings() != null) {

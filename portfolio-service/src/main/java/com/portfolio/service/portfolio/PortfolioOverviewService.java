@@ -69,7 +69,18 @@ public class PortfolioOverviewService {
         log.info("Starting overviewPortfolio for specific portfolio - User: {}, Portfolio: {}, Interval: {}",
                 userId, portfolioId, interval != null ? interval.getCode() : "null");
 
-        // For specific portfolio, we don't use cache as it's more targeted
+        if (portfolioId == null || portfolioId.trim().isEmpty()) {
+            log.warn("Blank portfolioId provided for specific portfolio overview - User: {}", userId);
+            throw new IllegalArgumentException("portfolioId cannot be blank");
+        }
+
+        Optional<PortfolioSummaryV1> cachedSummary = portfolioSummaryRedisService.getLatestSummary(userId, interval, portfolioId);
+        if (cachedSummary.isPresent()) {
+            log.info("Returning cached portfolio summary for user: {} and portfolio: {}", userId, portfolioId);
+            return cachedSummary.get();
+        }
+
+        log.info("Cache miss for specific portfolio summary - User: {}, Portfolio: {}, fetching from source", userId, portfolioId);
         var portfolios = portfolioService.getPortfoliosByUserId(userId);
         log.info("Retrieved {} portfolios for user: {}",
                 portfolios != null ? portfolios.size() : 0, userId);
@@ -151,7 +162,7 @@ public class PortfolioOverviewService {
 
         // Store in cache
         log.debug("Caching portfolio summary for user: {}", userId);
-        portfolioSummaryRedisService.cachePortfolioSummary(finalSummary, userId, interval);
+        portfolioSummaryRedisService.cachePortfolioSummary(finalSummary, userId, interval, portfolioId);
 
         log.info("Completed overviewPortfolio for user: {}", userId);
         return finalSummary;

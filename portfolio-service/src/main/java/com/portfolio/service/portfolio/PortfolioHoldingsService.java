@@ -89,7 +89,20 @@ public class PortfolioHoldingsService {
         log.info("Starting getPortfolioHoldings for specific portfolio - User: {}, Portfolio: {}, Interval: {}",
                 userId, portfolioId, interval != null ? interval.getCode() : "null");
 
-        // For specific portfolio, we don't use cache as it's more targeted
+        if (portfolioId == null || portfolioId.trim().isEmpty()) {
+            log.warn("Blank portfolioId provided for specific portfolio request - User: {}", userId);
+            throw new IllegalArgumentException("portfolioId cannot be blank");
+        }
+
+        if (enrich) {
+            Optional<PortfolioHoldings> cachedHoldings = portfolioHoldingsRedisService.getLatestHoldings(userId, interval, portfolioId);
+            if (cachedHoldings.isPresent()) {
+                log.info("Returning cached portfolio holdings for user: {} and portfolio: {}", userId, portfolioId);
+                return cachedHoldings.get();
+            }
+        }
+
+        log.info("Cache miss for specific portfolio holdings - User: {}, Portfolio: {}, fetching from source", userId, portfolioId);
         var portfolios = portfolioService.getPortfoliosByUserId(userId);
         if (portfolios == null || portfolios.isEmpty()) {
             log.warn("No portfolios found for user: {}", userId);
@@ -111,8 +124,6 @@ public class PortfolioHoldingsService {
                 filteredPortfolios.size(), portfolioId, userId);
 
         var portfolioHoldings = buildPortfolioHoldings(filteredPortfolios, userId, portfolioId, interval, enrich);
-
-        // Note: We do not cache specific portfolio holdings to avoid stale data issues
 
         log.info("Completed getPortfolioHoldings for user: {} and portfolio: {}", userId, portfolioId);
         return portfolioHoldings;
@@ -150,11 +161,10 @@ public class PortfolioHoldingsService {
 
         log.debug("Completed building portfolio holdings for user: {} and {}", userId, context);
 
-        // Store in cache only for all portfolios (not for specific portfolio) AND if
-        // enriched
+        // Store in cache if enriched
         if (enrich) {
-            log.info("Caching portfolio holdings for user: {}", userId);
-            portfolioHoldingsRedisService.cachePortfolioHoldings(portfolioHoldings, userId, interval);
+            log.info("Caching portfolio holdings for user: {} and context: {}", userId, context);
+            portfolioHoldingsRedisService.cachePortfolioHoldings(portfolioHoldings, userId, interval, portfolioId);
         }
 
         log.info("Completed getPortfolioHoldings for user: {}", userId);

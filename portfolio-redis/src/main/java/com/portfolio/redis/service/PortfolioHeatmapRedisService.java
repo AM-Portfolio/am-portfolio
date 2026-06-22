@@ -21,11 +21,12 @@ import lombok.extern.slf4j.Slf4j;
 public class PortfolioHeatmapRedisService {
     private final RedisTemplate<String, Heatmap> portfolioHeatmapRedisTemplate;
 
-    @Value("${spring.data.redis.portfolio-heatmap.ttl:900}")
-    private Integer portfolioHeatmapTtl;
 
     @Value("${spring.data.redis.portfolio-heatmap.key-prefix:portfolio:heatmap:}")
     private String portfolioHeatmapKeyPrefix;
+
+    @Value("${spring.data.redis.portfolio-heatmap.ttl:900}")
+    private Integer portfolioHeatmapTtl;
 
     @Async("taskExecutor")
     public CompletableFuture<Void> cacheHeatmap(Heatmap heatmap, String portfolioId, TimeFrameRequest interval) {

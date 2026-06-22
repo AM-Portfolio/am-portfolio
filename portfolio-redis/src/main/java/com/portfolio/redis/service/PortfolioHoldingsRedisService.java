@@ -32,7 +32,12 @@ public class PortfolioHoldingsRedisService {
 
     @Async("taskExecutor")
     public CompletableFuture<Void> cachePortfolioHoldings(PortfolioHoldings holdings, String userId, TimeInterval interval) {
-        String key = buildKey(userId, interval);
+        return cachePortfolioHoldings(holdings, userId, interval, null);
+    }
+
+    @Async("taskExecutor")
+    public CompletableFuture<Void> cachePortfolioHoldings(PortfolioHoldings holdings, String userId, TimeInterval interval, String portfolioId) {
+        String key = buildKey(userId, interval, portfolioId);
         try {
             // For short intervals, use the interval duration as TTL
             Duration ttl = interval != null && interval.getDuration() != null && 
@@ -49,7 +54,11 @@ public class PortfolioHoldingsRedisService {
     }
 
     public Optional<PortfolioHoldings> getLatestHoldings(String userId, TimeInterval interval) {
-        String key = buildKey(userId, interval);
+        return getLatestHoldings(userId, interval, null);
+    }
+
+    public Optional<PortfolioHoldings> getLatestHoldings(String userId, TimeInterval interval, String portfolioId) {
+        String key = buildKey(userId, interval, portfolioId);
         try {
             PortfolioHoldings holdings = portfolioHoldingsRedisTemplate.opsForValue().get(key);
             if (holdings != null) {
@@ -71,8 +80,9 @@ public class PortfolioHoldingsRedisService {
         return Optional.empty();
     }
 
-    private String buildKey(String userId, TimeInterval interval) {
-        return portfolioKeyPrefix + userId + ":" + 
-               (interval != null ? interval.getCode() : "default");
+    private String buildKey(String userId, TimeInterval interval, String portfolioId) {
+        String intervalCode = interval != null ? interval.getCode() : "default";
+        String portPart = (portfolioId != null && !portfolioId.trim().isEmpty()) ? portfolioId : "all";
+        return portfolioKeyPrefix + userId + ":" + portPart + ":" + intervalCode;
     }
 }

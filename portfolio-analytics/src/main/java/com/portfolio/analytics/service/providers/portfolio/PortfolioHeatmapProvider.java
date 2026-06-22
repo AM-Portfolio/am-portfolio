@@ -62,13 +62,14 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 // Group stocks by sector
                 Map<String, List<String>> sectorToStocks = securityDetailsService.groupSymbolsBySector(portfolioSymbols);
                 
-                // Process market data by sector
+                // Process market data by sector and compute total portfolio value in one pass
                 Map<String, List<MarketData>> sectorMarketDataMap = new HashMap<>();
                 Map<String, List<Double>> sectorQuantitiesMap = new HashMap<>();
-                groupMarketDataBySector(marketData, sectorToStocks, symbolToQuantity, sectorMarketDataMap, sectorQuantitiesMap);
+                double[] totalPortfolioValue = {0.0};
+                groupMarketDataBySector(marketData, sectorToStocks, symbolToQuantity, sectorMarketDataMap, sectorQuantitiesMap, totalPortfolioValue);
                 
                 // Calculate performance for each sector
-                List<Heatmap.SectorPerformance> sectorPerformances = calculateSectorPerformances(sectorMarketDataMap, sectorQuantitiesMap, symbolToQuantity);
+                List<Heatmap.SectorPerformance> sectorPerformances = calculateSectorPerformances(sectorMarketDataMap, sectorQuantitiesMap, symbolToQuantity, totalPortfolioValue[0]);
                 
                 // Create heatmap with domain-driven approach
                 Heatmap heatmap = Heatmap.builder()
@@ -121,33 +122,43 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             Map<String, List<String>> sectorToStocks,
             Map<String, Double> symbolToQuantity,
             Map<String, List<MarketData>> sectorMarketDataMap,
-            Map<String, List<Double>> sectorQuantitiesMap) {
+            Map<String, List<Double>> sectorQuantitiesMap,
+            double[] totalPortfolioValue) {
         log.debug("Grouping {} stocks by sector", marketData.size());
+        
+        // Build inverted index for O(1) sector lookup
+        Map<String, String> symbolToSector = new HashMap<>();
+        sectorToStocks.forEach((sector, symbols) -> 
+            symbols.forEach(sym -> symbolToSector.put(sym, sector))
+        );
         
         for (String symbol : marketData.keySet()) {
             MarketData data = marketData.get(symbol);
-            String sector = findSectorForSymbol(symbol, sectorToStocks);
+            if (data == null) {
+                log.warn("Null market data encountered for symbol: {}", symbol);
+                continue;
+            }
+
+            String sector = symbolToSector.getOrDefault(symbol, "Unknown");
             
             sectorMarketDataMap.computeIfAbsent(sector, k -> new ArrayList<>())
                 .add(data);
             
+            double quantity = symbolToQuantity.getOrDefault(symbol, 0.0);
             sectorQuantitiesMap.computeIfAbsent(sector, k -> new ArrayList<>())
-                .add(symbolToQuantity.getOrDefault(symbol, 0.0));
+                .add(quantity);
+                
+            double resolvedPrice = 0.0;
+            if (data.getLastPrice() != null && data.getLastPrice() > 0) {
+                resolvedPrice = data.getLastPrice();
+            } else if (data.getOhlc() != null && data.getOhlc().getClose() > 0) {
+                resolvedPrice = data.getOhlc().getClose();
+            }
+            totalPortfolioValue[0] += resolvedPrice * quantity;
         }
     }
     
-    // Removed unused calculateTotalPortfolioValue method as we're using calculateTotalSectorValues
     
-    /**
-     * Find the sector for a given symbol
-     */
-    private String findSectorForSymbol(String symbol, Map<String, List<String>> sectorToStocks) {
-        return sectorToStocks.entrySet().stream()
-            .filter(entry -> entry.getValue().contains(symbol))
-            .map(Map.Entry::getKey)
-            .findFirst()
-            .orElse("Unknown");
-    }
     
     /**
      * Calculate performance for each sector with domain-driven approach
@@ -155,13 +166,12 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
     private List<Heatmap.SectorPerformance> calculateSectorPerformances(
             Map<String, List<MarketData>> sectorMarketDataMap,
             Map<String, List<Double>> sectorQuantitiesMap,
-            Map<String, Double> symbolToQuantity) {
+            Map<String, Double> symbolToQuantity,
+            double totalPortfolioValue) {
         
         log.debug("Calculating performance metrics for {} sectors", sectorMarketDataMap.size());
         List<Heatmap.SectorPerformance> sectorPerformances = new ArrayList<>();
         
-        // Calculate total portfolio value for weightage calculation
-        double totalPortfolioValue = calculateTotalSectorValues(sectorMarketDataMap, sectorQuantitiesMap);
         log.debug("Total portfolio value for weightage calculation: {}", totalPortfolioValue);
         
         for (Map.Entry<String, List<MarketData>> entry : sectorMarketDataMap.entrySet()) {
@@ -207,29 +217,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         return sectorPerformances;
     }
     
-    /**
-     * Calculate the total value across all sectors
-     */
-    private double calculateTotalSectorValues(
-            Map<String, List<MarketData>> sectorMarketDataMap,
-            Map<String, List<Double>> sectorQuantitiesMap) {
-        
-        double totalValue = 0.0;
-        
-        for (Map.Entry<String, List<MarketData>> entry : sectorMarketDataMap.entrySet()) {
-            String sectorName = entry.getKey();
-            List<MarketData> sectorStocks = entry.getValue();
-            List<Double> quantities = sectorQuantitiesMap.get(sectorName);
-            
-            for (int i = 0; i < sectorStocks.size(); i++) {
-                MarketData stock = sectorStocks.get(i);
-                double quantity = quantities.get(i);
-                totalValue += stock.getLastPrice() * quantity;
-            }
-        }
-        
-        return totalValue;
-    }
+    // calculateTotalSectorValues has been merged into groupMarketDataBySector for performance
     
     // SectorMetrics class and related methods have been moved to HeatmapUtils
 }

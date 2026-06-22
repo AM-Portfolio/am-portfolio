@@ -102,6 +102,9 @@ public class PortfolioController {
         return ResponseEntity.ok(basicInfoList);
     }
 
+
+
+
     @Hidden
     @Operation(summary = "Get portfolio analysis", description = "Retrieves detailed analysis for a specific portfolio (hidden from API docs)")
     @GetMapping("/{portfolioId}/analysis")
@@ -225,4 +228,5 @@ public class PortfolioController {
             return ResponseEntity.badRequest().build();
         }
     }
+
 }

@@ -25,6 +25,7 @@ import lombok.NoArgsConstructor;
 public class PortfolioUpdateEvent {
     private UUID id;
     private BrokerType brokerType;
+    private String source; // "TRADE" or "DOCUMENT"
     private String userId;
     private String portfolioId;
 

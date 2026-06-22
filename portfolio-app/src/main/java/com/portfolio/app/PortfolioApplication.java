@@ -23,6 +23,7 @@ import reactor.core.publisher.Hooks;
         @ComponentScan("org.am.mypotrfolio.service.mapper"),
         @ComponentScan("com.am.common.amcommondata.mapper"),
         @ComponentScan("com.am.common.amcommondata.repository.security"),
+        @ComponentScan("com.portfolio.kafka"),
         @ComponentScan("com.portfolio")
 })
 @EntityScan(basePackages = {
