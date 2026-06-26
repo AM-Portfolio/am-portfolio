@@ -1,5 +1,6 @@
 package com.am.common.amcommondata.document.portfolio;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -56,6 +57,9 @@ public class PortfolioDocument extends BaseDocument {
     
     @Field("brokerType")
     private BrokerType brokerType;
+
+    @Field("lastLoginDate")
+    private LocalDate lastLoginDate; // Updated on each user login — used for active-user filtering
     
     // Helper methods for enum conversions
     public void setCurrency(Currency currency) {

@@ -11,6 +11,8 @@ import com.am.common.amcommondata.config.SecurityServiceAutoConfiguration;
 import com.portfolio.app.config.MarketDataApiConfigResolver;
 import reactor.core.publisher.Hooks;
 
+import org.springframework.scheduling.annotation.EnableScheduling;
+
 @Import({ MarketDataApiConfigResolver.class /*, SecurityServiceAutoConfiguration.class */ })
 @ComponentScans({
         @ComponentScan("com.am.common.amcommondata"),
@@ -33,6 +35,7 @@ import reactor.core.publisher.Hooks;
         "com.am.common.amcommondata.domain.portfolio"
 })
 @SpringBootApplication
+@EnableScheduling
 public class PortfolioApplication {
     public static void main(String[] args) {
         // Enable automatic context propagation for MDC in reactive chains

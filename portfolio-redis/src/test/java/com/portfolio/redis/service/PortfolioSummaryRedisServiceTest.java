@@ -22,14 +22,14 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class PortfolioSummaryRedisServiceTest {
 
-    @Mock private RedisTemplate<String, PortfolioSummaryV1> redisTemplate;
+    @Mock private RedisTemplate<String, PortfolioSummaryV1> portfolioSummaryRedisTemplate;
     @Mock private ValueOperations<String, PortfolioSummaryV1> valueOps;
     @InjectMocks private PortfolioSummaryRedisService service;
 
     @BeforeEach void setUp() {
         ReflectionTestUtils.setField(service, "portfolioSummaryTtl", 600);
         ReflectionTestUtils.setField(service, "portfolioSummaryKeyPrefix", "ps:");
-        lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        lenient().when(portfolioSummaryRedisTemplate.opsForValue()).thenReturn(valueOps);
     }
 
     private TimeInterval interval(String code, Duration d) {
@@ -43,7 +43,7 @@ class PortfolioSummaryRedisServiceTest {
         TimeInterval ti = interval("1d", Duration.ofDays(1));
         PortfolioSummaryV1 summary = new PortfolioSummaryV1();
         summary.setLastUpdated(LocalDateTime.now()); // fresh
-        when(valueOps.get("ps:user1:1d")).thenReturn(summary);
+        when(valueOps.get("ps:user1:all:1d")).thenReturn(summary);
 
         Optional<PortfolioSummaryV1> result = service.getLatestSummary("user1", ti);
         assertTrue(result.isPresent());
@@ -53,12 +53,12 @@ class PortfolioSummaryRedisServiceTest {
         TimeInterval ti = interval("1h", Duration.ofHours(1));
         PortfolioSummaryV1 summary = new PortfolioSummaryV1();
         summary.setLastUpdated(LocalDateTime.now().minusDays(2)); // stale
-        when(valueOps.get("ps:user1:1h")).thenReturn(summary);
-        when(redisTemplate.delete("ps:user1:1h")).thenReturn(true);
+        when(valueOps.get("ps:user1:all:1h")).thenReturn(summary);
+        when(portfolioSummaryRedisTemplate.delete("ps:user1:all:1h")).thenReturn(true);
 
         Optional<PortfolioSummaryV1> result = service.getLatestSummary("user1", ti);
         assertTrue(result.isEmpty());
-        verify(redisTemplate).delete("ps:user1:1h");
+        verify(portfolioSummaryRedisTemplate).delete("ps:user1:all:1h");
     }
 
     @Test void getLatestSummary_notFound() {
@@ -70,7 +70,7 @@ class PortfolioSummaryRedisServiceTest {
     @Test void getLatestSummary_nullInterval_returnsFoundSummary() {
         PortfolioSummaryV1 summary = new PortfolioSummaryV1();
         summary.setLastUpdated(LocalDateTime.now());
-        when(valueOps.get("ps:user1:all")).thenReturn(summary);
+        when(valueOps.get("ps:user1:all:all")).thenReturn(summary);
         Optional<PortfolioSummaryV1> result = service.getLatestSummary("user1", null);
         assertTrue(result.isPresent());
     }
@@ -87,7 +87,7 @@ class PortfolioSummaryRedisServiceTest {
         when(ti.getDuration()).thenReturn(null);
         PortfolioSummaryV1 summary = new PortfolioSummaryV1();
         summary.setLastUpdated(LocalDateTime.now());
-        when(valueOps.get("ps:user1:all")).thenReturn(summary);
+        when(valueOps.get("ps:user1:all:all")).thenReturn(summary);
         assertTrue(service.getLatestSummary("user1", ti).isPresent());
     }
 }

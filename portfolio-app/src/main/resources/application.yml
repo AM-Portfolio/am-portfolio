@@ -117,7 +117,15 @@ nse:
     - NIFTY REALTY
     - NIFTY PSU BANK
 
+dev:
+  tools:
+    enabled: ${DEV_TOOLS_ENABLED:false}
+
 app:
+  scheduler:
+    snapshot:
+      active-user-window-days: ${SNAPSHOT_ACTIVE_USER_WINDOW_DAYS:30}
+      max-backfill-days: ${SNAPSHOT_MAX_BACKFILL_DAYS:365}
   jwt:
     internal-secret: ${INTERNAL_SECRET_KEY:internal-service-super-secret-key-32chars-minimum-change-in-prod}
     secret: ${JWT_SECRET:internal-service-super-secret-key-32chars-minimum-change-in-prod}
@@ -132,6 +140,11 @@ app:
       publish-topic: ${PORTFOLIO_PUBLISH_TOPIC:am-portfolio-update}
       stream:
         topic: ${PORTFOLIO_STREAM_TOPIC:am-portfolio-stream}
+    login:
+      consumer:
+        id: ${LOGIN_CONSUMER_ID:am-portfolio-login-group}
+        enabled: ${LOGIN_KAFKA_ENABLED:false}
+      topic: ${LOGIN_TOPIC:active-user}
     stock:
       consumer:
         id: ${STOCK_CONSUMER_GROUP}
