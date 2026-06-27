@@ -9,6 +9,8 @@ import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.service.PortfolioDashboardService;
 import com.portfolio.service.scheduler.PortfolioHistoryScheduler;
+import com.am.common.amcommondata.model.PortfolioSnapshotModel;
+import com.am.common.amcommondata.service.PortfolioSnapshotService;
 
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
@@ -36,6 +38,7 @@ public class PortfolioController {
     private final PortfolioDashboardService portfolioDashboardService;
     private final PortfolioService portfolioService;
     private final PortfolioHistoryScheduler portfolioHistoryScheduler;
+    private final PortfolioSnapshotService portfolioSnapshotService;
 
     @Operation(summary = "Get portfolio by ID", description = "Retrieves detailed portfolio information for a specific portfolio ID")
     @ApiResponses(value = {
@@ -242,6 +245,42 @@ public class PortfolioController {
         }
     }
 
+    @Operation(summary = "Get portfolio history", description = "Retrieves the snapshot history of all portfolios for a user with the specified timeframe.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Portfolio history retrieved successfully"),
+            @ApiResponse(responseCode = "404", description = "No history found for user")
+    })
+    @GetMapping("/history")
+    public ResponseEntity<List<PortfolioSnapshotModel>> getPortfolioHistory(
+            @RequestParam(required = false, defaultValue = "1M") String timeFrame) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        log.info("PortfolioController - getPortfolioHistory called - User: {}, TimeFrame: {}", userId, timeFrame);
+
+        List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(userId, null, timeFrame);
+        if (history == null || history.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(history);
+    }
+
+    @Operation(summary = "Get specific portfolio history", description = "Retrieves the snapshot history of a specific portfolio for a user with the specified timeframe.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Portfolio history retrieved successfully"),
+            @ApiResponse(responseCode = "404", description = "No history found for portfolio")
+    })
+    @GetMapping("/{portfolioId}/history")
+    public ResponseEntity<List<PortfolioSnapshotModel>> getSpecificPortfolioHistory(
+            @PathVariable String portfolioId,
+            @RequestParam(required = false, defaultValue = "1M") String timeFrame) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        log.info("PortfolioController - getSpecificPortfolioHistory called - User: {}, Portfolio: {}, TimeFrame: {}", userId, portfolioId, timeFrame);
+
+        List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(userId, portfolioId, timeFrame);
+        if (history == null || history.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(history);
+    }
 }
 
 // Trigger workflow
