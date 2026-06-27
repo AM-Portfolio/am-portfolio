@@ -153,9 +153,9 @@ server:
   servlet:
     context-path: /
   tomcat:
-    max-threads: 20
-    min-spare-threads: 10
-    max-connections: 200
+    max-threads: 50
+    min-spare-threads: 20
+    max-connections: 500
 
 etf:
   url: ${ETF_API_URL:http://localhost:8022}

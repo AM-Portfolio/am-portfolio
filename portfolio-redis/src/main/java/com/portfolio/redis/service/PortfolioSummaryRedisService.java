@@ -43,11 +43,8 @@ public class PortfolioSummaryRedisService {
         log.debug("Generated cache key: {} for user: {}", key, userId);
         
         try {
-            // For short intervals, use the interval duration as TTL
-            Duration ttl = interval != null && interval.getDuration() != null && 
-                          interval.getDuration().compareTo(Duration.ofSeconds(portfolioSummaryTtl)) < 0 
-                          ? interval.getDuration() 
-                          : Duration.ofSeconds(portfolioSummaryTtl);
+            // Apply smarter TTL strategy based on interval
+            Duration ttl = getSmartTtl(interval, portfolioSummaryTtl);
             
             log.debug("Setting cache with TTL: {} seconds for key: {}", ttl.getSeconds(), key);
             portfolioSummaryRedisTemplate.opsForValue().set(key, summary, ttl);
@@ -112,5 +109,25 @@ public class PortfolioSummaryRedisService {
         String key = portfolioSummaryKeyPrefix + userId + ":" + portPart + ":" + intervalCode;
         log.trace("Built cache key: {} for user: {}, interval: {}", key, userId, intervalCode);
         return key;
+    }
+
+    private Duration getSmartTtl(TimeInterval interval, Integer defaultTtlSeconds) {
+        if (interval == null || interval.getCode() == null) {
+            return Duration.ofSeconds(defaultTtlSeconds);
+        }
+        
+        switch (interval.getCode()) {
+            case "1W":
+            case "1M":
+                return Duration.ofSeconds(3600); // 1 hour
+            case "3M":
+            case "6M":
+            case "1Y":
+                return Duration.ofSeconds(7200); // 2 hours
+            case "1D":
+            case "all":
+            default:
+                return Duration.ofSeconds(defaultTtlSeconds);
+        }
     }
 }

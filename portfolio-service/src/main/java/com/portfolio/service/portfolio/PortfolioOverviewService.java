@@ -154,7 +154,7 @@ public class PortfolioOverviewService {
 
         // Create final summary
         log.debug("Creating final portfolio summary for user: {} and {}", userId, context);
-        PortfolioSummaryV1 finalSummary = getPortfolioSummary(portfolios);
+        PortfolioSummaryV1 finalSummary = getPortfolioSummary(portfolios, userId, portfolioId);
         finalSummary.setBrokerPortfolios(brokerSummaryMap);
 
         log.info("Total portfolio value for user {} and {}: {}",
@@ -168,13 +168,13 @@ public class PortfolioOverviewService {
         return finalSummary;
     }
 
-    private PortfolioSummaryV1 getPortfolioSummary(List<PortfolioModelV1> portfolios) {
+    private PortfolioSummaryV1 getPortfolioSummary(List<PortfolioModelV1> portfolios, String userId, String portfolioId) {
         log.debug("Calculating total portfolio value from {} portfolios", portfolios.size());
 
         var totalValue = portfolios.stream().mapToDouble(PortfolioModelV1::getTotalValue).sum();
         log.debug("Calculated total value: {}", totalValue);
 
-        var equityHoldings = portfolioHoldingsService.getHoldings(portfolios);
+        var equityHoldings = portfolioHoldingsService.getHoldings(portfolios, userId, portfolioId);
 
         // Use calculator to generate the summary
         return portfolioCalculator.calculateSummary(equityHoldings, totalValue);

@@ -48,8 +48,13 @@ public class PortfolioHoldingsMapper {
 
                 // If this is the first time we're seeing this symbol, create a new holding
                 if (!equityHoldingsMap.containsKey(symbol)) {
-                    // Create a new holding with the correct initial quantity
+                    // Create a new holding with the correct initial security-level fields
                     EquityHoldings holdings = equityHoldingsMapper.toEquityHoldings(equity);
+
+                    // Reset aggregation fields - we will accumulate below
+                    holdings.setQuantity(0.0);
+                    holdings.setInvestmentCost(0.0);
+                    holdings.setAverageBuyingPrice(0.0);
 
                     // Enrich with portfolio context
                     holdings.setPortfolioId(portfolio.getId() != null ? portfolio.getId().toString() : null);
@@ -60,11 +65,32 @@ public class PortfolioHoldingsMapper {
 
                 // Get the holdings (either newly created or existing)
                 EquityHoldings holdings = equityHoldingsMap.get(symbol);
+                
+                // If this symbol is seen in multiple portfolios, update the name to indicate multi-broker
+                if (holdings.getBrokerPortfolios().size() >= 1) {
+                    holdings.setPortfolioId(null);
+                    holdings.setPortfolioName("Multi-Broker");
+                }
+
+                // Accumulate quantity and investment cost
+                double prevQty  = holdings.getQuantity() != null ? holdings.getQuantity() : 0.0;
+                double addQty   = equity.getQuantity() != null ? equity.getQuantity() : 0.0;
+                double prevCost = holdings.getInvestmentCost() != null ? holdings.getInvestmentCost() : 0.0;
+                double avgPrice = equity.getAvgBuyingPrice() != null ? equity.getAvgBuyingPrice() : 0.0;
+                double addCost  = avgPrice * addQty;
+
+                double newQty  = prevQty + addQty;
+                double newCost = prevCost + addCost;
+
+                holdings.setQuantity(newQty);
+                holdings.setInvestmentCost(newCost);
+                // Weighted average buying price across brokers
+                holdings.setAverageBuyingPrice(newQty > 0 ? newCost / newQty : 0.0);
 
                 // Add broker holding
                 holdings.getBrokerPortfolios().add(EquityBrokerHolding.builder()
                         .brokerType(portfolio.getBrokerType())
-                        .quantity(equity.getQuantity())
+                        .quantity(addQty)
                         .build());
             }
         }

@@ -18,6 +18,7 @@ import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.model.TimeInterval;
+import com.portfolio.redis.service.EnrichedHoldingsCacheService;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.enums.AssetType;
 
@@ -36,6 +37,7 @@ public class StockHoldingUpdateConsumerService {
     private final PortfolioHoldingsService portfolioHoldingsService;
     private final PortfolioCalculator portfolioCalculator;
     private final KafkaProducerService kafkaProducerService;
+    private final EnrichedHoldingsCacheService enrichedHoldingsCacheService;
 
     @KafkaListener(topics = "${app.kafka.holding.topic}", groupId = "${app.kafka.holding.consumer.id}", containerFactory = "kafkaListenerContainerFactory")
     public void consume(String message, Acknowledgment acknowledgment) {
@@ -45,33 +47,9 @@ public class StockHoldingUpdateConsumerService {
             StockHoldingUpdateEvent event = objectMapper.readValue(message, StockHoldingUpdateEvent.class);
             log.info("Processing holding update for user: {}, symbol: {}", event.getUserId(), event.getSymbol());
 
-            // 1. Force recalculation of portfolio holdings
-            PortfolioHoldings updatedHoldings = portfolioHoldingsService.getPortfolioHoldings(
-                    event.getUserId(),
-                    TimeInterval.ONE_DAY);
-
-            if (updatedHoldings != null) {
-                // 2. Enrich Holdings with Market Data
-                List<EquityHoldings> enrichedHoldings = portfolioCalculator
-                        .enrichHoldings(updatedHoldings.getEquityHoldings());
-                updatedHoldings.setEquityHoldings(enrichedHoldings);
-
-                // 3. Perform Full Summary Calculation
-                double totalInvestment = updatedHoldings.getEquityHoldings().stream()
-                        .filter(h -> h.getInvestmentCost() != null)
-                        .mapToDouble(EquityHoldings::getInvestmentCost)
-                        .sum();
-
-                PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(updatedHoldings.getEquityHoldings(),
-                        totalInvestment);
-
-                // 3. Publish update to Kafka for Real-time UI updates
-                PortfolioUpdateEvent updateEvent = mapToUpdateEvent(updatedHoldings, summary, event.getUserId(),
-                        event.getPortfolioId());
-
-                log.info("Publishing REAL-TIME portfolio update event for user: {}", event.getUserId());
-                kafkaProducerService.sendPortfolioStreamMessage(updateEvent, null);
-            }
+            // Evict the enriched holdings cache so the next request recomputes
+            enrichedHoldingsCacheService.evictEnrichedHoldingsCache(event.getUserId(), null);
+            log.info("Evicted enriched holdings cache for user {} due to holding update", event.getUserId());
 
             acknowledgment.acknowledge();
         } catch (Exception e) {

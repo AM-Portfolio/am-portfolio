@@ -39,11 +39,8 @@ public class PortfolioHoldingsRedisService {
     public CompletableFuture<Void> cachePortfolioHoldings(PortfolioHoldings holdings, String userId, TimeInterval interval, String portfolioId) {
         String key = buildKey(userId, interval, portfolioId);
         try {
-            // For short intervals, use the interval duration as TTL
-            Duration ttl = interval != null && interval.getDuration() != null && 
-                          interval.getDuration().compareTo(Duration.ofSeconds(portfolioHoldingTtl)) < 0 
-                          ? interval.getDuration() 
-                          : Duration.ofSeconds(portfolioHoldingTtl);
+            // Apply smarter TTL strategy based on interval
+            Duration ttl = getSmartTtl(interval, portfolioHoldingTtl);
             
             portfolioHoldingsRedisTemplate.opsForValue().set(key, holdings, ttl);
             log.debug("Cached portfolio holdings for key: {} with TTL: {} seconds", key, ttl.getSeconds());
@@ -71,8 +68,11 @@ public class PortfolioHoldingsRedisService {
                     } else {
                         log.debug("Found stale portfolio holdings in cache for key: {}, deleting", key);
                         portfolioHoldingsRedisTemplate.delete(key);
+                        return Optional.empty();
                     }
                 }
+                // If interval is null, trust Redis TTL and return
+                return Optional.of(holdings);
             }
         } catch (Exception e) {
             log.error("Error retrieving portfolio holdings from cache for key {}: {}", key, e.getMessage(), e);
@@ -84,5 +84,25 @@ public class PortfolioHoldingsRedisService {
         String intervalCode = interval != null ? interval.getCode() : "default";
         String portPart = (portfolioId != null && !portfolioId.trim().isEmpty()) ? portfolioId : "all";
         return portfolioKeyPrefix + userId + ":" + portPart + ":" + intervalCode;
+    }
+
+    private Duration getSmartTtl(TimeInterval interval, Integer defaultTtlSeconds) {
+        if (interval == null || interval.getCode() == null) {
+            return Duration.ofSeconds(defaultTtlSeconds);
+        }
+        
+        switch (interval.getCode()) {
+            case "1W":
+            case "1M":
+                return Duration.ofSeconds(3600); // 1 hour
+            case "3M":
+            case "6M":
+            case "1Y":
+                return Duration.ofSeconds(7200); // 2 hours
+            case "1D":
+            case "all":
+            default:
+                return Duration.ofSeconds(defaultTtlSeconds);
+        }
     }
 }

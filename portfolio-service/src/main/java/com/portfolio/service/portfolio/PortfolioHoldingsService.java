@@ -12,6 +12,7 @@ import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
+import com.portfolio.redis.service.EnrichedHoldingsCacheService;
 import com.portfolio.service.calculator.PortfolioCalculator;
 
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ public class PortfolioHoldingsService {
     private final PortfolioService portfolioService;
     private final PortfolioHoldingsMapper portfolioHoldingsMapper;
     private final PortfolioHoldingsRedisService portfolioHoldingsRedisService;
+    private final EnrichedHoldingsCacheService enrichedHoldingsCacheService;
     private final PortfolioCalculator portfolioCalculator;
 
     public PortfolioHoldings getPortfolioHoldings(String userId, TimeInterval interval) {
@@ -150,8 +152,12 @@ public class PortfolioHoldingsService {
                     portfolioHoldings.getEquityHoldings() != null ? portfolioHoldings.getEquityHoldings().size() : 0,
                     context);
 
-            var enrichedHoldings = portfolioCalculator.enrichHoldings(portfolioHoldings.getEquityHoldings());
-            portfolioCalculator.calculateWeights(enrichedHoldings);
+            var enrichedHoldings = enrichedHoldingsCacheService.getOrComputeEnrichedHoldings(userId, portfolioId, () -> {
+                var computed = portfolioCalculator.enrichHoldings(portfolioHoldings.getEquityHoldings());
+                portfolioCalculator.calculateWeights(computed);
+                return computed;
+            });
+            
             portfolioHoldings.setEquityHoldings(enrichedHoldings);
         } else {
             log.info("Skipping enrichment for user: {} and {}", userId, context);
@@ -171,16 +177,18 @@ public class PortfolioHoldingsService {
         return portfolioHoldings;
     }
 
-    protected List<EquityHoldings> getHoldings(List<PortfolioModelV1> portfolios) {
+    public List<EquityHoldings> getHoldings(List<PortfolioModelV1> portfolios, String userId, String portfolioId) {
 
-        var equityHoldings = portfolioHoldingsMapper.toEquityHoldings(portfolios);
+        return enrichedHoldingsCacheService.getOrComputeEnrichedHoldings(userId, portfolioId, () -> {
+            var equityHoldings = portfolioHoldingsMapper.toEquityHoldings(portfolios);
 
-        log.info("Enriching stock prices and performance data for {} equity holdings",
-                equityHoldings != null ? equityHoldings.size() : 0);
+            log.info("Enriching stock prices and performance data for {} equity holdings",
+                    equityHoldings != null ? equityHoldings.size() : 0);
 
-        equityHoldings = portfolioCalculator.enrichHoldings(equityHoldings);
-        portfolioCalculator.calculateWeights(equityHoldings);
-        return equityHoldings;
+            equityHoldings = portfolioCalculator.enrichHoldings(equityHoldings);
+            portfolioCalculator.calculateWeights(equityHoldings);
+            return equityHoldings;
+        });
     }
 
     private Optional<PortfolioHoldings> getCachedHoldings(String userId, TimeInterval interval) {
