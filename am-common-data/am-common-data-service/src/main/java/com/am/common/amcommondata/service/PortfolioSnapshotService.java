@@ -76,7 +76,7 @@ public class PortfolioSnapshotService {
             java.time.Period period = TIMEFRAME_PERIODS.getOrDefault(frame, java.time.Period.ofMonths(1));
             LocalDate fromDate = today.minus(period);
             documents = portfolioSnapshotRepository
-                .findByUserIdAndSnapshotDateBetweenOrderBySnapshotDateAsc(userId, fromDate, today);
+                .findByUserIdAndSnapshotDateBetweenOrderBySnapshotDateAsc(userId, fromDate, today.plusDays(1));
         }
 
         if (documents == null || documents.isEmpty()) {

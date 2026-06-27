@@ -257,8 +257,8 @@ public class PortfolioController {
         log.info("PortfolioController - getPortfolioHistory called - User: {}, TimeFrame: {}", userId, timeFrame);
 
         List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(userId, null, timeFrame);
-        if (history == null || history.isEmpty()) {
-            return ResponseEntity.notFound().build();
+        if (history == null) {
+            return ResponseEntity.ok(java.util.Collections.emptyList());
         }
         return ResponseEntity.ok(history);
     }
@@ -276,8 +276,8 @@ public class PortfolioController {
         log.info("PortfolioController - getSpecificPortfolioHistory called - User: {}, Portfolio: {}, TimeFrame: {}", userId, portfolioId, timeFrame);
 
         List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(userId, portfolioId, timeFrame);
-        if (history == null || history.isEmpty()) {
-            return ResponseEntity.notFound().build();
+        if (history == null) {
+            return ResponseEntity.ok(java.util.Collections.emptyList());
         }
         return ResponseEntity.ok(history);
     }
