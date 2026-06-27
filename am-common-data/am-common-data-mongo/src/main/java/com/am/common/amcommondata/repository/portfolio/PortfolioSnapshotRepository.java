@@ -21,5 +21,11 @@ public interface PortfolioSnapshotRepository extends MongoRepository<PortfolioSn
 
     // Fetch all existing snapshot dates for a user within a date range (batch idempotency for catch-up)
     List<PortfolioSnapshotDocument> findByUserIdAndSnapshotDateBetween(String userId, LocalDate from, LocalDate to);
+
+    // Fetch snapshots within a date range ordered ascending (for history chart)
+    List<PortfolioSnapshotDocument> findByUserIdAndSnapshotDateBetweenOrderBySnapshotDateAsc(String userId, LocalDate from, LocalDate to);
+
+    // Fetch all snapshots for a user ordered ascending (for ALL timeframe chart)
+    List<PortfolioSnapshotDocument> findByUserIdOrderBySnapshotDateAsc(String userId);
 }
 

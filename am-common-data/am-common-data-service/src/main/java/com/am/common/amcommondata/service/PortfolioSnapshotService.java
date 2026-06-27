@@ -8,7 +8,6 @@ import com.am.common.amcommondata.model.PortfolioSnapshotModel;
 import com.am.common.amcommondata.repository.portfolio.PortfolioSnapshotRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -25,13 +24,12 @@ public class PortfolioSnapshotService {
 
     private final PortfolioSnapshotRepository portfolioSnapshotRepository;
 
-    private static final java.util.Map<String, Integer> TIMEFRAME_LIMITS = java.util.Map.of(
-        "1W",  5,
-        "1M",  22,
-        "3M",  66,
-        "6M",  130,
-        "1Y",  252,
-        "ALL", Integer.MAX_VALUE
+    private static final java.util.Map<String, java.time.Period> TIMEFRAME_PERIODS = java.util.Map.of(
+        "1W",  java.time.Period.ofWeeks(1),
+        "1M",  java.time.Period.ofMonths(1),
+        "3M",  java.time.Period.ofMonths(3),
+        "6M",  java.time.Period.ofMonths(6),
+        "1Y",  java.time.Period.ofYears(1)
     );
 
     public void saveUserSnapshot(String userId, Double totalUserWealth, Double totalUserInvestment, Double totalUserGainLoss, Double totalUserGainLossPercentage, List<PortfolioSnapshotEntry> entries) {
@@ -66,20 +64,24 @@ public class PortfolioSnapshotService {
     }
 
     public List<PortfolioSnapshotModel> getHistory(String userId, String portfolioId, String timeFrame) {
-        int limit = TIMEFRAME_LIMITS.getOrDefault(
-            timeFrame != null ? timeFrame.toUpperCase() : "1M", 22
-        );
+        String frame = timeFrame != null ? timeFrame.toUpperCase() : "1M";
+        LocalDate today = LocalDate.now();
+        List<PortfolioSnapshotDocument> documents;
 
-        // Fetch user-level documents
-        List<PortfolioSnapshotDocument> documents = portfolioSnapshotRepository
-                .findByUserIdOrderBySnapshotDateDesc(userId, PageRequest.of(0, limit));
-
-        if (documents.isEmpty()) {
-            return Collections.emptyList();
+        if ("ALL".equals(frame)) {
+            // No date filter → fetch entire history, already sorted ASC by DB
+            documents = portfolioSnapshotRepository.findByUserIdOrderBySnapshotDateAsc(userId);
+        } else {
+            // Real date math: 1M = exactly 1 calendar month ago
+            java.time.Period period = TIMEFRAME_PERIODS.getOrDefault(frame, java.time.Period.ofMonths(1));
+            LocalDate fromDate = today.minus(period);
+            documents = portfolioSnapshotRepository
+                .findByUserIdAndSnapshotDateBetweenOrderBySnapshotDateAsc(userId, fromDate, today);
         }
 
-        // Reverse to chronological order (oldest first) for charts
-        Collections.reverse(documents);
+        if (documents == null || documents.isEmpty()) {
+            return Collections.emptyList();
+        }
 
         return documents.stream()
                 .map(doc -> toModel(doc, portfolioId))
@@ -87,31 +89,43 @@ public class PortfolioSnapshotService {
     }
 
     private PortfolioSnapshotModel toModel(PortfolioSnapshotDocument doc, String targetPortfolioId) {
-        // Map nested portfolios
-        List<PortfolioSnapshotEntryModel> entryModels = Collections.emptyList();
+        double wealth = 0.0, investment = 0.0, open = 0.0, high = 0.0, low = 0.0;
+        List<PortfolioSnapshotEntryModel> entryModels = new java.util.ArrayList<>();
+
         if (doc.getPortfolios() != null) {
-            entryModels = doc.getPortfolios().stream()
-                    .filter(p -> targetPortfolioId == null || targetPortfolioId.equals(p.getPortfolioId()))
-                    .map(this::toEntryModel)
-                    .collect(Collectors.toList());
+            for (PortfolioSnapshotEntry p : doc.getPortfolios()) {
+                boolean matches = targetPortfolioId == null || targetPortfolioId.equals(p.getPortfolioId());
+                if (!matches) continue;
+
+                double close = p.getClose() != null ? p.getClose() : 0.0;
+                open       += p.getOpen()   != null ? p.getOpen()   : close;
+                high       += p.getHigh()   != null ? p.getHigh()   : close;
+                low        += p.getLow()    != null ? p.getLow()    : close;
+                wealth     += close;
+                investment += p.getTotalInvestment() != null ? p.getTotalInvestment() : 0.0;
+                entryModels.add(toEntryModel(p));
+            }
+        } else {
+            // Null-safe fallback for documents without nested portfolios
+            double fallback = doc.getTotalUserWealth() != null ? doc.getTotalUserWealth() : 0.0;
+            wealth = fallback; open = fallback; high = fallback; low = fallback;
+            investment = doc.getTotalUserInvestment() != null ? doc.getTotalUserInvestment() : 0.0;
         }
 
-        double totalOpen = doc.getPortfolios() != null ? doc.getPortfolios().stream().mapToDouble(p -> p.getOpen() != null ? p.getOpen() : 0.0).sum() : doc.getTotalUserWealth();
-        double totalHigh = doc.getPortfolios() != null ? doc.getPortfolios().stream().mapToDouble(p -> p.getHigh() != null ? p.getHigh() : 0.0).sum() : doc.getTotalUserWealth();
-        double totalLow = doc.getPortfolios() != null ? doc.getPortfolios().stream().mapToDouble(p -> p.getLow() != null ? p.getLow() : 0.0).sum() : doc.getTotalUserWealth();
+        double gainLoss    = wealth - investment;
+        double gainLossPct = investment > 0 ? (gainLoss / investment) * 100.0 : 0.0;
 
-        // Map root
         return PortfolioSnapshotModel.builder()
                 .snapshotId(doc.getSnapshotId())
                 .userId(doc.getUserId())
                 .snapshotDate(doc.getSnapshotDate())
-                .totalUserWealth(doc.getTotalUserWealth())
-                .totalUserWealthOpen(totalOpen) 
-                .totalUserWealthHigh(totalHigh)
-                .totalUserWealthLow(totalLow)
-                .totalUserInvestment(doc.getTotalUserInvestment())
-                .totalUserGainLoss(doc.getTotalUserGainLoss())
-                .totalUserGainLossPercentage(doc.getTotalUserGainLossPercentage())
+                .totalUserWealth(wealth)
+                .totalUserWealthOpen(open)
+                .totalUserWealthHigh(high)
+                .totalUserWealthLow(low)
+                .totalUserInvestment(investment)
+                .totalUserGainLoss(gainLoss)
+                .totalUserGainLossPercentage(gainLossPct)
                 .portfolios(entryModels)
                 .createdAt(doc.getCreatedAt())
                 .build();

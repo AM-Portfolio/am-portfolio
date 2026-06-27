@@ -111,7 +111,8 @@ public class SnapshotCatchUpService {
                                     item.getSymbol(),
                                     item.getQuantity(),
                                     item.getAvgBuyPrice() != null ? item.getAvgBuyPrice() : 0.0,
-                                    brokerStr
+                                    brokerStr,
+                                    entry.getPortfolioName()
                             ));
                             allSymbols.add(item.getSymbol());
                         }
@@ -140,7 +141,8 @@ public class SnapshotCatchUpService {
                                     e.getSymbol(),
                                     e.getQuantity(),
                                     e.getAvgBuyingPrice() != null ? e.getAvgBuyingPrice() : 0.0,
-                                    brokerStr))
+                                    brokerStr,
+                                    portfolio.getName()))
                             .collect(Collectors.toList());
 
                     if (!holdingInfos.isEmpty()) {
@@ -269,11 +271,13 @@ public class SnapshotCatchUpService {
                             .collect(Collectors.toList());
 
                     String brokerStr = holdings.isEmpty() ? null : holdings.get(0).brokerType;
+                    String portfolioName = holdings.isEmpty() ? null : holdings.get(0).portfolioName;
 
                     // For catch-up snapshots: open = close = high = low (daily close value)
                     // We don't have intra-day data for historical reconstruction.
                     entries.add(PortfolioSnapshotEntry.builder()
                             .portfolioId(portfolioId)
+                            .portfolioName(portfolioName)
                             .brokerType(brokerStr)
                             .open(portValue)
                             .high(portValue)
@@ -334,12 +338,14 @@ public class SnapshotCatchUpService {
         final double quantity;
         final double avgBuyPrice;
         final String brokerType;
+        final String portfolioName;
 
-        HoldingInfo(String symbol, double quantity, double avgBuyPrice, String brokerType) {
+        HoldingInfo(String symbol, double quantity, double avgBuyPrice, String brokerType, String portfolioName) {
             this.symbol = symbol;
             this.quantity = quantity;
             this.avgBuyPrice = avgBuyPrice;
             this.brokerType = brokerType;
+            this.portfolioName = portfolioName;
         }
     }
 }
