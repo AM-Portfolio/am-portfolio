@@ -8,6 +8,7 @@ import com.portfolio.model.portfolio.PortfolioAnalysis;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.service.PortfolioDashboardService;
+import com.portfolio.service.scheduler.PortfolioHistoryScheduler;
 
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
@@ -34,6 +35,7 @@ public class PortfolioController {
 
     private final PortfolioDashboardService portfolioDashboardService;
     private final PortfolioService portfolioService;
+    private final PortfolioHistoryScheduler portfolioHistoryScheduler;
 
     @Operation(summary = "Get portfolio by ID", description = "Retrieves detailed portfolio information for a specific portfolio ID")
     @ApiResponses(value = {
@@ -104,6 +106,17 @@ public class PortfolioController {
 
 
 
+
+    @Operation(summary = "Trigger snapshot", description = "Manually triggers the end of day portfolio snapshot generation for testing")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Snapshot triggered successfully")
+    })
+    @PostMapping("/trigger-snapshot")
+    public ResponseEntity<String> triggerSnapshot() {
+        log.info("PortfolioController - triggerSnapshot called manually via API");
+        portfolioHistoryScheduler.runEndOfDayJob();
+        return ResponseEntity.ok("Snapshot generation triggered successfully in background.");
+    }
 
     @Hidden
     @Operation(summary = "Get portfolio analysis", description = "Retrieves detailed analysis for a specific portfolio (hidden from API docs)")
