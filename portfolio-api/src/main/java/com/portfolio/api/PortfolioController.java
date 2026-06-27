@@ -11,6 +11,7 @@ import com.portfolio.service.PortfolioDashboardService;
 import com.portfolio.service.scheduler.PortfolioHistoryScheduler;
 import com.am.common.amcommondata.model.PortfolioSnapshotModel;
 import com.am.common.amcommondata.service.PortfolioSnapshotService;
+import com.portfolio.service.scheduler.SnapshotCatchUpService;
 
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
@@ -39,6 +40,7 @@ public class PortfolioController {
     private final PortfolioService portfolioService;
     private final PortfolioHistoryScheduler portfolioHistoryScheduler;
     private final PortfolioSnapshotService portfolioSnapshotService;
+    private final SnapshotCatchUpService snapshotCatchUpService;
 
     @Operation(summary = "Get portfolio by ID", description = "Retrieves detailed portfolio information for a specific portfolio ID")
     @ApiResponses(value = {
@@ -281,7 +283,20 @@ public class PortfolioController {
         }
         return ResponseEntity.ok(history);
     }
+
+    /**
+     * DEV/ADMIN ONLY — Hidden from Swagger.
+     * Directly triggers historical snapshot catch-up for any given userId.
+     * Usage: POST /v1/portfolios/dev/trigger-catchup?userId=sahim99
+     */
+    @Hidden
+    @PostMapping("/dev/trigger-catchup")
+    public ResponseEntity<String> triggerCatchUpForUser(
+            @RequestParam String userId) {
+        log.info("[DEV] Manual catch-up trigger for userId={}", userId);
+        snapshotCatchUpService.triggerCatchUp(userId);
+        return ResponseEntity.ok("CatchUp triggered for userId=" + userId + ". Check server logs for progress.");
+    }
 }
 
 // Trigger workflow
-
