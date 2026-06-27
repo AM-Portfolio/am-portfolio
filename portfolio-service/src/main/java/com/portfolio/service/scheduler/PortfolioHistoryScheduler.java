@@ -3,6 +3,7 @@ package com.portfolio.service.scheduler;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -115,5 +116,16 @@ public class PortfolioHistoryScheduler {
         } catch (Exception e) {
             log.error("Critical failure in End-of-Day Job", e);
         }
+    }
+
+    /**
+     * Async wrapper used by the manual trigger REST endpoint.
+     * Returns immediately so Cloudflare does not time out (524).
+     * The actual heavy work runs on Spring's async task executor thread pool.
+     */
+    @Async
+    public void runEndOfDayJobAsync() {
+        log.info("[ASYNC] Manual snapshot trigger received — starting job on background thread");
+        runEndOfDayJob();
     }
 }

@@ -110,15 +110,15 @@ public class PortfolioController {
 
 
 
-    @Operation(summary = "Trigger snapshot", description = "Manually triggers the end of day portfolio snapshot generation for testing")
+    @Operation(summary = "Trigger snapshot", description = "Manually triggers the end of day portfolio snapshot generation. Returns immediately — job runs in the background.")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Snapshot triggered successfully")
+            @ApiResponse(responseCode = "202", description = "Snapshot job accepted and running in background")
     })
     @PostMapping("/trigger-snapshot")
     public ResponseEntity<String> triggerSnapshot() {
         log.info("PortfolioController - triggerSnapshot called manually via API");
-        portfolioHistoryScheduler.runEndOfDayJob();
-        return ResponseEntity.ok("Snapshot generation triggered successfully in background.");
+        portfolioHistoryScheduler.runEndOfDayJobAsync();
+        return ResponseEntity.accepted().body("Snapshot job accepted. Running in background — check server logs for progress.");
     }
 
     @Hidden
