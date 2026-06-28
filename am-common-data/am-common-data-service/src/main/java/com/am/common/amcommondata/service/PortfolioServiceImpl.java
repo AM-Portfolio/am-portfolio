@@ -9,13 +9,17 @@ import lombok.RequiredArgsConstructor;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import lombok.extern.slf4j.Slf4j;
+
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
+@Slf4j
 public class PortfolioServiceImpl implements PortfolioService {
     private final PortfolioDocumentRepository portfolioDocumentRepository;
     private final PortfolioMapper portfolioMapper;
@@ -41,13 +45,76 @@ public class PortfolioServiceImpl implements PortfolioService {
             PortfolioDocument existing = portfolioDocumentRepository.findById(portfolioId).orElse(null);
             
             if (existing != null) {
-                // Update existing equities
-                if (portfolioModel.getEquityModels() != null) {
-                    existing.setEquities(portfolioMapper.toDocument(portfolioModel).getEquities());
+                // Smart holding calculation logic
+                String tradeAction = portfolioModel.getLastTradeAction();
+                List<com.am.common.amcommondata.document.asset.equity.EquityDocument> incomingEquities = portfolioMapper.toDocument(portfolioModel).getEquities();
+                
+                List<com.am.common.amcommondata.document.asset.equity.EquityDocument> existingEquities = existing.getEquities();
+                if (existingEquities == null) {
+                    existingEquities = new java.util.ArrayList<>();
                 }
-                if (portfolioModel.getTotalValue() != null) {
-                    existing.setTotalValue(portfolioModel.getTotalValue());
+
+                if (incomingEquities != null) {
+                    for (com.am.common.amcommondata.document.asset.equity.EquityDocument incoming : incomingEquities) {
+                        String isin = incoming.getIsin();
+                        
+                        java.util.Optional<com.am.common.amcommondata.document.asset.equity.EquityDocument> matchOpt = existingEquities.stream()
+                            .filter(e -> e.getIsin() != null && e.getIsin().equals(isin))
+                            .findFirst();
+
+                        if ("BUY".equalsIgnoreCase(tradeAction)) {
+                            if (matchOpt.isPresent()) {
+                                com.am.common.amcommondata.document.asset.equity.EquityDocument match = matchOpt.get();
+                                double existingQty = match.getQuantity() != null ? match.getQuantity() : 0.0;
+                                double incomingQty = incoming.getQuantity() != null ? incoming.getQuantity() : 0.0;
+                                double existingAvg = match.getAvgBuyingPrice() != null ? match.getAvgBuyingPrice() : 0.0;
+                                double incomingAvg = incoming.getAvgBuyingPrice() != null ? incoming.getAvgBuyingPrice() : 0.0;
+                                
+                                double newQty = existingQty + incomingQty;
+                                double newAvg = newQty > 0 ? ((existingQty * existingAvg) + (incomingQty * incomingAvg)) / newQty : 0.0;
+                                
+                                match.setQuantity(newQty);
+                                match.setAvgBuyingPrice(newAvg);
+                                if (incoming.getCurrentPrice() != null) {
+                                    match.setCurrentPrice(incoming.getCurrentPrice());
+                                }
+                            } else {
+                                existingEquities.add(incoming);
+                            }
+                        } else if ("SELL".equalsIgnoreCase(tradeAction)) {
+                            if (matchOpt.isPresent()) {
+                                com.am.common.amcommondata.document.asset.equity.EquityDocument match = matchOpt.get();
+                                double existingQty = match.getQuantity() != null ? match.getQuantity() : 0.0;
+                                double incomingQty = incoming.getQuantity() != null ? incoming.getQuantity() : 0.0;
+                                double newQty = existingQty - incomingQty;
+                                
+                                if (newQty <= 0) {
+                                    existingEquities.remove(match);
+                                } else {
+                                    match.setQuantity(newQty);
+                                    if (incoming.getCurrentPrice() != null) {
+                                        match.setCurrentPrice(incoming.getCurrentPrice());
+                                    }
+                                }
+                            } else {
+                                // SELL received for ISIN not in holdings - skipping silently or log warning.
+                            }
+                        }
+                    }
                 }
+
+                // Recalculate total portfolio value
+                double totalValue = existingEquities.stream()
+                    .mapToDouble(e -> {
+                        double qty = e.getQuantity() != null ? e.getQuantity() : 0.0;
+                        double price = e.getCurrentPrice() != null ? e.getCurrentPrice() : (e.getAvgBuyingPrice() != null ? e.getAvgBuyingPrice() : 0.0);
+                        return qty * price;
+                    })
+                    .sum();
+
+                existing.setEquities(existingEquities);
+                existing.setTotalValue(totalValue);
+                
                 return portfolioMapper.toModel(portfolioDocumentRepository.save(existing));
             }
         }
@@ -151,5 +218,21 @@ public class PortfolioServiceImpl implements PortfolioService {
     @Override
     public List<String> getAllUserIds() {
         return portfolioDocumentRepository.findAllDistinctOwners();
+    }
+
+    @Override
+    public List<String> getActiveUserIds(LocalDate cutoffDate) {
+        return portfolioDocumentRepository.findActiveOwnersSince(cutoffDate);
+    }
+
+    @Override
+    @Transactional
+    public void updateLastLoginDate(String userId, LocalDate loginDate) {
+        List<PortfolioDocument> portfolios = portfolioDocumentRepository.findByOwner(userId);
+        if (portfolios != null && !portfolios.isEmpty()) {
+            portfolios.forEach(p -> p.setLastLoginDate(loginDate));
+            portfolioDocumentRepository.saveAll(portfolios);
+            log.info("Updated lastLoginDate={} for {} portfolios of user={}", loginDate, portfolios.size(), userId);
+        }
     }
 }

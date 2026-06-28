@@ -8,6 +8,10 @@ import com.portfolio.model.portfolio.PortfolioAnalysis;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.service.PortfolioDashboardService;
+import com.portfolio.service.scheduler.PortfolioHistoryScheduler;
+import com.am.common.amcommondata.model.PortfolioSnapshotModel;
+import com.am.common.amcommondata.service.PortfolioSnapshotService;
+import com.portfolio.service.scheduler.SnapshotCatchUpService;
 
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
@@ -34,6 +38,9 @@ public class PortfolioController {
 
     private final PortfolioDashboardService portfolioDashboardService;
     private final PortfolioService portfolioService;
+    private final PortfolioHistoryScheduler portfolioHistoryScheduler;
+    private final PortfolioSnapshotService portfolioSnapshotService;
+    private final SnapshotCatchUpService snapshotCatchUpService;
 
     @Operation(summary = "Get portfolio by ID", description = "Retrieves detailed portfolio information for a specific portfolio ID")
     @ApiResponses(value = {
@@ -104,6 +111,17 @@ public class PortfolioController {
 
 
 
+
+    @Operation(summary = "Trigger snapshot", description = "Manually triggers the end of day portfolio snapshot generation. Returns immediately — job runs in the background.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "202", description = "Snapshot job accepted and running in background")
+    })
+    @PostMapping("/trigger-snapshot")
+    public ResponseEntity<String> triggerSnapshot() {
+        log.info("PortfolioController - triggerSnapshot called manually via API");
+        portfolioHistoryScheduler.runEndOfDayJobAsync();
+        return ResponseEntity.accepted().body("Snapshot job accepted. Running in background — check server logs for progress.");
+    }
 
     @Hidden
     @Operation(summary = "Get portfolio analysis", description = "Retrieves detailed analysis for a specific portfolio (hidden from API docs)")
@@ -229,4 +247,56 @@ public class PortfolioController {
         }
     }
 
+    @Operation(summary = "Get portfolio history", description = "Retrieves the snapshot history of all portfolios for a user with the specified timeframe.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Portfolio history retrieved successfully"),
+            @ApiResponse(responseCode = "404", description = "No history found for user")
+    })
+    @GetMapping("/history")
+    public ResponseEntity<List<PortfolioSnapshotModel>> getPortfolioHistory(
+            @RequestParam(required = false, defaultValue = "1M") String timeFrame) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        log.info("PortfolioController - getPortfolioHistory called - User: {}, TimeFrame: {}", userId, timeFrame);
+
+        List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(userId, null, timeFrame);
+        if (history == null) {
+            return ResponseEntity.ok(java.util.Collections.emptyList());
+        }
+        return ResponseEntity.ok(history);
+    }
+
+    @Operation(summary = "Get specific portfolio history", description = "Retrieves the snapshot history of a specific portfolio for a user with the specified timeframe.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Portfolio history retrieved successfully"),
+            @ApiResponse(responseCode = "404", description = "No history found for portfolio")
+    })
+    @GetMapping("/{portfolioId}/history")
+    public ResponseEntity<List<PortfolioSnapshotModel>> getSpecificPortfolioHistory(
+            @PathVariable String portfolioId,
+            @RequestParam(required = false, defaultValue = "1M") String timeFrame) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        log.info("PortfolioController - getSpecificPortfolioHistory called - User: {}, Portfolio: {}, TimeFrame: {}", userId, portfolioId, timeFrame);
+
+        List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(userId, portfolioId, timeFrame);
+        if (history == null) {
+            return ResponseEntity.ok(java.util.Collections.emptyList());
+        }
+        return ResponseEntity.ok(history);
+    }
+
+    /**
+     * DEV/ADMIN ONLY — Hidden from Swagger.
+     * Directly triggers historical snapshot catch-up for any given userId.
+     * Usage: POST /v1/portfolios/dev/trigger-catchup?userId=sahim99
+     */
+    @Hidden
+    @PostMapping("/dev/trigger-catchup")
+    public ResponseEntity<String> triggerCatchUpForUser(
+            @RequestParam String userId) {
+        log.info("[DEV] Manual catch-up trigger for userId={}", userId);
+        snapshotCatchUpService.triggerCatchUp(userId);
+        return ResponseEntity.ok("CatchUp triggered for userId=" + userId + ". Check server logs for progress.");
+    }
 }
+
+// Trigger workflow

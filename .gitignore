@@ -100,3 +100,7 @@ bean_keys.txt
 javap.txt
 *.txt
 !**/src/**/*.txt
+
+# JDK binaries in workspace root — never committed
+jdk*/
+*.zip

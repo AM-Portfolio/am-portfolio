@@ -10,7 +10,11 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDate;
 import java.util.Arrays;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -33,10 +37,15 @@ class PortfolioHistorySchedulerTest {
     @Mock
     private PortfolioHoldingsService portfolioHoldingsService;
 
+    @BeforeEach
+    void setUp() {
+        ReflectionTestUtils.setField(scheduler, "activeUserWindowDays", 30);
+    }
+
     @Test
     void whenJobRuns_thenAllUserHistoriesAreProcessed() {
         // Prepare test data
-        when(portfolioService.getAllUserIds()).thenReturn(Arrays.asList("user1", "user2", "user3"));
+        when(portfolioService.getActiveUserIds(any(LocalDate.class))).thenReturn(Arrays.asList("user1", "user2", "user3"));
 
         // Execute job manually
         scheduler.runEndOfDayJob();
@@ -51,7 +60,7 @@ class PortfolioHistorySchedulerTest {
     @Test
     void whenUserProcessingFails_thenContinueWithNextUser() {
         // Prepare test data where one user fails
-        when(portfolioService.getAllUserIds()).thenReturn(Arrays.asList("fail-user", "success-user"));
+        when(portfolioService.getActiveUserIds(any(LocalDate.class))).thenReturn(Arrays.asList("fail-user", "success-user"));
         
         doThrow(new RuntimeException("Simulated Failure"))
             .when(portfolioHoldingsService).getPortfolioHoldings(eq("fail-user"), any(), anyBoolean());
@@ -67,7 +76,7 @@ class PortfolioHistorySchedulerTest {
     @Test
     void whenGetAllUsersFails_thenHandleGracefully() {
         // Prepare test data where fetching users fails
-        when(portfolioService.getAllUserIds()).thenThrow(new RuntimeException("DB Failure"));
+        when(portfolioService.getActiveUserIds(any(LocalDate.class))).thenThrow(new RuntimeException("DB Failure"));
 
         // Execute job
         scheduler.runEndOfDayJob();

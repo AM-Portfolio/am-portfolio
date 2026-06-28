@@ -38,4 +38,5 @@ public class PortfolioModelV1 {
     private String createdBy;
     private String updatedBy;
     private Long version;
+    private String lastTradeAction;
 }
