@@ -1,5 +1,7 @@
 package com.portfolio.kafka.service;
 
+import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.service.PortfolioService;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.enums.AssetType;
 import com.portfolio.kafka.producer.KafkaProducerService;
@@ -30,47 +32,62 @@ public class PortfolioCalculationService {
     private final PortfolioHoldingsService portfolioHoldingsService;
     private final PortfolioCalculator portfolioCalculator;
     private final KafkaProducerService kafkaProducerService;
+    private final PortfolioService portfolioService;
 
     public void processCalculation(String userId, String portfolioId, String correlationId) {
         log.info("Processing portfolio calculation in service for UserID: {}, PortfolioID: {}", userId, portfolioId);
 
-        try {
-            // 1. Fetch Holdings
-            PortfolioHoldings holdings;
-            if (portfolioId != null && !portfolioId.isEmpty()) {
-                holdings = portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, TimeInterval.ONE_DAY);
-            } else {
-                holdings = portfolioHoldingsService.getPortfolioHoldings(userId, TimeInterval.ONE_DAY);
-            }
+        if (portfolioId == null || portfolioId.isEmpty()) {
+            processAllPortfolios(userId, correlationId);
+            return;
+        }
 
-            if (holdings == null || holdings.getEquityHoldings() == null) {
-                log.warn("No holdings found for user: {}", userId);
+        calculateAndPublish(userId, portfolioId, correlationId);
+    }
+
+    private void processAllPortfolios(String userId, String correlationId) {
+        List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
+        if (portfolios == null || portfolios.isEmpty()) {
+            log.warn("No portfolios found for user: {}", userId);
+            return;
+        }
+
+        log.info("Bootstrap-all: publishing calculation for {} portfolio(s), userId={}", portfolios.size(), userId);
+        for (PortfolioModelV1 portfolio : portfolios) {
+            if (portfolio.getId() == null) {
+                continue;
+            }
+            calculateAndPublish(userId, portfolio.getId().toString(), correlationId);
+        }
+    }
+
+    private void calculateAndPublish(String userId, String portfolioId, String correlationId) {
+        try {
+            PortfolioHoldings holdings = portfolioHoldingsService.getPortfolioHoldings(
+                    userId, portfolioId, TimeInterval.ONE_DAY);
+
+            if (holdings == null || holdings.getEquityHoldings() == null || holdings.getEquityHoldings().isEmpty()) {
+                log.warn("No holdings found for user: {}, portfolioId: {}", userId, portfolioId);
                 return;
             }
 
-            // 2. Perform Calculation (Calculating Total Investment First)
             double totalInvestment = holdings.getEquityHoldings().stream()
                     .filter(h -> h.getInvestmentCost() != null)
                     .mapToDouble(EquityHoldings::getInvestmentCost)
                     .sum();
 
-            // 2.1 Enrich with Market Data
             List<EquityHoldings> enrichedHoldings = portfolioCalculator.enrichHoldings(holdings.getEquityHoldings());
+            PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(enrichedHoldings, totalInvestment);
 
-            PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(enrichedHoldings,
-                    totalInvestment);
+            PortfolioUpdateEvent updateEvent = mapToUpdateEvent(holdings, summary, userId, portfolioId);
 
-            // 3. Map to Event
-            String eventPortfolioId = (portfolioId != null && !portfolioId.isEmpty()) ? portfolioId : "GLOBAL";
-            PortfolioUpdateEvent updateEvent = mapToUpdateEvent(holdings, summary, userId, eventPortfolioId);
-
-            // 4. Publish to Kafka
             log.info("Publishing calculated portfolio update for UserID: {}, PortfolioID: {}", userId, portfolioId);
+            kafkaProducerService.sendMessage(updateEvent, correlationId);
             kafkaProducerService.sendPortfolioStreamMessage(updateEvent, correlationId);
-
         } catch (Exception e) {
-            log.error("Error executing calculation logic for user: {} [TraceID: {}]", userId, correlationId, e);
-            throw e; // Re-throw to ensure consumer acknowledges failure if needed
+            log.error("Error executing calculation logic for user: {}, portfolioId: {} [TraceID: {}]",
+                    userId, portfolioId, correlationId, e);
+            throw e;
         }
     }
 
@@ -82,7 +99,6 @@ public class PortfolioCalculationService {
         event.setPortfolioId(portfolioId);
         event.setTimestamp(LocalDateTime.now());
 
-        // Map Summary Data
         if (summary != null) {
             event.setTotalValue(summary.getCurrentValue());
             event.setTotalInvestment(summary.getInvestmentValue());
@@ -92,7 +108,6 @@ public class PortfolioCalculationService {
             event.setTodayGainLossPercentage(summary.getTodayGainLossPercentage());
         }
 
-        // Map Holdings
         if (holdings.getEquityHoldings() != null) {
             List<EquityModel> equityModels = holdings.getEquityHoldings().stream()
                     .map(this::mapToEquityModel)

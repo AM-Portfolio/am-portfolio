@@ -37,11 +37,11 @@
         <lombok.version>1.18.30</lombok.version>
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
-        <am.investment.version>1.6.24-SNAPSHOT</am.investment.version>
-        <am.common.version>1.4.1-SNAPSHOT</am.common.version>
+        <am.investment.version>1.6.24</am.investment.version>
+        <am.common.version>1.4.1</am.common.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <am-common-investment.version>1.6.24-SNAPSHOT</am-common-investment.version>
-        <am-common-data-parent.version>1.4.1-SNAPSHOT</am-common-data-parent.version>
+        <am-common-investment.version>1.6.24</am-common-investment.version>
+        <am-common-data-parent.version>1.4.1</am-common-data-parent.version>
         <!--
           Observability - pinned to Spring Boot 3.2.3's OTel line.
           Spring Boot 3.2.3 ships opentelemetry-exporter-common 1.31.0; if we let the
