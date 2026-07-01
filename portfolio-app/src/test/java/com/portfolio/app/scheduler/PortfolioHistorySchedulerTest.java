@@ -1,7 +1,11 @@
 package com.portfolio.app.scheduler;
 
+import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.service.PortfolioService;
+import com.am.common.amcommondata.service.PortfolioSnapshotService;
 import com.portfolio.model.TimeInterval;
+import com.portfolio.model.portfolio.EquityHoldings;
+import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.service.portfolio.PortfolioHoldingsService;
 import com.portfolio.service.scheduler.PortfolioHistoryScheduler;
 import org.junit.jupiter.api.Test;
@@ -10,21 +14,12 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDate;
-import java.util.Arrays;
+import java.util.List;
+import java.util.UUID;
 
-import org.junit.jupiter.api.BeforeEach;
-import org.springframework.test.util.ReflectionTestUtils;
-
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * Unit test for PortfolioHistoryScheduler.
- * Moved to com.portfolio.app.scheduler for consistent scanning.
- */
 @ExtendWith(MockitoExtension.class)
 class PortfolioHistorySchedulerTest {
 
@@ -37,51 +32,77 @@ class PortfolioHistorySchedulerTest {
     @Mock
     private PortfolioHoldingsService portfolioHoldingsService;
 
-    @BeforeEach
-    void setUp() {
-        ReflectionTestUtils.setField(scheduler, "activeUserWindowDays", 30);
-    }
+    @Mock
+    private PortfolioSnapshotService portfolioSnapshotService;
 
     @Test
-    void whenJobRuns_thenAllUserHistoriesAreProcessed() {
-        // Prepare test data
-        when(portfolioService.getActiveUserIds(any(LocalDate.class))).thenReturn(Arrays.asList("user1", "user2", "user3"));
+    void whenJobRuns_thenSnapshotsAreSavedForEachUser() {
+        UUID portfolioId = UUID.randomUUID();
+        when(portfolioService.getAllUserIds()).thenReturn(List.of("user1", "user2"));
+        when(portfolioService.getPortfoliosByUserId("user1"))
+                .thenReturn(List.of(PortfolioModelV1.builder().id(portfolioId).name("P1").build()));
+        when(portfolioService.getPortfoliosByUserId("user2")).thenReturn(List.of());
 
-        // Execute job manually
+        EquityHoldings equity = EquityHoldings.builder()
+                .symbol("TCS")
+                .quantity(10.0)
+                .averageBuyingPrice(100.0)
+                .currentPrice(110.0)
+                .build();
+        PortfolioHoldings holdings = PortfolioHoldings.builder()
+                .equityHoldings(List.of(equity))
+                .build();
+
+        when(portfolioHoldingsService.getPortfolioHoldings(
+                eq("user1"), eq(portfolioId.toString()), eq(TimeInterval.ONE_DAY), eq(true)))
+                .thenReturn(holdings);
+
         scheduler.runEndOfDayJob();
 
-        // Verify that holdings service was called for each user with forceEnrich=true
-        verify(portfolioHoldingsService, times(3)).getPortfolioHoldings(anyString(), any(TimeInterval.class), eq(true));
-        verify(portfolioHoldingsService).getPortfolioHoldings(eq("user1"), any(), eq(true));
-        verify(portfolioHoldingsService).getPortfolioHoldings(eq("user2"), any(), eq(true));
-        verify(portfolioHoldingsService).getPortfolioHoldings(eq("user3"), any(), eq(true));
+        verify(portfolioSnapshotService).saveUserSnapshot(
+                eq("user1"), anyDouble(), anyDouble(), anyDouble(), anyDouble(), argThat(entries -> entries.size() == 1));
+        verify(portfolioHoldingsService, never()).getPortfolioHoldings(
+                eq("user2"), anyString(), any(), anyBoolean());
     }
 
     @Test
     void whenUserProcessingFails_thenContinueWithNextUser() {
-        // Prepare test data where one user fails
-        when(portfolioService.getActiveUserIds(any(LocalDate.class))).thenReturn(Arrays.asList("fail-user", "success-user"));
-        
-        doThrow(new RuntimeException("Simulated Failure"))
-            .when(portfolioHoldingsService).getPortfolioHoldings(eq("fail-user"), any(), anyBoolean());
+        UUID p1 = UUID.randomUUID();
+        UUID p2 = UUID.randomUUID();
+        when(portfolioService.getAllUserIds()).thenReturn(List.of("fail-user", "success-user"));
+        when(portfolioService.getPortfoliosByUserId("fail-user"))
+                .thenReturn(List.of(PortfolioModelV1.builder().id(p1).build()));
+        when(portfolioService.getPortfoliosByUserId("success-user"))
+                .thenReturn(List.of(PortfolioModelV1.builder().id(p2).build()));
 
-        // Execute job
+        doThrow(new RuntimeException("Simulated Failure"))
+                .when(portfolioHoldingsService)
+                .getPortfolioHoldings(eq("fail-user"), eq(p1.toString()), any(), eq(true));
+
+        PortfolioHoldings holdings = PortfolioHoldings.builder()
+                .equityHoldings(List.of(EquityHoldings.builder()
+                        .symbol("INFY")
+                        .quantity(5.0)
+                        .averageBuyingPrice(200.0)
+                        .currentPrice(210.0)
+                        .build()))
+                .build();
+        when(portfolioHoldingsService.getPortfolioHoldings(
+                eq("success-user"), eq(p2.toString()), eq(TimeInterval.ONE_DAY), eq(true)))
+                .thenReturn(holdings);
+
         scheduler.runEndOfDayJob();
 
-        // Verify that even if one fails, the other is still processed
-        verify(portfolioHoldingsService).getPortfolioHoldings(eq("fail-user"), any(), eq(true));
-        verify(portfolioHoldingsService).getPortfolioHoldings(eq("success-user"), any(), eq(true));
+        verify(portfolioSnapshotService).saveUserSnapshot(
+                eq("success-user"), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyList());
     }
 
     @Test
     void whenGetAllUsersFails_thenHandleGracefully() {
-        // Prepare test data where fetching users fails
-        when(portfolioService.getActiveUserIds(any(LocalDate.class))).thenThrow(new RuntimeException("DB Failure"));
+        when(portfolioService.getAllUserIds()).thenThrow(new RuntimeException("DB Failure"));
 
-        // Execute job
         scheduler.runEndOfDayJob();
 
-        // Verify no holdings processing was attempted
-        verifyNoInteractions(portfolioHoldingsService);
+        verifyNoInteractions(portfolioHoldingsService, portfolioSnapshotService);
     }
 }

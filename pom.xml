@@ -17,6 +17,7 @@
     <packaging>pom</packaging>
 
     <modules>
+        <module>am-common-data</module>
         <module>portfolio-model</module>
         <module>portfolio-market-data</module>
         <module>portfolio-basket</module>
@@ -27,7 +28,6 @@
         <module>portfolio-app</module>
         <module>portfolio-analytics</module>
         <module>portfolio-sdk</module>
-        <module>am-common-data</module>
     </modules>
 
     <properties>
@@ -37,10 +37,10 @@
         <lombok.version>1.18.30</lombok.version>
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
-        <am.investment.version>1.6.24-SNAPSHOT</am.investment.version>
+        <am.investment.version>1.6.24</am.investment.version>
         <am.common.version>1.4.1-SNAPSHOT</am.common.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <am-common-investment.version>1.6.24-SNAPSHOT</am-common-investment.version>
+        <am-common-investment.version>1.6.24</am-common-investment.version>
         <am-common-data-parent.version>1.4.1-SNAPSHOT</am-common-data-parent.version>
         <!--
           Observability - pinned to Spring Boot 3.2.3's OTel line.

@@ -1,11 +1,11 @@
 package com.portfolio.app;
 
+import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.junit.jupiter.api.Test;
 import com.portfolio.service.scheduler.PortfolioHistoryScheduler;
 
-@SpringBootTest
+@SpringBootTest(properties = "spring.main.allow-bean-definition-overriding=true")
 public class SnapshotTriggerTest {
 
     @Autowired
