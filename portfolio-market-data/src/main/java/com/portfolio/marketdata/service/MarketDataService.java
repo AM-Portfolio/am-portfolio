@@ -362,23 +362,27 @@ public class MarketDataService {
                 java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata"));
                 HistoricalDataRequest eodRequest = HistoricalDataRequest.builder()
                     .symbols(String.join(",", stillMissing))
-                    .fromDate(today.minusDays(5))
-                    .toDate(today)
+                    .fromDate(today.minusDays(5).toString())
+                    .toDate(today.toString())
                     .interval(TimeFrame.DAY.getValue())
                     .filterType(FilterType.START_END.getValue())
                     .instrumentType(InstrumentType.STOCK.getValue())
                     .build();
-                Map<String, MarketData> eodData = getHistoricalData(eodRequest);
-                if (eodData != null && !eodData.isEmpty()) {
-                    // Update result with EOD data, preserving any partial live data
-                    eodData.forEach((k, v) -> {
-                        if (v.getLastPrice() != null && v.getLastPrice() > 0) {
-                            result.put(k, v);
+                try {
+                    Map<String, MarketData> eodData = getHistoricalData(eodRequest);
+                    if (eodData != null && !eodData.isEmpty()) {
+                        // Update result with EOD data, preserving any partial live data
+                        eodData.forEach((k, v) -> {
+                            if (v.getLastPrice() != null && v.getLastPrice() > 0) {
+                                result.put(k, v);
+                            }
+                        });
+                        if (marketDataRedisService != null) {
+                            marketDataRedisService.cacheMarketData(result); // Cache the combined result
                         }
-                    });
-                    if (marketDataRedisService != null) {
-                        marketDataRedisService.cacheMarketData(result); // Cache the combined result
                     }
+                } catch (Exception ex) {
+                    log.warn("[MarketData] Failed to fetch EOD historical fallback for missing symbols: {}", ex.getMessage());
                 }
             }
         } catch (Exception e) {
