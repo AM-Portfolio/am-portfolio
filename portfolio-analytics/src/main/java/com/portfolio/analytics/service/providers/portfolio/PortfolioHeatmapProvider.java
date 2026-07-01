@@ -83,7 +83,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 
                 log.info("Generated heatmap with {} sectors using Market Data", sectorPerformances.size());
                 
-                heatmapRedisService.cacheHeatmap(portfolioId, request.getTimeFrameRequest(), heatmap);
+                heatmapRedisService.cacheHeatmap(heatmap, portfolioId, request.getTimeFrameRequest());
                 
                 return heatmap;
             },
@@ -161,7 +161,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 heatmap.sortSectorsByPerformance();
                 
                 // Cache the newly generated fallback heatmap
-                heatmapRedisService.cacheHeatmap(portfolioId, request.getTimeFrameRequest(), heatmap);
+                heatmapRedisService.cacheHeatmap(heatmap, portfolioId, request.getTimeFrameRequest());
                 
                 return heatmap;
             }
