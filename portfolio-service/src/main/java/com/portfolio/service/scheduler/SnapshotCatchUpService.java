@@ -164,8 +164,8 @@ public class SnapshotCatchUpService {
             String symbolsParam = String.join(",", allSymbols);
             HistoricalDataRequest request = HistoricalDataRequest.builder()
                     .symbols(symbolsParam)
-                    .fromDate(backfillStart)
-                    .toDate(today.minusDays(1)) // up to yesterday (market closed)
+                    .fromDate(backfillStart != null ? backfillStart.toString() : null)
+                    .toDate(today.minusDays(1).toString()) // up to yesterday (market closed)
                     .interval("day")
                     .forceRefresh(false)
                     .build();

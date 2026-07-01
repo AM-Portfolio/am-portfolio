@@ -103,8 +103,8 @@ public abstract class AbstractAnalyticsProvider<T, I> {
             // Create HistoricalDataRequest from TimeFrameRequest
             HistoricalDataRequest request = HistoricalDataRequest.builder()
                     .symbols(String.join(",", symbols))
-                    .fromDate(timeFrameRequest.getFromDate())
-                    .toDate(timeFrameRequest.getToDate())
+                    .fromDate(timeFrameRequest.getFromDate() != null ? timeFrameRequest.getFromDate().toString() : null)
+                    .toDate(timeFrameRequest.getToDate() != null ? timeFrameRequest.getToDate().toString() : null)
                     .filterType(FilterType.START_END.getValue())
                     .instrumentType(InstrumentType.STOCK.getValue())
                     .continuous(false)
