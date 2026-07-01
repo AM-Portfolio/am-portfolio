@@ -17,6 +17,7 @@
     <packaging>pom</packaging>
 
     <modules>
+        <module>am-common-data</module>
         <module>portfolio-model</module>
         <module>portfolio-market-data</module>
         <module>portfolio-basket</module>
@@ -27,7 +28,6 @@
         <module>portfolio-app</module>
         <module>portfolio-analytics</module>
         <module>portfolio-sdk</module>
-        <module>am-common-data</module>
     </modules>
 
     <properties>

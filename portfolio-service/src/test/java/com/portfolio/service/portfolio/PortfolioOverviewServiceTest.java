@@ -74,7 +74,7 @@ class PortfolioOverviewServiceTest {
         PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, TimeInterval.ONE_DAY);
 
         assertNotNull(result);
-        verify(portfolioSummaryRedisService).cachePortfolioSummary(any(), eq(userId), any());
+        verify(portfolioSummaryRedisService).cachePortfolioSummary(any(), eq(userId), any(), isNull());
     }
 
     @Test

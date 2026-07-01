@@ -2,9 +2,12 @@ package com.portfolio.app.web;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.service.PortfolioService;
+import com.am.common.amcommondata.service.PortfolioSnapshotService;
 import com.portfolio.api.PortfolioController;
 import com.portfolio.api.exception.GlobalExceptionHandler;
 import com.portfolio.service.PortfolioDashboardService;
+import com.portfolio.service.scheduler.PortfolioHistoryScheduler;
+import com.portfolio.service.scheduler.SnapshotCatchUpService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -46,6 +49,15 @@ class PortfolioControllerTest {
 
     @MockBean
     private PortfolioService portfolioService;
+
+    @MockBean
+    private PortfolioHistoryScheduler portfolioHistoryScheduler;
+
+    @MockBean
+    private PortfolioSnapshotService portfolioSnapshotService;
+
+    @MockBean
+    private SnapshotCatchUpService snapshotCatchUpService;
 
     @AfterEach
     void tearDown() {
