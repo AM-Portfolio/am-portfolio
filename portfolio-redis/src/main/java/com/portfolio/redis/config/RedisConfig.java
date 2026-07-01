@@ -18,6 +18,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -81,6 +82,8 @@ public class RedisConfig {
         ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
         objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        // Never crash on unknown fields from Redis — schema may evolve between deployments
+        objectMapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
         return objectMapper;
     }
     
@@ -101,6 +104,8 @@ public class RedisConfig {
         ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
         objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        // Production safety: don't crash if cached JSON has fields not in the current model
+        objectMapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
         
         // Use the newer constructor that takes the ObjectMapper directly
         Jackson2JsonRedisSerializer<T> serializer = new Jackson2JsonRedisSerializer<>(objectMapper, targetClass);
@@ -172,5 +177,10 @@ public class RedisConfig {
         template.setHashValueSerializer(serializer);
         
         return template;
+    }
+
+    @Bean
+    public RedisTemplate<String, com.portfolio.model.market.MarketData> portfolioMarketDataRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, com.portfolio.model.market.MarketData.class);
     }
 }

@@ -60,6 +60,9 @@ spring:
       portfolio-heatmap:
         ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:heatmap:"
+      portfolio-market-data:
+        key-prefix: "portfolio:mktdata:"
+        # Note: TTL is computed dynamically by PortfolioMarketDataRedisService.computeSmartTtl()
       portfolio-holdings:
         ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:holdings:"
@@ -114,7 +117,15 @@ nse:
     - NIFTY REALTY
     - NIFTY PSU BANK
 
+dev:
+  tools:
+    enabled: ${DEV_TOOLS_ENABLED:false}
+
 app:
+  scheduler:
+    snapshot:
+      active-user-window-days: ${SNAPSHOT_ACTIVE_USER_WINDOW_DAYS:30}
+      max-backfill-days: ${SNAPSHOT_MAX_BACKFILL_DAYS:365}
   jwt:
     internal-secret: ${INTERNAL_SECRET_KEY:internal-service-super-secret-key-32chars-minimum-change-in-prod}
     secret: ${JWT_SECRET:internal-service-super-secret-key-32chars-minimum-change-in-prod}
@@ -129,11 +140,24 @@ app:
         id: ${PORTFOLIO_CONSUMER_GROUP}
         enabled: ${KAFKA_ENABLED:false}
       topic: ${PORTFOLIO_TOPIC_NAME}
+      publish-topic: ${PORTFOLIO_PUBLISH_TOPIC:am-portfolio-update}
+      stream:
+        topic: ${PORTFOLIO_STREAM_TOPIC:am-portfolio-stream}
+    login:
+      consumer:
+        id: ${LOGIN_CONSUMER_ID:am-portfolio-login-group}
+        enabled: ${LOGIN_KAFKA_ENABLED:false}
+      topic: ${LOGIN_TOPIC:active-user}
     stock:
       consumer:
         id: ${STOCK_CONSUMER_GROUP}
         enabled: ${KAFKA_ENABLED:false}
       topic: ${STOCK_TOPIC_NAME}
+    holding:
+      consumer:
+        id: ${HOLDING_CONSUMER_ID:am-portfolio-holding-group}
+        enabled: ${KAFKA_ENABLED:false}
+      topic: ${HOLDING_TOPIC:am-holding-update}
     market-index:
       consumer:
         id: ${MARKET_INDEX_CONSUMER_GROUP}

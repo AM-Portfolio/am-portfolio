@@ -99,7 +99,9 @@ public class PortfolioMapperv1 {
                 .brokerType(brokerType)
                 .symbol(equityModel.getSymbol())
                 .name(equityModel.getName())
+                .isin(equityModel.getIsin())
                 .avgBuyingPrice(equityModel.getAvgBuyingPrice())
+                .currentPrice(equityModel.getCurrentPrice())
                 .quantity(equityModel.getQuantity())
                 .build();
     }

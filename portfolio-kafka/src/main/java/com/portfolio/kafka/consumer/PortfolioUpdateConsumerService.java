@@ -13,16 +13,21 @@ import com.portfolio.model.mapper.PortfolioMapperv1;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.portfolio.kafka.publisher.PortfolioEventPublisher;
+import org.springframework.context.annotation.Lazy;
 
 @Slf4j
 @Service
+@Lazy(false)
+@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = false)
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "app.kafka.portfolio.consumer.enabled", havingValue = "true", matchIfMissing = false)
 public class PortfolioUpdateConsumerService {
 
     private final ObjectMapper objectMapper;
     private final PortfolioMapperv1 portfolioMapper;
     private final PortfolioService portfolioService;
+    private final PortfolioEventPublisher portfolioEventPublisher;
+
 
     @KafkaListener(topics = "${app.kafka.portfolio.topic}", groupId = "${app.kafka.portfolio.consumer.id}", containerFactory = "kafkaListenerContainerFactory")
     public void consume(String message, Acknowledgment acknowledgment) {
@@ -46,6 +51,19 @@ public class PortfolioUpdateConsumerService {
 
     private void processMessage(PortfolioUpdateEvent event) {
         PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
-        portfolioService.createPortfolio(portfolioModel);
+        PortfolioModelV1 saved;
+        
+        if ("TRADE".equalsIgnoreCase(event.getSource())) {
+            saved = portfolioService.updateTradePortfolio(portfolioModel);
+        } else {
+            saved = portfolioService.upsertDocumentPortfolio(portfolioModel);
+        }
+
+        if (saved != null) {
+            portfolioEventPublisher.publishPortfolioUpdate(saved);
+        } else {
+            log.warn("[Consumer] Portfolio save returned null for source='{}', portfolioId='{}'. Event will NOT be published downstream.",
+                     event.getSource(), event.getPortfolioId());
+        }
     }
 }

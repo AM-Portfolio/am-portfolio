@@ -14,10 +14,13 @@ import com.portfolio.model.market.MarketData.MarketDataBuilder;
 import com.portfolio.model.market.OhlcData;
 import com.portfolio.model.market.TimeFrame;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Utility class for converting between different market data model formats.
  * Provides conversion methods between the unified MarketData model and other models.
  */
+@Slf4j
 public class MarketDataConverter {
 
     /**
@@ -31,10 +34,21 @@ public class MarketDataConverter {
             return null;
         }
         
+        // Derive previousClose if missing (for live data, ohlc.close usually represents yesterday's close)
+        Double effectivePreviousClose = response.getPreviousClose();
+        if ((effectivePreviousClose == null || effectivePreviousClose <= 0) && response.getOhlc() != null) {
+            effectivePreviousClose = response.getOhlc().getClose();
+        }
+
+        // Avoid emitting previousClose without a usable lastPrice (prevents NPEs and -100% drops)
+        if (response.getLastPrice() <= 0) {
+            effectivePreviousClose = null;
+        }
+
         MarketDataBuilder builder = MarketData.builder()
             .instrumentToken(response.getInstrumentToken())
             .lastPrice(response.getLastPrice())
-            .previousClose(response.getPreviousClose())
+            .previousClose(effectivePreviousClose)
             .ohlc(response.getOhlc())
             .timestamp(response.getTimestamp())
             .timeFrame(response.getTimeFrame())
@@ -90,13 +104,29 @@ public class MarketDataConverter {
                 .build());
         }
         
-        return MarketData.builder()
+        MarketDataBuilder builder = MarketData.builder()
             .symbol(response.getSymbol())
             .fromDate(response.getFromDate())
             .toDate(response.getToDate())
             .timeFrame(timeFrame)
             .historical(true)
-            .dataPoints(dataPoints)
-            .build();
+            .dataPoints(dataPoints);
+
+        if (!dataPoints.isEmpty()) {
+            MarketData.MarketDataPoint latestPoint = dataPoints.get(dataPoints.size() - 1);
+            MarketData.MarketDataPoint firstPoint = dataPoints.get(0);
+            
+            builder.ohlc(latestPoint.getOhlcData());
+            if (latestPoint.getOhlcData() != null) {
+                builder.lastPrice(latestPoint.getOhlcData().getClose());
+            }
+            if (firstPoint.getOhlcData() != null && latestPoint.getOhlcData() != null && latestPoint.getOhlcData().getClose() > 0) {
+                // For historical timeframe, the "previous close" acts as the timeframe baseline
+                // Avoid emitting previousClose without a usable lastPrice
+                builder.previousClose(firstPoint.getOhlcData().getClose());
+            }
+        }
+        
+        return builder.build();
     }
 }

@@ -16,7 +16,8 @@ public class EquityHoldingsMapper {
             .industry(equityModel.getIndustry())
             .marketCap(equityModel.getMarketCap())
             .quantity(equityModel.getQuantity())
-            .investmentCost(equityModel.getAvgBuyingPrice() * equityModel.getQuantity())
+            .investmentCost(equityModel.getAvgBuyingPrice() != null && equityModel.getQuantity() != null ? equityModel.getAvgBuyingPrice() * equityModel.getQuantity() : 0.0)
+            .averageBuyingPrice(equityModel.getAvgBuyingPrice())
             .build();
     }
 }

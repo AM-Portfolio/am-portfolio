@@ -42,6 +42,7 @@ public abstract class AssetMapper<M extends AssetModel, D extends AssetDocument>
         model.setMarketData(document.getMarketData());
         model.setQuantity(document.getQuantity());
         model.setAvgBuyingPrice(document.getAvgBuyingPrice());
+        model.setCurrentPrice(document.getCurrentPrice());
         model.setCurrentValue(document.getCurrentValue());
         model.setInvestmentValue(document.getInvestmentValue());
         model.setBrokerType(document.getBrokerType());
@@ -61,6 +62,7 @@ public abstract class AssetMapper<M extends AssetModel, D extends AssetDocument>
         document.setMarketData(model.getMarketData());
         document.setQuantity(model.getQuantity());
         document.setAvgBuyingPrice(model.getAvgBuyingPrice());
+        document.setCurrentPrice(model.getCurrentPrice());
         document.setCurrentValue(model.getCurrentValue());
         document.setInvestmentValue(model.getInvestmentValue());
         document.setBrokerType(model.getBrokerType());

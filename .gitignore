@@ -93,5 +93,14 @@ dev_deploy.ps1
 # Binary dumps and build artefacts accidentally left in workspace
 pods.json
 build_err.txt
+build_output.txt
+beans.json
+beans_after.json
+bean_keys.txt
+javap.txt
 *.txt
 !**/src/**/*.txt
+
+# JDK binaries in workspace root — never committed
+jdk*/
+*.zip

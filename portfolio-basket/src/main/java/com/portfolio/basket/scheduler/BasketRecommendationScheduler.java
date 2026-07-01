@@ -20,7 +20,7 @@ public class BasketRecommendationScheduler {
     private final UserPortfolioProvider userProvider;
 
     // Run Daily at 6 PM
-    @Scheduled(cron = "0 0 18 * * ?")
+    @Scheduled(cron = "0 0 18 * * ?", zone = "Asia/Kolkata")
     public void runDailyRecommendation() {
         log.info("⏰ Starting Daily Basket Recommendation Job...");
 

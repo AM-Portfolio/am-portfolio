@@ -1,0 +1,118 @@
+{
+  "info": {
+    "name": "Portfolio Snapshot Engine",
+    "description": "API collection to test the new Historical Holdings Snapshot Engine",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Trigger End of Day Snapshot (Dev)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8072/v1/portfolios/trigger-snapshot",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8072",
+          "path": [
+            "v1",
+            "portfolios",
+            "trigger-snapshot"
+          ]
+        },
+        "description": "Triggers the snapshot generation process exactly as it would run at 4 PM. This will capture the current holdings inside the snapshot document in MongoDB."
+      },
+      "response": []
+    },
+    {
+      "name": "2. Get Total User Wealth History",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8072/v1/portfolios/history?timeFrame=1M",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8072",
+          "path": [
+            "v1",
+            "portfolios",
+            "history"
+          ],
+          "query": [
+            {
+              "key": "timeFrame",
+              "value": "1M"
+            }
+          ]
+        },
+        "description": "Retrieves the historical OHLC data for the user across all portfolios. Uses the newly captured holdings snapshot for backward-reconstruction if necessary."
+      },
+      "response": []
+    },
+    {
+      "name": "3. Get Specific Portfolio History (1W)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8072/v1/portfolios/{{portfolio_id}}/history?timeFrame=1W",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8072",
+          "path": [
+            "v1",
+            "portfolios",
+            "{{portfolio_id}}",
+            "history"
+          ],
+          "query": [
+            {
+              "key": "timeFrame",
+              "value": "1W"
+            }
+          ]
+        },
+        "description": "Retrieves historical data for a specific portfolio. Replace {{portfolio_id}} with an actual UUID."
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "jwt_token",
+      "value": "YOUR_BEARER_TOKEN_HERE",
+      "type": "string"
+    },
+    {
+      "key": "portfolio_id",
+      "value": "YOUR_PORTFOLIO_UUID_HERE",
+      "type": "string"
+    }
+  ]
+}
