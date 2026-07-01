@@ -351,6 +351,36 @@ public class MarketDataService {
                     marketDataRedisService.cacheMarketData(fetched);
                 }
             }
+            
+            // 4. Fallback for symbols that are STILL missing (e.g., after market hours)
+            List<String> stillMissing = symbols.stream().map(this::cleanSymbol)
+                .filter(s -> !result.containsKey(s) || result.get(s).getLastPrice() == null || result.get(s).getLastPrice() == 0.0)
+                .collect(Collectors.toList());
+                
+            if (!stillMissing.isEmpty()) {
+                log.info("[MarketData] OHLC returned empty for {} symbols (likely after hours). Falling back to EOD historical data.", stillMissing.size());
+                java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata"));
+                HistoricalDataRequest eodRequest = HistoricalDataRequest.builder()
+                    .symbols(String.join(",", stillMissing))
+                    .fromDate(today.minusDays(5))
+                    .toDate(today)
+                    .interval(TimeFrame.DAY.getValue())
+                    .filterType(FilterType.START_END.getValue())
+                    .instrumentType(InstrumentType.STOCK.getValue())
+                    .build();
+                Map<String, MarketData> eodData = getHistoricalData(eodRequest);
+                if (eodData != null && !eodData.isEmpty()) {
+                    // Update result with EOD data, preserving any partial live data
+                    eodData.forEach((k, v) -> {
+                        if (v.getLastPrice() != null && v.getLastPrice() > 0) {
+                            result.put(k, v);
+                        }
+                    });
+                    if (marketDataRedisService != null) {
+                        marketDataRedisService.cacheMarketData(result); // Cache the combined result
+                    }
+                }
+            }
         } catch (Exception e) {
             log.error("[MarketData] OHLC fetch failed: {}", e.getMessage());
         }
