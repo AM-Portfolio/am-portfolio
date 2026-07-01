@@ -278,8 +278,8 @@ public class MarketDataService {
 
         HistoricalDataRequest request = HistoricalDataRequest.builder()
                 .symbols(String.join(",", symbols))
-                .fromDate(fromDate)
-                .toDate(toDate)
+                .fromDate(fromDate != null ? fromDate.toString() : null)
+                .toDate(toDate != null ? toDate.toString() : null)
                 .interval(tf.getValue())
                 .instrumentType(it.getValue())
                 .filterType(ft.getValue())
