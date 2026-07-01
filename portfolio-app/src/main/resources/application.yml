@@ -184,10 +184,10 @@ market-data:
     read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:45000}
   api:
     base-url: ${MARKET_DATA_API_URL:https://am.asrax.in/market}
-    ohlc-endpoint: /v1/market-data/ohlc
-    historical-data-endpoint: /v1/market-data/historical-data
-    securities-endpoint: /v1/securities
-    nse-indices-endpoint: /v1/nse-indices
+    ohlc-endpoint: /api/v1/market-data/ohlc
+    historical-data-endpoint: /api/v1/market-data/historical-data
+    securities-endpoint: /api/v1/securities
+    nse-indices-endpoint: /api/v1/nse-indices
     read-timeout: 30000      # Must be < PortfolioCalculator.enrichHoldings() 34s blocking wait
     connection-timeout: 5000
     max-retry-attempts: 1
