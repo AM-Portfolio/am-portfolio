@@ -92,7 +92,7 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
                 allMovements.sort(Comparator.comparing(GainerLoser.StockMovement::getChangePercent).reversed());
                 
                 List<GainerLoser.StockMovement> gainers = allMovements.stream()
-                    .filter(m -> m.getChangePercent() > 0)
+                    .filter(m -> m.getChangePercent() >= 0)
                     .limit(limit)
                     .collect(Collectors.toList());
                     
