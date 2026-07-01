@@ -184,15 +184,15 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
         
         java.util.concurrent.CompletableFuture<Map<String, MarketData>> future = null;
         try {
-            log.info("Circuit Breaker [START]: Attempting to fetch Market Data for portfolio: {} with 8s timeout...", portfolioId);
+            log.info("Circuit Breaker [START]: Attempting to fetch Market Data for portfolio: {} with 15s timeout...", portfolioId);
             
             // Execute Market Data fetch in a separate thread to enforce timeout
             future = java.util.concurrent.CompletableFuture.supplyAsync(() -> 
                     AnalyticsUtils.fetchMarketData(this, portfolioSymbols, timeFrameRequest)
                 );
                 
-            // Strict 8-second Timeout
-            Map<String, MarketData> marketData = future.get(8, java.util.concurrent.TimeUnit.SECONDS);
+            // Strict 15-second Timeout
+            Map<String, MarketData> marketData = future.get(15, java.util.concurrent.TimeUnit.SECONDS);
             
             if (marketData != null && !marketData.isEmpty()) {
                 log.info("Circuit Breaker [SUCCESS]: Market data fetched in time. Executing Primary Processor (Global Timeframes).");
@@ -202,7 +202,7 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
             }
             
         } catch (java.util.concurrent.TimeoutException e) {
-            log.warn("Circuit Breaker [TRIPPED - TIMEOUT]: Market Data API took longer than 8s. Cancelling task and falling back to MongoDB 1D Snapshot for portfolio: {}", portfolioId);
+            log.warn("Circuit Breaker [TRIPPED - TIMEOUT]: Market Data API took longer than 15s. Cancelling task and falling back to MongoDB 1D Snapshot for portfolio: {}", portfolioId);
             if (future != null) {
                 future.cancel(true); // Prevent thread leak!
             }
