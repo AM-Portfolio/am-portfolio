@@ -187,6 +187,7 @@ market-data:
     ohlc-endpoint: /v1/market-data/ohlc
     historical-data-endpoint: /v1/market-data/historical-data
     securities-endpoint: /v1/securities
+    nse-indices-endpoint: /v1/nse-indices
     read-timeout: 30000      # Must be < PortfolioCalculator.enrichHoldings() 34s blocking wait
     connection-timeout: 5000
     max-retry-attempts: 1
