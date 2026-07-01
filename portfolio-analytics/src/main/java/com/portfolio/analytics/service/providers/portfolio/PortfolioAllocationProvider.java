@@ -42,17 +42,19 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
     }
     
     /**
-     * Common method to generate sector allocation with or without time frame
+     * Generate sector allocation using Hybrid Circuit Breaker.
+     * Attempts Market Data fetch for Global Timeframe. Falls back to MongoDB if timeout.
      */
     private SectorAllocation generateSectorAllocation(String portfolioId, TimeFrameRequest timeFrameRequest) {
-        log.info("Calculating sector allocations for portfolio: {} with fast current market data", portfolioId);
+        log.info("Calculating sector allocations for portfolio: {} using Hybrid Architecture", portfolioId);
         
-        return processPortfolioData(
+        return processPortfolioDataHybrid(
             portfolioId,
-            null, // Force fetching fast current market data instead of heavy historical data
+            timeFrameRequest,
             this::createEmptyResult,
+            
+            // Primary Engine: Market Data API (Supports Global Timeframes)
             (portfolio, portfolioSymbols, marketData) -> {
-        
                 // Create a map of symbol to holding quantity
                 Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
                 
@@ -60,13 +62,10 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
                 Map<String, List<String>> sectorToStocks = securityDetailsService.groupSymbolsBySector(portfolioSymbols);
                 Map<String, List<String>> industryToStocks = securityDetailsService.groupSymbolsByIndustry(portfolioSymbols);
                 
-                log.debug("Sector groups for portfolio {}: {}", portfolioId, sectorToStocks.keySet());
-                log.debug("Industry groups for portfolio {}: {}", portfolioId, industryToStocks.keySet());
-                
                 // Map industry to parent sector
                 Map<String, String> industryToSector = mapIndustriesToSectors(industryToStocks, sectorToStocks);
                 
-                // Calculate market values for each stock
+                // Calculate market values for each stock using Market Data
                 Map<String, Double> stockToMarketValue = new HashMap<>();
                 double totalPortfolioValue = calculateMarketValues(marketData, symbolToQuantity, stockToMarketValue);
                 
@@ -78,7 +77,65 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
                         industryToStocks, industryToSector, stockToMarketValue, totalPortfolioValue);
                 
                 return SectorAllocation.builder()
+                    .timestamp(Instant.now())
+                    .sectorWeights(sectorWeights)
+                    .industryWeights(industryWeights)
+                    .build();
+            },
+            
+            // Fallback Engine: MongoDB Extraction (1-Day Snapshot)
+            (portfolio) -> {
+                double totalPortfolioValue = portfolio.getEquityModels().stream()
+                    .mapToDouble(e -> e.getCurrentValue() != null ? e.getCurrentValue() : 0.0)
+                    .sum();
                     
+                if (totalPortfolioValue <= 0) {
+                    return createEmptyResult();
+                }
+
+                // Group by Sector and sum currentValue
+                Map<String, Double> sectorValues = portfolio.getEquityModels().stream()
+                    .collect(Collectors.groupingBy(
+                        e -> e.getSector() != null ? e.getSector() : "Other",
+                        Collectors.summingDouble(e -> e.getCurrentValue() != null ? e.getCurrentValue() : 0.0)
+                    ));
+                    
+                List<SectorAllocation.SectorWeight> sectorWeights = sectorValues.entrySet().stream()
+                    .map(entry -> SectorAllocation.SectorWeight.builder()
+                        .sectorName(entry.getKey())
+                        .weightPercentage((entry.getValue() / totalPortfolioValue) * 100.0)
+                        .marketCap(entry.getValue())
+                        .build())
+                    .sorted(Comparator.comparing(SectorAllocation.SectorWeight::getWeightPercentage).reversed())
+                    .collect(Collectors.toList());
+
+                // Group by Industry and sum currentValue
+                Map<String, Double> industryValues = portfolio.getEquityModels().stream()
+                    .collect(Collectors.groupingBy(
+                        e -> e.getIndustry() != null ? e.getIndustry() : "Other",
+                        Collectors.summingDouble(e -> e.getCurrentValue() != null ? e.getCurrentValue() : 0.0)
+                    ));
+                    
+                List<SectorAllocation.IndustryWeight> industryWeights = industryValues.entrySet().stream()
+                    .map(entry -> {
+                        // Find the sector for this industry by picking the first matching equity
+                        String parentSector = portfolio.getEquityModels().stream()
+                            .filter(e -> Objects.equals(e.getIndustry(), entry.getKey()))
+                            .map(e -> e.getSector() != null ? e.getSector() : "Other")
+                            .findFirst()
+                            .orElse("Other");
+                            
+                        return SectorAllocation.IndustryWeight.builder()
+                            .industryName(entry.getKey())
+                            .parentSector(parentSector)
+                            .weightPercentage((entry.getValue() / totalPortfolioValue) * 100.0)
+                            .marketCap(entry.getValue())
+                            .build();
+                    })
+                    .sorted(Comparator.comparing(SectorAllocation.IndustryWeight::getWeightPercentage).reversed())
+                    .collect(Collectors.toList());
+                    
+                return SectorAllocation.builder()
                     .timestamp(Instant.now())
                     .sectorWeights(sectorWeights)
                     .industryWeights(industryWeights)

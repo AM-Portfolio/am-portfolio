@@ -40,7 +40,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
 
     @Override
     public Heatmap generateAnalytics(AdvancedAnalyticsRequest request) {
-        log.info("Generating sector heatmap for portfolio: {}", request.getCoreIdentifiers().getPortfolioId());
+        log.info("Generating sector heatmap for portfolio: {} using Hybrid Architecture", request.getCoreIdentifiers().getPortfolioId());
         
         String portfolioId = request.getCoreIdentifiers().getPortfolioId();
         
@@ -50,12 +50,13 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             return cached.get();
         }
 
-        return processPortfolioData(
+        return processPortfolioDataHybrid(
             portfolioId,
             request.getTimeFrameRequest(),
             this::createEmptyResult,
+            
+            // Primary Engine: Market Data API (Calculates 1W/1M/1Y dynamically)
             (portfolio, portfolioSymbols, marketData) -> {
-        
                 // Create a map of symbol to holding quantity
                 Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
                 
@@ -78,12 +79,89 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                     .sectors(sectorPerformances)
                     .build();
                     
-                // Use domain method to sort sectors
                 heatmap.sortSectorsByPerformance();
                 
-                log.info("Generated heatmap with {} sectors for portfolio: {}", sectorPerformances.size(), portfolioId);
+                log.info("Generated heatmap with {} sectors using Market Data", sectorPerformances.size());
                 
-                heatmapRedisService.cacheHeatmap(heatmap, portfolioId, request.getTimeFrameRequest());
+                heatmapRedisService.cacheHeatmap(portfolioId, request.getTimeFrameRequest(), heatmap);
+                
+                return heatmap;
+            },
+            
+            // Fallback Engine: MongoDB local extraction (Instant 1-Day Snapshot)
+            (portfolio) -> {
+                double totalPortfolioValue = portfolio.getEquityModels().stream()
+                    .mapToDouble(e -> e.getCurrentValue() != null ? e.getCurrentValue() : 0.0)
+                    .sum();
+                    
+                if (totalPortfolioValue <= 0) {
+                    return createEmptyResult();
+                }
+
+                // Group by Sector
+                Map<String, List<EquityModel>> sectorGroups = portfolio.getEquityModels().stream()
+                    .collect(Collectors.groupingBy(e -> e.getSector() != null ? e.getSector() : "Other"));
+                    
+                List<Heatmap.SectorPerformance> sectors = sectorGroups.entrySet().stream()
+                    .map(entry -> {
+                        String sectorName = entry.getKey();
+                        List<EquityModel> equities = entry.getValue();
+                        
+                        double sectorValue = equities.stream()
+                            .mapToDouble(e -> e.getCurrentValue() != null ? e.getCurrentValue() : 0.0)
+                            .sum();
+                            
+                        double sectorWeight = (sectorValue / totalPortfolioValue) * 100.0;
+                        
+                        // Calculate sector performance weighted by value
+                        double weightedPerformanceSum = equities.stream()
+                            .mapToDouble(e -> {
+                                double val = e.getCurrentValue() != null ? e.getCurrentValue() : 0.0;
+                                double perf = e.getTodayProfitLossPercentage() != null ? e.getTodayProfitLossPercentage() : 0.0;
+                                return val * perf;
+                            })
+                            .sum();
+                            
+                        double sectorPerformance = sectorValue > 0 ? weightedPerformanceSum / sectorValue : 0.0;
+                        
+                        // Build stock details
+                        List<Heatmap.StockDetail> stockDetails = equities.stream()
+                            .map(e -> Heatmap.StockDetail.builder()
+                                .symbol(e.getSymbol())
+                                .name(e.getCompanyName() != null ? e.getCompanyName() : e.getName())
+                                .price(java.math.BigDecimal.valueOf(e.getCurrentPrice() != null ? e.getCurrentPrice() : 0.0))
+                                .changePercent(e.getTodayProfitLossPercentage() != null ? e.getTodayProfitLossPercentage() : 0.0)
+                                .quantity(java.math.BigDecimal.valueOf(e.getQuantity() != null ? e.getQuantity() : 0.0))
+                                .value(java.math.BigDecimal.valueOf(e.getCurrentValue() != null ? e.getCurrentValue() : 0.0))
+                                .weight(sectorValue > 0 ? ((e.getCurrentValue() != null ? e.getCurrentValue() : 0.0) / sectorValue) * 100.0 : 0.0)
+                                .color(Heatmap.deriveColorFromPerformance(e.getTodayProfitLossPercentage() != null ? e.getTodayProfitLossPercentage() : 0.0))
+                                .build())
+                            .sorted(Comparator.comparing(Heatmap.StockDetail::getValue).reversed())
+                            .collect(Collectors.toList());
+                            
+                        return Heatmap.SectorPerformance.builder()
+                            .sectorName(sectorName)
+                            .sectorCode(sectorName.toUpperCase().replaceAll("\\s+", "_"))
+                            .performance(sectorPerformance)
+                            .weightage(sectorWeight)
+                            .stockCount(equities.size())
+                            .totalValue(java.math.BigDecimal.valueOf(sectorValue))
+                            .color(Heatmap.deriveColorFromPerformance(sectorPerformance))
+                            .stocks(stockDetails)
+                            .build();
+                    })
+                    .collect(Collectors.toList());
+                    
+                Heatmap heatmap = Heatmap.builder()
+                    .portfolioId(portfolioId)
+                    .timestamp(Instant.now())
+                    .sectors(sectors)
+                    .build();
+                    
+                heatmap.sortSectorsByPerformance();
+                
+                // Cache the newly generated fallback heatmap
+                heatmapRedisService.cacheHeatmap(portfolioId, request.getTimeFrameRequest(), heatmap);
                 
                 return heatmap;
             }

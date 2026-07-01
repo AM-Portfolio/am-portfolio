@@ -157,4 +157,70 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
     protected interface PortfolioDataProcessor<R> {
         R process(PortfolioModelV1 portfolio, List<String> symbols, Map<String, MarketData> marketData);
     }
+    
+    /**
+     * Process portfolio data with a Hybrid Circuit Breaker approach.
+     * Attempts to fetch full Market Data for Global Timeframe support (8-second timeout).
+     * If it times out or fails, gracefully falls back to MongoDB local extraction.
+     */
+    protected <R> R processPortfolioDataHybrid(
+            String portfolioId,
+            TimeFrameRequest timeFrameRequest,
+            Supplier<R> emptyResultSupplier,
+            PortfolioDataProcessor<R> marketDataProcessor,
+            PortfolioDataLocalProcessor<R> fallbackLocalProcessor) {
+        
+        // Get portfolio data (Automatically cached in Redis)
+        PortfolioModelV1 portfolio = getPortfolio(portfolioId);
+        if (portfolio == null || portfolio.getEquityModels() == null || portfolio.getEquityModels().isEmpty()) {
+            log.warn("No portfolio or holdings found for ID: {}", portfolioId);
+            return emptyResultSupplier.get();
+        }
+        
+        List<String> portfolioSymbols = getPortfolioSymbols(portfolio);
+        if (portfolioSymbols.isEmpty()) {
+            return emptyResultSupplier.get();
+        }
+        
+        java.util.concurrent.CompletableFuture<Map<String, MarketData>> future = null;
+        try {
+            log.info("Circuit Breaker [START]: Attempting to fetch Market Data for portfolio: {} with 8s timeout...", portfolioId);
+            
+            // Execute Market Data fetch in a separate thread to enforce timeout
+            future = java.util.concurrent.CompletableFuture.supplyAsync(() -> 
+                    AnalyticsUtils.fetchMarketData(this, portfolioSymbols, timeFrameRequest)
+                );
+                
+            // Strict 8-second Timeout
+            Map<String, MarketData> marketData = future.get(8, java.util.concurrent.TimeUnit.SECONDS);
+            
+            if (marketData != null && !marketData.isEmpty()) {
+                log.info("Circuit Breaker [SUCCESS]: Market data fetched in time. Executing Primary Processor (Global Timeframes).");
+                return marketDataProcessor.process(portfolio, portfolioSymbols, marketData);
+            } else {
+                log.warn("Circuit Breaker [WARN]: Market data returned empty. Triggering Fallback.");
+            }
+            
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.warn("Circuit Breaker [TRIPPED - TIMEOUT]: Market Data API took longer than 8s. Cancelling task and falling back to MongoDB 1D Snapshot for portfolio: {}", portfolioId);
+            if (future != null) {
+                future.cancel(true); // Prevent thread leak!
+            }
+        } catch (Exception e) {
+            log.warn("Circuit Breaker [TRIPPED - ERROR]: Failed to fetch Market Data ({}). Falling back to MongoDB 1D Snapshot for portfolio: {}", e.getMessage(), portfolioId);
+        }
+        
+        // Fallback: Process local MongoDB data
+        log.info("Executing Fallback Local Processor (Instant MongoDB Extraction) for portfolio: {}", portfolioId);
+        return fallbackLocalProcessor.process(portfolio);
+    }
+    
+    /**
+     * Functional interface for processing portfolio data locally
+     * @param <R> The type of result to return
+     */
+    @FunctionalInterface
+    protected interface PortfolioDataLocalProcessor<R> {
+        R process(PortfolioModelV1 portfolio);
+    }
 }

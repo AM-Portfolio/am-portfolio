@@ -45,25 +45,23 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
     }
     
     /**
-     * Common implementation for generating market cap allocation analytics
-     * 
-     * @param portfolioId The portfolio ID to analyze
-     * @param timeFrameRequest Optional time frame parameters (can be null)
-     * @return Market cap allocation analytics
+     * Generate market cap allocation using Hybrid Circuit Breaker
      */
     private MarketCapAllocation generateMarketCapAllocation(String portfolioId, TimeFrameRequest timeFrameRequest) {
-        return processPortfolioData(
-            portfolioId,
-            null, // Force fetching fast current market data instead of heavy historical data
-            this::createEmptyResult,
-            (portfolio, portfolioSymbols, marketData) -> {
+        log.info("Calculating market cap allocations for portfolio: {} using Hybrid Architecture", portfolioId);
         
+        return processPortfolioDataHybrid(
+            portfolioId,
+            timeFrameRequest,
+            this::createEmptyResult,
+            
+            // Primary Engine: Market Data API
+            (portfolio, portfolioSymbols, marketData) -> {
                 // Create a map of symbol to holding quantity
                 Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
                 
                 // Use SecurityDetailsService to group symbols by market cap type
                 Map<String, List<String>> marketCapGroups = securityDetailsService.groupSymbolsByMarketType(portfolioSymbols);
-                log.info("Market cap groups for portfolio {}: {}", portfolioId, marketCapGroups.keySet());
                 
                 // Create a mapping for market cap type enum to segment name
                 Map<String, String> marketCapTypeToSegmentName = createMarketCapTypeMapping();
@@ -82,10 +80,50 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
                 List<MarketCapAllocation.CapSegment> segments = createCapSegments(
                         segmentToSymbols, stockMarketValues, totalPortfolioValue);
                 
-                log.info("Generated market cap allocation with {} segments for portfolio: {}", segments.size(), portfolioId);
-                
                 return MarketCapAllocation.builder()
-                   
+                    .timestamp(Instant.now())
+                    .segments(segments)
+                    .build();
+            },
+            
+            // Fallback Engine: MongoDB local extraction
+            (portfolio) -> {
+                double totalPortfolioValue = portfolio.getEquityModels().stream()
+                    .mapToDouble(e -> e.getCurrentValue() != null ? e.getCurrentValue() : 0.0)
+                    .sum();
+                    
+                if (totalPortfolioValue <= 0) {
+                    return createEmptyResult();
+                }
+
+                // Group by Market Cap and sum currentValue
+                Map<String, List<EquityModel>> capGroups = portfolio.getEquityModels().stream()
+                    .collect(Collectors.groupingBy(e -> e.getMarketCap() != null ? e.getMarketCap() : "Unknown"));
+                    
+                List<MarketCapAllocation.CapSegment> segments = capGroups.entrySet().stream()
+                    .map(entry -> {
+                        double segmentValue = entry.getValue().stream()
+                            .mapToDouble(e -> e.getCurrentValue() != null ? e.getCurrentValue() : 0.0)
+                            .sum();
+                            
+                        List<String> topStocks = entry.getValue().stream()
+                            .sorted(Comparator.comparing((EquityModel e) -> e.getCurrentValue() != null ? e.getCurrentValue() : 0.0).reversed())
+                            .limit(5)
+                            .map(EquityModel::getSymbol)
+                            .collect(Collectors.toList());
+                            
+                        return MarketCapAllocation.CapSegment.builder()
+                            .segmentName(entry.getKey())
+                            .weightPercentage((segmentValue / totalPortfolioValue) * 100.0)
+                            .segmentValue(segmentValue)
+                            .numberOfStocks(entry.getValue().size())
+                            .topStocks(topStocks)
+                            .build();
+                    })
+                    .sorted(Comparator.comparing(MarketCapAllocation.CapSegment::getWeightPercentage).reversed())
+                    .collect(Collectors.toList());
+                    
+                return MarketCapAllocation.builder()
                     .timestamp(Instant.now())
                     .segments(segments)
                     .build();
