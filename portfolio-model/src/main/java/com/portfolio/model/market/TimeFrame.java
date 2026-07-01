@@ -23,6 +23,7 @@ public enum TimeFrame {
         this.value = value;
     }
     
+    @com.fasterxml.jackson.annotation.JsonValue
     public String getValue() {
         return value;
     }
@@ -33,6 +34,7 @@ public enum TimeFrame {
      * @param value the string value
      * @return the corresponding TimeFrame or null if not found
      */
+    @com.fasterxml.jackson.annotation.JsonCreator
     public static TimeFrame fromValue(String value) {
         for (TimeFrame timeFrame : TimeFrame.values()) {
             if (timeFrame.getValue().equals(value)) {
