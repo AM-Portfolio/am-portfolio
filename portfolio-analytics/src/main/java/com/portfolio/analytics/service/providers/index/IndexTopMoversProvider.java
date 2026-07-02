@@ -51,11 +51,8 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
             return createEmptyResult();
         }
         
-        // Top Movers only requires daily data, ignoring global timeframe to prevent massive Market Data loads
-        com.portfolio.model.analytics.request.TimeFrameRequest dailyTimeFrame = 
-            com.portfolio.model.analytics.request.TimeFrameRequest.builder().timeFrame(com.portfolio.model.market.TimeFrame.DAY).build();
-        
-        Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, indexStockSymbols, dailyTimeFrame);
+        // Top Movers only requires live market data, ignoring global timeframe to prevent massive Market Data loads and circuit breaker timeouts
+        Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, indexStockSymbols, null);
         if (marketData.isEmpty()) {
             return createEmptyResult();
         }

@@ -33,7 +33,7 @@ public class TopMoverUtils {
         log.debug("Calculating performance metrics for {} stocks", marketData.size());
         
         marketData.forEach((symbol, data) -> {
-            if (data != null && data.getOhlc() != null) {
+            if (data != null) {
                 if (data.getPreviousClose() != null && data.getPreviousClose() > 0) {
                     double previousClose = data.getPreviousClose();
                     double lastPrice = data.getLastPrice();

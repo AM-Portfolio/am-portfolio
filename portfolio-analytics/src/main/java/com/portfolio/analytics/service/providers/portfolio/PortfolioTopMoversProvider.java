@@ -51,8 +51,8 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
         
         return processPortfolioDataHybrid(
             portfolioId,
-            // Top Movers only requires daily data, ignoring global timeframe to prevent massive Market Data loads
-            com.portfolio.model.analytics.request.TimeFrameRequest.builder().timeFrame(com.portfolio.model.market.TimeFrame.DAY).build(),
+            // Top Movers only requires live market data, ignoring global timeframe to prevent massive Market Data loads and circuit breaker timeouts
+            null,
             this::createEmptyResponse,
             
             // Primary Engine: Market Data API

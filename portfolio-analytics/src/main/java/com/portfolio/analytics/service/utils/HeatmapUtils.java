@@ -74,13 +74,13 @@ public class HeatmapUtils {
         int validStockCount = 0;
         
         for (MarketData stock : stocks) {
-            if (stock != null && stock.getOhlc() != null) {
+            if (stock != null) {
                 if (stock.getLastPrice() == null) {
                     log.debug("Skipping stock - null lastPrice in calculateSectorMetrics");
                     continue;
                 }
                 double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0) 
-                        ? stock.getPreviousClose() : stock.getOhlc().getClose();
+                        ? stock.getPreviousClose() : (stock.getOhlc() != null ? stock.getOhlc().getClose() : 0.0);
                 
                 if (previousClose > 0) {
                     // Calculate change percentage relative to previous close (acts as baseline for timeframe)
@@ -140,20 +140,20 @@ public class HeatmapUtils {
         for (int i = 0; i < sectorStocks.size(); i++) {
             MarketData stock = sectorStocks.get(i);
             double quantity = quantities.get(i);
-            // Guard against missing OHLC or lastPrice data BEFORE calculating weighted sums
-            if (stock == null || stock.getOhlc() == null || stock.getLastPrice() == null) {
-                log.warn("Skipping stock in weighted metrics - no OHLC or lastPrice data. Symbol index: {}, lastPrice: {}",
+            // Guard against missing lastPrice data BEFORE calculating weighted sums
+            if (stock == null || stock.getLastPrice() == null) {
+                log.warn("Skipping stock in weighted metrics - no lastPrice data. Symbol index: {}, lastPrice: {}",
                         i, stock != null ? stock.getLastPrice() : "null");
                 continue;
             }
             
             double value = stock.getLastPrice() * quantity;
             
-            // Only add to total value if the stock has valid OHLC data
+            // Only add to total value if the stock has valid data
             totalValue += value;
             
             double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0) 
-                    ? stock.getPreviousClose() : stock.getOhlc().getClose();
+                    ? stock.getPreviousClose() : (stock.getOhlc() != null ? stock.getOhlc().getClose() : 0.0);
             
             if (previousClose > 0) {
                 // Calculate timeframe change percentage based on previous close
