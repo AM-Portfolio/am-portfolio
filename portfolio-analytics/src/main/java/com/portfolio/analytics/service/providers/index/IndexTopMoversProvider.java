@@ -38,10 +38,15 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
     public GainerLoser generateAnalytics(String indexSymbol, AdvancedAnalyticsRequest request) {
         log.info("Getting top {} gainers and losers for index: {}", request.getFeatureConfiguration().getMoversLimit(), indexSymbol);
 
-        Integer limit = request.getFeatureConfiguration().getMoversLimit();
-        
+        Integer limit = request.getFeatureConfiguration().getMoversLimit() != null 
+                ? request.getFeatureConfiguration().getMoversLimit() 
+                : 5; // Default limit
+
         // Get index symbols and market data
-        List<String> indexStockSymbols = getIndexSymbols(indexSymbol);
+        List<String> indexStockSymbols = new ArrayList<>(getIndexSymbols(indexSymbol));
+        // Remove the index symbol itself if it's in the constituents list to prevent massive timeouts
+        indexStockSymbols.remove(indexSymbol);
+        
         if (indexStockSymbols.isEmpty()) {
             return createEmptyResult();
         }

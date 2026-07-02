@@ -14,10 +14,9 @@ services:
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=am_kafka:9092
       - MONGODB_URL=mongodb://admin:password123@host.docker.internal:27017/portfolio?authSource=admin
-      - MARKET_DATA_API_URL=http://host.docker.internal:8092
-      - ETF_API_URL=http://host.docker.internal:8022
+      - REDIS_HOSTNAME=host.docker.internal
     volumes:
-      - ./portfolio-app/target/portfolio-app-1.0-SNAPSHOT.jar:/app/app.jar
+      - ./portfolio-app/target/portfolio-app-1.0.2-SNAPSHOT.jar:/app/app.jar
     command: ["java", "-jar", "/app/app.jar"]
     networks:
       - am-net

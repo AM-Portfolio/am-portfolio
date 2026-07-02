@@ -48,7 +48,9 @@ public class IndexAllocationProvider extends AbstractIndexAnalyticsProvider<Sect
      * @return Sector allocation analytics
      */
     private SectorAllocation generateSectorAllocation(String indexSymbol, AdvancedAnalyticsRequest request) {
-        var indexStockSymbols = getIndexSymbols(indexSymbol);
+        List<String> indexStockSymbols = new ArrayList<>(getIndexSymbols(indexSymbol));
+        indexStockSymbols.remove(indexSymbol);
+        
         if (indexStockSymbols.isEmpty()) {
             log.warn("No stock symbols found for index: {}", indexSymbol);
             return createEmptyAllocation();

@@ -74,7 +74,7 @@ public class HeatmapUtils {
         int validStockCount = 0;
         
         for (MarketData stock : stocks) {
-            if (stock.getOhlc() != null) {
+            if (stock != null && stock.getOhlc() != null) {
                 if (stock.getLastPrice() == null) {
                     log.debug("Skipping stock - null lastPrice in calculateSectorMetrics");
                     continue;
@@ -141,9 +141,9 @@ public class HeatmapUtils {
             MarketData stock = sectorStocks.get(i);
             double quantity = quantities.get(i);
             // Guard against missing OHLC or lastPrice data BEFORE calculating weighted sums
-            if (stock.getOhlc() == null || stock.getLastPrice() == null) {
+            if (stock == null || stock.getOhlc() == null || stock.getLastPrice() == null) {
                 log.warn("Skipping stock in weighted metrics - no OHLC or lastPrice data. Symbol index: {}, lastPrice: {}",
-                        i, stock.getLastPrice());
+                        i, stock != null ? stock.getLastPrice() : "null");
                 continue;
             }
             
@@ -275,7 +275,7 @@ public class HeatmapUtils {
         
         // Use domain methods to calculate values
         double previousCloseVal = (data.getPreviousClose() != null && data.getPreviousClose() > 0) 
-                ? data.getPreviousClose() : data.getOhlc().getClose();
+                ? data.getPreviousClose() : (data.getOhlc() != null ? data.getOhlc().getClose() : 0.0);
         BigDecimal previousPrice = BigDecimal.valueOf(previousCloseVal);
         stockDetail.calculateChange(previousPrice)
                   .calculateChangePercent(previousPrice)

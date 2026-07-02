@@ -48,7 +48,9 @@ public class IndexHeatmapProvider extends AbstractIndexAnalyticsProvider<Heatmap
         log.info("Generating sector heatmap for index: {} with timeFrame: {}", indexSymbol, timeFrameRequest);
 
         // Get index symbols
-        List<String> indexStockSymbols = getIndexSymbols(indexSymbol);
+        List<String> indexStockSymbols = new ArrayList<>(getIndexSymbols(indexSymbol));
+        indexStockSymbols.remove(indexSymbol);
+        
         if (indexStockSymbols.isEmpty()) {
             log.warn("No stock symbols found for index: {}", indexSymbol);
             return createEmptyHeatmap();
