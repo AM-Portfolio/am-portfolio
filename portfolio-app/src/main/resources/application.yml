@@ -132,6 +132,9 @@ app:
     algorithm: ${JWT_ALGORITHM:HS256}
   kafka:
     enabled: ${KAFKA_ENABLED:false}
+    trigger-calculation:
+      consumer:
+        id: am-portfolio-trigger-calculation-group
     portfolio:
       consumer:
         id: ${PORTFOLIO_CONSUMER_GROUP}

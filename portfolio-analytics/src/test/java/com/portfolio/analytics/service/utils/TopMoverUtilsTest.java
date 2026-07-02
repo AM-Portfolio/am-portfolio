@@ -9,10 +9,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class TopMoverUtilsTest {
 
-    private MarketData md(double last, double open, double close) {
+    private MarketData md(double last, double open, double previousClose) {
         MarketData m = new MarketData();
         m.setLastPrice(last);
-        m.setOhlc(OhlcData.builder().open(open).close(close).build());
+        m.setPreviousClose(previousClose);
+        m.setOhlc(OhlcData.builder().open(open).close(previousClose).build());
         return m;
     }
 
@@ -78,7 +79,8 @@ class TopMoverUtilsTest {
                 List.of("A"), Map.of("A", md(110, 100, 105)), Map.of("A", 10.0));
         assertEquals(1, movements.size());
         assertEquals(110.0, movements.get(0).getLastPrice());
-        assertEquals(10.0, movements.get(0).getChangeAmount());
+        assertEquals(5.0, movements.get(0).getChangeAmount());
+        assertEquals(10.0, movements.get(0).getChangePercent());
     }
 
     @Test void buildTopMoversResponse_basic() {

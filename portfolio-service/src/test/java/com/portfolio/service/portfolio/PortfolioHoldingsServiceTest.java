@@ -96,7 +96,7 @@ public class PortfolioHoldingsServiceTest {
         assertThat(result).isNotNull();
         verify(portfolioCalculator, times(1)).enrichHoldings(holdings);
         verify(portfolioCalculator, times(1)).calculateWeights(holdings);
-        verify(portfolioHoldingsRedisService, times(1)).cachePortfolioHoldings(mappedHoldings, userId, interval);
+        verify(portfolioHoldingsRedisService, times(1)).cachePortfolioHoldings(mappedHoldings, userId, interval, null);
     }
 
     @Test
@@ -121,7 +121,7 @@ public class PortfolioHoldingsServiceTest {
         assertThat(result).isNotNull();
         verify(portfolioHoldingsRedisService, never()).getLatestHoldings(anyString(), any());
         verify(portfolioCalculator, never()).enrichHoldings(anyList());
-        verify(portfolioHoldingsRedisService, never()).cachePortfolioHoldings(any(), anyString(), any());
+        verify(portfolioHoldingsRedisService, never()).cachePortfolioHoldings(any(), anyString(), any(), any());
     }
 
     @Test

@@ -146,7 +146,8 @@ public class BasketEngineServiceTest {
         etfHoldings.add(etfHolding);
         etfData.setHoldings(etfHoldings);
 
-        when(etfApiClient.fetchEtfHoldings("IE00B53SZB19")).thenReturn(etfData);
+        when(etfApiClient.fetchEtfHoldingsBatch(anyList())).thenReturn(Map.of("IE00B53SZB19", etfData));
+        doNothing().when(etfApiClient).enrichHoldings(anyList());
 
         List<BasketOpportunity> result = basketEngineService.findOpportunities(userHoldings, "IE00B53SZB19,");
 
