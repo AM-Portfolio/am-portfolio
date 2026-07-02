@@ -126,6 +126,7 @@ public class PortfolioCalculationService {
                 .isin(holding.getIsin())
                 .symbol(holding.getSymbol())
                 .name(holding.getName())
+                .companyName(holding.getName())
                 .quantity(holding.getQuantity())
                 .avgBuyingPrice(holding.getAverageBuyingPrice())
                 .currentPrice(holding.getCurrentPrice())

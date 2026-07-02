@@ -143,6 +143,15 @@ public class PortfolioCalculator {
                     holding.setMarketCap(match.getMarketCapType());
                 }
             }
+            if (match.getCompanyName() != null) {
+                holding.setName(match.getCompanyName());
+            }
+            if (match.getSector() != null) {
+                holding.setSector(match.getSector());
+            }
+            if (match.getIndustry() != null) {
+                holding.setIndustry(match.getIndustry());
+            }
         }
 
         MarketData marketData = marketDataMap.get(symbol);
