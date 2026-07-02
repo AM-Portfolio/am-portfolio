@@ -354,7 +354,10 @@ public class MarketDataService {
             
             // 4. Fallback for symbols that are STILL missing (e.g., after market hours)
             List<String> stillMissing = symbols.stream().map(this::cleanSymbol)
-                .filter(s -> !result.containsKey(s) || result.get(s).getLastPrice() == null || result.get(s).getLastPrice() == 0.0)
+                .filter(s -> {
+                    MarketData data = result.get(s);
+                    return data == null || data.getLastPrice() == null || data.getLastPrice() == 0.0;
+                })
                 .collect(Collectors.toList());
                 
             if (!stillMissing.isEmpty()) {
@@ -373,7 +376,7 @@ public class MarketDataService {
                     if (eodData != null && !eodData.isEmpty()) {
                         // Update result with EOD data, preserving any partial live data
                         eodData.forEach((k, v) -> {
-                            if (v.getLastPrice() != null && v.getLastPrice() > 0) {
+                            if (v != null && v.getLastPrice() != null && v.getLastPrice() > 0) {
                                 result.put(k, v);
                             }
                         });
