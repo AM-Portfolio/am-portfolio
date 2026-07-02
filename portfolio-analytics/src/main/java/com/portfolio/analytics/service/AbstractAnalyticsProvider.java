@@ -95,18 +95,21 @@ public abstract class AbstractAnalyticsProvider<T, I> {
             return marketDataService.getMarketData(symbols);
         }
         
+        // Resolve potentially null dates using the TimeFrame
+        TimeFrameRequest resolvedTf = resolveDates(timeFrameRequest);
+        
         log.info("Fetching historical data for {} symbols with time frame: {} to {}, interval: {}", 
-                symbols.size(), timeFrameRequest.getFromDate(), timeFrameRequest.getToDate(), 
-                timeFrameRequest.getTimeFrame());
+                symbols.size(), resolvedTf.getFromDate(), resolvedTf.getToDate(), 
+                resolvedTf.getTimeFrame());
         
         try {
             // Create HistoricalDataRequest from TimeFrameRequest
             HistoricalDataRequest request = HistoricalDataRequest.builder()
                     .symbols(String.join(",", symbols))
-                    .fromDate(timeFrameRequest.getFromDate() != null ? timeFrameRequest.getFromDate().toString() : null)
-                    .toDate(timeFrameRequest.getToDate() != null ? timeFrameRequest.getToDate().toString() : null)
+                    .fromDate(resolvedTf.getFromDate() != null ? resolvedTf.getFromDate().toString() : null)
+                    .toDate(resolvedTf.getToDate() != null ? resolvedTf.getToDate().toString() : null)
                     .filterType(FilterType.START_END.getValue())
-                    .instrumentType(InstrumentType.STOCK.getValue())
+                    .instrumentType(InstrumentType.EQ.getValue())
                     .continuous(false)
                     .interval(timeFrameRequest.getTimeFrame().getValue())
                     .build();
@@ -121,5 +124,31 @@ public abstract class AbstractAnalyticsProvider<T, I> {
             log.error("Error fetching historical data: {}", e.getMessage(), e);
             return Collections.emptyMap();
         }
+    }
+
+    /**
+     * Helper method to calculate fromDate and toDate from timeFrame if they are null
+     */
+    private TimeFrameRequest resolveDates(TimeFrameRequest tfr) {
+        if (tfr == null || tfr.getTimeFrame() == null) return tfr;
+        if (tfr.getFromDate() != null && tfr.getToDate() != null) return tfr; // already set
+        
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+        LocalDate from;
+        switch (tfr.getTimeFrame()) {
+            case MINUTE: case THREE_MIN: case FIVE_MIN: 
+            case TEN_MIN: case FIFTEEN_MIN: case THIRTY_MIN:
+            case HOUR: case FOUR_HOUR:
+            case DAY:   from = today.minusDays(5); break;   // 5-day window for intraday/daily
+            case WEEK:  from = today.minusWeeks(1); break;
+            case MONTH: from = today.minusMonths(1); break;
+            case YEAR:  from = today.minusYears(1); break;
+            default:    from = today.minusDays(7); break;
+        }
+        return TimeFrameRequest.builder()
+            .fromDate(from)
+            .toDate(today)
+            .timeFrame(tfr.getTimeFrame())
+            .build();
     }
 }

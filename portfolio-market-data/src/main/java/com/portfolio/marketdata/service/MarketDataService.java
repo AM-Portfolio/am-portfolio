@@ -366,7 +366,7 @@ public class MarketDataService {
                     .toDate(today.toString())
                     .interval(TimeFrame.DAY.getValue())
                     .filterType(FilterType.START_END.getValue())
-                    .instrumentType(InstrumentType.STOCK.getValue())
+                    .instrumentType(InstrumentType.EQ.getValue())
                     .build();
                 try {
                     Map<String, MarketData> eodData = getHistoricalData(eodRequest);
