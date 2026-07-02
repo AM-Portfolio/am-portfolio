@@ -13,7 +13,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Provider for portfolio top movers (gainers and losers) analytics
@@ -46,70 +45,20 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
         int limit = moversLimit != null ? moversLimit : 
                     (request.getPagination().isReturnAllData() ? DEFAULT_LIMIT : request.getPagination().getSize());
         
-        log.info("Generating top {} movers for portfolio {} using Hybrid Architecture", 
+        log.info("Generating top {} movers for portfolio {} with time frame, pagination, and feature configuration", 
                 limit, portfolioId);
         
-        return processPortfolioDataHybrid(
+        // Use the common portfolio data processing method
+        return processPortfolioData(
             portfolioId,
-            // Top Movers only requires live market data, ignoring global timeframe to prevent massive Market Data loads and circuit breaker timeouts
-            null,
+            request.getTimeFrameRequest(),
             this::createEmptyResponse,
-            
-            // Primary Engine: Market Data API
             (portfolio, portfolioSymbols, marketData) -> {
                 // Get sector information for symbols
                 Map<String, String> symbolSectors = securityDetailsService.getSymbolMapSectors(portfolioSymbols);
                 
                 // Calculate top movers using the determined limit and include sector information
-                return com.portfolio.analytics.service.utils.TopMoverUtils.buildTopMoversResponse(marketData, limit, portfolioId, true, symbolSectors);
-            },
-            
-            // Fallback Engine: MongoDB local extraction
-            (portfolio) -> {
-                double totalValue = portfolio.getEquityModels().stream()
-                    .mapToDouble(e -> e.getCurrentValue() != null ? e.getCurrentValue() : 0.0)
-                    .sum();
-                    
-                List<GainerLoser.StockMovement> allMovements = portfolio.getEquityModels().stream()
-                    .map(e -> {
-                        double currentValue = e.getCurrentValue() != null ? e.getCurrentValue() : 0.0;
-                        double weight = totalValue > 0 ? (currentValue / totalValue) * 100.0 : 0.0;
-                        
-                        return GainerLoser.StockMovement.builder()
-                            .symbol(e.getSymbol())
-                            .companyName(e.getCompanyName() != null ? e.getCompanyName() : e.getName())
-                            .lastPrice(e.getCurrentPrice() != null ? e.getCurrentPrice() : 0.0)
-                            .changeAmount(e.getTodayProfitLoss() != null ? e.getTodayProfitLoss() : 0.0)
-                            .changePercent(e.getTodayProfitLossPercentage() != null ? e.getTodayProfitLossPercentage() : 0.0)
-                            .sector(e.getSector() != null ? e.getSector() : "Other")
-                            .quantity(e.getQuantity() != null ? e.getQuantity() : 0.0)
-                            .marketValue(currentValue)
-                            .weightPercentage(weight)
-                            .build();
-                    })
-                    .collect(Collectors.toList());
-                    
-                // Sort by changePercent descending
-                allMovements.sort(Comparator.comparing(GainerLoser.StockMovement::getChangePercent).reversed());
-                
-                List<GainerLoser.StockMovement> gainers = allMovements.stream()
-                    .filter(m -> m.getChangePercent() >= 0)
-                    .limit(limit)
-                    .collect(Collectors.toList());
-                    
-                List<GainerLoser.StockMovement> losers = allMovements.stream()
-                    .filter(m -> m.getChangePercent() < 0)
-                    // Take from the end of the list (most negative)
-                    .sorted(Comparator.comparing(GainerLoser.StockMovement::getChangePercent))
-                    .limit(limit)
-                    .collect(Collectors.toList());
-                    
-                return GainerLoser.builder()
-                    .timestamp(Instant.now())
-                    .topGainers(gainers)
-                    .topLosers(losers)
-                    .sectorMovements(Collections.emptyList()) // Can be populated if needed
-                    .build();
+                return TopMoverUtils.buildTopMoversResponse(marketData, limit, portfolioId, true, symbolSectors);
             }
         );
     }
