@@ -39,7 +39,7 @@ public abstract class AbstractIndexAnalyticsProvider<T> extends AbstractAnalytic
     public T generateAnalytics(String indexSymbol, AdvancedAnalyticsRequest request) {
         log.info("Generating {} analytics for index {} with time frame, pagination, and feature configuration", 
                 getType(), indexSymbol);
-        return generateAnalytics(indexSymbol, request);
+        return generateAnalytics(request);
     }
     
     /**
