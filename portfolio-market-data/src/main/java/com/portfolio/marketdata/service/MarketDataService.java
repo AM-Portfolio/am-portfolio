@@ -351,45 +351,51 @@ public class MarketDataService {
                     marketDataRedisService.cacheMarketData(fetched);
                 }
             }
-            
-            // 4. Fallback for symbols that are STILL missing (e.g., after market hours)
-            List<String> stillMissing = symbols.stream().map(this::cleanSymbol)
-                .filter(s -> {
-                    MarketData data = result.get(s);
-                    return data == null || data.getLastPrice() == null || data.getLastPrice() == 0.0;
-                })
-                .collect(Collectors.toList());
-                
-            if (!stillMissing.isEmpty()) {
-                log.info("[MarketData] OHLC returned empty for {} symbols (likely after hours). Falling back to EOD historical data.", stillMissing.size());
-                java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata"));
-                HistoricalDataRequest eodRequest = HistoricalDataRequest.builder()
-                    .symbols(String.join(",", stillMissing))
-                    .fromDate(today.minusDays(5).toString())
-                    .toDate(today.toString())
-                    .interval(TimeFrame.DAY.getValue())
-                    .filterType(FilterType.START_END.getValue())
-                    .instrumentType(InstrumentType.EQ.getValue())
-                    .build();
-                try {
-                    Map<String, MarketData> eodData = getHistoricalData(eodRequest);
-                    if (eodData != null && !eodData.isEmpty()) {
-                        // Update result with EOD data, preserving any partial live data
-                        eodData.forEach((k, v) -> {
-                            if (v != null && v.getLastPrice() != null && v.getLastPrice() > 0) {
-                                result.put(k, v);
-                            }
-                        });
-                        if (marketDataRedisService != null) {
-                            marketDataRedisService.cacheMarketData(result); // Cache the combined result
-                        }
-                    }
-                } catch (Exception ex) {
-                    log.warn("[MarketData] Failed to fetch EOD historical fallback for missing symbols: {}", ex.getMessage());
-                }
-            }
         } catch (Exception e) {
             log.error("[MarketData] OHLC fetch failed: {}", e.getMessage());
+        }
+
+        // 4. Fallback for symbols that are STILL missing (e.g., after market hours or OHLC timeout)
+        List<String> stillMissing = symbols.stream().map(this::cleanSymbol)
+            .filter(s -> {
+                MarketData data = result.get(s);
+                return data == null || data.getLastPrice() == null || data.getLastPrice() == 0.0;
+            })
+            .collect(Collectors.toList());
+            
+        if (!stillMissing.isEmpty()) {
+            log.info("[MarketData] OHLC returned empty for {} symbols (likely after hours). Falling back to EOD historical data.", stillMissing.size());
+            java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata"));
+            HistoricalDataRequest eodRequest = HistoricalDataRequest.builder()
+                .symbols(String.join(",", stillMissing))
+                .fromDate(today.minusDays(5).toString())
+                .toDate(today.toString())
+                .interval(TimeFrame.DAY.getValue())
+                .filterType(FilterType.START_END.getValue())
+                .instrumentType(InstrumentType.EQ.getValue())
+                .build();
+            try {
+                // Apply a strict 15-second timeout to prevent unbounded hanging
+                Map<String, MarketData> eodData = java.util.concurrent.CompletableFuture.supplyAsync(() -> getHistoricalData(eodRequest))
+                    .get(15, java.util.concurrent.TimeUnit.SECONDS);
+                    
+                if (eodData != null && !eodData.isEmpty()) {
+                    // Update result with EOD data, preserving any partial live data
+                    eodData.forEach((k, v) -> {
+                        if (v != null && v.getLastPrice() != null && v.getLastPrice() > 0) {
+                            // Normalize the key in case the API returns prefixed symbols (e.g. NSE:RELIANCE)
+                            result.put(cleanSymbol(k), v);
+                        }
+                    });
+                    if (marketDataRedisService != null) {
+                        marketDataRedisService.cacheMarketData(result); // Cache the combined result
+                    }
+                }
+            } catch (java.util.concurrent.TimeoutException ex) {
+                log.warn("[MarketData] EOD historical fallback timed out after 15s");
+            } catch (Exception ex) {
+                log.warn("[MarketData] Failed to fetch EOD historical fallback for missing symbols: {}", ex.getMessage());
+            }
         }
 
         log.info("[MarketData] Result: {}/{} symbols returned.", result.size(), symbols.size());

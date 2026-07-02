@@ -160,8 +160,8 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                     
                 heatmap.sortSectorsByPerformance();
                 
-                // Cache the newly generated fallback heatmap
-                heatmapRedisService.cacheHeatmap(heatmap, portfolioId, request.getTimeFrameRequest());
+                // DO NOT cache the newly generated fallback heatmap so we don't pollute the cache for 1W/1M requests
+                // heatmapRedisService.cacheHeatmap(heatmap, portfolioId, request.getTimeFrameRequest());
                 
                 return heatmap;
             }

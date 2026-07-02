@@ -120,7 +120,7 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
                     .map(entry -> {
                         // Find the sector for this industry by picking the first matching equity
                         String parentSector = portfolio.getEquityModels().stream()
-                            .filter(e -> Objects.equals(e.getIndustry(), entry.getKey()))
+                            .filter(e -> Objects.equals(e.getIndustry() != null ? e.getIndustry() : "Other", entry.getKey()))
                             .map(e -> e.getSector() != null ? e.getSector() : "Other")
                             .findFirst()
                             .orElse("Other");
