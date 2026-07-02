@@ -11,7 +11,6 @@ import lombok.experimental.SuperBuilder;
  * with timeframe support.
  */
 @Data
-@NoArgsConstructor
 @AllArgsConstructor
 @EqualsAndHashCode(callSuper = true)
 @SuperBuilder
