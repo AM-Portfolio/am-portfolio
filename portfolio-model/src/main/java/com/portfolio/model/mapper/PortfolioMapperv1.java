@@ -35,6 +35,52 @@ public class PortfolioMapperv1 {
         return portfolioModel;
     }
 
+    public PortfolioModelV1 toPortfolioModelV1(com.portfolio.model.events.trade.TradePortfolioSyncEvent tradeEvent) {
+        String action = null;
+        List<EquityModel> equityModels = new ArrayList<>();
+        if (tradeEvent.getEquities() != null && !tradeEvent.getEquities().isEmpty()) {
+            action = tradeEvent.getEquities().get(0).getAction();
+            equityModels = tradeEvent.getEquities().stream().map(e -> {
+                EquityModel em = new EquityModel();
+                em.setSymbol(e.getSymbol());
+                em.setIsin(e.getIsin());
+                // In am-portfolio, the asset type might need mapping, but setting it safely
+                em.setAssetType(AssetType.EQUITY);
+                
+                // Map quantities based on BUY/SELL
+                if ("SELL".equalsIgnoreCase(e.getAction())) {
+                    em.setQuantity(e.getSellQuantity() != null ? e.getSellQuantity().doubleValue() : 0.0);
+                    em.setAvgBuyingPrice(e.getSellPrice() != null ? e.getSellPrice().doubleValue() : 0.0);
+                } else {
+                    em.setQuantity(e.getQuantity() != null ? e.getQuantity().doubleValue() : 0.0);
+                    em.setAvgBuyingPrice(e.getAvgBuyingPrice() != null ? e.getAvgBuyingPrice().doubleValue() : 0.0);
+                }
+                return em;
+            }).collect(Collectors.toList());
+        }
+
+        BrokerType brokerType = null;
+        if (tradeEvent.getBrokerType() != null) {
+            try {
+                brokerType = BrokerType.valueOf(tradeEvent.getBrokerType().toUpperCase());
+            } catch (Exception ignored) {}
+        }
+
+        return PortfolioModelV1.builder()
+                .name(tradeEvent.getId()) // Name holds the portfolioId (which maps to Trade Event ID)
+                .owner(tradeEvent.getUserId())
+                .brokerType(brokerType)
+                .fundType(FundType.DEFAULT)
+                .status("Active")
+                .createdBy(tradeEvent.getUserId())
+                .equityModels(equityModels)
+                .assetCount(calculateAssetCount(equityModels))
+                .totalValue(calculateTotalValue(equityModels))
+                .version(0L)
+                .lastTradeAction(action)
+                .build();
+    }
+
     public BrokerPortfolioSummary toPortfolioModelV1(PortfolioModelV1 portfolio) {
 
         BrokerPortfolioSummary portfolioModel = BrokerPortfolioSummary.builder()

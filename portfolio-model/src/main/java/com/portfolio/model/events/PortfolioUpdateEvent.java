@@ -28,6 +28,7 @@ public class PortfolioUpdateEvent {
     private String source; // "TRADE" or "DOCUMENT"
     private String userId;
     private String portfolioId;
+    private String name;
 
     // Core Data
     private List<EquityModel> equities;

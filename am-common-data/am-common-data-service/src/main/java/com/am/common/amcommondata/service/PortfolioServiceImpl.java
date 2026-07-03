@@ -44,9 +44,27 @@ public class PortfolioServiceImpl implements PortfolioService {
             String portfolioId = portfolioModel.getName();
             PortfolioDocument existing = portfolioDocumentRepository.findById(portfolioId).orElse(null);
             
-            if (existing != null) {
-                // Smart holding calculation logic
-                String tradeAction = portfolioModel.getLastTradeAction();
+
+            
+            if (existing == null) {
+                existing = new PortfolioDocument();
+                existing.setId(portfolioId);
+                existing.setOwner(portfolioModel.getOwner());
+                existing.setBrokerType(portfolioModel.getBrokerType());
+                existing.setEquities(new java.util.ArrayList<>());
+                existing.setStatus(com.am.common.amcommondata.model.enums.DocumentStatus.ACTIVE);
+                
+                com.am.common.amcommondata.document.common.AuditMetadata audit = new com.am.common.amcommondata.document.common.AuditMetadata();
+                audit.setCreatedBy(portfolioModel.getOwner());
+                audit.setCreatedAt(java.time.LocalDateTime.now());
+                audit.setUpdatedAt(java.time.LocalDateTime.now());
+                existing.setAudit(audit);
+                
+                existing.setName("Auto-created " + portfolioModel.getBrokerType());
+            }
+
+            // Smart holding calculation logic
+            String tradeAction = portfolioModel.getLastTradeAction();
                 List<com.am.common.amcommondata.document.asset.equity.EquityDocument> incomingEquities = portfolioMapper.toDocument(portfolioModel).getEquities();
                 
                 List<com.am.common.amcommondata.document.asset.equity.EquityDocument> existingEquities = existing.getEquities();
@@ -59,7 +77,8 @@ public class PortfolioServiceImpl implements PortfolioService {
                         String isin = incoming.getIsin();
                         
                         java.util.Optional<com.am.common.amcommondata.document.asset.equity.EquityDocument> matchOpt = existingEquities.stream()
-                            .filter(e -> e.getIsin() != null && e.getIsin().equals(isin))
+                            .filter(e -> (e.getIsin() != null && isin != null && e.getIsin().equals(isin)) 
+                                    || (e.getSymbol() != null && incoming.getSymbol() != null && e.getSymbol().equals(incoming.getSymbol())))
                             .findFirst();
 
                         if ("BUY".equalsIgnoreCase(tradeAction)) {
@@ -116,7 +135,6 @@ public class PortfolioServiceImpl implements PortfolioService {
                 existing.setTotalValue(totalValue);
                 
                 return portfolioMapper.toModel(portfolioDocumentRepository.save(existing));
-            }
         }
         return null;
     }

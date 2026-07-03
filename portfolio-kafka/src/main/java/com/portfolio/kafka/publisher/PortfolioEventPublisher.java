@@ -32,6 +32,7 @@ public class PortfolioEventPublisher {
                 .id(savedPortfolio.getId() != null ? savedPortfolio.getId() : UUID.randomUUID())
                 .userId(savedPortfolio.getOwner())
                 .portfolioId(savedPortfolio.getId() != null ? savedPortfolio.getId().toString() : null)
+                .name(savedPortfolio.getName())
                 .brokerType(savedPortfolio.getBrokerType())
                 .source("PORTFOLIO_RESOLVED")
                 .equities(savedPortfolio.getEquityModels())

@@ -15,6 +15,7 @@ import com.am.common.amcommondata.service.PortfolioService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.portfolio.kafka.publisher.PortfolioEventPublisher;
 import org.springframework.context.annotation.Lazy;
+import com.portfolio.redis.service.PortfolioHoldingsRedisService;
 
 @Slf4j
 @Service
@@ -27,6 +28,7 @@ public class PortfolioUpdateConsumerService {
     private final PortfolioMapperv1 portfolioMapper;
     private final PortfolioService portfolioService;
     private final PortfolioEventPublisher portfolioEventPublisher;
+    private final PortfolioHoldingsRedisService portfolioHoldingsRedisService;
 
 
     @KafkaListener(topics = "${app.kafka.portfolio.topic}", groupId = "${app.kafka.portfolio.consumer.id}", containerFactory = "kafkaListenerContainerFactory")
@@ -34,12 +36,22 @@ public class PortfolioUpdateConsumerService {
         try {
             log.info("Received message: {}", message);
 
-            // Convert JSON string to PortfolioUpdateEvent
-            PortfolioUpdateEvent event = objectMapper.readValue(message, PortfolioUpdateEvent.class);
-            log.info("Converted to event: {}", event);
-
-            // Process the event
-            processMessage(event);
+            com.fasterxml.jackson.databind.JsonNode rootNode = objectMapper.readTree(message);
+            
+            // EDGE CASE FIX: We check for 'portfolioId' instead of 'source' 
+            // because 'portfolioId' is unique to the Document parser's event.
+            // If Trade Management ever adds a 'source' field in the future, this won't break.
+            if (rootNode.has("portfolioId")) {
+                // Parse as PortfolioUpdateEvent (e.g. from Document Parser)
+                PortfolioUpdateEvent event = objectMapper.treeToValue(rootNode, PortfolioUpdateEvent.class);
+                log.info("Converted to PortfolioUpdateEvent: {}", event);
+                processDocumentMessage(event);
+            } else {
+                // Parse as TradePortfolioSyncEvent (from Trade Management)
+                com.portfolio.model.events.trade.TradePortfolioSyncEvent event = objectMapper.treeToValue(rootNode, com.portfolio.model.events.trade.TradePortfolioSyncEvent.class);
+                log.info("Converted to TradePortfolioSyncEvent: {}", event);
+                processTradeMessage(event);
+            }
 
             // If processing was successful, acknowledge the message
             acknowledgment.acknowledge();
@@ -49,21 +61,30 @@ public class PortfolioUpdateConsumerService {
         }
     }
 
-    private void processMessage(PortfolioUpdateEvent event) {
+    private void processDocumentMessage(PortfolioUpdateEvent event) {
         PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
-        PortfolioModelV1 saved;
-        
-        if ("TRADE".equalsIgnoreCase(event.getSource())) {
-            saved = portfolioService.updateTradePortfolio(portfolioModel);
-        } else {
-            saved = portfolioService.upsertDocumentPortfolio(portfolioModel);
+        PortfolioModelV1 saved = portfolioService.upsertDocumentPortfolio(portfolioModel);
+        if (saved != null && saved.getOwner() != null) {
+            portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), saved.getId() != null ? saved.getId().toString() : null);
         }
+        publishUpdate(saved, event.getSource(), event.getPortfolioId());
+    }
 
+    private void processTradeMessage(com.portfolio.model.events.trade.TradePortfolioSyncEvent event) {
+        PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
+        PortfolioModelV1 saved = portfolioService.updateTradePortfolio(portfolioModel);
+        if (saved != null && saved.getOwner() != null) {
+            portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), saved.getId() != null ? saved.getId().toString() : null);
+        }
+        publishUpdate(saved, "TRADE", event.getId());
+    }
+
+    private void publishUpdate(PortfolioModelV1 saved, String source, String originalId) {
         if (saved != null) {
             portfolioEventPublisher.publishPortfolioUpdate(saved);
         } else {
             log.warn("[Consumer] Portfolio save returned null for source='{}', portfolioId='{}'. Event will NOT be published downstream.",
-                     event.getSource(), event.getPortfolioId());
+                     source, originalId);
         }
     }
 }
