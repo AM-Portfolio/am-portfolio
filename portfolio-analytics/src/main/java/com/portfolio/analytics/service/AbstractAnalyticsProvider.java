@@ -64,7 +64,9 @@ public abstract class AbstractAnalyticsProvider<T, I> {
         
         log.info("Fetching market data for {} symbols", symbols.size());
         try {
-            Map<String, MarketData> marketData = marketDataService.getOhlcData(symbols, false);
+            // Use the smart cache-first method (Redis -> OHLC fallback -> EOD fallback)
+            // This is fast (~1ms on cache hit, max 15s on cold cache with fallback)
+            Map<String, MarketData> marketData = marketDataService.getMarketData(symbols);
             if (marketData == null) {
                 log.warn("Market data service returned null response");
                 return Collections.emptyMap();
