@@ -40,11 +40,15 @@ public class MarketDataService {
     @org.springframework.lang.Nullable
     private final com.portfolio.redis.service.PortfolioMarketDataRedisService marketDataRedisService;
 
+    private final java.util.concurrent.Executor taskExecutor;
+
     public MarketDataService(
             MarketDataApiClient marketDataApiClient,
-            @org.springframework.lang.Nullable com.portfolio.redis.service.PortfolioMarketDataRedisService marketDataRedisService) {
+            @org.springframework.lang.Nullable com.portfolio.redis.service.PortfolioMarketDataRedisService marketDataRedisService,
+            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
         this.marketDataApiClient = marketDataApiClient;
         this.marketDataRedisService = marketDataRedisService;
+        this.taskExecutor = taskExecutor;
     }
 
     /**
@@ -187,7 +191,7 @@ public class MarketDataService {
                     log.warn("[OHLC chunk] Failed for chunk of {}: {}", chunk.size(), e.getMessage());
                     return Collections.<String, MarketData>emptyMap();
                 }
-            }))
+            }, taskExecutor))
             .collect(Collectors.toList());
 
         Map<String, MarketData> merged = new java.util.HashMap<>();
@@ -376,7 +380,7 @@ public class MarketDataService {
                 .build();
             try {
                 // Apply a strict 15-second timeout to prevent unbounded hanging
-                Map<String, MarketData> eodData = java.util.concurrent.CompletableFuture.supplyAsync(() -> getHistoricalData(eodRequest))
+                Map<String, MarketData> eodData = java.util.concurrent.CompletableFuture.supplyAsync(() -> getHistoricalData(eodRequest), taskExecutor)
                     .get(15, java.util.concurrent.TimeUnit.SECONDS);
                     
                 if (eodData != null && !eodData.isEmpty()) {
