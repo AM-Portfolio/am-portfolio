@@ -17,7 +17,7 @@ public class PortfolioEventPublisher {
     @Autowired(required = false)
     private KafkaProducerService kafkaProducerService;
 
-    public void publishPortfolioUpdate(PortfolioModelV1 savedPortfolio) {
+    public void publishPortfolioUpdate(PortfolioModelV1 savedPortfolio, String source) {
         if (kafkaProducerService == null) {
             log.debug("Kafka disabled - skipping portfolio update publish for user: {}",
                       savedPortfolio != null ? savedPortfolio.getOwner() : "null");
@@ -32,15 +32,16 @@ public class PortfolioEventPublisher {
                 .id(savedPortfolio.getId() != null ? savedPortfolio.getId() : UUID.randomUUID())
                 .userId(savedPortfolio.getOwner())
                 .portfolioId(savedPortfolio.getId() != null ? savedPortfolio.getId().toString() : null)
+                .name(savedPortfolio.getName())
                 .brokerType(savedPortfolio.getBrokerType())
-                .source("PORTFOLIO_RESOLVED")
+                .source(source != null ? source : "PORTFOLIO_RESOLVED")
                 .equities(savedPortfolio.getEquityModels())
                 .totalValue(savedPortfolio.getTotalValue())
                 .timestamp(LocalDateTime.now())
                 .build();
 
         kafkaProducerService.sendMessage(outboundEvent, null);
-        log.info("Published resolved portfolio to outbound topic for user: {}, broker: {}",
-                 savedPortfolio.getOwner(), savedPortfolio.getBrokerType());
+        log.info("Published resolved portfolio to outbound topic for user: {}, broker: {}, source: {}",
+                 savedPortfolio.getOwner(), savedPortfolio.getBrokerType(), source);
     }
 }
