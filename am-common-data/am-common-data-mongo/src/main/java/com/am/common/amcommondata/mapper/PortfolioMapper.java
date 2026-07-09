@@ -60,7 +60,7 @@ public class PortfolioMapper {
         }
 
         PortfolioDocument document = PortfolioDocument.builder()
-                .id(model.getId().toString())
+                .id(model.getId() != null ? model.getId().toString() : UUID.randomUUID().toString())
                 .name(model.getName())
                 .description(model.getDescription())
                 .owner(model.getOwner())

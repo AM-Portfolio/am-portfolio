@@ -35,6 +35,8 @@ public class AsyncConfig {
         executor.setThreadNamePrefix("PortfolioAsync-");
         // Propagate traceId/spanId/correlationId across async thread boundaries
         executor.setTaskDecorator(new MdcTaskDecorator());
+        // If queue is full, run in caller's thread instead of throwing exception
+        executor.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
         executor.initialize();
         return executor;
     }

@@ -85,4 +85,22 @@ public class PortfolioHoldingsRedisService {
         String portPart = (portfolioId != null && !portfolioId.trim().isEmpty()) ? portfolioId : "all";
         return portfolioKeyPrefix + userId + ":" + portPart + ":" + intervalCode;
     }
+
+    public void evictPortfolioHoldings(String userId, String portfolioId) {
+        try {
+            // Need to clear all intervals for this portfolio
+            for (TimeInterval interval : TimeInterval.values()) {
+                String key = buildKey(userId, interval, portfolioId);
+                portfolioHoldingsRedisTemplate.delete(key);
+                log.debug("Evicted portfolio holdings cache for key: {}", key);
+                
+                // Also clear the "all" portfolios cache since it includes this one
+                String allKey = buildKey(userId, interval, null);
+                portfolioHoldingsRedisTemplate.delete(allKey);
+                log.debug("Evicted 'all' portfolio holdings cache for key: {}", allKey);
+            }
+        } catch (Exception e) {
+            log.error("Error evicting portfolio holdings cache for user {} portfolio {}: {}", userId, portfolioId, e.getMessage());
+        }
+    }
 }
