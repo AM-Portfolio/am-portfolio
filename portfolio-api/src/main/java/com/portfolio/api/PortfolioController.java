@@ -297,6 +297,28 @@ public class PortfolioController {
         snapshotCatchUpService.triggerCatchUp(userId);
         return ResponseEntity.ok("CatchUp triggered for userId=" + userId + ". Check server logs for progress.");
     }
+
+    /**
+     * DEV/ADMIN ONLY — Hidden from Swagger.
+     * Fixes broken "Grow" or "Auto-created GROW" portfolio names in MongoDB.
+     */
+    @Hidden
+    @PostMapping("/dev/migrate-groww")
+    public ResponseEntity<String> migrateGrowwNames(
+            @org.springframework.beans.factory.annotation.Autowired com.am.common.amcommondata.repository.portfolio.PortfolioDocumentRepository repo) {
+        log.info("[DEV] Running Groww name migration...");
+        java.util.List<com.am.common.amcommondata.document.portfolio.PortfolioDocument> allDocs = repo.findAll();
+        int updated = 0;
+        for (com.am.common.amcommondata.document.portfolio.PortfolioDocument doc : allDocs) {
+            if ("Grow".equals(doc.getName()) || "Auto-created GROW".equals(doc.getName())) {
+                doc.setName("Groww");
+                repo.save(doc);
+                updated++;
+                log.info("Migrated portfolio ID {} to name 'Groww'", doc.getId());
+            }
+        }
+        return ResponseEntity.ok("Migration complete. Updated " + updated + " portfolios.");
+    }
 }
 
 // Trigger workflow

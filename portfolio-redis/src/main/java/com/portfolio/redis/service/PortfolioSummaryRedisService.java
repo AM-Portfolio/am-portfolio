@@ -113,4 +113,22 @@ public class PortfolioSummaryRedisService {
         log.trace("Built cache key: {} for user: {}, interval: {}", key, userId, intervalCode);
         return key;
     }
+
+    public void evictPortfolioSummary(String userId, String portfolioId) {
+        try {
+            // Need to clear all intervals for this portfolio
+            for (TimeInterval interval : TimeInterval.values()) {
+                String key = buildKey(userId, interval, portfolioId);
+                portfolioSummaryRedisTemplate.delete(key);
+                log.debug("Evicted portfolio summary cache for key: {}", key);
+                
+                // Also clear the "all" portfolios cache since it includes this one
+                String allKey = buildKey(userId, interval, null);
+                portfolioSummaryRedisTemplate.delete(allKey);
+                log.debug("Evicted 'all' portfolio summary cache for key: {}", allKey);
+            }
+        } catch (Exception e) {
+            log.error("Error evicting portfolio summary cache for user {} portfolio {}: {}", userId, portfolioId, e.getMessage());
+        }
+    }
 }

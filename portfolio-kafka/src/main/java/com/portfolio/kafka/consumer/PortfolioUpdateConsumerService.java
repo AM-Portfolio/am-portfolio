@@ -59,6 +59,7 @@ public class PortfolioUpdateConsumerService {
     private final PortfolioService              portfolioService;
     private final PortfolioEventPublisher       portfolioEventPublisher;
     private final PortfolioHoldingsRedisService portfolioHoldingsRedisService;
+    private final com.portfolio.redis.service.PortfolioSummaryRedisService portfolioSummaryRedisService;
     private final StringRedisTemplate           stringRedisTemplate;
 
     @Value("${app.kafka.portfolio.consumer.id:am-portfolio-consumer-group}")
@@ -138,9 +139,9 @@ public class PortfolioUpdateConsumerService {
         PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
         PortfolioModelV1 saved = portfolioService.upsertDocumentPortfolio(portfolioModel);
         if (saved != null && saved.getOwner() != null) {
-            portfolioHoldingsRedisService.evictPortfolioHoldings(
-                    saved.getOwner(),
-                    saved.getId() != null ? saved.getId().toString() : null);
+            String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
+            portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
+            portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
         }
         publishUpdate(saved, event.getSource(), event.getPortfolioId());
     }
@@ -149,9 +150,9 @@ public class PortfolioUpdateConsumerService {
         PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
         PortfolioModelV1 saved = portfolioService.updateTradePortfolio(portfolioModel);
         if (saved != null && saved.getOwner() != null) {
-            portfolioHoldingsRedisService.evictPortfolioHoldings(
-                    saved.getOwner(),
-                    saved.getId() != null ? saved.getId().toString() : null);
+            String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
+            portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
+            portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
         }
         publishUpdate(saved, "TRADE", event.getId());
     }
