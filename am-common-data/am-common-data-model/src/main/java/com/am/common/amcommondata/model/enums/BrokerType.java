@@ -4,7 +4,7 @@ public enum BrokerType {
     DHAN("Dhan"),
     ZERODHA("Zerodha"),
     MSTOCK("MStock"),
-    GROW("Grow"),
+    GROWW("Groww"),
     KOTAK("Kotak"),
     ANGEL_ONE("Angel One");
 
@@ -39,8 +39,8 @@ public enum BrokerType {
         return "MStock".equals(brokerName);
     }
 
-    public boolean isGrow() {
-        return "Grow".equals(brokerName);
+    public boolean isGroww() {
+        return "Groww".equals(brokerName);
     }
 
     public boolean isKotak() {

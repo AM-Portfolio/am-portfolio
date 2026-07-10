@@ -145,10 +145,19 @@ public class PortfolioMapperv1 {
                 .brokerType(brokerType)
                 .symbol(equityModel.getSymbol())
                 .name(equityModel.getName())
+                .companyName(equityModel.getCompanyName() != null ? equityModel.getCompanyName() : equityModel.getName())
                 .isin(equityModel.getIsin())
                 .avgBuyingPrice(equityModel.getAvgBuyingPrice())
                 .currentPrice(equityModel.getCurrentPrice())
                 .quantity(equityModel.getQuantity())
+                .currentValue(equityModel.getCurrentValue())
+                .sector(equityModel.getSector())
+                .industry(equityModel.getIndustry())
+                .marketCap(equityModel.getMarketCap())
+                .todayProfitLoss(equityModel.getTodayProfitLoss())
+                .todayProfitLossPercentage(equityModel.getTodayProfitLossPercentage())
+                .profitLoss(equityModel.getProfitLoss())
+                .profitLossPercentage(equityModel.getProfitLossPercentage())
                 .build();
     }
 

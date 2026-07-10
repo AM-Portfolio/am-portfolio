@@ -60,14 +60,9 @@ public class StockPerformanceService {
         var marketData = marketDataService.getMarketData(symbols);
         
         if (startTime != null) {
-            // Fetch database/cache items concurrently using taskExecutor to avoid sequential N+1 slow paths
-            var futures = equityHoldings.stream()
-                .map(asset -> java.util.concurrent.CompletableFuture.supplyAsync(
-                    () -> getGainLossPercentage(asset, startTime, marketData), taskExecutor))
-                .toList();
-                
-            return futures.stream()
-                .map(java.util.concurrent.CompletableFuture::join)
+            // Normal in-memory fast-path (avoiding thread pool exhaustion)
+            return equityHoldings.stream()
+                .map(asset -> getGainLossPercentage(asset, startTime, marketData))
                 .filter(java.util.Objects::nonNull)
                 .toList();
         } else {

@@ -120,10 +120,11 @@ public class MarketDataConverter {
             if (latestPoint.getOhlcData() != null) {
                 builder.lastPrice(latestPoint.getOhlcData().getClose());
             }
-            if (firstPoint.getOhlcData() != null && latestPoint.getOhlcData() != null && latestPoint.getOhlcData().getClose() > 0) {
-                // For historical timeframe, the "previous close" acts as the timeframe baseline
-                // Avoid emitting previousClose without a usable lastPrice
-                builder.previousClose(firstPoint.getOhlcData().getClose());
+            if (dataPoints.size() >= 2) {
+                MarketData.MarketDataPoint prevPoint = dataPoints.get(dataPoints.size() - 2);
+                if (prevPoint.getOhlcData() != null && latestPoint.getOhlcData() != null && latestPoint.getOhlcData().getClose() > 0) {
+                    builder.previousClose(prevPoint.getOhlcData().getClose());
+                }
             }
         }
         

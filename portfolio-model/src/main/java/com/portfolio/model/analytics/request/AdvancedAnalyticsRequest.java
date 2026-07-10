@@ -11,18 +11,28 @@ import lombok.experimental.SuperBuilder;
  * with timeframe support.
  */
 @Data
-@SuperBuilder
-@NoArgsConstructor
 @AllArgsConstructor
 @EqualsAndHashCode(callSuper = true)
+@SuperBuilder
 public class AdvancedAnalyticsRequest extends TimeFrameRequest {
-    private CoreIdentifiers coreIdentifiers;
+    @lombok.Builder.Default
+    private CoreIdentifiers coreIdentifiers = new CoreIdentifiers();
     
-    private PaginationRequest pagination;
+    @lombok.Builder.Default
+    private PaginationRequest pagination = new PaginationRequest();
     
-    private FeatureToggles featureToggles;
+    @lombok.Builder.Default
+    private FeatureToggles featureToggles = new FeatureToggles();
 
-    private FeatureConfiguration featureConfiguration;
+    @lombok.Builder.Default
+    private FeatureConfiguration featureConfiguration = new FeatureConfiguration();
+
+    public AdvancedAnalyticsRequest() {
+        this.coreIdentifiers = new CoreIdentifiers();
+        this.pagination = new PaginationRequest();
+        this.featureToggles = new FeatureToggles();
+        this.featureConfiguration = new FeatureConfiguration();
+    }
 
     public TimeFrameRequest getTimeFrameRequest() {
         if (this.getFromDate() == null || this.getToDate() == null || this.getTimeFrame () == null) {

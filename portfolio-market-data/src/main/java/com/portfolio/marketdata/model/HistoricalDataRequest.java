@@ -18,11 +18,9 @@ import lombok.NoArgsConstructor;
 public class HistoricalDataRequest {
     private String symbols;
     @JsonProperty("from")
-    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
-    private LocalDate fromDate;
+    private String fromDate;
     @JsonProperty("to")
-    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
-    private LocalDate toDate;
+    private String toDate;
     @JsonProperty("interval")
     private String interval;
     private String instrumentType;
