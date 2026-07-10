@@ -25,11 +25,14 @@ public class PortfolioSnapshotService {
     private final PortfolioSnapshotRepository portfolioSnapshotRepository;
 
     private static final java.util.Map<String, java.time.Period> TIMEFRAME_PERIODS = java.util.Map.of(
+        "1D",  java.time.Period.ofDays(1),
         "1W",  java.time.Period.ofWeeks(1),
         "1M",  java.time.Period.ofMonths(1),
         "3M",  java.time.Period.ofMonths(3),
         "6M",  java.time.Period.ofMonths(6),
-        "1Y",  java.time.Period.ofYears(1)
+        "1Y",  java.time.Period.ofYears(1),
+        "3Y",  java.time.Period.ofYears(3),
+        "5Y",  java.time.Period.ofYears(5)
     );
 
     public void saveUserSnapshot(String userId, Double totalUserWealth, Double totalUserInvestment, Double totalUserGainLoss, Double totalUserGainLossPercentage, List<PortfolioSnapshotEntry> entries) {
@@ -71,6 +74,11 @@ public class PortfolioSnapshotService {
         if ("ALL".equals(frame)) {
             // No date filter → fetch entire history, already sorted ASC by DB
             documents = portfolioSnapshotRepository.findByUserIdOrderBySnapshotDateAsc(userId);
+        } else if ("YTD".equals(frame)) {
+            // Year to Date → January 1st of current year
+            LocalDate fromDate = LocalDate.of(today.getYear(), 1, 1);
+            documents = portfolioSnapshotRepository
+                .findByUserIdAndSnapshotDateBetweenOrderBySnapshotDateAsc(userId, fromDate, today.plusDays(1));
         } else {
             // Real date math: 1M = exactly 1 calendar month ago
             java.time.Period period = TIMEFRAME_PERIODS.getOrDefault(frame, java.time.Period.ofMonths(1));
