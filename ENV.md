@@ -96,7 +96,7 @@ App listens on `SERVER_PORT` (default **8072** in template/mapper — avoids Win
 |----------|------------|--------|
 | `SPRING_PROFILES_ACTIVE` | — | `preprod` or `dev` |
 | `SERVER_PORT` | — | Local HTTP port (not in Vault); default `8072` |
-| `ETF_API_URL` | `apps/{env}/services/am-parser` → `URL` | Fallback: `https://am.asrax.in/parser` / `https://am-dev.asrax.in/parser` |
+| `ETF_API_URL` | `apps/{env}/services/am-parser` → `URL` | Fallback: `https://am-preprod.asrax.in/parser` / `https://am-dev.asrax.in/parser` |
 | `MARKET_DATA_API_URL` | `apps/{env}/services/am-market-data` → `URL` | In-cluster `http://am-market-data...` rewritten to public gateway URL |
 | `BASKET_HOLDINGS_ENRICHMENT` | — | `true` = resolve constituent ISINs via market batch-search |
 | `MARKET_DATA_CONNECT_TIMEOUT_MS` | — | HTTP connect timeout (ms) |
