@@ -1,5 +1,5 @@
 # Preprod Environment Overrides — am-portfolio
-# Dual-host: am-preprod (target) + am.asrax.in (current preprod until Phase 4)
+# Preprod app host only — am.asrax.in reserved for prod
 environment: preprod
 replicaCount: 1
 
@@ -48,10 +48,6 @@ ingress:
       am-apps-preprod-strip-prefix-apps@kubernetescrd
   hosts:
     - host: am-preprod.asrax.in
-      paths:
-        - path: /portfolio
-          pathType: Prefix
-    - host: am.asrax.in
       paths:
         - path: /portfolio
           pathType: Prefix
