@@ -1,5 +1,7 @@
 # Preprod Environment Overrides — am-portfolio
+# Preprod app host only — am.asrax.in reserved for prod
 environment: preprod
+replicaCount: 1
 
 resources:
   limits:
@@ -37,19 +39,18 @@ vault:
 
 ingress:
   enabled: true
-  className: "nginx"
+  className: "traefik"
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    kubernetes.io/ingress.class: "traefik"
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.middlewares: >-
+      am-apps-preprod-global-cors@kubernetescrd,
+      am-apps-preprod-strip-prefix-apps@kubernetescrd
   hosts:
-    - host: portfolio.preprod.am-portfolio.com
+    - host: am-preprod.asrax.in
       paths:
-        - path: /
-          pathType: ImplementationSpecific
-  tls:
-    - secretName: portfolio-tls
-      hosts:
-        - portfolio.preprod.am-portfolio.com
+        - path: /portfolio
+          pathType: Prefix
 
 env:
   SPRING_PROFILES_ACTIVE: "preprod,security"

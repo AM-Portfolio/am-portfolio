@@ -88,18 +88,18 @@ def build_env(env_name: str, data: dict) -> str:
     portfolio = _get(data, f"{prefix}/services/am-portfolio")
 
     etf_url = parser.get("URL") or (
-        "https://am.asrax.in/parser"
+        "https://am-preprod.asrax.in/parser"
         if env_name == "preprod"
         else "https://am-dev.asrax.in/parser"
     )
     market_url = market.get("URL") or (
-        "https://am.asrax.in/market"
+        "https://am-preprod.asrax.in/market"
         if env_name == "preprod"
         else "https://am-dev.asrax.in/market"
     )
     if market_url.startswith("http://am-market-data"):
         market_url = (
-            "https://am.asrax.in/market"
+            "https://am-preprod.asrax.in/market"
             if env_name == "preprod"
             else "https://am-dev.asrax.in/market"
         )
