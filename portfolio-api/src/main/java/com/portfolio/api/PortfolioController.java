@@ -41,6 +41,24 @@ public class PortfolioController {
     private final PortfolioHistoryScheduler portfolioHistoryScheduler;
     private final PortfolioSnapshotService portfolioSnapshotService;
     private final SnapshotCatchUpService snapshotCatchUpService;
+    private final com.portfolio.service.portfolio.PortfolioIntradayService portfolioIntradayService;
+
+    @Operation(summary = "Get intraday data for all portfolios")
+    @GetMapping("/intraday")
+    public ResponseEntity<List<com.portfolio.model.portfolio.IntradayDataPoint>> getAllPortfoliosIntraday() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        log.info("[Intraday] Request for all portfolios, user={}", userId);
+        return ResponseEntity.ok(portfolioIntradayService.getIntraday(userId, null));
+    }
+
+    @Operation(summary = "Get intraday data for specific portfolio")
+    @GetMapping("/{portfolioId}/intraday")
+    public ResponseEntity<List<com.portfolio.model.portfolio.IntradayDataPoint>> getPortfolioIntraday(
+            @PathVariable String portfolioId) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        log.info("[Intraday] Request for portfolio={}, user={}", portfolioId, userId);
+        return ResponseEntity.ok(portfolioIntradayService.getIntraday(userId, portfolioId));
+    }
 
     @Operation(summary = "Get portfolio by ID", description = "Retrieves detailed portfolio information for a specific portfolio ID")
     @ApiResponses(value = {
