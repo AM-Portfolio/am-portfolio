@@ -97,10 +97,12 @@ public class PortfolioIntradayService {
             if (portfolioId != null) {
                 // For a single portfolio, recompute the baseline from its specific components
                 baselineWealth = 0.0;
-                for (PortfolioSnapshotEntryModel entry : baselineSnap.getPortfolios()) {
-                    if (portfolioId.equals(entry.getPortfolioId())) {
-                        baselineWealth = entry.getClose() != null ? entry.getClose() : 0.0;
-                        break;
+                if (baselineSnap.getPortfolios() != null) {
+                    for (PortfolioSnapshotEntryModel entry : baselineSnap.getPortfolios()) {
+                        if (portfolioId.equals(entry.getPortfolioId())) {
+                            baselineWealth = entry.getClose() != null ? entry.getClose() : 0.0;
+                            break;
+                        }
                     }
                 }
             }
@@ -152,22 +154,25 @@ public class PortfolioIntradayService {
 
         // ── STEP 4: Build time-series: candle time → {symbol → closePrice} ───
         TreeMap<LocalTime, Map<String, Double>> priceSeries = new TreeMap<>();
-        for (Map.Entry<String, MarketData> entry : intradayData.entrySet()) {
-            String sym = entry.getKey();
-            MarketData md = entry.getValue();
-            if (md.getDataPoints() == null) {
-                continue;
-            }
-            for (MarketData.MarketDataPoint pt : md.getDataPoints()) {
-                if (pt.getTimestamp() == null || pt.getOhlcData() == null) {
+        
+        if (intradayData != null) {
+            for (Map.Entry<String, MarketData> entry : intradayData.entrySet()) {
+                String sym = entry.getKey();
+                MarketData md = entry.getValue();
+                if (md == null || md.getDataPoints() == null) {
                     continue;
                 }
-                LocalTime t = pt.getTimestamp().atZone(IST).toLocalTime()
-                        .withSecond(0).withNano(0); // normalize to minute
-                if (t.isBefore(MARKET_OPEN) || t.isAfter(MARKET_CLOSE)) {
-                    continue;
+                for (MarketData.MarketDataPoint pt : md.getDataPoints()) {
+                    if (pt.getTimestamp() == null || pt.getOhlcData() == null) {
+                        continue;
+                    }
+                    LocalTime t = pt.getTimestamp().atZone(IST).toLocalTime()
+                            .withSecond(0).withNano(0); // normalize to minute
+                    if (t.isBefore(MARKET_OPEN) || t.isAfter(MARKET_CLOSE)) {
+                        continue;
+                    }
+                    priceSeries.computeIfAbsent(t, k -> new HashMap<>()).put(sym, pt.getOhlcData().getClose());
                 }
-                priceSeries.computeIfAbsent(t, k -> new HashMap<>()).put(sym, pt.getOhlcData().getClose());
             }
         }
 
@@ -185,7 +190,10 @@ public class PortfolioIntradayService {
             lastKnown.putAll(entry.getValue()); // carry-forward update
 
             double portfolioValue = symbolQty.entrySet().stream()
-                    .mapToDouble(sq -> lastKnown.getOrDefault(sq.getKey(), 0.0) * sq.getValue())
+                    .mapToDouble(sq -> {
+                        Double price = lastKnown.get(sq.getKey());
+                        return (price != null ? price : 0.0) * sq.getValue();
+                    })
                     .sum();
 
             if (portfolioValue <= 0) {
