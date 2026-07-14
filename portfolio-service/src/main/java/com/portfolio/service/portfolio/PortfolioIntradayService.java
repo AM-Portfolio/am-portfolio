@@ -28,6 +28,8 @@ import com.portfolio.model.TimeInterval;
 import com.portfolio.model.market.TimeFrame;
 import com.portfolio.model.portfolio.IntradayDataPoint;
 import com.portfolio.model.portfolio.PortfolioHoldings;
+import com.am.common.amcommondata.repository.portfolio.PortfolioDocumentRepository;
+import com.am.common.amcommondata.document.portfolio.PortfolioDocument;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +43,7 @@ public class PortfolioIntradayService {
     private final PortfolioHoldingsService holdingsService;
     private final MarketDataService marketDataService;
     private final PortfolioIntradayRedisService intradayRedisService;
+    private final PortfolioDocumentRepository portfolioDocumentRepository;
 
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
     private static final LocalTime MARKET_OPEN = LocalTime.of(9, 15);
@@ -128,51 +131,93 @@ public class PortfolioIntradayService {
             return List.of(makeGlobalPoint("09:15", baselineWealth, baselineWealth, false));
         }
 
-        // ── STEP 3: Fetch 15-min OHLC candles for all symbols ─────────────────
+        // Fetch current portfolio value from MongoDB to compute the Mutual Fund offset
+        double currentMongoValue = 0.0;
+        try {
+            if (portfolioId == null || portfolioId.trim().isEmpty()) {
+                List<PortfolioDocument> portfolios = portfolioDocumentRepository.findByOwner(userId);
+                if (portfolios != null) {
+                    currentMongoValue = portfolios.stream()
+                            .mapToDouble(p -> p.getTotalValue() != null ? p.getTotalValue() : 0.0)
+                            .sum();
+                }
+            } else {
+                Optional<PortfolioDocument> pOpt = portfolioDocumentRepository.findById(portfolioId);
+                if (pOpt.isPresent()) {
+                    currentMongoValue = pOpt.get().getTotalValue() != null ? pOpt.get().getTotalValue() : 0.0;
+                }
+            }
+        } catch (Exception e) {
+            log.error("[Intraday] Failed to fetch current totalValue from MongoDB", e);
+        }
+
+        // ── STEP 3: Fetch 1D OHLC candles for all symbols in batch ─────────────
         List<String> symbols = new ArrayList<>(symbolQty.keySet());
-        Map<String, MarketData> intradayData = Collections.emptyMap();
+        com.portfolio.marketdata.model.HistoricalChartsResponse chartResponse = null;
 
         if (marketOpen || nowIST.isAfter(MARKET_OPEN)) {
-            // Only fetch if market has opened today
             try {
-                HistoricalDataRequest req = HistoricalDataRequest.builder()
-                        .symbols(String.join(",", symbols))
-                        .fromDate(today.toString())
-                        .toDate(today.toString())
-                        .interval(TimeFrame.FIVE_MIN.getValue())
-                        .filterType(FilterType.ALL.getValue())
-                        .instrumentType(InstrumentType.STOCK.getValue())
-                        .continuous(false)
-                        .forceRefresh(false)
-                        .build();
-                intradayData = marketDataService.getHistoricalData(req);
-                log.info("[Intraday] Fetched 5-min candles for {} symbols via historical-data", intradayData.size());
+                chartResponse = marketDataService.getHistoricalCharts(symbols, "1D");
+                log.info("[Intraday] Fetched historical charts for {} symbols", symbols.size());
             } catch (Exception e) {
-                log.error("[Intraday] Failed to fetch historical data: {}", e.getMessage());
+                log.error("[Intraday] Failed to fetch historical charts: {}", e.getMessage());
             }
         }
 
         // ── STEP 4: Build time-series: candle time → {symbol → closePrice} ───
         TreeMap<LocalTime, Map<String, Double>> priceSeries = new TreeMap<>();
-        
-        if (intradayData != null) {
-            for (Map.Entry<String, MarketData> entry : intradayData.entrySet()) {
+        if (chartResponse != null && chartResponse.getData() != null) {
+            for (Map.Entry<String, com.portfolio.marketdata.model.HistoricalData> entry : chartResponse.getData().entrySet()) {
                 String sym = entry.getKey();
-                MarketData md = entry.getValue();
-                if (md == null || md.getDataPoints() == null) {
+                com.portfolio.marketdata.model.HistoricalData hd = entry.getValue();
+                if (hd == null || hd.getDataPoints() == null) {
                     continue;
                 }
-                for (MarketData.MarketDataPoint pt : md.getDataPoints()) {
-                    if (pt.getTimestamp() == null || pt.getOhlcData() == null) {
+                for (com.am.common.investment.model.historical.OHLCVTPoint pt : hd.getDataPoints()) {
+                    if (pt.getTime() == null || pt.getClose() == null) {
                         continue;
                     }
-                    LocalTime t = pt.getTimestamp().atZone(IST).toLocalTime()
-                            .withSecond(0).withNano(0); // normalize to minute
+                    LocalTime t = pt.getTime().toLocalTime().withSecond(0).withNano(0);
                     if (t.isBefore(MARKET_OPEN) || t.isAfter(MARKET_CLOSE)) {
                         continue;
                     }
-                    priceSeries.computeIfAbsent(t, k -> new HashMap<>()).put(sym, pt.getOhlcData().getClose());
+                    priceSeries.computeIfAbsent(t, k -> new HashMap<>()).put(sym, pt.getClose());
                 }
+            }
+        }
+
+        // Fetch current live prices of equities
+        Map<String, Double> livePrices = new HashMap<>();
+        double liveEquityWealth = 0.0;
+        try {
+            livePrices = marketDataService.getCurrentPrices(symbols);
+            if (livePrices != null) {
+                for (Map.Entry<String, Double> sq : symbolQty.entrySet()) {
+                    Double price = livePrices.get(sq.getKey());
+                    if (price != null) {
+                        liveEquityWealth += price * sq.getValue();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("[Intraday] Failed to fetch live prices or compute live equity wealth", e);
+        }
+
+        // Compute flat offset for unsupported assets (Mutual Funds / Bonds)
+        double finalMongoVal = currentMongoValue > 0.0 ? currentMongoValue : baselineWealth;
+        double missingAssetValue = finalMongoVal - liveEquityWealth;
+        if (missingAssetValue < 0.0) {
+            missingAssetValue = 0.0;
+        }
+
+        // Fallback: If 1D candles are empty, fetch live prices as fallback
+        if (priceSeries.isEmpty() && (marketOpen || nowIST.isAfter(MARKET_OPEN))) {
+            if (livePrices != null && !livePrices.isEmpty()) {
+                LocalTime now = nowIST.withSecond(0).withNano(0);
+                if (now.isAfter(MARKET_CLOSE)) {
+                    now = MARKET_CLOSE;
+                }
+                priceSeries.put(now, livePrices);
             }
         }
 
@@ -183,42 +228,35 @@ public class PortfolioIntradayService {
         // Anchor: 9:15 AM = yesterday's close
         result.add(makeGlobalPoint("09:15", baselineWealth, baselineWealth, false));
 
-        // Fallback: If Upstox historical API didn't return today's 5-min candles, fetch the current live prices
-        if (priceSeries.isEmpty() && marketOpen || (priceSeries.isEmpty() && nowIST.isAfter(MARKET_OPEN))) {
-            try {
-                log.info("[Intraday] 5-min candles empty, fetching live prices as fallback for user={}, portfolioId={}", userId, portfolioId);
-                Map<String, Double> livePrices = marketDataService.getCurrentPrices(new ArrayList<>(symbols));
-                if (livePrices != null && !livePrices.isEmpty()) {
-                    LocalTime now = nowIST.withSecond(0).withNano(0);
-                    if (now.isAfter(MARKET_CLOSE)) {
-                        now = MARKET_CLOSE;
-                    }
-                    priceSeries.put(now, livePrices);
-                }
-            } catch (Exception e) {
-                log.error("[Intraday] Failed to fetch live prices fallback: {}", e.getMessage());
-            }
-        }
-
         LocalTime latestCandle = priceSeries.isEmpty() ? null : priceSeries.lastKey();
 
         for (Map.Entry<LocalTime, Map<String, Double>> entry : priceSeries.entrySet()) {
             LocalTime t = entry.getKey();
             lastKnown.putAll(entry.getValue()); // carry-forward update
 
-            double portfolioValue = symbolQty.entrySet().stream()
+            double equityValue = symbolQty.entrySet().stream()
                     .mapToDouble(sq -> {
                         Double price = lastKnown.get(sq.getKey());
                         return (price != null ? price : 0.0) * sq.getValue();
                     })
                     .sum();
 
-            if (portfolioValue <= 0) {
+            if (equityValue <= 0) {
                 continue;
             }
 
+            double totalWealth = equityValue + missingAssetValue;
             boolean isLive = t.equals(latestCandle) && marketOpen;
-            result.add(makeGlobalPoint(t.toString(), portfolioValue, baselineWealth, isLive));
+            result.add(makeGlobalPoint(t.toString(), totalWealth, baselineWealth, isLive));
+        }
+
+        // ── STEP 6: LTP Stitching (Industry Standard real-time update) ───
+        if (marketOpen && livePrices != null && !livePrices.isEmpty()) {
+            LocalTime nowTime = nowIST.withSecond(0).withNano(0);
+            if (latestCandle == null || nowTime.isAfter(latestCandle)) {
+                double totalWealth = liveEquityWealth + missingAssetValue;
+                result.add(makeGlobalPoint(nowTime.toString(), totalWealth, baselineWealth, true));
+            }
         }
 
         // Cache the result before returning

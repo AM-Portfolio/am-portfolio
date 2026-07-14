@@ -47,7 +47,8 @@ public class PortfolioController {
     @GetMapping("/intraday")
     public ResponseEntity<List<com.portfolio.model.portfolio.IntradayDataPoint>> getAllPortfoliosIntraday() {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
-        log.info("[Intraday] Request for all portfolios, user={}", userId);
+        String traceId = org.slf4j.MDC.get("traceId");
+        log.info("[Intraday] Request for all portfolios, user={}, traceId={}", userId, traceId);
         return ResponseEntity.ok(portfolioIntradayService.getIntraday(userId, null));
     }
 
@@ -56,7 +57,8 @@ public class PortfolioController {
     public ResponseEntity<List<com.portfolio.model.portfolio.IntradayDataPoint>> getPortfolioIntraday(
             @PathVariable String portfolioId) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
-        log.info("[Intraday] Request for portfolio={}, user={}", portfolioId, userId);
+        String traceId = org.slf4j.MDC.get("traceId");
+        log.info("[Intraday] Request for portfolio={}, user={}, traceId={}", portfolioId, userId, traceId);
         return ResponseEntity.ok(portfolioIntradayService.getIntraday(userId, portfolioId));
     }
 

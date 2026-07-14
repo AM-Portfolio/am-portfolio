@@ -189,6 +189,7 @@ market-data:
     base-url: ${MARKET_DATA_API_URL:https://am-preprod.asrax.in/market}
     ohlc-endpoint: /v1/market-data/ohlc
     historical-data-endpoint: /v1/market-data/historical-data
+    historical-charts-endpoint: /v1/analysis/historical-charts
     securities-endpoint: /v1/securities
     nse-indices-endpoint: /v1/indices
     read-timeout: 30000      # Must be < PortfolioCalculator.enrichHoldings() 34s blocking wait

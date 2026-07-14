@@ -526,4 +526,22 @@ public class MarketDataService {
         return merged;
     }
 
+    /**
+     * Gets historical charts data for the specified symbols and range.
+     * 
+     * @param symbols list of symbols
+     * @param range time range (e.g. 1D, 1M, 1Y)
+     * @return HistoricalChartsResponse containing the chart points
+     */
+    public com.portfolio.marketdata.model.HistoricalChartsResponse getHistoricalCharts(List<String> symbols, String range) {
+        if (symbols == null || symbols.isEmpty()) {
+            return new com.portfolio.marketdata.model.HistoricalChartsResponse();
+        }
+        try {
+            return marketDataApiClient.getHistoricalCharts(symbols, range).block();
+        } catch (Exception e) {
+            log.error("Failed to fetch historical charts: {}", e.getMessage());
+            return new com.portfolio.marketdata.model.HistoricalChartsResponse();
+        }
+    }
 }

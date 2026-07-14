@@ -28,6 +28,11 @@ public class MarketDataApiConfig {
     private String historicalDataEndpoint;
 
     /**
+     * API path for historical charts data.
+     */
+    private String historicalChartsEndpoint = "/v1/analysis/historical-charts";
+
+    /**
      * API path for securities data.
      */
     private String securitiesEndpoint;
