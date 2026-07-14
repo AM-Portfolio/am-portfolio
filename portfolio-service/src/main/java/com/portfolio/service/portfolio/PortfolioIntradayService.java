@@ -89,11 +89,14 @@ public class PortfolioIntradayService {
         if (symbolQty.isEmpty()) {
             // Fallback: fetch live holdings from broker
             log.warn("[Intraday] No holdings in snapshot for user={}, falling back to live holdings", userId);
-            PortfolioHoldings live = holdingsService.getPortfolioHoldings(userId, portfolioId, TimeInterval.ONE_DAY);
+            PortfolioHoldings live = (portfolioId == null || portfolioId.trim().isEmpty()) 
+                ? holdingsService.getPortfolioHoldings(userId, TimeInterval.ONE_DAY)
+                : holdingsService.getPortfolioHoldings(userId, portfolioId, TimeInterval.ONE_DAY);
             if (live != null && live.getEquityHoldings() != null) {
                 live.getEquityHoldings().forEach(h -> {
                     if (h.getSymbol() != null) {
-                        symbolQty.merge(h.getSymbol(), (double) h.getQuantity(), Double::sum);
+                        double qty = h.getQuantity() != null ? h.getQuantity() : 0.0;
+                        symbolQty.merge(h.getSymbol(), qty, Double::sum);
                     }
                 });
             }
@@ -110,13 +113,17 @@ public class PortfolioIntradayService {
         if (marketOpen || nowIST.isAfter(MARKET_OPEN)) {
             // Only fetch if market has opened today
             try {
-                intradayData = marketDataService.getHistoricalData(
-                        symbols,
-                        today, today,
-                        TimeFrame.FIFTEEN_MIN,
-                        InstrumentType.STOCK,
-                        FilterType.ALL,
-                        null, null, false);
+                com.portfolio.marketdata.model.HistoricalDataRequest request = 
+                        com.portfolio.marketdata.model.HistoricalDataRequest.builder()
+                        .symbols(String.join(",", symbols))
+                        .fromDate(today.toString())
+                        .toDate(today.toString())
+                        .interval(TimeFrame.FIFTEEN_MIN.getValue())
+                        .instrumentType(InstrumentType.STOCK.getValue())
+                        .filterType(FilterType.ALL.getValue())
+                        .continuous(false)
+                        .build();
+                intradayData = marketDataService.getHistoricalData(request);
                 log.info("[Intraday] Fetched 15-min candles for {} symbols", intradayData.size());
             } catch (Exception e) {
                 log.error("[Intraday] Failed to fetch OHLC data: {}", e.getMessage());
