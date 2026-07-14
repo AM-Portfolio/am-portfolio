@@ -20,6 +20,7 @@ import com.am.common.amcommondata.model.PortfolioSnapshotModel;
 import com.am.common.amcommondata.service.PortfolioSnapshotService;
 import com.portfolio.marketdata.model.FilterType;
 import com.portfolio.marketdata.model.InstrumentType;
+import com.portfolio.marketdata.model.HistoricalDataRequest;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.redis.service.PortfolioIntradayRedisService;
@@ -93,6 +94,16 @@ public class PortfolioIntradayService {
                     }
                 }
             }
+            if (portfolioId != null) {
+                // For a single portfolio, recompute the baseline from its specific components
+                baselineWealth = 0.0;
+                for (PortfolioSnapshotEntryModel entry : baselineSnap.getPortfolios()) {
+                    if (portfolioId.equals(entry.getPortfolioId())) {
+                        baselineWealth = entry.getClose() != null ? entry.getClose() : 0.0;
+                        break;
+                    }
+                }
+            }
         }
 
         if (symbolQty.isEmpty()) {
@@ -122,10 +133,20 @@ public class PortfolioIntradayService {
         if (marketOpen || nowIST.isAfter(MARKET_OPEN)) {
             // Only fetch if market has opened today
             try {
-                intradayData = marketDataService.getOhlcData(symbols, TimeFrame.FIVE_MIN.getValue(), false);
-                log.info("[Intraday] Fetched 5-min candles for {} symbols via OHLC", intradayData.size());
+                HistoricalDataRequest req = HistoricalDataRequest.builder()
+                        .symbols(String.join(",", symbols))
+                        .fromDate(today.toString())
+                        .toDate(today.toString())
+                        .interval(TimeFrame.FIVE_MIN.getValue())
+                        .filterType(FilterType.ALL.getValue())
+                        .instrumentType(InstrumentType.STOCK.getValue())
+                        .continuous(false)
+                        .forceRefresh(false)
+                        .build();
+                intradayData = marketDataService.getHistoricalData(req);
+                log.info("[Intraday] Fetched 5-min candles for {} symbols via historical-data", intradayData.size());
             } catch (Exception e) {
-                log.error("[Intraday] Failed to fetch OHLC data: {}", e.getMessage());
+                log.error("[Intraday] Failed to fetch historical data: {}", e.getMessage());
             }
         }
 
