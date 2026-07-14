@@ -205,6 +205,20 @@ public class MarketDataService {
      * @return Map of symbols to their respective market data
      */
     public Map<String, MarketData> getOhlcData(List<String> symbols, boolean refresh) {
+        return getOhlcData(symbols, TimeFrame.DAY.getValue(), refresh);
+    }
+
+    /**
+     * Get OHLC data for the specified symbols with a specific time frame.
+     * Splits large symbol lists into parallel chunks of max 20 symbols to prevent
+     * downstream API timeouts.
+     *
+     * @param symbols   List of symbols to fetch data for
+     * @param timeFrame The time frame for the OHLC data
+     * @param refresh   Whether to refresh the data or use cached data
+     * @return Map of symbols to their respective market data
+     */
+    public Map<String, MarketData> getOhlcData(List<String> symbols, String timeFrame, boolean refresh) {
         List<String> validSymbols = symbols.stream()
                 .filter(s -> s != null && !s.trim().isEmpty())
                 .collect(Collectors.toList());
@@ -213,7 +227,7 @@ public class MarketDataService {
             return Collections.emptyMap();
         }
 
-        log.info("Getting OHLC data for {} symbols with refresh={}", validSymbols.size(), refresh);
+        log.info("Getting OHLC data for {} symbols with timeFrame={} refresh={}", validSymbols.size(), timeFrame, refresh);
 
         // Partition into chunks of 20 to avoid massive single-batch timeouts
         final int CHUNK_SIZE = 20;
@@ -227,7 +241,7 @@ public class MarketDataService {
             .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
                 try {
                     MarketDataResponseWrapper w = marketDataApiClient
-                            .getOhlcData(chunk, TimeFrame.DAY.getValue(), refresh).block();
+                            .getOhlcData(chunk, timeFrame, refresh).block();
                     return convertToMarketDataMap(w, true);
                 } catch (Exception e) {
                     log.warn("[OHLC chunk] Failed for chunk of {}: {}", chunk.size(), e.getMessage());

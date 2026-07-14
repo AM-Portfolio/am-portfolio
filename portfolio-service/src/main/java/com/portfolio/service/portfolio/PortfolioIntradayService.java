@@ -122,18 +122,8 @@ public class PortfolioIntradayService {
         if (marketOpen || nowIST.isAfter(MARKET_OPEN)) {
             // Only fetch if market has opened today
             try {
-                com.portfolio.marketdata.model.HistoricalDataRequest request = 
-                        com.portfolio.marketdata.model.HistoricalDataRequest.builder()
-                        .symbols(String.join(",", symbols))
-                        .fromDate(today.toString())
-                        .toDate(today.toString())
-                        .interval(TimeFrame.FIVE_MIN.getValue())
-                        .instrumentType(InstrumentType.STOCK.getValue())
-                        .filterType(FilterType.ALL.getValue())
-                        .continuous(false)
-                        .build();
-                intradayData = marketDataService.getHistoricalData(request);
-                log.info("[Intraday] Fetched 15-min candles for {} symbols", intradayData.size());
+                intradayData = marketDataService.getOhlcData(symbols, TimeFrame.FIVE_MIN.getValue(), false);
+                log.info("[Intraday] Fetched 5-min candles for {} symbols via OHLC", intradayData.size());
             } catch (Exception e) {
                 log.error("[Intraday] Failed to fetch OHLC data: {}", e.getMessage());
             }
