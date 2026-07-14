@@ -45,7 +45,7 @@ services:
 
       # ETF / Basket API — points to the market service on the shared am-infra gateway.
       # Fallback to production gateway URL if env var is not set in .env
-      ETF_API_URL: ${ETF_API_URL:-https://am.asrax.in/market}
+      ETF_API_URL: ${ETF_API_URL:-https://am-preprod.asrax.in/parser}
 
     entrypoint: ["/bin/sh", "-c"]
     command: 

@@ -1,6 +1,7 @@
 # Prod Environment Overrides — am-portfolio
+# Service-level Ingress (same model as am-identity), not central am-infra ingress.
 environment: prod
-replicaCount: 2  # Production requires 2 replicas for high availability
+replicaCount: 1
 
 # Prod Vault secret paths — key mappings are in vault-mappings.yaml
 vault:
@@ -30,19 +31,17 @@ vault:
 
 ingress:
   enabled: true
-  className: "nginx"
+  className: "traefik"
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    kubernetes.io/ingress.class: "traefik"
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.middlewares: >-
+      am-apps-prod-global-cors@kubernetescrd
   hosts:
-    - host: portfolio.am-portfolio.com
+    - host: am.asrax.in
       paths:
-        - path: /
-          pathType: ImplementationSpecific
-  tls:
-    - secretName: portfolio-tls-prod
-      hosts:
-        - portfolio.am-portfolio.com
+        - path: /portfolio
+          pathType: Prefix
 
 env:
   SPRING_PROFILES_ACTIVE: "prod,security"
