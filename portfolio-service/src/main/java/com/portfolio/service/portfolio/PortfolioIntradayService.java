@@ -3,7 +3,7 @@ package com.portfolio.service.portfolio;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
-import java.time.temporal.ChronoUnit;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -139,7 +139,7 @@ public class PortfolioIntradayService {
                 continue;
             }
             for (MarketData.MarketDataPoint pt : md.getDataPoints()) {
-                if (pt.getTimestamp() == null || pt.getOhlcData() == null || pt.getOhlcData().getClose() == null) {
+                if (pt.getTimestamp() == null || pt.getOhlcData() == null) {
                     continue;
                 }
                 LocalTime t = pt.getTimestamp().atZone(IST).toLocalTime()
