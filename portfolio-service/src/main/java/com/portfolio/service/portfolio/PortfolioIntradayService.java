@@ -155,13 +155,17 @@ public class PortfolioIntradayService {
         List<String> symbols = new ArrayList<>(symbolQty.keySet());
         com.portfolio.marketdata.model.HistoricalChartsResponse chartResponse = null;
 
-        if (marketOpen || nowIST.isAfter(MARKET_OPEN)) {
-            try {
-                chartResponse = marketDataService.getHistoricalCharts(symbols, "1D");
-                log.info("[Intraday] Fetched historical charts for {} symbols", symbols.size());
-            } catch (Exception e) {
-                log.error("[Intraday] Failed to fetch historical charts: {}", e.getMessage());
+        try {
+            chartResponse = marketDataService.getHistoricalCharts(symbols, "1D");
+            if (chartResponse != null && chartResponse.getData() != null) {
+                int totalParsed = chartResponse.getData().values().stream()
+                        .filter(hd -> hd != null && hd.getDataPoints() != null)
+                        .mapToInt(hd -> hd.getDataPoints().size())
+                        .sum();
+                log.info("[Intraday] Fetched historical charts for {} symbols, total points parsed: {}", symbols.size(), totalParsed);
             }
+        } catch (Exception e) {
+            log.error("[Intraday] Failed to fetch historical charts: {}", e.getMessage());
         }
 
         // ── STEP 4: Build time-series: candle time → {symbol → closePrice} ───
@@ -211,7 +215,7 @@ public class PortfolioIntradayService {
         }
 
         // Fallback: If 1D candles are empty, fetch live prices as fallback
-        if (priceSeries.isEmpty() && (marketOpen || nowIST.isAfter(MARKET_OPEN))) {
+        if (priceSeries.isEmpty()) {
             if (livePrices != null && !livePrices.isEmpty()) {
                 LocalTime now = nowIST.withSecond(0).withNano(0);
                 if (now.isAfter(MARKET_CLOSE)) {
