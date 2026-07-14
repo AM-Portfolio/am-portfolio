@@ -14,14 +14,13 @@ import java.util.TreeMap;
 
 import org.springframework.stereotype.Service;
 
-import com.am.common.amcommondata.document.portfolio.HoldingSnapshotItem;
-import com.am.common.amcommondata.document.portfolio.PortfolioSnapshotEntry;
-import com.am.common.amcommondata.model.portfolio.HoldingSnapshotItemModel;
-import com.am.common.amcommondata.model.portfolio.PortfolioSnapshotEntryModel;
-import com.am.common.amcommondata.model.portfolio.PortfolioSnapshotModel;
+import com.am.common.amcommondata.model.HoldingSnapshotItemModel;
+import com.am.common.amcommondata.model.PortfolioSnapshotEntryModel;
+import com.am.common.amcommondata.model.PortfolioSnapshotModel;
+import com.am.common.amcommondata.service.PortfolioSnapshotService;
 import com.portfolio.marketdata.model.FilterType;
 import com.portfolio.marketdata.model.InstrumentType;
-import com.portfolio.marketdata.model.MarketData;
+import com.portfolio.model.market.MarketData;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.market.TimeFrame;
