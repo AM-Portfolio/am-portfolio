@@ -183,6 +183,23 @@ public class PortfolioIntradayService {
         // Anchor: 9:15 AM = yesterday's close
         result.add(makeGlobalPoint("09:15", baselineWealth, baselineWealth, false));
 
+        // Fallback: If Upstox historical API didn't return today's 5-min candles, fetch the current live prices
+        if (priceSeries.isEmpty() && marketOpen || (priceSeries.isEmpty() && nowIST.isAfter(MARKET_OPEN))) {
+            try {
+                log.info("[Intraday] 5-min candles empty, fetching live prices as fallback for user={}, portfolioId={}", userId, portfolioId);
+                Map<String, Double> livePrices = marketDataService.getCurrentPrices(new ArrayList<>(symbols));
+                if (livePrices != null && !livePrices.isEmpty()) {
+                    LocalTime now = nowIST.toLocalTime().withSecond(0).withNano(0);
+                    if (now.isAfter(MARKET_CLOSE)) {
+                        now = MARKET_CLOSE;
+                    }
+                    priceSeries.put(now, livePrices);
+                }
+            } catch (Exception e) {
+                log.error("[Intraday] Failed to fetch live prices fallback: {}", e.getMessage());
+            }
+        }
+
         LocalTime latestCandle = priceSeries.isEmpty() ? null : priceSeries.lastKey();
 
         for (Map.Entry<LocalTime, Map<String, Double>> entry : priceSeries.entrySet()) {
