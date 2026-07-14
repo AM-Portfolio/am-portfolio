@@ -156,7 +156,7 @@ public class PortfolioIntradayService {
         com.portfolio.marketdata.model.HistoricalChartsResponse chartResponse = null;
 
         try {
-            chartResponse = marketDataService.getHistoricalCharts(symbols, "1D");
+            chartResponse = marketDataService.getHistoricalCharts(symbols, "1W");
             if (chartResponse != null && chartResponse.getData() != null) {
                 int totalParsed = chartResponse.getData().values().stream()
                         .filter(hd -> hd != null && hd.getDataPoints() != null)
