@@ -127,7 +127,7 @@ public class PortfolioIntradayService {
                         .symbols(String.join(",", symbols))
                         .fromDate(today.toString())
                         .toDate(today.toString())
-                        .interval(TimeFrame.FIFTEEN_MIN.getValue())
+                        .interval(TimeFrame.FIVE_MIN.getValue())
                         .instrumentType(InstrumentType.STOCK.getValue())
                         .filterType(FilterType.ALL.getValue())
                         .continuous(false)
