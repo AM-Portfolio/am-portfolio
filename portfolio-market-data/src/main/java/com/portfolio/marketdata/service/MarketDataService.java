@@ -537,11 +537,48 @@ public class MarketDataService {
         if (symbols == null || symbols.isEmpty()) {
             return new com.portfolio.marketdata.model.HistoricalChartsResponse();
         }
-        try {
-            return marketDataApiClient.getHistoricalCharts(symbols, range).block();
-        } catch (Exception e) {
-            log.error("Failed to fetch historical charts: {}", e.getMessage());
+
+        List<String> validSymbols = symbols.stream()
+                .filter(s -> s != null && !s.trim().isEmpty())
+                .collect(Collectors.toList());
+
+        if (validSymbols.isEmpty()) {
             return new com.portfolio.marketdata.model.HistoricalChartsResponse();
         }
+
+        log.info("Getting historical charts for {} symbols with range={}", validSymbols.size(), range);
+
+        final int CHUNK_SIZE = 20;
+        List<List<String>> chunks = new java.util.ArrayList<>();
+        for (int i = 0; i < validSymbols.size(); i += CHUNK_SIZE) {
+            chunks.add(validSymbols.subList(i, Math.min(i + CHUNK_SIZE, validSymbols.size())));
+        }
+
+        List<java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalChartsResponse>> futures = chunks.stream()
+            .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                try {
+                    return marketDataApiClient.getHistoricalCharts(chunk, range).block();
+                } catch (Exception e) {
+                    log.error("[HistoricalCharts chunk] Failed for chunk of {}: {}", chunk.size(), e.getMessage());
+                    return new com.portfolio.marketdata.model.HistoricalChartsResponse();
+                }
+            }, taskExecutor))
+            .collect(Collectors.toList());
+
+        com.portfolio.marketdata.model.HistoricalChartsResponse mergedResponse = new com.portfolio.marketdata.model.HistoricalChartsResponse();
+        mergedResponse.setData(new java.util.HashMap<>());
+
+        for (java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalChartsResponse> f : futures) {
+            try {
+                com.portfolio.marketdata.model.HistoricalChartsResponse chunkResult = f.get(30, java.util.concurrent.TimeUnit.SECONDS);
+                if (chunkResult != null && chunkResult.getData() != null) {
+                    mergedResponse.getData().putAll(chunkResult.getData());
+                }
+            } catch (Exception e) {
+                log.warn("[HistoricalCharts chunk] Chunk future failed or timed out: {}", e.getMessage());
+            }
+        }
+        
+        return mergedResponse;
     }
 }
