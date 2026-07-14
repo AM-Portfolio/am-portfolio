@@ -156,7 +156,7 @@ public class PortfolioIntradayService {
         com.portfolio.marketdata.model.HistoricalChartsResponse chartResponse = null;
 
         try {
-            chartResponse = marketDataService.getHistoricalCharts(symbols, "1W");
+            chartResponse = marketDataService.getHistoricalCharts(symbols, "1D");
             if (chartResponse != null && chartResponse.getData() != null) {
                 int totalParsed = chartResponse.getData().values().stream()
                         .filter(hd -> hd != null && hd.getDataPoints() != null)
@@ -214,14 +214,14 @@ public class PortfolioIntradayService {
             missingAssetValue = 0.0;
         }
 
-        // Fallback: If 1D candles are empty, fetch live prices as fallback
+        // Fallback: If 1D candles are empty (e.g., market not open yet), generate flat 75-point chart using previous close
         if (priceSeries.isEmpty()) {
             if (livePrices != null && !livePrices.isEmpty()) {
-                LocalTime now = nowIST.withSecond(0).withNano(0);
-                if (now.isAfter(MARKET_CLOSE)) {
-                    now = MARKET_CLOSE;
+                LocalTime t = MARKET_OPEN;
+                while (!t.isAfter(MARKET_CLOSE)) {
+                    priceSeries.put(t, livePrices);
+                    t = t.plusMinutes(5);
                 }
-                priceSeries.put(now, livePrices);
             }
         }
 
