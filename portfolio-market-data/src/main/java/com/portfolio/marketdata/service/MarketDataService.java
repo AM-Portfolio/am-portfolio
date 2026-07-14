@@ -117,6 +117,10 @@ public class MarketDataService {
                             .interval(request.getInterval())
                             .filterType(request.getFilterType())
                             .instrumentType(request.getInstrumentType())
+                            .filterFrequency(request.getFilterFrequency())
+                            .continuous(request.getContinuous())
+                            .forceRefresh(request.getForceRefresh())
+                            .additionalParams(request.getAdditionalParams())
                             .build();
 
                     HistoricalDataResponseWrapper response = marketDataApiClient.getHistoricalData(chunkRequest).block();
