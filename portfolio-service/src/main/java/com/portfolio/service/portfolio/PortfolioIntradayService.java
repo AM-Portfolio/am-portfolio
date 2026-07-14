@@ -189,7 +189,7 @@ public class PortfolioIntradayService {
                 log.info("[Intraday] 5-min candles empty, fetching live prices as fallback for user={}, portfolioId={}", userId, portfolioId);
                 Map<String, Double> livePrices = marketDataService.getCurrentPrices(new ArrayList<>(symbols));
                 if (livePrices != null && !livePrices.isEmpty()) {
-                    LocalTime now = nowIST.toLocalTime().withSecond(0).withNano(0);
+                    LocalTime now = nowIST.withSecond(0).withNano(0);
                     if (now.isAfter(MARKET_CLOSE)) {
                         now = MARKET_CLOSE;
                     }
