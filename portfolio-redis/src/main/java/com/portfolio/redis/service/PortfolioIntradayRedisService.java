@@ -20,7 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 public class PortfolioIntradayRedisService {
     private final RedisTemplate<String, IntradayDataPoint[]> portfolioIntradayRedisTemplate;
 
-    private static final String KEY_PREFIX = "portfolio:intraday:v4:";
+    private static final String KEY_PREFIX = "portfolio:intraday:v5:";
     private static final int MARKET_HOURS_TTL_MINUTES = 5;
     private static final int OFF_MARKET_HOURS_TTL_HOURS = 24;
 
