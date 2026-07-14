@@ -10,8 +10,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
-
 import org.springframework.stereotype.Service;
 
 import com.am.common.amcommondata.model.HoldingSnapshotItemModel;
@@ -22,6 +22,7 @@ import com.portfolio.marketdata.model.FilterType;
 import com.portfolio.marketdata.model.InstrumentType;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.redis.service.PortfolioIntradayRedisService;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.market.TimeFrame;
 import com.portfolio.model.portfolio.IntradayDataPoint;
@@ -38,6 +39,7 @@ public class PortfolioIntradayService {
     private final PortfolioSnapshotService snapshotService;
     private final PortfolioHoldingsService holdingsService;
     private final MarketDataService marketDataService;
+    private final PortfolioIntradayRedisService intradayRedisService;
 
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
     private static final LocalTime MARKET_OPEN = LocalTime.of(9, 15);
@@ -47,6 +49,13 @@ public class PortfolioIntradayService {
         LocalDate today = LocalDate.now(IST);
         LocalTime nowIST = LocalTime.now(IST);
         boolean marketOpen = !nowIST.isBefore(MARKET_OPEN) && !nowIST.isAfter(MARKET_CLOSE);
+
+        // ── CACHE CHECK ───────────────────────────────────────────────────────────
+        Optional<List<IntradayDataPoint>> cached = intradayRedisService.getIntradayData(userId, portfolioId);
+        if (cached.isPresent()) {
+            log.info("[Intraday] Serving intraday chart from cache for user={}, portfolioId={}", userId, portfolioId);
+            return cached.get();
+        }
 
         // ── STEP 1: Get yesterday's EOD snapshot ──────────────────────────────
         // Fetch last 7 days to handle weekends & holidays gracefully
@@ -175,6 +184,9 @@ public class PortfolioIntradayService {
             boolean isLive = t.equals(latestCandle) && marketOpen;
             result.add(makeGlobalPoint(t.toString(), portfolioValue, baselineWealth, isLive));
         }
+
+        // Cache the result before returning
+        intradayRedisService.cacheIntradayData(userId, portfolioId, result, marketOpen);
 
         return result;
     }
