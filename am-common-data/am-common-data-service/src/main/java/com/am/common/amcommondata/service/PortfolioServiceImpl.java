@@ -60,7 +60,11 @@ public class PortfolioServiceImpl implements PortfolioService {
                 audit.setUpdatedAt(java.time.LocalDateTime.now());
                 existing.setAudit(audit);
                 
-                existing.setName(portfolioModel.getBrokerType().getCode());
+                if (portfolioModel.getBrokerType() != null) {
+                    existing.setName(portfolioModel.getBrokerType().getCode());
+                } else {
+                    existing.setName("UNKNOWN");
+                }
             }
 
             // Smart holding calculation logic
