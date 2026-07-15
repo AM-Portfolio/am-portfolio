@@ -1,0 +1,25 @@
+apiVersion: am.obs/v1
+kind: ServiceObservability
+service: am-portfolio
+tier: A
+runtime: java
+k8s_app_label: am-portfolio   # calibrate if live pod label differs
+# Spring: spring.application.name=portfolio-app → Prom label application
+metrics_application: portfolio-app
+namespace: am-apps-preprod
+owners: [portfolio]
+signals:
+  uses:
+    - http_request_rate
+    - http_error_rate
+    - http_latency_p95
+    - jvm_heap_used
+    - jvm_gc_pause
+    - k8s_cpu_usage
+    - k8s_memory_usage
+    - k8s_restarts
+    - service_logs_all
+    - service_error_logs
+    - service_health_up
+    - trace_latency_p95
+functional: []
