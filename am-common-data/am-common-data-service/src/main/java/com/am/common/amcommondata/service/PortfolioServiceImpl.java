@@ -76,7 +76,12 @@ public class PortfolioServiceImpl implements PortfolioService {
                     existingEquities = new java.util.ArrayList<>();
                 }
 
-                if (incomingEquities != null) {
+                if (incomingEquities != null && !incomingEquities.isEmpty()) {
+                    // Trade sync often omits action (full holdings snapshot). Without this branch,
+                    // equities were parsed from Kafka but never written — DB stayed empty.
+                    if (tradeAction == null || tradeAction.isBlank() || "UPDATE".equalsIgnoreCase(tradeAction)) {
+                        existingEquities = new java.util.ArrayList<>(incomingEquities);
+                    } else {
                     for (com.am.common.amcommondata.document.asset.equity.EquityDocument incoming : incomingEquities) {
                         String isin = incoming.getIsin();
                         
@@ -123,6 +128,7 @@ public class PortfolioServiceImpl implements PortfolioService {
                                 // SELL received for ISIN not in holdings - skipping silently or log warning.
                             }
                         }
+                    }
                     }
                 }
 
