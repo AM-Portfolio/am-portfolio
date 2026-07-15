@@ -59,12 +59,7 @@ public class PortfolioMapperv1 {
             }).collect(Collectors.toList());
         }
 
-        BrokerType brokerType = null;
-        if (tradeEvent.getBrokerType() != null) {
-            try {
-                brokerType = BrokerType.valueOf(tradeEvent.getBrokerType().toUpperCase());
-            } catch (Exception ignored) {}
-        }
+        BrokerType brokerType = resolveBrokerType(tradeEvent.getBrokerType());
 
         return PortfolioModelV1.builder()
                 .name(tradeEvent.getId()) // Name holds the portfolioId (which maps to Trade Event ID)
@@ -170,5 +165,25 @@ public class PortfolioMapperv1 {
                 .avgBuyingPrice(fundModel.getAvgBuyingPrice())
                 .quantity(fundModel.getQuantity())
                 .build();
+    }
+
+    /**
+     * Trade publishes enum names (ZERODHA, GROW, UNKNOWN, …). Portfolio enum is a subset
+     * (GROWW not GROW). Fall back via display code, then ZERODHA-safe null avoidance for create.
+     */
+    private BrokerType resolveBrokerType(String raw) {
+        if (raw == null || raw.isBlank() || "UNKNOWN".equalsIgnoreCase(raw) || "OTHER".equalsIgnoreCase(raw)) {
+            return null;
+        }
+        String normalized = raw.trim().toUpperCase().replace(' ', '_');
+        if ("GROW".equals(normalized) || "GROWW".equals(normalized)) {
+            return BrokerType.GROWW;
+        }
+        try {
+            return BrokerType.valueOf(normalized);
+        } catch (IllegalArgumentException ignored) {
+            BrokerType fromCode = BrokerType.fromCode(raw.trim());
+            return fromCode;
+        }
     }
 }
