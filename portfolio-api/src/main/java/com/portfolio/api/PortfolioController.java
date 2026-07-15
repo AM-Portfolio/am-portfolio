@@ -100,10 +100,9 @@ public class PortfolioController {
         return ResponseEntity.ok(portfolios);
     }
 
-    @Operation(summary = "Get portfolio IDs and names", description = "Retrieves a lightweight list of portfolio IDs and names for all user portfolios")
+    @Operation(summary = "Get portfolio IDs and names", description = "Retrieves a lightweight list of portfolio IDs and names for all user portfolios. Empty list when the user has no portfolios.")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Portfolio list retrieved successfully"),
-            @ApiResponse(responseCode = "404", description = "No portfolios found for user")
+            @ApiResponse(responseCode = "200", description = "Portfolio list retrieved successfully (may be empty)")
     })
     @GetMapping("/list")
     public ResponseEntity<List<PortfolioBasicInfo>> getPortfolioBasicDetails() {
@@ -113,8 +112,10 @@ public class PortfolioController {
         List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
 
         if (portfolios == null || portfolios.isEmpty()) {
-            log.warn("PortfolioController - getPortfolioBasicDetails - No portfolios found for user: {}", userId);
-            return ResponseEntity.notFound().build();
+            log.info("PortfolioController - getPortfolioBasicDetails - No portfolios for user: {} (returning empty list)",
+                    userId);
+            // Empty is a valid state — UI shows "No portfolios" / upload CTA. Do not 404.
+            return ResponseEntity.ok(java.util.Collections.emptyList());
         }
 
         List<PortfolioBasicInfo> basicInfoList = portfolios.stream()
