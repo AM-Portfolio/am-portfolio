@@ -6,6 +6,7 @@ on:
       ["main", "develop", "test/**", "feature/**", "hotfix/**", "fix/**"]
     paths:
       - "portfolio-**"
+      - "am-common-data/**"
       - "helm/**"
       - "pom.xml"
       - "Dockerfile"
@@ -15,6 +16,7 @@ on:
       ["main", "develop", "test/**", "feature/**", "hotfix/**", "fix/**"]
     paths:
       - "portfolio-**"
+      - "am-common-data/**"
       - "helm/**"
       - "pom.xml"
       - "Dockerfile"

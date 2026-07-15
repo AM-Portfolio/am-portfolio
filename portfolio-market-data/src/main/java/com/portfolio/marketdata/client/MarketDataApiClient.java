@@ -153,4 +153,26 @@ public class MarketDataApiClient extends AbstractApiClient {
                                                 data.getTotalMatches()))
                                 .doOnError(e -> log.error("Failed to batch search: {}", e.getMessage()));
         }
+
+        /**
+         * Gets historical charts data from am-market.
+         * 
+         * @param symbols the symbols to fetch charts for
+         * @param range the timeframe range (e.g. 1D, 1M, 1Y)
+         * @return a Mono of HistoricalChartsResponse
+         */
+        public Mono<com.portfolio.marketdata.model.HistoricalChartsResponse> getHistoricalCharts(List<String> symbols, String range) {
+                String symbolsParam = String.join(",", symbols);
+                String traceId = org.slf4j.MDC.get("traceId");
+                log.info("Fetching historical charts for symbols={} range={} from {} traceId={}",
+                                symbolsParam, range, config.getHistoricalChartsEndpoint(), traceId);
+
+                return get(config.getHistoricalChartsEndpoint(),
+                                com.portfolio.marketdata.model.HistoricalChartsResponse.class,
+                                "symbols", symbolsParam,
+                                "range", range,
+                                "isIndexSymbol", false)
+                                .doOnSuccess(data -> log.debug("Successfully fetched historical charts, traceId={}", traceId))
+                                .doOnError(e -> log.error("Failed to fetch historical charts: {}, traceId={}", e.getMessage(), traceId));
+        }
 }

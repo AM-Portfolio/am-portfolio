@@ -1,6 +1,7 @@
 package com.portfolio.marketdata.service;
 
 import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -82,33 +83,74 @@ public class MarketDataService {
      */
     public Map<String, MarketData> getHistoricalData(HistoricalDataRequest request) {
 
-        log.info("Getting historical data for {} from {} to {} with interval={}, filterType={}",
-                request.getSymbols(), request.getFromDate(), request.getToDate(),
+        String symbolStr = request.getSymbols();
+        if (symbolStr == null || symbolStr.trim().isEmpty()) {
+            return java.util.Collections.emptyMap();
+        }
+
+        List<String> validSymbols = Arrays.stream(symbolStr.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
+
+        if (validSymbols.isEmpty()) {
+            return java.util.Collections.emptyMap();
+        }
+
+        log.info("Getting historical data for {} symbols from {} to {} with interval={}, filterType={}",
+                validSymbols.size(), request.getFromDate(), request.getToDate(),
                 request.getInterval(), request.getFilterType());
 
-        try {
-            HistoricalDataResponseWrapper response = marketDataApiClient.getHistoricalData(request).block();
-
-            if (response == null || response.getData() == null) {
-                log.warn("No historical data returned for symbols: {}", request.getSymbols());
-                return java.util.Collections.emptyMap();
-            }
-
-            log.info("Successfully fetched historical data for {} symbols with {} total data points",
-                    response.getSuccessfulSymbols(), response.getTotalDataPoints());
-
-            // Convert HistoricalDataResponse to MarketData
-            Map<String, MarketData> marketDataMap = new HashMap<>();
-            for (Map.Entry<String, HistoricalDataResponse> entry : response.getData().entrySet()) {
-                marketDataMap.put(entry.getKey(), MarketDataConverter.fromHistoricalDataResponse(entry.getValue()));
-            }
-
-            return marketDataMap;
-
-        } catch (Exception e) {
-            log.error("Error fetching historical data: {}", e.getMessage(), e);
-            return java.util.Collections.<String, MarketData>emptyMap();
+        final int CHUNK_SIZE = 20;
+        List<List<String>> chunks = new java.util.ArrayList<>();
+        for (int i = 0; i < validSymbols.size(); i += CHUNK_SIZE) {
+            chunks.add(validSymbols.subList(i, Math.min(i + CHUNK_SIZE, validSymbols.size())));
         }
+
+        List<java.util.concurrent.CompletableFuture<Map<String, MarketData>>> futures = chunks.stream()
+            .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                try {
+                    HistoricalDataRequest chunkRequest = HistoricalDataRequest.builder()
+                            .symbols(String.join(",", chunk))
+                            .fromDate(request.getFromDate())
+                            .toDate(request.getToDate())
+                            .interval(request.getInterval())
+                            .filterType(request.getFilterType())
+                            .instrumentType(request.getInstrumentType())
+                            .filterFrequency(request.getFilterFrequency())
+                            .continuous(request.getContinuous())
+                            .forceRefresh(request.getForceRefresh())
+                            .additionalParams(request.getAdditionalParams())
+                            .build();
+
+                    HistoricalDataResponseWrapper response = marketDataApiClient.getHistoricalData(chunkRequest).block();
+
+                    if (response == null || response.getData() == null) {
+                        return java.util.Collections.<String, MarketData>emptyMap();
+                    }
+
+                    Map<String, MarketData> chunkResult = new HashMap<>();
+                    for (Map.Entry<String, HistoricalDataResponse> entry : response.getData().entrySet()) {
+                        chunkResult.put(entry.getKey(), MarketDataConverter.fromHistoricalDataResponse(entry.getValue()));
+                    }
+                    return chunkResult;
+                } catch (Exception e) {
+                    log.warn("[HistoricalData chunk] Failed for chunk of {}: {}", chunk.size(), e.getMessage());
+                    return java.util.Collections.<String, MarketData>emptyMap();
+                }
+            }, taskExecutor))
+            .collect(Collectors.toList());
+
+        Map<String, MarketData> merged = new java.util.HashMap<>();
+        for (java.util.concurrent.CompletableFuture<Map<String, MarketData>> f : futures) {
+            try {
+                merged.putAll(f.get(30, java.util.concurrent.TimeUnit.SECONDS));
+            } catch (Exception e) {
+                log.warn("[HistoricalData chunk] Chunk future failed or timed out: {}", e.getMessage());
+            }
+        }
+        
+        return merged;
     }
 
     /**
@@ -163,6 +205,20 @@ public class MarketDataService {
      * @return Map of symbols to their respective market data
      */
     public Map<String, MarketData> getOhlcData(List<String> symbols, boolean refresh) {
+        return getOhlcData(symbols, TimeFrame.DAY.getValue(), refresh);
+    }
+
+    /**
+     * Get OHLC data for the specified symbols with a specific time frame.
+     * Splits large symbol lists into parallel chunks of max 20 symbols to prevent
+     * downstream API timeouts.
+     *
+     * @param symbols   List of symbols to fetch data for
+     * @param timeFrame The time frame for the OHLC data
+     * @param refresh   Whether to refresh the data or use cached data
+     * @return Map of symbols to their respective market data
+     */
+    public Map<String, MarketData> getOhlcData(List<String> symbols, String timeFrame, boolean refresh) {
         List<String> validSymbols = symbols.stream()
                 .filter(s -> s != null && !s.trim().isEmpty())
                 .collect(Collectors.toList());
@@ -171,7 +227,7 @@ public class MarketDataService {
             return Collections.emptyMap();
         }
 
-        log.info("Getting OHLC data for {} symbols with refresh={}", validSymbols.size(), refresh);
+        log.info("Getting OHLC data for {} symbols with timeFrame={} refresh={}", validSymbols.size(), timeFrame, refresh);
 
         // Partition into chunks of 20 to avoid massive single-batch timeouts
         final int CHUNK_SIZE = 20;
@@ -185,7 +241,7 @@ public class MarketDataService {
             .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
                 try {
                     MarketDataResponseWrapper w = marketDataApiClient
-                            .getOhlcData(chunk, TimeFrame.DAY.getValue(), refresh).block();
+                            .getOhlcData(chunk, timeFrame, refresh).block();
                     return convertToMarketDataMap(w, true);
                 } catch (Exception e) {
                     log.warn("[OHLC chunk] Failed for chunk of {}: {}", chunk.size(), e.getMessage());
@@ -419,35 +475,110 @@ public class MarketDataService {
         }
 
         log.info("Fetching market cap data for {} symbols", symbols.size());
-        try {
-            com.portfolio.marketdata.model.BatchSearchRequest request = com.portfolio.marketdata.model.BatchSearchRequest
-                    .builder()
-                    .queries(symbols)
-                    .limit(1) // We only need the best match per symbol (usually exact match)
-                    .minMatchScore(0.9) // High confidence for exact symbol match
-                    .build();
 
-            com.portfolio.marketdata.model.BatchSearchResponse response = marketDataApiClient.batchSearch(request)
-                    .block();
-
-            if (response == null || response.getResults() == null) {
-                return Collections.emptyMap();
-            }
-
-            Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> result = new HashMap<>();
-
-            for (com.portfolio.marketdata.model.BatchSearchResponse.QueryResult qr : response.getResults()) {
-                if (qr.getMatches() != null && !qr.getMatches().isEmpty()) {
-                    // Assuming the first match is the correct one for the query (symbol)
-                    result.put(qr.getQuery(), qr.getMatches().get(0));
-                }
-            }
-
-            return result;
-        } catch (Exception e) {
-            log.error("Error fetching market cap data: {}", e.getMessage(), e);
-            return Collections.emptyMap();
+        final int CHUNK_SIZE = 20;
+        List<List<String>> chunks = new java.util.ArrayList<>();
+        for (int i = 0; i < symbols.size(); i += CHUNK_SIZE) {
+            chunks.add(symbols.subList(i, Math.min(i + CHUNK_SIZE, symbols.size())));
         }
+
+        List<java.util.concurrent.CompletableFuture<Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch>>> futures = chunks.stream()
+            .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                try {
+                    com.portfolio.marketdata.model.BatchSearchRequest request = com.portfolio.marketdata.model.BatchSearchRequest
+                            .builder()
+                            .queries(chunk)
+                            .limit(1) // We only need the best match per symbol (usually exact match)
+                            .minMatchScore(0.9) // High confidence for exact symbol match
+                            .build();
+
+                    com.portfolio.marketdata.model.BatchSearchResponse response = marketDataApiClient.batchSearch(request)
+                            .block();
+
+                    if (response == null || response.getResults() == null) {
+                        return Collections.<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch>emptyMap();
+                    }
+
+                    Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> chunkResult = new HashMap<>();
+                    for (com.portfolio.marketdata.model.BatchSearchResponse.QueryResult qr : response.getResults()) {
+                        if (qr.getMatches() != null && !qr.getMatches().isEmpty()) {
+                            // Assuming the first match is the correct one for the query (symbol)
+                            chunkResult.put(qr.getQuery(), qr.getMatches().get(0));
+                        }
+                    }
+                    return chunkResult;
+                } catch (Exception e) {
+                    log.error("[MarketCap chunk] Error fetching market cap data for {} symbols: {}", chunk.size(), e.getMessage());
+                    return Collections.<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch>emptyMap();
+                }
+            }, taskExecutor))
+            .collect(Collectors.toList());
+
+        Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> merged = new java.util.HashMap<>();
+        for (java.util.concurrent.CompletableFuture<Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch>> f : futures) {
+            try {
+                merged.putAll(f.get(15, java.util.concurrent.TimeUnit.SECONDS));
+            } catch (Exception e) {
+                log.warn("[MarketCap chunk] Chunk future failed or timed out: {}", e.getMessage());
+            }
+        }
+
+        return merged;
     }
 
+    /**
+     * Gets historical charts data for the specified symbols and range.
+     * 
+     * @param symbols list of symbols
+     * @param range time range (e.g. 1D, 1M, 1Y)
+     * @return HistoricalChartsResponse containing the chart points
+     */
+    public com.portfolio.marketdata.model.HistoricalChartsResponse getHistoricalCharts(List<String> symbols, String range) {
+        if (symbols == null || symbols.isEmpty()) {
+            return new com.portfolio.marketdata.model.HistoricalChartsResponse();
+        }
+
+        List<String> validSymbols = symbols.stream()
+                .filter(s -> s != null && !s.trim().isEmpty())
+                .collect(Collectors.toList());
+
+        if (validSymbols.isEmpty()) {
+            return new com.portfolio.marketdata.model.HistoricalChartsResponse();
+        }
+
+        log.info("Getting historical charts for {} symbols with range={}", validSymbols.size(), range);
+
+        final int CHUNK_SIZE = 20;
+        List<List<String>> chunks = new java.util.ArrayList<>();
+        for (int i = 0; i < validSymbols.size(); i += CHUNK_SIZE) {
+            chunks.add(validSymbols.subList(i, Math.min(i + CHUNK_SIZE, validSymbols.size())));
+        }
+
+        List<java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalChartsResponse>> futures = chunks.stream()
+            .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                try {
+                    return marketDataApiClient.getHistoricalCharts(chunk, range).block();
+                } catch (Exception e) {
+                    log.error("[HistoricalCharts chunk] Failed for chunk of {}: {}", chunk.size(), e.getMessage());
+                    return new com.portfolio.marketdata.model.HistoricalChartsResponse();
+                }
+            }, taskExecutor))
+            .collect(Collectors.toList());
+
+        com.portfolio.marketdata.model.HistoricalChartsResponse mergedResponse = new com.portfolio.marketdata.model.HistoricalChartsResponse();
+        mergedResponse.setData(new java.util.HashMap<>());
+
+        for (java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalChartsResponse> f : futures) {
+            try {
+                com.portfolio.marketdata.model.HistoricalChartsResponse chunkResult = f.get(30, java.util.concurrent.TimeUnit.SECONDS);
+                if (chunkResult != null && chunkResult.getData() != null) {
+                    mergedResponse.getData().putAll(chunkResult.getData());
+                }
+            } catch (Exception e) {
+                log.warn("[HistoricalCharts chunk] Chunk future failed or timed out: {}", e.getMessage());
+            }
+        }
+        
+        return mergedResponse;
+    }
 }

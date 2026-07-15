@@ -148,6 +148,11 @@ public class RedisConfig {
     }
 
     @Bean
+    public RedisTemplate<String, com.portfolio.model.portfolio.IntradayDataPoint[]> portfolioIntradayRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, com.portfolio.model.portfolio.IntradayDataPoint[].class);
+    }
+
+    @Bean
     public RedisTemplate<String, IndexIndices> marketIndexIndicesRedisTemplate(RedisConnectionFactory connectionFactory) {
         return createRedisTemplate(connectionFactory, IndexIndices.class);
     }
