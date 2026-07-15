@@ -174,14 +174,34 @@ public class PortfolioIntradayService {
             for (Map.Entry<String, com.portfolio.marketdata.model.HistoricalData> entry : chartResponse.getData().entrySet()) {
                 String sym = entry.getKey();
                 com.portfolio.marketdata.model.HistoricalData hd = entry.getValue();
-                if (hd == null || hd.getDataPoints() == null) {
+                if (hd == null || hd.getDataPoints() == null || hd.getDataPoints().isEmpty()) {
                     continue;
                 }
+
+                // --- TIMEZONE AUTO-DETECTION HEURISTIC ---
+                // We handle both IST (local) and UTC (cloud) responses without touching am-market.
+                // The Indian market opens at 09:15 IST (which is 03:45 UTC).
+                // By checking the first candle's hour, we can detect the timezone of the payload.
+                boolean isUtcPayload = false;
+                com.am.common.investment.model.historical.OHLCVTPoint firstPt = hd.getDataPoints().get(0);
+                if (firstPt != null && firstPt.getTime() != null) {
+                    int firstHour = firstPt.getTime().toLocalTime().getHour();
+                    // If the first candle starts before 9 AM (e.g. 3 AM or 4 AM), it is definitely UTC-shifted.
+                    if (firstHour < 9) {
+                        isUtcPayload = true;
+                    }
+                }
+
                 for (com.am.common.investment.model.historical.OHLCVTPoint pt : hd.getDataPoints()) {
                     if (pt.getTime() == null || pt.getClose() == null) {
                         continue;
                     }
                     LocalTime t = pt.getTime().toLocalTime().withSecond(0).withNano(0);
+                    
+                    if (isUtcPayload) {
+                        t = t.plusHours(5).plusMinutes(30);
+                    }
+
                     if (t.isBefore(MARKET_OPEN) || t.isAfter(MARKET_CLOSE)) {
                         continue;
                     }
