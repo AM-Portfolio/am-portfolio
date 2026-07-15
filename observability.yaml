@@ -3,23 +3,55 @@ kind: ServiceObservability
 service: am-portfolio
 tier: A
 runtime: java
-k8s_app_label: am-portfolio   # calibrate if live pod label differs
-# Spring: spring.application.name=portfolio-app → Prom label application
+# Loki/cAdvisor pod match (pod name prefix). Live labels use
+# app.kubernetes.io/instance=am-portfolio (no short app= label).
+k8s_app_label: am-portfolio
+# Spring: spring.application.name → Prom label application=
 metrics_application: portfolio-app
 namespace: am-apps-preprod
 owners: [portfolio]
+#
+# Prerequisites for non-empty HTTP/JVM/DB panels:
+# 1) micrometer-registry-prometheus on classpath (pom) + rebuild image
+# 2) Helm podAnnotations scrape (needs universal-chart that merges podAnnotations)
+# 3) k8s_restarts needs kube-state-metrics (not deployed on cluster today)
+#
 signals:
   uses:
+    # HTTP / API
     - http_request_rate
+    - http_requests_by_status
+    - http_requests_by_outcome
+    - http_requests_2xx
+    - http_requests_4xx
     - http_error_rate
     - http_latency_p95
+    - http_latency_p95_by_uri
+    - http_requests_by_uri
+    - http_client_request_rate
+    # JVM / process
     - jvm_heap_used
+    - jvm_heap_max
+    - jvm_nonheap_used
     - jvm_gc_pause
+    - jvm_threads_live
+    - process_cpu_usage
+    - process_files_open
+    - system_cpu_usage
+    - logback_events
+    - tomcat_threads_busy
+    - service_health_up
+    # Data / messaging
+    - mongo_commands
+    - mongo_pool_checkedout
+    - redis_commands
+    - kafka_listener
+    - kafka_listener_errors
+    # K8s + logs + traces
     - k8s_cpu_usage
     - k8s_memory_usage
     - k8s_restarts
     - service_logs_all
     - service_error_logs
-    - service_health_up
     - trace_latency_p95
 functional: []

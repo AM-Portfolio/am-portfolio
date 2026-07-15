@@ -223,6 +223,8 @@ management:
       exposure:
         include: health,info,metrics,prometheus
   endpoint:
+    prometheus:
+      enabled: true
     health:
       probes:
         enabled: true
@@ -231,6 +233,9 @@ management:
       group:
         readiness:
           include: mongo,readinessState
+  metrics:
+    tags:
+      application: ${spring.application.name}
   health:
     livenessstate:
       enabled: true

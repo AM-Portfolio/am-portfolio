@@ -59,6 +59,12 @@ probes:
     initialDelaySeconds: 150
     periodSeconds: 15
 
+# Scraped by am-infra Prometheus kubernetes-pods job
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/actuator/prometheus"
+
 resources:
   limits:
     cpu: 1000m
