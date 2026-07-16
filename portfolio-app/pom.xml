@@ -68,6 +68,12 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
+        <!-- Core observability (FlowLogger / metric naming) — branch snapshot until main publish -->
+        <dependency>
+            <groupId>com.am.libraries</groupId>
+            <artifactId>am-observability-lib</artifactId>
+            <version>1.1.1-SNAPSHOT</version>
+        </dependency>
 
         <!-- Required for MDC propagation in Reactive/WebClient chains (Spring Boot 3.2+) -->
         <dependency>
