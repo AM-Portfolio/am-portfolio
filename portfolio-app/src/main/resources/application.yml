@@ -183,6 +183,191 @@ etf:
 basket:
   holdings:
     enrichment:
+# Infrastructure Configuration
+MONGODB_CONNECTION_URL: ${MONGODB_URL:mongodb://admin:password123@localhost:27017/portfolio?authSource=admin}
+
+#Kafka
+PROJ_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+PROJ_KAFKA_USERNAME: ${KAFKA_USERNAME:admin}
+PROJ_KAFKA_PASSWORD: ${KAFKA_PASSWORD:password123}
+PROJ_KAFKA_JAAS_CONFIG: ${KAFKA_JAAS_CONFIG:org.apache.kafka.common.security.scram.ScramLoginModule required username="${PROJ_KAFKA_USERNAME}" password="${PROJ_KAFKA_PASSWORD}";}
+PROJ_KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:SASL_PLAINTEXT}
+PROJ_KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:SCRAM-SHA-256}
+
+#Topic
+PORTFOLIO_CONSUMER_GROUP: ${PORTFOLIO_CONSUMER_ID:am-portfolio-group-1}
+PORTFOLIO_TOPIC_NAME: ${PORTFOLIO_TOPIC:am-portfolio}
+STOCK_CONSUMER_GROUP: ${STOCK_CONSUMER_ID:am-stock-group.v2}
+STOCK_TOPIC_NAME: ${STOCK_TOPIC:am-stock-price-update}
+MARKET_INDEX_CONSUMER_GROUP: ${MARKET_INDEX_CONSUMER_ID:am-market-index-group-1}
+MARKET_INDEX_TOPIC_NAME: ${MARKET_INDEX_TOPIC:nse-stock-indices-update}
+
+#Redis
+PROJ_REDIS_HOSTNAME: ${REDIS_HOSTNAME:localhost}
+PROJ_REDIS_PORT: ${REDIS_PORT:6379}
+PROJ_REDIS_PASSWORD: ${REDIS_PASSWORD:password123}
+
+cache:
+  redis:
+    enabled: false
+
+spring:
+  main:
+    lazy-initialization: true
+  application:
+    name: portfolio-app
+  profiles:
+    include:
+      - api
+  kafka:
+    bootstrap-servers: ${PROJ_KAFKA_BOOTSTRAP_SERVERS}
+    listener:
+      auto-startup: ${KAFKA_ENABLED:false}
+    consumer:
+      group-id: ${PORTFOLIO_CONSUMER_GROUP}
+      auto-offset-reset: latest
+      enable-auto-commit: false
+      max-poll-records: 100
+    properties:
+      security-protocol: ${PROJ_KAFKA_SECURITY_PROTOCOL}
+      sasl-mechanism: ${PROJ_KAFKA_SASL_MECHANISM}
+      sasl-jaas-config: ${PROJ_KAFKA_JAAS_CONFIG}
+      ssl-endpoint-identification-algorithm: ""
+      ssl-truststore-location: /etc/ssl/certs/java/cacerts
+      ssl-truststore-password: changeit
+  data:
+    redis:
+      host: ${PROJ_REDIS_HOSTNAME}
+      port: ${PROJ_REDIS_PORT}
+      password: ${PROJ_REDIS_PASSWORD}
+      portfolio-mover:
+        ttl: 900 # 15 minutes in seconds
+        key-prefix: "portfolio:analysis:"
+      portfolio-summary:
+        ttl: 900 # 15 minutes in seconds
+        key-prefix: "portfolio:summary:"
+      portfolio-heatmap:
+        ttl: 900 # 15 minutes in seconds
+        key-prefix: "portfolio:heatmap:"
+      portfolio-market-data:
+        key-prefix: "portfolio:mktdata:"
+        # Note: TTL is computed dynamically by PortfolioMarketDataRedisService.computeSmartTtl()
+      portfolio-holdings:
+        ttl: 900 # 15 minutes in seconds
+        key-prefix: "portfolio:holdings:"
+      market-indices:
+        ttl: 129600 # 30 Days in seconds
+        key-prefix: "market-indices:indices:"
+        historical:
+          key-prefix: "market-indices:historical-indices:"
+          ttl: 129600 # 30 Days in seconds
+      stock:
+        ttl: 129600 # 30 Days in seconds
+        key-prefix: "stock:price:"
+        historical:
+          key-prefix: "stock:historical-price:"
+          ttl: 129600 # 30 Days in seconds
+      stock-indices:
+        ttl: 129600 # 30 Days in seconds
+        key-prefix: "stock-indices:data:"
+        historical:
+          key-prefix: "stock-indices:historical-data:"
+          ttl: 129600 # 30 Days in seconds
+    mongodb:
+      uri: ${MONGODB_CONNECTION_URL}
+      database: ${MONGODB_DATABASE:portfolio}
+      authentication-database: admin
+  # Disable JDBC auto-configuration since we're using MongoDB
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+
+nse:
+  broad-market-indices:
+    - NIFTY 50
+    - NIFTY NEXT 50
+    - NIFTY MIDCAP 50
+    - NIFTY MIDCAP 100
+    - NIFTY MIDCAP 150
+    - NIFTY MIDCAP 250
+    - NIFTY MIDCAP 500
+    - NIFTY SMLCAP 100
+    - NIFTY SMLCAP 250
+    - NIFTY SMLCAP 500
+  sector-indices:
+    - NIFTY BANK
+    - NIFTY IT
+    - NIFTY PHARMA
+    - NIFTY AUTO
+    - NIFTY METAL
+    - NIFTY ENERGY
+    - NIFTY FMCG
+    - NIFTY MEDIA
+    - NIFTY REALTY
+    - NIFTY PSU BANK
+
+dev:
+  tools:
+    enabled: ${DEV_TOOLS_ENABLED:false}
+
+app:
+  scheduler:
+    snapshot:
+      active-user-window-days: ${SNAPSHOT_ACTIVE_USER_WINDOW_DAYS:30}
+      max-backfill-days: ${SNAPSHOT_MAX_BACKFILL_DAYS:365}
+  jwt:
+    internal-secret: ${INTERNAL_SECRET_KEY:internal-service-super-secret-key-32chars-minimum-change-in-prod}
+    secret: ${JWT_SECRET:internal-service-super-secret-key-32chars-minimum-change-in-prod}
+    algorithm: ${JWT_ALGORITHM:HS256}
+  kafka:
+    enabled: ${KAFKA_ENABLED:false}
+    trigger-calculation:
+      consumer:
+        id: am-portfolio-trigger-calculation-group
+    portfolio:
+      consumer:
+        id: ${PORTFOLIO_CONSUMER_GROUP}
+        enabled: ${KAFKA_ENABLED:false}
+      topic: ${PORTFOLIO_TOPIC_NAME}
+      publish-topic: ${PORTFOLIO_PUBLISH_TOPIC:am-portfolio-update}
+      stream:
+        topic: ${PORTFOLIO_STREAM_TOPIC:am-portfolio-stream}
+    login:
+      consumer:
+        id: ${LOGIN_CONSUMER_ID:am-portfolio-login-group}
+        enabled: ${LOGIN_KAFKA_ENABLED:false}
+      topic: ${LOGIN_TOPIC:active-user}
+    stock:
+      consumer:
+        id: ${STOCK_CONSUMER_GROUP}
+        enabled: ${KAFKA_ENABLED:false}
+      topic: ${STOCK_TOPIC_NAME}
+    holding:
+      consumer:
+        id: ${HOLDING_CONSUMER_ID:am-portfolio-holding-group}
+        enabled: ${KAFKA_ENABLED:false}
+      topic: ${HOLDING_TOPIC:am-holding-update}
+    market-index:
+      consumer:
+        id: ${MARKET_INDEX_CONSUMER_GROUP}
+        enabled: ${KAFKA_ENABLED:false}
+      topic: ${MARKET_INDEX_TOPIC_NAME}
+
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    context-path: /
+  tomcat:
+    max-threads: 20
+    min-spare-threads: 10
+    max-connections: 200
+
+etf:
+  url: ${ETF_API_URL:http://localhost:8022}
+
+basket:
+  holdings:
+    enrichment:
       enabled: ${BASKET_HOLDINGS_ENRICHMENT:true}
 
 market-data:
@@ -190,7 +375,7 @@ market-data:
     connect-timeout-ms: ${MARKET_DATA_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:45000}
   api:
-    base-url: ${MARKET_DATA_API_URL:https://am-preprod.asrax.in/market}
+    base-url: ${MARKET_DATA_API_URL:http://am-market-data:8080}
     ohlc-endpoint: /v1/market-data/ohlc
     historical-data-endpoint: /v1/market-data/historical-data
     historical-charts-endpoint: /v1/analysis/historical-charts
@@ -296,8 +481,3 @@ cache:
 portfolio:
   redis:
     enabled: false
-m a n a g e m e n t :  
-     h e a l t h :  
-         r e d i s :  
-             e n a b l e d :   f a l s e  
- 
