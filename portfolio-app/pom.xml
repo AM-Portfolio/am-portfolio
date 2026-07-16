@@ -63,6 +63,11 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-tracing-bridge-otel</artifactId>
         </dependency>
+        <!-- Exposes /actuator/prometheus for Grafana/Prometheus scrape -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
 
         <!-- Required for MDC propagation in Reactive/WebClient chains (Spring Boot 3.2+) -->
         <dependency>

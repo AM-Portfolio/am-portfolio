@@ -1,0 +1,24 @@
+apiVersion: am.obs/v1
+kind: ServiceObservability
+service: am-portfolio
+tier: A
+runtime: java
+# Loki/cAdvisor pod match (pod name prefix). Live labels use
+# app.kubernetes.io/instance=am-portfolio (no short app= label).
+k8s_app_label: am-portfolio
+# Spring: spring.application.name → Prom label application=
+metrics_application: portfolio-app
+namespace: am-apps-preprod
+owners: [portfolio]
+#
+# Prerequisites for non-empty HTTP/JVM/DB panels:
+# 1) micrometer-registry-prometheus on classpath (pom) + rebuild image
+# 2) Helm podAnnotations scrape (needs universal-chart that merges podAnnotations)
+# 3) k8s_restarts needs kube-state-metrics (not deployed on cluster today)
+#
+signals:
+  bundle: tier-a-java-core
+  domain:
+    - portfolio_users_total
+    - portfolio_portfolios_total
+    - portfolio_holdings_total
