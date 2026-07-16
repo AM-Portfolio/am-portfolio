@@ -22,6 +22,10 @@ PROJ_REDIS_HOSTNAME: ${REDIS_HOSTNAME:localhost}
 PROJ_REDIS_PORT: ${REDIS_PORT:6379}
 PROJ_REDIS_PASSWORD: ${REDIS_PASSWORD:password123}
 
+cache:
+  redis:
+    enabled: false
+
 spring:
   main:
     lazy-initialization: true
@@ -249,7 +253,7 @@ management:
     mongo:
       enabled: true
     redis:
-      enabled: true
+      enabled: ${cache.redis.enabled:true}
     kafka:
       enabled: ${KAFKA_ENABLED:false}
   tracing:
@@ -284,3 +288,11 @@ am:
         - /swagger-ui/**
         - /api-docs/**
         - /v3/api-docs/**
+
+cache:
+  redis:
+    enabled: false
+
+portfolio:
+  redis:
+    enabled: false

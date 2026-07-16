@@ -240,7 +240,7 @@ public class MarketDataService {
                     return Collections.<String, MarketData>emptyMap();
                 }
             }, taskExecutor)
-            .orTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            .orTimeout(1, java.util.concurrent.TimeUnit.SECONDS)
             .exceptionally(e -> {
                 log.warn("[OHLC data] Fetch timed out or failed: {}", e.getMessage());
                 return Collections.<String, MarketData>emptyMap();
@@ -392,19 +392,19 @@ public class MarketDataService {
         }
 
         // 3. Fetch missing from OHLC API
-        log.info("[MarketData] Cache miss for {} symbols. Fetching from API.", missing.size());
-        try {
-            Map<String, MarketData> fetched = getOhlcData(missing, false);
-            if (fetched != null && !fetched.isEmpty()) {
-                result.putAll(fetched);
-                // Store in cache with SmartTTL
-                if (marketDataRedisService != null) {
-                    marketDataRedisService.cacheMarketData(fetched);
-                }
-            }
-        } catch (Exception e) {
-            log.error("[MarketData] OHLC fetch failed: {}", e.getMessage());
-        }
+        // log.info("[MarketData] Cache miss for {} symbols. Fetching from API.", missing.size());
+        // try {
+        //     Map<String, MarketData> fetched = getOhlcData(missing, false);
+        //     if (fetched != null && !fetched.isEmpty()) {
+        //         result.putAll(fetched);
+        //         // Store in cache with SmartTTL
+        //         if (marketDataRedisService != null) {
+        //             marketDataRedisService.cacheMarketData(fetched);
+        //         }
+        //     }
+        // } catch (Exception e) {
+        //     log.error("[MarketData] OHLC fetch failed: {}", e.getMessage());
+        // }
 
         // 4. Fallback for symbols that are STILL missing (e.g., after market hours or OHLC timeout)
         List<String> stillMissing = symbols.stream().map(this::cleanSymbol)
@@ -471,7 +471,7 @@ public class MarketDataService {
                     return Collections.<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch>emptyMap();
                 }
             }, taskExecutor)
-            .orTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            .orTimeout(1, java.util.concurrent.TimeUnit.SECONDS)
             .exceptionally(e -> {
                 log.warn("[MarketCap data] Fetch timed out or failed: {}", e.getMessage());
                 return Collections.<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch>emptyMap();
@@ -516,7 +516,7 @@ public class MarketDataService {
                     return resp;
                 }
             }, taskExecutor)
-            .orTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            .orTimeout(1, java.util.concurrent.TimeUnit.SECONDS)
             .exceptionally(e -> {
                 log.warn("[HistoricalCharts data] Fetch timed out or failed: {}", e.getMessage());
                 com.portfolio.marketdata.model.HistoricalChartsResponse resp = new com.portfolio.marketdata.model.HistoricalChartsResponse();
