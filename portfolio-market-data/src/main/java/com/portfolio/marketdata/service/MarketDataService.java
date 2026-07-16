@@ -229,27 +229,36 @@ public class MarketDataService {
 
         log.info("Getting OHLC data for {} symbols with timeFrame={} refresh={}", validSymbols.size(), timeFrame, refresh);
 
-        try {
-            return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+        // Chunking by 500
+        int CHUNK_SIZE = 500;
+        List<List<String>> chunks = new java.util.ArrayList<>();
+        for (int i = 0; i < validSymbols.size(); i += CHUNK_SIZE) {
+            chunks.add(validSymbols.subList(i, Math.min(validSymbols.size(), i + CHUNK_SIZE)));
+        }
+
+        List<java.util.concurrent.CompletableFuture<Map<String, MarketData>>> futures = chunks.stream()
+            .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
                 try {
                     MarketDataResponseWrapper w = marketDataApiClient
-                            .getOhlcData(validSymbols, timeFrame, refresh).block();
+                            .getOhlcData(chunk, timeFrame, refresh).block();
                     return convertToMarketDataMap(w, true);
                 } catch (Exception e) {
                     log.warn("[OHLC data] API call failed: {}", e.getMessage());
                     return Collections.<String, MarketData>emptyMap();
                 }
             }, taskExecutor)
-            .orTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            .completeOnTimeout(Collections.<String, MarketData>emptyMap(), 4, java.util.concurrent.TimeUnit.SECONDS)
             .exceptionally(e -> {
                 log.warn("[OHLC data] Fetch timed out or failed: {}", e.getMessage());
                 return Collections.<String, MarketData>emptyMap();
-            })
-            .join();
-        } catch (Exception e) {
-            log.warn("[OHLC data] Unexpected error during fetch: {}", e.getMessage());
-            return Collections.emptyMap();
+            }))
+            .collect(Collectors.toList());
+
+        Map<String, MarketData> merged = new java.util.HashMap<>();
+        for (java.util.concurrent.CompletableFuture<Map<String, MarketData>> f : futures) {
+            merged.putAll(f.join());
         }
+        return merged;
     }
 
     /**
@@ -392,19 +401,19 @@ public class MarketDataService {
         }
 
         // 3. Fetch missing from OHLC API
-        // log.info("[MarketData] Cache miss for {} symbols. Fetching from API.", missing.size());
-        // try {
-        //     Map<String, MarketData> fetched = getOhlcData(missing, false);
-        //     if (fetched != null && !fetched.isEmpty()) {
-        //         result.putAll(fetched);
-        //         // Store in cache with SmartTTL
-        //         if (marketDataRedisService != null) {
-        //             marketDataRedisService.cacheMarketData(fetched);
-        //         }
-        //     }
-        // } catch (Exception e) {
-        //     log.error("[MarketData] OHLC fetch failed: {}", e.getMessage());
-        // }
+        log.info("[MarketData] Cache miss for {} symbols. Fetching from API.", missing.size());
+        try {
+            Map<String, MarketData> fetched = getOhlcData(missing, false);
+            if (fetched != null && !fetched.isEmpty()) {
+                result.putAll(fetched);
+                // Store in cache with SmartTTL
+                if (marketDataRedisService != null) {
+                    marketDataRedisService.cacheMarketData(fetched);
+                }
+            }
+        } catch (Exception e) {
+            log.error("[MarketData] OHLC fetch failed: {}", e.getMessage());
+        }
 
         // 4. Fallback for symbols that are STILL missing (e.g., after market hours or OHLC timeout)
         List<String> stillMissing = symbols.stream().map(this::cleanSymbol)
