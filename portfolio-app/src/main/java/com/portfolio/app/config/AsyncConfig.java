@@ -54,25 +54,14 @@ public class AsyncConfig {
 
         @Override
         public Runnable decorate(Runnable runnable) {
-            // Capture the MDC of the submitting thread at scheduling time
-            Map<String, String> contextMap = MDC.getCopyOfContextMap();
+            // Capture all context variables including TraceContext and MDC
+            io.micrometer.context.ContextSnapshot snapshot = 
+                io.micrometer.context.ContextSnapshotFactory.builder().build().captureAll();
+                
             return () -> {
-                // Save whatever the worker thread already has (may be empty)
-                Map<String, String> previous = MDC.getCopyOfContextMap();
-                if (contextMap != null) {
-                    MDC.setContextMap(contextMap);
-                } else {
-                    MDC.clear();
-                }
-                try {
+                // Restore the context in the worker thread
+                try (io.micrometer.context.ContextSnapshot.Scope scope = snapshot.setThreadLocals()) {
                     runnable.run();
-                } finally {
-                    // Restore the worker thread's original MDC
-                    if (previous != null) {
-                        MDC.setContextMap(previous);
-                    } else {
-                        MDC.clear();
-                    }
                 }
             };
         }

@@ -11,6 +11,8 @@ import com.portfolio.marketdata.client.NseIndicesApiClient;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
 
+import org.springframework.web.reactive.function.client.WebClient;
+
 /**
  * Auto-configuration for the Market Data API module.
  */
@@ -21,8 +23,8 @@ public class MarketDataAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public MarketDataApiClient marketDataApiClient(MarketDataApiConfig config) {
-        return new MarketDataApiClient(config);
+    public MarketDataApiClient marketDataApiClient(WebClient.Builder webClientBuilder, MarketDataApiConfig config) {
+        return new MarketDataApiClient(webClientBuilder, config);
     }
     
     @Bean
@@ -36,8 +38,8 @@ public class MarketDataAutoConfiguration {
     
     @Bean
     @ConditionalOnMissingBean
-    public NseIndicesApiClient nseIndicesApiClient(MarketDataApiConfig config) {
-        return new NseIndicesApiClient(config);
+    public NseIndicesApiClient nseIndicesApiClient(WebClient.Builder webClientBuilder, MarketDataApiConfig config) {
+        return new NseIndicesApiClient(webClientBuilder, config);
     }
     
     @Bean

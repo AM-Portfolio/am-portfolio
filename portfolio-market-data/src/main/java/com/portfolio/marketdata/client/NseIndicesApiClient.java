@@ -9,6 +9,8 @@ import com.portfolio.marketdata.model.indices.IndexData;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
+import org.springframework.web.reactive.function.client.WebClient;
+
 /**
  * Client for the NSE Indices API.
  */
@@ -19,10 +21,11 @@ public class NseIndicesApiClient extends AbstractApiClient {
     /**
      * Creates a new NseIndicesApiClient with the specified configuration.
      * 
+     * @param webClientBuilder the WebClient.Builder (auto-configured by Spring Boot)
      * @param config the NSE indices API configuration
      */
-    public NseIndicesApiClient(MarketDataApiConfig config) {
-        super(config);
+    public NseIndicesApiClient(WebClient.Builder webClientBuilder, MarketDataApiConfig config) {
+        super(webClientBuilder, config);
     }
 
     public Mono<IndexData> getIndexData(String indexSymbol) {

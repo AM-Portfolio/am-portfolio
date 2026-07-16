@@ -15,8 +15,6 @@ import com.portfolio.marketdata.config.MarketDataApiConfig;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
-import io.micrometer.observation.Observation;
-import io.micrometer.observation.ObservationRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
 
 /**
@@ -27,9 +25,6 @@ public abstract class AbstractApiClient implements ApiClient {
 
     protected final WebClient webClient;
     protected final MarketDataApiConfig config;
-    
-    @Autowired(required = false)
-    protected ObservationRegistry observationRegistry = ObservationRegistry.NOOP;
     
     /**
      * Creates a new AbstractApiClient with the specified WebClient and config.
@@ -43,24 +38,15 @@ public abstract class AbstractApiClient implements ApiClient {
     }
     
     /**
-     * Creates a new AbstractApiClient with the specified configuration.
+     * Creates a new AbstractApiClient using the provided WebClient.Builder and configuration.
      * 
+     * @param webClientBuilder the WebClient.Builder (auto-configured by Spring Boot)
      * @param config the API configuration
      */
-    protected AbstractApiClient(MarketDataApiConfig config) {
+    protected AbstractApiClient(WebClient.Builder webClientBuilder, MarketDataApiConfig config) {
         this.config = config;
-        this.webClient = createDefaultWebClient(config.getBaseUrl());
-    }
-    
-    /**
-     * Creates a default WebClient with common configuration.
-     * 
-     * @param baseUrl the base URL for the API
-     * @return a configured WebClient
-     */
-    protected static WebClient createDefaultWebClient(String baseUrl) {
-        return WebClient.builder()
-                .baseUrl(baseUrl)
+        this.webClient = webClientBuilder
+                .baseUrl(config.getBaseUrl())
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
                 .defaultHeader(HttpHeaders.USER_AGENT, "Mozilla/5.0")
@@ -206,19 +192,11 @@ public abstract class AbstractApiClient implements ApiClient {
         long startTime = System.currentTimeMillis();
         
         return Mono.deferContextual(ctx -> {
-            Observation observation = Observation.createNotStarted("external.api.call", observationRegistry)
-                .contextualName("external-api-call")
-                .lowCardinalityKeyValue("http.url", config.getBaseUrl())
-                .start();
-
             return requestFunction.apply(webClient)
                     .timeout(Duration.ofMillis(getReadTimeout()))
                     .doOnSubscribe(s -> log.debug("API Request [{}] - Executing", requestId))
                     .doOnSuccess(response -> {
                         long duration = System.currentTimeMillis() - startTime;
-                        observation.lowCardinalityKeyValue("http.status", "200");
-                        observation.highCardinalityKeyValue("response.time.ms", String.valueOf(duration));
-                        observation.stop();
                         log.info("API Request [{}] - Completed successfully in {}ms - Status: OK", requestId, duration);
                     })
                     .doOnError(e -> {
@@ -237,10 +215,6 @@ public abstract class AbstractApiClient implements ApiClient {
                             log.error("API Request [{}] - Failed after {}ms - Error: {}", 
                                     requestId, duration, e.getMessage());
                         }
-                        observation.error(e);
-                        observation.lowCardinalityKeyValue("http.status", statusCode);
-                        observation.highCardinalityKeyValue("response.time.ms", String.valueOf(duration));
-                        observation.stop();
                     })
                     .retryWhen(Retry.backoff(getMaxRetryAttempts(), Duration.ofSeconds(1))
                             .filter(e -> !(e instanceof WebClientResponseException.NotFound))
