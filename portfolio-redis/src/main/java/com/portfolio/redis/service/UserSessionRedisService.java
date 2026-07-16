@@ -1,5 +1,7 @@
 package com.portfolio.redis.service;
 
+import java.util.Collections;
+import org.springframework.beans.factory.annotation.Value;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -12,14 +14,19 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class UserSessionRedisService {
 
-    private final StringRedisTemplate redisTemplate;
+    
+    @org.springframework.beans.factory.annotation.Value("${cache.redis.enabled:true}")
+    private boolean isRedisEnabled;
+private final StringRedisTemplate redisTemplate;
     private static final String ACTIVE_USERS_KEY = "portfolio:active_users";
 
     public void addActiveUser(String userId) {
+        if (!isRedisEnabled) return;
         redisTemplate.opsForSet().add(ACTIVE_USERS_KEY, userId);
     }
 
     public void removeActiveUser(String userId) {
+        if (!isRedisEnabled) return;
         redisTemplate.opsForSet().remove(ACTIVE_USERS_KEY, userId);
     }
 
@@ -31,3 +38,4 @@ public class UserSessionRedisService {
         return redisTemplate.opsForSet().members(ACTIVE_USERS_KEY);
     }
 }
+

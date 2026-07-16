@@ -1,5 +1,6 @@
 package com.portfolio.redis.service;
 
+import java.util.Collections;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -29,7 +30,10 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class StockIndicesEventRedisService {
 
-    private final RedisTemplate<String, StockIndicesEventDataCache> stockIndicesRedisTemplate;
+    
+    @org.springframework.beans.factory.annotation.Value("${cache.redis.enabled:true}")
+    private boolean isRedisEnabled;
+private final RedisTemplate<String, StockIndicesEventDataCache> stockIndicesRedisTemplate;
     private static final int BATCH_SIZE = 100;
 
     @Value("${spring.data.redis.stock-indices.ttl}")
@@ -52,6 +56,7 @@ public class StockIndicesEventRedisService {
      */
     @Async("taskExecutor")
     public CompletableFuture<Void> cacheStockIndicesEventDataBatch(List<StockInsidicesEventData> indicesEvents) {
+        if (!isRedisEnabled) return java.util.concurrent.CompletableFuture.completedFuture(null);
         if (indicesEvents == null || indicesEvents.isEmpty()) {
             log.warn("Received empty or null stock indices events batch");
             return CompletableFuture.completedFuture(null);
@@ -180,6 +185,7 @@ public class StockIndicesEventRedisService {
      * @return Optional<StockIndicesEventDataCache> containing the latest data if available
      */
     public Optional<StockIndicesEventDataCache> getLatestIndexData(String symbol) {
+        if (!isRedisEnabled) return java.util.Optional.empty();
         try {
             String key = stockIndicesKeyPrefix + symbol;
             StockIndicesEventDataCache indexData = stockIndicesRedisTemplate.opsForValue().get(key);
@@ -199,6 +205,8 @@ public class StockIndicesEventRedisService {
      * @return List<StockIndicesEventDataCache> containing the historical data
      */
     public List<StockIndicesEventDataCache> getHistoricalIndexData(String symbol, LocalDateTime startTime, LocalDateTime endTime) {
+        if (!isRedisEnabled) return Collections.emptyList();
+
         try {
             String pattern = historicalKeyPrefix + symbol + ":*";
             List<StockIndicesEventDataCache> historicalData = new ArrayList<>();
@@ -241,6 +249,7 @@ public class StockIndicesEventRedisService {
      * @param beforeTime Time before which data should be deleted
      */
     public void deleteOldIndexData(String symbol, LocalDateTime beforeTime) {
+        if (!isRedisEnabled) return;
         try {
             String pattern = historicalKeyPrefix + symbol + ":*";
             stockIndicesRedisTemplate.keys(pattern).stream()
@@ -253,3 +262,4 @@ public class StockIndicesEventRedisService {
         }
     }
 }
+

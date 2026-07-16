@@ -240,7 +240,7 @@ public class MarketDataService {
                     return Collections.<String, MarketData>emptyMap();
                 }
             }, taskExecutor)
-            .orTimeout(1, java.util.concurrent.TimeUnit.SECONDS)
+            .orTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
             .exceptionally(e -> {
                 log.warn("[OHLC data] Fetch timed out or failed: {}", e.getMessage());
                 return Collections.<String, MarketData>emptyMap();
@@ -471,7 +471,7 @@ public class MarketDataService {
                     return Collections.<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch>emptyMap();
                 }
             }, taskExecutor)
-            .orTimeout(1, java.util.concurrent.TimeUnit.SECONDS)
+            .orTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
             .exceptionally(e -> {
                 log.warn("[MarketCap data] Fetch timed out or failed: {}", e.getMessage());
                 return Collections.<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch>emptyMap();
@@ -516,7 +516,7 @@ public class MarketDataService {
                     return resp;
                 }
             }, taskExecutor)
-            .orTimeout(1, java.util.concurrent.TimeUnit.SECONDS)
+            .orTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
             .exceptionally(e -> {
                 log.warn("[HistoricalCharts data] Fetch timed out or failed: {}", e.getMessage());
                 com.portfolio.marketdata.model.HistoricalChartsResponse resp = new com.portfolio.marketdata.model.HistoricalChartsResponse();

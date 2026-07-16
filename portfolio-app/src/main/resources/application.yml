@@ -296,3 +296,8 @@ cache:
 portfolio:
   redis:
     enabled: false
+m a n a g e m e n t :  
+     h e a l t h :  
+         r e d i s :  
+             e n a b l e d :   f a l s e  
+ 

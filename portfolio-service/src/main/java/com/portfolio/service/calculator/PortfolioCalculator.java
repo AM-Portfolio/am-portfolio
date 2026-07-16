@@ -74,7 +74,7 @@ public class PortfolioCalculator {
         try {
             java.util.concurrent.CompletableFuture
                     .allOf(marketDataFuture, marketCapFuture)
-                    .orTimeout(1, java.util.concurrent.TimeUnit.SECONDS)
+                    .orTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
                     .join(); // propagates CancellationException / TimeoutException
             marketDataMap = marketDataFuture.join();
             marketCapMap = marketCapFuture.join();
