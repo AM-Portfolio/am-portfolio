@@ -9,7 +9,9 @@ vault:
     parser:
       mappings:
         ETF_API_URL: "URL"
-
+    market:
+      mappings:
+        MARKET_DATA_API_URL: "URL"
     logging:
       template: |
         export LOG_LEVEL="{{ index .Data.data "LOG_LEVEL" }}"

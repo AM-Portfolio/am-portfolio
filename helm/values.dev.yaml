@@ -16,7 +16,8 @@ vault:
       path: apps/data/dev/services/am-parser
     logging:
       path: apps/data/dev/services/logging
-
+    market:
+      path: apps/data/dev/services/am-market-data
     mongodb:
       path: apps/data/dev/infra/mongodb
     kafka:
