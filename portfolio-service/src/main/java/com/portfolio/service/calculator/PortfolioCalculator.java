@@ -74,7 +74,7 @@ public class PortfolioCalculator {
         try {
             java.util.concurrent.CompletableFuture
                     .allOf(marketDataFuture, marketCapFuture)
-                    .orTimeout(34, java.util.concurrent.TimeUnit.SECONDS)
+                    .orTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
                     .join(); // propagates CancellationException / TimeoutException
             marketDataMap = marketDataFuture.join();
             marketCapMap = marketCapFuture.join();
@@ -86,7 +86,7 @@ public class PortfolioCalculator {
             marketCapMap = Map.of();
         } catch (java.util.concurrent.CompletionException e) {
             if (e.getCause() instanceof java.util.concurrent.TimeoutException) {
-                log.warn("Parallel market data fetch timed out (14s). Falling back to Redis cache.");
+                log.warn("Parallel market data fetch timed out (6s). Falling back to Redis cache.");
             } else {
                 log.error("Parallel market data fetch failed: {}. Falling back to Redis cache.", e.getMessage());
             }

@@ -15,6 +15,7 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=infra-kafka:29092
       - MONGODB_URL=mongodb://admin:password123@infra-mongo:27017/portfolio?authSource=admin
       - REDIS_HOSTNAME=infra-redis
+      - MARKET_DATA_API_URL=https://am-dev.asrax.in/market
     volumes:
       - ./portfolio-app/target/portfolio-app-1.0.2-SNAPSHOT.jar:/app/app.jar
     command: ["java", "-jar", "/app/app.jar"]
