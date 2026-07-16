@@ -129,6 +129,12 @@
             <name>GitHub AM Common Data Model Apache Maven Packages</name>
             <url>https://maven.pkg.github.com/AM-Portfolio/am-portfolio</url>
         </repository>
+
+        <repository>
+            <id>github-core</id>
+            <name>GitHub AM Core Services Apache Maven Packages</name>
+            <url>https://maven.pkg.github.com/AM-Portfolio/am-core-services</url>
+        </repository>
     </repositories>
 
     <build>

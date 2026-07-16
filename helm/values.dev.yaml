@@ -6,6 +6,8 @@ environment: dev
 # Dev Vault secret paths — key mappings are in vault-mappings.yaml
 vault:
   secretPaths:
+    otel:
+      path: "apps/data/dev/infra/observability"
     auth:
       path: apps/data/dev/services/am-auth
     infra:

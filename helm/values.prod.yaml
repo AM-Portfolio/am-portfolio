@@ -6,6 +6,8 @@ replicaCount: 1
 # Prod Vault secret paths — key mappings are in vault-mappings.yaml
 vault:
   secretPaths:
+    otel:
+      path: "apps/data/prod/infra/observability"
     auth:
       path: apps/data/prod/services/am-auth
     infra:

@@ -446,10 +446,8 @@ management:
   tracing:
     enabled: true
     sampling:
-      # Override per-environment via TRACING_SAMPLING_PROBABILITY env var.
-      # Default 0.1 (10 %) matches am-analysis / am-gateway in preprod and prevents
-      # heap pressure from buffered spans when the collector is unreachable.
-      probability: 1.0
+      # 1.0 while validating flows in Tempo; dial helm back to 0.1 when comfortable
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
     propagation:
       type: w3c                  # Must match core-services: "traceparent" / "tracestate" headers
 
