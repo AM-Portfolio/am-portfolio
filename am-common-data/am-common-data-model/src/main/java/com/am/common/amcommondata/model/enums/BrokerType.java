@@ -6,7 +6,8 @@ public enum BrokerType {
     MSTOCK("MStock"),
     GROWW("Groww"),
     KOTAK("Kotak"),
-    ANGEL_ONE("Angel One");
+    ANGEL_ONE("Angel One"),
+    UPSTOX("Upstox");
 
     private String brokerName;
 
@@ -49,5 +50,9 @@ public enum BrokerType {
 
     public boolean isAngelOne() {
         return "Angel One".equals(brokerName);
+    }
+
+    public boolean isUpstox() {
+        return "Upstox".equals(brokerName);
     }
 }
