@@ -19,6 +19,8 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
 
+import io.micrometer.observation.annotation.Observed;
+
 @Component
 @Slf4j
 public class PortfolioCalculator {
@@ -43,6 +45,7 @@ public class PortfolioCalculator {
      * Enriches equity holdings with real-time market data (price, value, P&L) and
      * market cap info.
      */
+    @Observed(name = "portfolio.enrich.holdings", contextualName = "enrich-equity-holdings")
     public List<EquityHoldings> enrichHoldings(List<EquityHoldings> equityHoldings) {
         log.debug("Enriching {} equity holdings with price, performance, and market cap data",
                 equityHoldings != null ? equityHoldings.size() : 0);

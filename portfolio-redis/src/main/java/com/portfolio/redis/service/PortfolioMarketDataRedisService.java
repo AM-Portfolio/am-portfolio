@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import java.time.*;
 import java.util.*;
 import java.util.stream.Collectors;
+import io.micrometer.observation.annotation.Observed;
 
 @Slf4j
 @Service
@@ -32,6 +33,7 @@ private final RedisTemplate<String, MarketData> portfolioMarketDataRedisTemplate
     /**
      * Cache a batch of market data with smart TTL based on IST market hours.
      */
+    @Observed(name = "redis.cache.market_data", contextualName = "cache-market-data-write")
     public void cacheMarketData(Map<String, MarketData> data) {
         if (!isRedisEnabled) return;
         if (data == null || data.isEmpty()) return;

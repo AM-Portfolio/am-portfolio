@@ -19,6 +19,8 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
 
+import io.micrometer.observation.annotation.Observed;
+
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -29,6 +31,7 @@ public class PortfolioHoldingsService {
     private final PortfolioHoldingsRedisService portfolioHoldingsRedisService;
     private final PortfolioCalculator portfolioCalculator;
 
+    @Observed(name = "portfolio.get.holdings", contextualName = "get-portfolio-holdings")
     public PortfolioHoldings getPortfolioHoldings(String userId, TimeInterval interval) {
         return getPortfolioHoldings(userId, interval, true);
     }
