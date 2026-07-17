@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.UUID;
 
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
+import com.am.common.amcommondata.model.asset.mutualfund.MutualFundModel;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.FundType;
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -30,6 +31,7 @@ public class PortfolioModelV1 {
     private String tags;
     private String notes;
     private List<EquityModel> equityModels;
+    private List<MutualFundModel> mutualFundModels;
     private Double totalValue;
     private BrokerType brokerType;
     private Integer assetCount;

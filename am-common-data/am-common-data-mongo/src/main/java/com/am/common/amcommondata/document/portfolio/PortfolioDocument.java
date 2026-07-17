@@ -7,6 +7,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
 import com.am.common.amcommondata.document.asset.equity.EquityDocument;
+import com.am.common.amcommondata.document.asset.mutualfund.MutualFundDocument;
 import com.am.common.amcommondata.document.base.BaseDocument;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.Currency;
@@ -51,6 +52,9 @@ public class PortfolioDocument extends BaseDocument {
     
     @Field("equities")
     private List<EquityDocument> equities;
+    
+    @Field("mutualFunds")
+    private List<MutualFundDocument> mutualFunds;
     
     @Field("totalValue")
     private Double totalValue;

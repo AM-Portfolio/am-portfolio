@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import com.am.common.amcommondata.document.common.AuditMetadata;
 import com.am.common.amcommondata.document.portfolio.PortfolioDocument;
 import com.am.common.amcommondata.mapper.asset.EquityMapper;
+import com.am.common.amcommondata.mapper.asset.MutualFundMapper;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.enums.Currency;
 
@@ -17,6 +18,9 @@ public class PortfolioMapper {
 
     @Autowired
     private EquityMapper equityMapper;
+    
+    @Autowired
+    private MutualFundMapper mutualFundMapper;
 
     public PortfolioModelV1 toModel(PortfolioDocument document) {
         if (document == null) {
@@ -36,6 +40,11 @@ public class PortfolioMapper {
                 .equityModels(document.getEquities() != null 
                     ? document.getEquities().stream()
                         .map(equityMapper::toModel)
+                        .collect(Collectors.toList())
+                    : null)
+                .mutualFundModels(document.getMutualFunds() != null 
+                    ? document.getMutualFunds().stream()
+                        .map(mutualFundMapper::toModel)
                         .collect(Collectors.toList())
                     : null)
                 .totalValue(document.getTotalValue())
@@ -70,6 +79,11 @@ public class PortfolioMapper {
                 .equities(model.getEquityModels() != null 
                     ? model.getEquityModels().stream()
                         .map(equityMapper::toDocument)
+                        .collect(Collectors.toList())
+                    : null)
+                .mutualFunds(model.getMutualFundModels() != null 
+                    ? model.getMutualFundModels().stream()
+                        .map(mutualFundMapper::toDocument)
                         .collect(Collectors.toList())
                     : null)
                 .totalValue(model.getTotalValue())

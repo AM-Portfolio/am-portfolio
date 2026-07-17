@@ -20,5 +20,6 @@ public class PortfolioHoldings {
     private String userId;
     private String portfolioId;
     private List<EquityHoldings> equityHoldings;
+    private List<MutualFundHoldings> mutualFundHoldings;
     private LocalDateTime lastUpdated;
 }
