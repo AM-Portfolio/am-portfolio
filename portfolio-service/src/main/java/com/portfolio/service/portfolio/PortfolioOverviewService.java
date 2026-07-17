@@ -171,7 +171,9 @@ public class PortfolioOverviewService {
     private PortfolioSummaryV1 getPortfolioSummary(List<PortfolioModelV1> portfolios) {
         log.debug("Calculating total portfolio value from {} portfolios", portfolios.size());
 
-        var totalValue = portfolios.stream().mapToDouble(PortfolioModelV1::getTotalValue).sum();
+        var totalValue = portfolios.stream()
+                .mapToDouble(p -> p.getTotalValue() != null ? p.getTotalValue() : 0.0)
+                .sum();
         log.debug("Calculated total value: {}", totalValue);
 
         var equityHoldings = portfolioHoldingsService.getHoldings(portfolios);
