@@ -14,6 +14,7 @@ import java.util.List;
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class TradePortfolioSyncEvent {
+    private String eventType;
     private String id;
     private String brokerType;
     private String userId;

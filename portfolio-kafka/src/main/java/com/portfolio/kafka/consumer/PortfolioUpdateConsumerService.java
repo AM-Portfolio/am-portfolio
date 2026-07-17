@@ -86,9 +86,9 @@ public class PortfolioUpdateConsumerService {
             com.fasterxml.jackson.databind.JsonNode rootNode = objectMapper.readTree(message);
 
             // ── Determine message type ────────────────────────────────────────
-            // PortfolioUpdateEvent (Document Parser) always carries a 'portfolioId' field.
-            // TradePortfolioSyncEvent (Trade Management) carries the portfolio id in 'id'.
-            if (rootNode.has("portfolioId")) {
+            String eventType = rootNode.has("eventType") ? rootNode.get("eventType").asText() : "UNKNOWN";
+
+            if ("DOC_UPLOAD".equals(eventType) || (eventType.equals("UNKNOWN") && rootNode.has("portfolioId"))) {
                 // ── Document-parser path ──────────────────────────────────────
                 PortfolioUpdateEvent event = objectMapper.treeToValue(rootNode, PortfolioUpdateEvent.class);
                 log.info("Parsed PortfolioUpdateEvent for portfolioId={}", event.getPortfolioId());
@@ -103,7 +103,7 @@ public class PortfolioUpdateConsumerService {
                 processDocumentMessage(event);
                 markProcessed(dedupKey);
 
-            } else {
+            } else if ("TRADE_SYNC".equals(eventType) || eventType.equals("UNKNOWN")) {
                 // ── Trade-management path ─────────────────────────────────────
                 com.portfolio.model.events.trade.TradePortfolioSyncEvent event =
                         objectMapper.treeToValue(rootNode, com.portfolio.model.events.trade.TradePortfolioSyncEvent.class);

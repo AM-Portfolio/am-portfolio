@@ -23,6 +23,7 @@ import lombok.NoArgsConstructor;
 @JsonInclude(Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class PortfolioUpdateEvent {
+    private String eventType;
     private UUID id;
     private BrokerType brokerType;
     private String source; // "TRADE" or "DOCUMENT"
