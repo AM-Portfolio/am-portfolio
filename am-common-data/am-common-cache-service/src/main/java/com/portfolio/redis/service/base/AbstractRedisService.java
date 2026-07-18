@@ -17,6 +17,9 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public abstract class AbstractRedisService<K, V> implements RedisOperations<K, V> {
 
+    @org.springframework.beans.factory.annotation.Value("${cache.redis.enabled:true}")
+    protected boolean isRedisEnabled;
+
     protected final RedisTemplate<K, V> redisTemplate;
 
     protected abstract String getServiceName();
@@ -25,6 +28,7 @@ public abstract class AbstractRedisService<K, V> implements RedisOperations<K, V
 
     @Override
     public void set(K key, V value, Duration ttl) {
+        if (!isRedisEnabled) return;
         String operation = getServiceName() + ".set";
         
         try {
@@ -38,6 +42,7 @@ public abstract class AbstractRedisService<K, V> implements RedisOperations<K, V
 
     @Override
     public void setBatch(Map<K, V> entries, Duration ttl) {
+        if (!isRedisEnabled) return;
         String operation = getServiceName() + ".setBatch";
         
         try {
@@ -53,6 +58,7 @@ public abstract class AbstractRedisService<K, V> implements RedisOperations<K, V
 
     @Override
     public Optional<V> get(K key) {
+        if (!isRedisEnabled) return Optional.empty();
         String operation = getServiceName() + ".get";
         
         try {
@@ -73,6 +79,7 @@ public abstract class AbstractRedisService<K, V> implements RedisOperations<K, V
 
     @Override
     public List<V> getAll(List<K> keys) {
+        if (!isRedisEnabled) return java.util.Collections.emptyList();
         String operation = getServiceName() + ".getAll";
         
         try {
@@ -85,6 +92,7 @@ public abstract class AbstractRedisService<K, V> implements RedisOperations<K, V
 
     @Override
     public void delete(K key) {
+        if (!isRedisEnabled) return;
         String operation = getServiceName() + ".delete";
         
         try {
@@ -98,6 +106,7 @@ public abstract class AbstractRedisService<K, V> implements RedisOperations<K, V
 
     @Override
     public void deleteBatch(List<K> keys) {
+        if (!isRedisEnabled) return;
         String operation = getServiceName() + ".deleteBatch";
         
         try {

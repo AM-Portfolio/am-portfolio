@@ -1,5 +1,6 @@
 package com.portfolio.redis.service;
 
+import java.util.Collections;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -19,7 +20,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @RequiredArgsConstructor
 public class PortfolioHeatmapRedisService {
-    private final RedisTemplate<String, Heatmap> portfolioHeatmapRedisTemplate;
+    
+    @org.springframework.beans.factory.annotation.Value("${cache.redis.enabled:true}")
+    private boolean isRedisEnabled;
+private final RedisTemplate<String, Heatmap> portfolioHeatmapRedisTemplate;
 
 
     @Value("${spring.data.redis.portfolio-heatmap.key-prefix:portfolio:heatmap:}")
@@ -30,6 +34,7 @@ public class PortfolioHeatmapRedisService {
 
     @Async("taskExecutor")
     public CompletableFuture<Void> cacheHeatmap(Heatmap heatmap, String portfolioId, TimeFrameRequest interval) {
+        if (!isRedisEnabled) return java.util.concurrent.CompletableFuture.completedFuture(null);
         log.info("Starting async caching of portfolio heatmap - Portfolio: {}, Interval: {}", 
             portfolioId, interval != null ? interval.getTimeFrame() : "null");
         
@@ -50,6 +55,7 @@ public class PortfolioHeatmapRedisService {
     }
 
     public Optional<Heatmap> getCachedHeatmap(String portfolioId, TimeFrameRequest interval) {
+        if (!isRedisEnabled) return java.util.Optional.empty();
         log.info("Retrieving latest portfolio heatmap - Portfolio: {}, Interval: {}", 
             portfolioId, interval != null ? interval.getTimeFrame() : "null");
             
@@ -80,3 +86,4 @@ public class PortfolioHeatmapRedisService {
         return key;
     }
 }
+

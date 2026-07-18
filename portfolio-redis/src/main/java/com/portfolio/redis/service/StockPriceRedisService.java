@@ -1,5 +1,6 @@
 package com.portfolio.redis.service;
 
+import java.util.Collections;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -26,7 +27,10 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class StockPriceRedisService {
 
-    private final RedisTemplate<String, StockPriceCache> stockPriceRedisTemplate;
+    
+    @org.springframework.beans.factory.annotation.Value("${cache.redis.enabled:true}")
+    private boolean isRedisEnabled;
+private final RedisTemplate<String, StockPriceCache> stockPriceRedisTemplate;
     private static final int BATCH_SIZE = 100;
 
     @Value("${spring.data.redis.stock.ttl}")
@@ -43,6 +47,7 @@ public class StockPriceRedisService {
 
     @Async("taskExecutor")
     public CompletableFuture<Void> cacheEquityPriceUpdateBatch(List<EquityPrice> priceUpdates) {
+        if (!isRedisEnabled) return java.util.concurrent.CompletableFuture.completedFuture(null);
         if (priceUpdates == null || priceUpdates.isEmpty()) {
             log.warn("Received empty or null price updates batch");
             return CompletableFuture.completedFuture(null);
@@ -135,6 +140,7 @@ public class StockPriceRedisService {
     }
 
     public Optional<StockPriceCache> getLatestPrice(String symbol) {
+        if (!isRedisEnabled) return java.util.Optional.empty();
         try {
             String key = stockKeyPrefix + symbol;
             StockPriceCache price = stockPriceRedisTemplate.opsForValue().get(key);
@@ -146,6 +152,8 @@ public class StockPriceRedisService {
     }
 
     public Map<String, StockPriceCache> getLatestPrices(List<String> symbols) {
+        if (!isRedisEnabled) return Collections.emptyMap();
+
         if (symbols == null || symbols.isEmpty()) {
             return Map.of();
         }
@@ -170,6 +178,8 @@ public class StockPriceRedisService {
     }
 
     public List<StockPriceCache> getHistoricalPrices(String symbol, LocalDateTime startTime, LocalDateTime endTime) {
+        if (!isRedisEnabled) return Collections.emptyList();
+
         try {
             String pattern = historicalKeyPrefix + symbol + ":*";
             List<StockPriceCache> historicalPrices = new ArrayList<>();
@@ -207,6 +217,7 @@ public class StockPriceRedisService {
     }
 
     public void deleteOldPrices(String symbol, LocalDateTime beforeTime) {
+        if (!isRedisEnabled) return;
         try {
             String pattern = historicalKeyPrefix + symbol + ":*";
             stockPriceRedisTemplate.keys(pattern).stream()
@@ -219,3 +230,4 @@ public class StockPriceRedisService {
         }
     }
 }
+

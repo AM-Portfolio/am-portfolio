@@ -18,6 +18,11 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
+import io.lettuce.core.resource.DefaultClientResources;
+import io.lettuce.core.tracing.MicrometerTracing;
+import io.micrometer.observation.ObservationRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
+
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -48,6 +53,9 @@ public class RedisConfig {
     @Value("${market.data.cache.ttl.seconds:300}")
     private long cacheTimeToLiveSeconds;
 
+    @Autowired
+    private ObservationRegistry observationRegistry;
+
     @Bean
     public RedisConnectionFactory redisConnectionFactory() {
         RedisStandaloneConfiguration redisConfig = new RedisStandaloneConfiguration();
@@ -68,8 +76,12 @@ public class RedisConfig {
         // Configure Lettuce client with a 5-second command timeout.
         // This prevents health probes from hanging for 60s (Lettuce default)
         // when Redis is in LOADING state during snapshot restore.
+        // Also enables Micrometer tracing for Redis commands.
         LettuceClientConfiguration clientConfig = LettuceClientConfiguration.builder()
             .commandTimeout(Duration.ofSeconds(5))
+            .clientResources(DefaultClientResources.builder()
+                .tracing(new MicrometerTracing(observationRegistry, "redis"))
+                .build())
             .build();
         
         return new LettuceConnectionFactory(redisConfig, clientConfig);

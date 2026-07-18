@@ -15,6 +15,7 @@ import com.portfolio.marketdata.config.MarketDataApiConfig;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * Abstract implementation of ApiClient that provides common functionality.
@@ -37,24 +38,15 @@ public abstract class AbstractApiClient implements ApiClient {
     }
     
     /**
-     * Creates a new AbstractApiClient with the specified configuration.
+     * Creates a new AbstractApiClient using the provided WebClient.Builder and configuration.
      * 
+     * @param webClientBuilder the WebClient.Builder (auto-configured by Spring Boot)
      * @param config the API configuration
      */
-    protected AbstractApiClient(MarketDataApiConfig config) {
+    protected AbstractApiClient(WebClient.Builder webClientBuilder, MarketDataApiConfig config) {
         this.config = config;
-        this.webClient = createDefaultWebClient(config.getBaseUrl());
-    }
-    
-    /**
-     * Creates a default WebClient with common configuration.
-     * 
-     * @param baseUrl the base URL for the API
-     * @return a configured WebClient
-     */
-    protected static WebClient createDefaultWebClient(String baseUrl) {
-        return WebClient.builder()
-                .baseUrl(baseUrl)
+        this.webClient = webClientBuilder
+                .baseUrl(config.getBaseUrl())
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
                 .defaultHeader(HttpHeaders.USER_AGENT, "Mozilla/5.0")
@@ -199,38 +191,44 @@ public abstract class AbstractApiClient implements ApiClient {
     protected <T> Mono<T> executeWithRetry(Function<WebClient, Mono<T>> requestFunction, String requestId) {
         long startTime = System.currentTimeMillis();
         
-        return requestFunction.apply(webClient)
-                .timeout(Duration.ofMillis(getReadTimeout()))
-                .doOnSubscribe(s -> log.debug("API Request [{}] - Executing", requestId))
-                .doOnSuccess(response -> {
-                    long duration = System.currentTimeMillis() - startTime;
-                    log.info("API Request [{}] - Completed successfully in {}ms - Status: OK", requestId, duration);
-                })
-                .doOnError(e -> {
-                    long duration = System.currentTimeMillis() - startTime;
-                    String statusCode = "";
-                    if (e instanceof WebClientResponseException) {
-                        WebClientResponseException wcre = (WebClientResponseException) e;
-                        statusCode = String.valueOf(wcre.getStatusCode().value());
-                        log.error("API Request [{}] - Failed after {}ms - Status: {} - Error: {}", 
-                                requestId, duration, statusCode, wcre.getMessage());
-                    } else {
-                        log.error("API Request [{}] - Failed after {}ms - Error: {}", 
-                                requestId, duration, e.getMessage());
-                    }
-                })
-                .retryWhen(Retry.backoff(getMaxRetryAttempts(), Duration.ofSeconds(1))
-                        .filter(e -> !(e instanceof WebClientResponseException.NotFound))
-                        .doBeforeRetry(retrySignal -> {
-                            log.warn("API Request [{}] - Retry attempt {} of {} after failure: {}", 
-                                    requestId, retrySignal.totalRetries() + 1, getMaxRetryAttempts(), 
-                                    retrySignal.failure().getMessage());
-                        })
-                        .onRetryExhaustedThrow((retryBackoffSpec, retrySignal) -> {
-                            log.error("API Request [{}] - Retry attempts exhausted: {}", 
-                                    requestId, retrySignal.failure().getMessage());
-                            return retrySignal.failure();
-                        }));
+        return Mono.deferContextual(ctx -> {
+            return requestFunction.apply(webClient)
+                    .timeout(Duration.ofMillis(getReadTimeout()))
+                    .doOnSubscribe(s -> log.debug("API Request [{}] - Executing", requestId))
+                    .doOnSuccess(response -> {
+                        long duration = System.currentTimeMillis() - startTime;
+                        log.info("API Request [{}] - Completed successfully in {}ms - Status: OK", requestId, duration);
+                    })
+                    .doOnError(e -> {
+                        long duration = System.currentTimeMillis() - startTime;
+                        String statusCode = "500";
+                        if (e instanceof WebClientResponseException) {
+                            WebClientResponseException wcre = (WebClientResponseException) e;
+                            statusCode = String.valueOf(wcre.getStatusCode().value());
+                            log.error("API Request [{}] - Failed after {}ms - Status: {} - Error: {}", 
+                                    requestId, duration, statusCode, wcre.getMessage());
+                        } else if (e instanceof java.util.concurrent.TimeoutException) {
+                            statusCode = "timeout";
+                            log.error("API Request [{}] - Timed out after {}ms - Error: {}", 
+                                    requestId, duration, e.getMessage());
+                        } else {
+                            log.error("API Request [{}] - Failed after {}ms - Error: {}", 
+                                    requestId, duration, e.getMessage());
+                        }
+                    })
+                    .retryWhen(Retry.backoff(getMaxRetryAttempts(), Duration.ofSeconds(1))
+                            .filter(e -> !(e instanceof WebClientResponseException.NotFound))
+                            .doBeforeRetry(retrySignal -> {
+                                log.warn("API Request [{}] - Retry attempt {} of {} after failure: {}", 
+                                        requestId, retrySignal.totalRetries() + 1, getMaxRetryAttempts(), 
+                                        retrySignal.failure().getMessage());
+                            })
+                            .onRetryExhaustedThrow((retryBackoffSpec, retrySignal) -> {
+                                log.error("API Request [{}] - Retry attempts exhausted: {}", 
+                                        requestId, retrySignal.failure().getMessage());
+                                return retrySignal.failure();
+                            }));
+        });
     }
     
     /**

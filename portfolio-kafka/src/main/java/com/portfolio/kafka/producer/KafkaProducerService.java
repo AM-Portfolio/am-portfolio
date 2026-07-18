@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import com.portfolio.model.events.PortfolioUpdateEvent;
 import com.portfolio.model.events.StockHoldingUpdateEvent;
+import io.micrometer.observation.annotation.Observed;
 
 @Slf4j
 @Service
@@ -57,6 +58,7 @@ public class KafkaProducerService {
         sendRecord(record);
     }
 
+    @Observed(name = "kafka.portfolio.send", contextualName = "portfolio-event-publish")
     public void sendMessage(PortfolioUpdateEvent portfolioUpdateEvent, String correlationId) {
         RecordHeaders headers = new RecordHeaders();
         headers.add("id", portfolioUpdateEvent.getId().toString().getBytes());

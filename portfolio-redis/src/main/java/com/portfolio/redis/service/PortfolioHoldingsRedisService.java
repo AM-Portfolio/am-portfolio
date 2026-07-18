@@ -1,5 +1,6 @@
 package com.portfolio.redis.service;
 
+import java.util.Collections;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -22,7 +23,10 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class PortfolioHoldingsRedisService {
     
-    private final RedisTemplate<String, PortfolioHoldings> portfolioHoldingsRedisTemplate;
+    
+    @org.springframework.beans.factory.annotation.Value("${cache.redis.enabled:true}")
+    private boolean isRedisEnabled;
+private final RedisTemplate<String, PortfolioHoldings> portfolioHoldingsRedisTemplate;
 
     @Value("${spring.data.redis.portfolio-holdings.ttl}")
     private Integer portfolioHoldingTtl;
@@ -32,11 +36,13 @@ public class PortfolioHoldingsRedisService {
 
     @Async("taskExecutor")
     public CompletableFuture<Void> cachePortfolioHoldings(PortfolioHoldings holdings, String userId, TimeInterval interval) {
+        if (!isRedisEnabled) return java.util.concurrent.CompletableFuture.completedFuture(null);
         return cachePortfolioHoldings(holdings, userId, interval, null);
     }
 
     @Async("taskExecutor")
     public CompletableFuture<Void> cachePortfolioHoldings(PortfolioHoldings holdings, String userId, TimeInterval interval, String portfolioId) {
+        if (!isRedisEnabled) return java.util.concurrent.CompletableFuture.completedFuture(null);
         String key = buildKey(userId, interval, portfolioId);
         try {
             // For short intervals, use the interval duration as TTL
@@ -54,10 +60,12 @@ public class PortfolioHoldingsRedisService {
     }
 
     public Optional<PortfolioHoldings> getLatestHoldings(String userId, TimeInterval interval) {
+        if (!isRedisEnabled) return java.util.Optional.empty();
         return getLatestHoldings(userId, interval, null);
     }
 
     public Optional<PortfolioHoldings> getLatestHoldings(String userId, TimeInterval interval, String portfolioId) {
+        if (!isRedisEnabled) return java.util.Optional.empty();
         String key = buildKey(userId, interval, portfolioId);
         try {
             PortfolioHoldings holdings = portfolioHoldingsRedisTemplate.opsForValue().get(key);
@@ -87,6 +95,7 @@ public class PortfolioHoldingsRedisService {
     }
 
     public void evictPortfolioHoldings(String userId, String portfolioId) {
+        if (!isRedisEnabled) return;
         try {
             // Need to clear all intervals for this portfolio
             for (TimeInterval interval : TimeInterval.values()) {
@@ -104,3 +113,4 @@ public class PortfolioHoldingsRedisService {
         }
     }
 }
+

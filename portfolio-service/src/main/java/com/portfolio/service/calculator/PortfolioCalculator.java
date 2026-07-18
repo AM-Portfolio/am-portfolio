@@ -19,6 +19,8 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
 
+import io.micrometer.observation.annotation.Observed;
+
 @Component
 @Slf4j
 public class PortfolioCalculator {
@@ -43,6 +45,7 @@ public class PortfolioCalculator {
      * Enriches equity holdings with real-time market data (price, value, P&L) and
      * market cap info.
      */
+    @Observed(name = "portfolio.enrich.holdings", contextualName = "enrich-equity-holdings")
     public List<EquityHoldings> enrichHoldings(List<EquityHoldings> equityHoldings) {
         log.debug("Enriching {} equity holdings with price, performance, and market cap data",
                 equityHoldings != null ? equityHoldings.size() : 0);
@@ -59,45 +62,22 @@ public class PortfolioCalculator {
 
         // Fetch market data and market cap data in PARALLEL (these are independent calls)
         var marketDataFuture = java.util.concurrent.CompletableFuture.supplyAsync(
-                () -> marketDataService.getMarketData(symbols), taskExecutor);
+                () -> marketDataService.getMarketData(symbols), taskExecutor)
+                .completeOnTimeout(Map.of(), 4, java.util.concurrent.TimeUnit.SECONDS);
         var marketCapFuture = java.util.concurrent.CompletableFuture.supplyAsync(
-                () -> marketDataService.getMarketCapData(symbols), taskExecutor);
+                () -> marketDataService.getMarketCapData(symbols), taskExecutor)
+                .completeOnTimeout(Map.of(), 4, java.util.concurrent.TimeUnit.SECONDS);
 
-        // Wait for BOTH futures simultaneously with a single shared timeout.
-        // Using allOf().orTimeout() is better than sequential .get(15s) x2 because:
-        //   1. Both futures truly run in parallel and we wait for both at once.
-        //   2. orTimeout() internally cancels the future on expiry, signalling the
-        //      underlying WebClient subscription to stop — avoiding the reactor
-        //      "did not observe any item or terminal signal" warning.
         Map<String, MarketData> marketDataMap;
         Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap;
         try {
             java.util.concurrent.CompletableFuture
                     .allOf(marketDataFuture, marketCapFuture)
-                    .orTimeout(34, java.util.concurrent.TimeUnit.SECONDS)
-                    .join(); // propagates CancellationException / TimeoutException
+                    .join(); 
             marketDataMap = marketDataFuture.join();
             marketCapMap = marketCapFuture.join();
-        } catch (java.util.concurrent.CancellationException e) {
-            log.warn("Parallel market data fetch cancelled. Falling back to Redis cache.");
-            marketDataFuture.cancel(true);
-            marketCapFuture.cancel(true);
-            marketDataMap = Map.of();
-            marketCapMap = Map.of();
-        } catch (java.util.concurrent.CompletionException e) {
-            if (e.getCause() instanceof java.util.concurrent.TimeoutException) {
-                log.warn("Parallel market data fetch timed out (14s). Falling back to Redis cache.");
-            } else {
-                log.error("Parallel market data fetch failed: {}. Falling back to Redis cache.", e.getMessage());
-            }
-            marketDataFuture.cancel(true);
-            marketCapFuture.cancel(true);
-            marketDataMap = Map.of();
-            marketCapMap = Map.of();
         } catch (Exception e) {
             log.error("Parallel market data fetch failed unexpectedly: {}. Falling back to Redis cache.", e.getMessage());
-            marketDataFuture.cancel(true);
-            marketCapFuture.cancel(true);
             marketDataMap = Map.of();
             marketCapMap = Map.of();
         }

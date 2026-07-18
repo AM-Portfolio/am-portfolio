@@ -21,6 +21,8 @@ import com.portfolio.model.market.TimeFrame;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
+import org.springframework.web.reactive.function.client.WebClient;
+
 /**
  * Client for the Market Data API.
  */
@@ -31,10 +33,11 @@ public class MarketDataApiClient extends AbstractApiClient {
         /**
          * Creates a new MarketDataApiClient with the specified configuration.
          * 
+         * @param webClientBuilder the WebClient.Builder (auto-configured by Spring Boot)
          * @param config the market data API configuration
          */
-        public MarketDataApiClient(MarketDataApiConfig config) {
-                super(config);
+        public MarketDataApiClient(WebClient.Builder webClientBuilder, MarketDataApiConfig config) {
+                super(webClientBuilder, config);
         }
 
         /**

@@ -1,5 +1,6 @@
 package com.portfolio.redis.service;
 
+import java.util.Collections;
 import com.portfolio.model.market.MarketData;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -10,13 +11,17 @@ import org.springframework.stereotype.Service;
 import java.time.*;
 import java.util.*;
 import java.util.stream.Collectors;
+import io.micrometer.observation.annotation.Observed;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class PortfolioMarketDataRedisService {
 
-    private final RedisTemplate<String, MarketData> portfolioMarketDataRedisTemplate;
+    
+    @org.springframework.beans.factory.annotation.Value("${cache.redis.enabled:true}")
+    private boolean isRedisEnabled;
+private final RedisTemplate<String, MarketData> portfolioMarketDataRedisTemplate;
 
     @Value("${spring.data.redis.portfolio-market-data.key-prefix:portfolio:mktdata:}")
     private String keyPrefix;
@@ -28,7 +33,9 @@ public class PortfolioMarketDataRedisService {
     /**
      * Cache a batch of market data with smart TTL based on IST market hours.
      */
+    @Observed(name = "redis.cache.market_data", contextualName = "cache-market-data-write")
     public void cacheMarketData(Map<String, MarketData> data) {
+        if (!isRedisEnabled) return;
         if (data == null || data.isEmpty()) return;
         Duration ttl = computeSmartTtl();
         
@@ -57,6 +64,8 @@ public class PortfolioMarketDataRedisService {
      * Retrieve a batch of cached market data.
      */
     public Map<String, MarketData> getMarketData(List<String> symbols) {
+        if (!isRedisEnabled) return Collections.emptyMap();
+
         if (symbols == null || symbols.isEmpty()) return Collections.emptyMap();
         
         List<String> keys = symbols.stream().map(s -> keyPrefix + s).collect(Collectors.toList());
@@ -121,3 +130,4 @@ public class PortfolioMarketDataRedisService {
         }
     }
 }
+

@@ -1,5 +1,6 @@
 package com.portfolio.redis.service;
 
+import java.util.Collections;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -19,7 +20,10 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class PortfolioAnalysisRedisService {
     
-    private final RedisTemplate<String, PortfolioAnalysis> portfolioAnalysisRedisTemplate;
+    
+    @org.springframework.beans.factory.annotation.Value("${cache.redis.enabled:true}")
+    private boolean isRedisEnabled;
+private final RedisTemplate<String, PortfolioAnalysis> portfolioAnalysisRedisTemplate;
 
     @Value("${spring.data.redis.portfolio-mover.ttl}")
     private Integer portfolioMoverTtl;
@@ -28,6 +32,7 @@ public class PortfolioAnalysisRedisService {
     private String portfolioMoverKeyPrefix;
 
     public void cachePortfolioAnalysis(PortfolioAnalysis analysis, String portfolioId, String userId, TimeInterval interval) {
+        if (!isRedisEnabled) return;
         String key = buildKey(portfolioId, userId, interval);
         try {
             // For short intervals, use the interval duration as TTL
@@ -44,6 +49,7 @@ public class PortfolioAnalysisRedisService {
     }
 
     public Optional<PortfolioAnalysis> getLatestAnalysis(String portfolioId, String userId, TimeInterval interval) {
+        if (!isRedisEnabled) return java.util.Optional.empty();
         String key = buildKey(portfolioId, userId, interval);
         try {
             PortfolioAnalysis analysis = portfolioAnalysisRedisTemplate.opsForValue().get(key);
@@ -71,3 +77,4 @@ public class PortfolioAnalysisRedisService {
                (interval != null ? interval.getCode() : "default");
     }
 }
+

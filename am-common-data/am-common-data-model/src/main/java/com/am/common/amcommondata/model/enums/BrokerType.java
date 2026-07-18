@@ -5,6 +5,7 @@ public enum BrokerType {
     ZERODHA("Zerodha"),
     MSTOCK("MStock"),
     GROWW("Groww"),
+    GROW("Groww"), // Fallback for existing db records
     KOTAK("Kotak"),
     ANGEL_ONE("Angel One"),
     UPSTOX("Upstox");

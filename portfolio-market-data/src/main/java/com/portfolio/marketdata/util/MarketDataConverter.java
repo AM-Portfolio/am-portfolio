@@ -34,11 +34,7 @@ public class MarketDataConverter {
             return null;
         }
         
-        // Derive previousClose if missing (for live data, ohlc.close usually represents yesterday's close)
         Double effectivePreviousClose = response.getPreviousClose();
-        if ((effectivePreviousClose == null || effectivePreviousClose <= 0) && response.getOhlc() != null) {
-            effectivePreviousClose = response.getOhlc().getClose();
-        }
 
         // Avoid emitting previousClose without a usable lastPrice (prevents NPEs and -100% drops)
         if (response.getLastPrice() <= 0) {

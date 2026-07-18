@@ -1,5 +1,6 @@
 package com.portfolio.redis.service;
 
+import org.springframework.beans.factory.annotation.Value;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
@@ -18,7 +19,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @RequiredArgsConstructor
 public class PortfolioIntradayRedisService {
-    private final RedisTemplate<String, IntradayDataPoint[]> portfolioIntradayRedisTemplate;
+    
+    @org.springframework.beans.factory.annotation.Value("${cache.redis.enabled:true}")
+    private boolean isRedisEnabled;
+private final RedisTemplate<String, IntradayDataPoint[]> portfolioIntradayRedisTemplate;
 
     private static final String KEY_PREFIX = "portfolio:intraday:v10:";
     private static final int MARKET_HOURS_TTL_MINUTES = 5;
@@ -30,6 +34,7 @@ public class PortfolioIntradayRedisService {
     }
 
     public void cacheIntradayData(String userId, String portfolioId, List<IntradayDataPoint> data, boolean isMarketOpen) {
+        if (!isRedisEnabled) return;
         String key = buildKey(userId, portfolioId);
         try {
             Duration ttl = isMarketOpen ? Duration.ofMinutes(MARKET_HOURS_TTL_MINUTES) : Duration.ofHours(OFF_MARKET_HOURS_TTL_HOURS);
@@ -58,3 +63,4 @@ public class PortfolioIntradayRedisService {
         return Optional.empty();
     }
 }
+

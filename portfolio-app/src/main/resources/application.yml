@@ -186,7 +186,7 @@ market-data:
     connect-timeout-ms: ${MARKET_DATA_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:45000}
   api:
-    base-url: ${MARKET_DATA_API_URL:https://am-preprod.asrax.in/market}
+    base-url: ${MARKET_DATA_API_URL:http://am-market-data:8080}
     ohlc-endpoint: /v1/market-data/ohlc
     historical-data-endpoint: /v1/market-data/historical-data
     historical-charts-endpoint: /v1/analysis/historical-charts
@@ -239,8 +239,10 @@ management:
     distribution:
       percentiles-histogram:
         http.server.requests: true
+        external.api.call: true
       slo:
         http.server.requests: 100ms, 500ms, 1s, 5s, 10s, 20s, 30s
+        external.api.call: 50ms, 200ms, 500ms, 1s, 5s, 10s, 30s
   health:
     livenessstate:
       enabled: true
@@ -282,3 +284,11 @@ am:
         - /swagger-ui/**
         - /api-docs/**
         - /v3/api-docs/**
+
+cache:
+  redis:
+    enabled: ${REDIS_CACHE_ENABLED:true}
+
+portfolio:
+  redis:
+    enabled: ${PORTFOLIO_REDIS_ENABLED:true}

@@ -1,5 +1,6 @@
 package com.portfolio.redis.service;
 
+import java.util.Collections;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -21,7 +22,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @RequiredArgsConstructor
 public class PortfolioSummaryRedisService {
-    private final RedisTemplate<String, PortfolioSummaryV1> portfolioSummaryRedisTemplate;
+    
+    @org.springframework.beans.factory.annotation.Value("${cache.redis.enabled:true}")
+    private boolean isRedisEnabled;
+private final RedisTemplate<String, PortfolioSummaryV1> portfolioSummaryRedisTemplate;
 
     @Value("${spring.data.redis.portfolio-summary.ttl}")
     private Integer portfolioSummaryTtl;
@@ -31,11 +35,13 @@ public class PortfolioSummaryRedisService {
 
     @Async("taskExecutor")
     public CompletableFuture<Void> cachePortfolioSummary(PortfolioSummaryV1 summary, String userId, TimeInterval interval) {
+        if (!isRedisEnabled) return java.util.concurrent.CompletableFuture.completedFuture(null);
         return cachePortfolioSummary(summary, userId, interval, null);
     }
 
     @Async("taskExecutor")
     public CompletableFuture<Void> cachePortfolioSummary(PortfolioSummaryV1 summary, String userId, TimeInterval interval, String portfolioId) {
+        if (!isRedisEnabled) return java.util.concurrent.CompletableFuture.completedFuture(null);
         log.info("Starting async caching of portfolio summary - User: {}, Interval: {}", 
             userId, interval != null ? interval.getCode() : "null");
         
@@ -61,10 +67,12 @@ public class PortfolioSummaryRedisService {
     }
 
     public Optional<PortfolioSummaryV1> getLatestSummary(String userId, TimeInterval interval) {
+        if (!isRedisEnabled) return java.util.Optional.empty();
         return getLatestSummary(userId, interval, null);
     }
 
     public Optional<PortfolioSummaryV1> getLatestSummary(String userId, TimeInterval interval, String portfolioId) {
+        if (!isRedisEnabled) return java.util.Optional.empty();
         log.debug("Retrieving latest portfolio summary - User: {}, Interval: {}", 
             userId, interval != null ? interval.getCode() : "null");
             
@@ -115,6 +123,7 @@ public class PortfolioSummaryRedisService {
     }
 
     public void evictPortfolioSummary(String userId, String portfolioId) {
+        if (!isRedisEnabled) return;
         try {
             // Need to clear all intervals for this portfolio
             for (TimeInterval interval : TimeInterval.values()) {
@@ -132,3 +141,4 @@ public class PortfolioSummaryRedisService {
         }
     }
 }
+

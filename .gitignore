@@ -1,4 +1,4 @@
-### Maven ###
+﻿### Maven ###
 target/
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
@@ -61,7 +61,7 @@ application-*.yml
 *.bak
 *.orig
 
-### Secrets — only .env.template is committed; copy to .env.preprod / .env.dev locally ###
+### Secrets â€” only .env.template is committed; copy to .env.preprod / .env.dev locally ###
 .env*
 !.env.template
 .env.secrets
@@ -87,7 +87,7 @@ credentials.json
 test-portfolio
 dev_deploy.ps1
 
-# Local dev PowerShell helper scripts — never committed
+# Local dev PowerShell helper scripts â€” never committed
 *.ps1
 
 # Binary dumps and build artefacts accidentally left in workspace
@@ -98,9 +98,12 @@ beans.json
 beans_after.json
 bean_keys.txt
 javap.txt
-### Maven ###
-target/
-!.mvn/wrapper/maven-wrapper.jar
-!**/src/main/**/target/
-!**/src/test/**/target/
-pom.xml.tag
+
+# Private/Local Files
+node_modules/
+jdk-*/
+*.json
+*.py
+*.js
+*.sh
+report.md
