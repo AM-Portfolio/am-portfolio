@@ -20,7 +20,7 @@ jobs:
     uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
     with:
       language: "java"
-      working_directory: "am-common-data"
+      working_directory: "./am-common-data"
       sdk_name: "am-common-data-lib"
       maven_repo_id: "github"
       maven_repo_url: "https://maven.pkg.github.com/AM-Portfolio/am-portfolio"
