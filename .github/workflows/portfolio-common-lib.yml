@@ -20,10 +20,7 @@ jobs:
     uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
     with:
       language: "java"
-      # DO NOT REMOVE the ./ prefix below. 
-      # It intentionally bypasses a bug in publish-library.yml's root pom grep check
-      # ensuring that maven correctly builds and deploys all submodules (including JARs).
-      working_directory: "./am-common-data"
+      working_directory: "."
       sdk_name: "am-common-data-lib"
       maven_repo_id: "github"
       maven_repo_url: "https://maven.pkg.github.com/AM-Portfolio/am-portfolio"
