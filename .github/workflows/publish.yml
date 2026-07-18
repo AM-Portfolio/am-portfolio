@@ -1,0 +1,13 @@
+name: Publish Portfolio Service
+
+on:
+  push:
+    branches: 
+      - main
+      - develop
+      - "hotfix/*"
+
+jobs:
+  publish:
+    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
+    secrets: inherit
