@@ -14,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import com.am.common.amcommondata.service.price.StockPriceMongoService;
 
 import java.util.Collections;
 import java.util.List;
@@ -22,6 +23,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -33,6 +35,9 @@ class PortfolioCalculatorTest {
     @Mock
     private StockIndicesRedisService stockPriceRedisService;
 
+    @Mock
+    private StockPriceMongoService stockPriceMongoService;
+
     private PortfolioCalculator portfolioCalculator;
 
     private EquityHoldings holding;
@@ -40,7 +45,7 @@ class PortfolioCalculatorTest {
 
     @BeforeEach
     void setUp() {
-        portfolioCalculator = new PortfolioCalculator(marketDataService, stockPriceRedisService, Runnable::run);
+        portfolioCalculator = new PortfolioCalculator(marketDataService, stockPriceRedisService, stockPriceMongoService, Runnable::run);
         holding = new EquityHoldings();
         holding.setSymbol("TCS");
         holding.setQuantity(10.0);
@@ -77,8 +82,8 @@ class PortfolioCalculatorTest {
 
     @Test
     void enrichHoldings_FallbackToRedis() {
-        when(marketDataService.getMarketData(anyList())).thenReturn(Collections.emptyMap());
-        when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+        lenient().when(marketDataService.getMarketData(anyList())).thenReturn(Collections.emptyMap());
+        lenient().when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
         
         StockPriceCache redisPrice = StockPriceCache.builder()
                 .closePrice(3100.0)
