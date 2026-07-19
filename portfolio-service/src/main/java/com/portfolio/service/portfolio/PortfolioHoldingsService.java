@@ -13,6 +13,7 @@ import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
 import com.portfolio.service.calculator.PortfolioCalculator;
+import com.portfolio.service.portfolio.PortfolioHoldingsMongoService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,6 +31,10 @@ public class PortfolioHoldingsService {
     private final PortfolioHoldingsMapper portfolioHoldingsMapper;
     private final PortfolioHoldingsRedisService portfolioHoldingsRedisService;
     private final PortfolioCalculator portfolioCalculator;
+    private final PortfolioHoldingsMongoService portfolioHoldingsMongoService;
+    
+    @org.springframework.beans.factory.annotation.Value("${portfolio.redis.enabled:true}")
+    private boolean isRedisEnabled;
 
     @Observed(name = "portfolio.get.holdings", contextualName = "get-portfolio-holdings")
     public PortfolioHoldings getPortfolioHoldings(String userId, TimeInterval interval) {
@@ -100,8 +105,15 @@ public class PortfolioHoldingsService {
         if (enrich) {
             Optional<PortfolioHoldings> cachedHoldings = portfolioHoldingsRedisService.getLatestHoldings(userId, interval, portfolioId);
             if (cachedHoldings.isPresent()) {
-                log.info("Returning cached portfolio holdings for user: {} and portfolio: {}", userId, portfolioId);
+                log.info("Returning cached portfolio holdings from Redis for user: {} and portfolio: {}", userId, portfolioId);
                 return cachedHoldings.get();
+            }
+            if (!isRedisEnabled) {
+                cachedHoldings = portfolioHoldingsMongoService.getLatestFreshHoldings(userId, interval, portfolioId);
+                if (cachedHoldings.isPresent()) {
+                    log.info("Returning cached portfolio holdings from MongoDB for user: {} and portfolio: {}", userId, portfolioId);
+                    return cachedHoldings.get();
+                }
             }
         }
 
@@ -168,6 +180,7 @@ public class PortfolioHoldingsService {
         if (enrich) {
             log.info("Caching portfolio holdings for user: {} and context: {}", userId, context);
             portfolioHoldingsRedisService.cachePortfolioHoldings(portfolioHoldings, userId, interval, portfolioId);
+            portfolioHoldingsMongoService.cachePortfolioHoldings(portfolioHoldings, userId, interval, portfolioId);
         }
 
         log.info("Completed getPortfolioHoldings for user: {}", userId);
@@ -192,9 +205,21 @@ public class PortfolioHoldingsService {
 
         Optional<PortfolioHoldings> cachedHoldings = portfolioHoldingsRedisService.getLatestHoldings(userId, interval);
         if (cachedHoldings.isPresent()) {
-            log.info("Serving portfolio holdings from cache - User: {}, Interval: {}",
+            log.info("Serving portfolio holdings from Redis cache - User: {}, Interval: {}",
                     userId, interval != null ? interval.getCode() : "null");
+            return cachedHoldings;
         }
-        return cachedHoldings;
+
+        // Tier 2: Check MongoDB if Redis missed (especially when Redis is disabled)
+        if (!isRedisEnabled) {
+            cachedHoldings = portfolioHoldingsMongoService.getLatestFreshHoldings(userId, interval, null);
+            if (cachedHoldings.isPresent()) {
+                log.info("Serving portfolio holdings from MongoDB cache - User: {}, Interval: {}",
+                        userId, interval != null ? interval.getCode() : "null");
+                return cachedHoldings;
+            }
+        }
+        
+        return Optional.empty();
     }
 }

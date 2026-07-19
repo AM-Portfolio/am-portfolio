@@ -12,10 +12,13 @@ import com.am.common.investment.model.equity.EquityPrice;
 import com.am.common.investment.model.events.EquityPriceUpdateEvent;
 import com.am.common.investment.model.events.StockInsidicesEventData;
 import com.am.common.investment.model.events.mapper.StockIndicesEventDataMapper;
+import com.am.common.amcommondata.document.price.StockPriceDocument;
+import com.am.common.amcommondata.service.price.StockPriceMongoService;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.portfolio.redis.service.StockIndicesRedisService;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -24,7 +27,7 @@ import java.util.List;
 public class StockIndicesUpdateConsumerService {
 
     private final ObjectMapper objectMapper;
-    private final StockIndicesRedisService stockPriceRedisService;
+    private final StockPriceMongoService stockPriceMongoService;
 
     @KafkaListener(topics = "${app.kafka.stock.topic}", 
                   groupId = "${app.kafka.stock.consumer.id}",
@@ -49,13 +52,22 @@ public class StockIndicesUpdateConsumerService {
     }
 
     private void processStockPriceUpdate(StockInsidicesEventData event) {
-        // var indicesStocks = StockIndicesEventDataMapper.toMarketData(event);
-        // if (indicesStocks != null) {
-        //     stockPriceRedisService.cacheEquityPriceUpdateBatch(indicesStocks)
-        //         .exceptionally(ex -> {
-        //             log.error("Failed to cache stock prices: {}", ex.getMessage(), ex);
-        //             return null;
-        //         });
-        // }
+        var indicesStocks = StockIndicesEventDataMapper.toMarketData(event);
+        if (indicesStocks != null) {
+            List<StockPriceDocument> docs = indicesStocks.stream()
+                .map(ep -> StockPriceDocument.builder()
+                    .symbol(ep.getSymbol())
+                    .lastPrice(ep.getLastPrice())
+                    .previousClose(ep.getPreviousClose())
+                    .openPrice(ep.getOhlcv() != null ? ep.getOhlcv().getOpen() : null)
+                    .highPrice(ep.getOhlcv() != null ? ep.getOhlcv().getHigh() : null)
+                    .lowPrice(ep.getOhlcv() != null ? ep.getOhlcv().getLow() : null)
+                    .timestamp(ep.getTime() != null ? ep.getTime().toEpochMilli() : System.currentTimeMillis())
+                    .updatedAt(LocalDateTime.now())
+                    .build())
+                .collect(Collectors.toList());
+            
+            stockPriceMongoService.saveAll(docs);
+        }
     }
 }

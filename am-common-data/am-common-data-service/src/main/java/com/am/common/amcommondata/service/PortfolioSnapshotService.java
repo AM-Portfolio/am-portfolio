@@ -38,32 +38,53 @@ public class PortfolioSnapshotService {
     public void saveUserSnapshot(String userId, Double totalUserWealth, Double totalUserInvestment, Double totalUserGainLoss, Double totalUserGainLossPercentage, List<PortfolioSnapshotEntry> entries) {
         LocalDate today = LocalDate.now();
 
-        // 1. Idempotency check: don't save if already saved today
         Optional<PortfolioSnapshotDocument> existing = portfolioSnapshotRepository.findByUserIdAndSnapshotDate(userId, today);
+        PortfolioSnapshotDocument snapshot;
+        
         if (existing.isPresent()) {
-            log.info("Snapshot already exists for user {} on date {}. Skipping.", userId, today);
-            return;
+            // Update existing snapshot for today (Upsert)
+            snapshot = existing.get();
+            snapshot.setTotalUserWealth(totalUserWealth);
+            snapshot.setTotalUserInvestment(totalUserInvestment);
+            snapshot.setTotalUserGainLoss(totalUserGainLoss);
+            snapshot.setTotalUserGainLossPercentage(totalUserGainLossPercentage);
+            snapshot.setPortfolios(entries);
+            snapshot.setCreatedAt(LocalDateTime.now());
+        } else {
+            // Create new snapshot
+            String snapshotId = java.util.UUID.randomUUID().toString();
+            snapshot = PortfolioSnapshotDocument.builder()
+                    .id(snapshotId)
+                    .snapshotId(snapshotId)
+                    .userId(userId)
+                    .snapshotDate(today)
+                    .totalUserWealth(totalUserWealth)
+                    .totalUserInvestment(totalUserInvestment)
+                    .totalUserGainLoss(totalUserGainLoss)
+                    .totalUserGainLossPercentage(totalUserGainLossPercentage)
+                    .portfolios(entries)
+                    .createdAt(LocalDateTime.now())
+                    .build();
         }
 
-        // 2. Pre-generate a UUID so snapshotId == _id from the start (single save, no double-write)
-        String snapshotId = java.util.UUID.randomUUID().toString();
-
-        // 3. Create and save new snapshot — holdings are now nested inside each PortfolioSnapshotEntry
-        PortfolioSnapshotDocument snapshot = PortfolioSnapshotDocument.builder()
-                .id(snapshotId)          // sets MongoDB _id
-                .snapshotId(snapshotId)  // duplicate human-readable field
-                .userId(userId)
-                .snapshotDate(today)
-                .totalUserWealth(totalUserWealth)
-                .totalUserInvestment(totalUserInvestment)
-                .totalUserGainLoss(totalUserGainLoss)
-                .totalUserGainLossPercentage(totalUserGainLossPercentage)
-                .portfolios(entries)
-                .createdAt(LocalDateTime.now())
-                .build();
-
         portfolioSnapshotRepository.save(snapshot);
-        log.info("Successfully saved User-Centric EOD snapshot for user {} snapshotId={} totalWealth={}", userId, snapshotId, totalUserWealth);
+        log.info("Successfully upserted User-Centric EOD snapshot for user {} totalWealth={}", userId, totalUserWealth);
+    }
+
+    public Optional<PortfolioSnapshotModel> getLatestFreshSnapshot(String userId, int freshnessMinutes) {
+        LocalDate today = LocalDate.now();
+        Optional<PortfolioSnapshotDocument> existing = portfolioSnapshotRepository.findByUserIdAndSnapshotDate(userId, today);
+        
+        if (existing.isPresent()) {
+            PortfolioSnapshotDocument doc = existing.get();
+            LocalDateTime cutoff = LocalDateTime.now().minusMinutes(freshnessMinutes);
+            if (doc.getCreatedAt() != null && doc.getCreatedAt().isAfter(cutoff)) {
+                return Optional.of(toModel(doc, null));
+            } else {
+                log.info("Snapshot for user {} is stale (older than {} minutes)", userId, freshnessMinutes);
+            }
+        }
+        return Optional.empty();
     }
 
     public List<PortfolioSnapshotModel> getHistory(String userId, String portfolioId, String timeFrame) {
