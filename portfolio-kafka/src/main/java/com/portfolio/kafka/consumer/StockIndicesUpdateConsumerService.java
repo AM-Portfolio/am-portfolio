@@ -8,10 +8,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
 
-import com.am.common.investment.model.equity.EquityPrice;
-import com.am.common.investment.model.events.EquityPriceUpdateEvent;
 import com.am.common.investment.model.events.StockInsidicesEventData;
-import com.am.common.investment.model.events.mapper.StockIndicesEventDataMapper;
 import com.am.common.amcommondata.document.price.StockPriceDocument;
 import com.am.common.amcommondata.service.price.StockPriceMongoService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,7 +33,7 @@ public class StockIndicesUpdateConsumerService {
         try {
             log.info("Received stock price update message: {}", message);
             
-            // Convert JSON string to EquityPriceUpdateEvent
+            // Convert JSON string to StockInsidicesEventData
             StockInsidicesEventData event = objectMapper.readValue(message, StockInsidicesEventData.class);
             log.info("Converted to stock price event: {}", event);
             
@@ -52,22 +49,24 @@ public class StockIndicesUpdateConsumerService {
     }
 
     private void processStockPriceUpdate(StockInsidicesEventData event) {
-        var indicesStocks = StockIndicesEventDataMapper.toMarketData(event);
-        if (indicesStocks != null) {
-            List<StockPriceDocument> docs = indicesStocks.stream()
-                .map(ep -> StockPriceDocument.builder()
-                    .symbol(ep.getSymbol())
-                    .lastPrice(ep.getLastPrice())
-                    .previousClose(ep.getPreviousClose())
-                    .openPrice(ep.getOhlcv() != null ? ep.getOhlcv().getOpen() : null)
-                    .highPrice(ep.getOhlcv() != null ? ep.getOhlcv().getHigh() : null)
-                    .lowPrice(ep.getOhlcv() != null ? ep.getOhlcv().getLow() : null)
-                    .timestamp(ep.getTime() != null ? ep.getTime().toEpochMilli() : System.currentTimeMillis())
+        if (event != null && event.getData() != null) {
+            List<StockPriceDocument> docs = event.getData().stream()
+                .filter(sd -> sd != null && sd.getSymbol() != null)
+                .map(sd -> StockPriceDocument.builder()
+                    .symbol(sd.getSymbol())
+                    .lastPrice(sd.getLastPrice())
+                    .previousClose(sd.getPreviousClose())
+                    .openPrice(sd.getOpen())
+                    .highPrice(sd.getDayHigh())
+                    .lowPrice(sd.getDayLow())
+                    .timestamp(System.currentTimeMillis())
                     .updatedAt(LocalDateTime.now())
                     .build())
                 .collect(Collectors.toList());
-            
-            stockPriceMongoService.saveAll(docs);
+                
+            if (!docs.isEmpty()) {
+                stockPriceMongoService.saveAll(docs);
+            }
         }
     }
 }
