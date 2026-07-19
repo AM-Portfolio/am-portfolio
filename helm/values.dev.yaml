@@ -54,3 +54,6 @@ ingress:
 
 env:
   SPRING_PROFILES_ACTIVE: "dev,security"
+  KAFKA_ENABLED: "true"
+  PROJ_KAFKA_BOOTSTRAP_SERVERS: "kafka.infra-dev.svc.cluster.local:9092"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka.infra-dev.svc.cluster.local:9092"

@@ -7,7 +7,7 @@ import com.portfolio.model.market.OhlcData;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.model.cache.StockPriceCache;
-import com.portfolio.redis.service.StockIndicesRedisService;
+import com.am.common.amcommondata.service.marketcap.MarketCapMongoService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,7 +33,7 @@ class PortfolioCalculatorTest {
     private MarketDataService marketDataService;
 
     @Mock
-    private StockIndicesRedisService stockPriceRedisService;
+    private MarketCapMongoService marketCapMongoService;
 
     @Mock
     private StockPriceMongoService stockPriceMongoService;
@@ -45,7 +45,7 @@ class PortfolioCalculatorTest {
 
     @BeforeEach
     void setUp() {
-        portfolioCalculator = new PortfolioCalculator(marketDataService, stockPriceRedisService, stockPriceMongoService, Runnable::run);
+        portfolioCalculator = new PortfolioCalculator(marketDataService, marketCapMongoService, stockPriceMongoService, Runnable::run);
         holding = new EquityHoldings();
         holding.setSymbol("TCS");
         holding.setQuantity(10.0);
@@ -81,14 +81,15 @@ class PortfolioCalculatorTest {
     }
 
     @Test
-    void enrichHoldings_FallbackToRedis() {
+    void enrichHoldings_FallbackToMongo() {
         lenient().when(marketDataService.getMarketData(anyList())).thenReturn(Collections.emptyMap());
         lenient().when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Collections.emptyMap());
         
-        StockPriceCache redisPrice = StockPriceCache.builder()
-                .closePrice(3100.0)
+        com.am.common.amcommondata.document.price.StockPriceDocument mongoPrice = com.am.common.amcommondata.document.price.StockPriceDocument.builder()
+                .lastPrice(3100.0)
                 .build();
-        when(stockPriceRedisService.getLatestPrices(anyList())).thenReturn(Map.of("TCS", redisPrice));
+        when(stockPriceMongoService.getPrices(anyList())).thenReturn(Map.of("TCS", mongoPrice));
 
         List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
 
@@ -99,7 +100,8 @@ class PortfolioCalculatorTest {
     void enrichHoldings_LocalDevFallback() {
         when(marketDataService.getMarketData(anyList())).thenReturn(Collections.emptyMap());
         when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
-        when(stockPriceRedisService.getLatestPrices(anyList())).thenReturn(Map.of());
+        when(stockPriceMongoService.getPrices(anyList())).thenReturn(Map.of());
+        when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
 
         List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
 

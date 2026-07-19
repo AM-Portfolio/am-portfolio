@@ -12,9 +12,10 @@ import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
-import com.portfolio.redis.service.StockIndicesRedisService;
 import com.am.common.amcommondata.service.price.StockPriceMongoService;
 import com.am.common.amcommondata.document.price.StockPriceDocument;
+import com.am.common.amcommondata.service.marketcap.MarketCapMongoService;
+import com.am.common.amcommondata.document.marketcap.MarketCapDocument;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,17 +29,17 @@ import io.micrometer.observation.annotation.Observed;
 public class PortfolioCalculator {
 
     private final MarketDataService marketDataService;
-    private final StockIndicesRedisService stockPriceRedisService;
+    private final MarketCapMongoService marketCapMongoService;
     private final StockPriceMongoService stockPriceMongoService;
     private final java.util.concurrent.Executor taskExecutor;
 
     public PortfolioCalculator(
             MarketDataService marketDataService,
-            StockIndicesRedisService stockPriceRedisService,
+            MarketCapMongoService marketCapMongoService,
             StockPriceMongoService stockPriceMongoService,
             @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
         this.marketDataService = marketDataService;
-        this.stockPriceRedisService = stockPriceRedisService;
+        this.marketCapMongoService = marketCapMongoService;
         this.stockPriceMongoService = stockPriceMongoService;
         this.taskExecutor = taskExecutor;
     }
@@ -62,39 +63,51 @@ public class PortfolioCalculator {
                 .filter(symbol -> symbol != null)
                 .collect(Collectors.toList());
 
-        // 1. Fetch market cap data asynchronously
-        var marketCapFuture = java.util.concurrent.CompletableFuture.supplyAsync(
-                () -> marketDataService.getMarketCapData(symbols), taskExecutor)
-                .completeOnTimeout(Map.of(), 4, java.util.concurrent.TimeUnit.SECONDS);
-
-        // 2. 3-Tier Price Lookup Waterfall
-
-        // Tier 1: Redis
-        Map<String, com.portfolio.model.cache.StockPriceCache> rawRedisData = stockPriceRedisService.getLatestPrices(symbols);
-        final Map<String, com.portfolio.model.cache.StockPriceCache> redisData = (rawRedisData == null) ? Map.of() : rawRedisData;
-
-        // Find missing for Tier 2
-        List<String> missingFromRedis = symbols.stream()
-                .filter(s -> !redisData.containsKey(s))
+        // 1. Fetch market cap data (MongoDB Cache first, then API)
+        Map<String, MarketCapDocument> cachedMarketCap = marketCapMongoService.getBySymbols(symbols);
+        List<String> missingMarketCap = symbols.stream()
+                .filter(s -> !cachedMarketCap.containsKey(s))
                 .collect(Collectors.toList());
 
-        // Tier 2: MongoDB
-        final Map<String, StockPriceDocument> mongoData;
-        if (!missingFromRedis.isEmpty()) {
-            mongoData = stockPriceMongoService.getPrices(missingFromRedis);
-        } else {
-            mongoData = Map.of();
-        }
+        java.util.concurrent.CompletableFuture<Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch>> marketCapFuture = missingMarketCap.isEmpty()
+                ? java.util.concurrent.CompletableFuture.completedFuture(Map.of())
+                : java.util.concurrent.CompletableFuture.supplyAsync(
+                        () -> marketDataService.getMarketCapData(missingMarketCap), taskExecutor)
+                        .completeOnTimeout(Map.of(), 4, java.util.concurrent.TimeUnit.SECONDS);
 
-        // Find missing for Tier 3
-        List<String> missingFromMongo = missingFromRedis.stream()
+        // Self-heal: Cache API results to MongoDB
+        marketCapFuture.thenAcceptAsync(apiResults -> {
+            if (apiResults != null && !apiResults.isEmpty()) {
+                List<MarketCapDocument> docs = apiResults.values().stream()
+                        .map(match -> MarketCapDocument.builder()
+                                .symbol(match.getSymbol())
+                                .sector(match.getSector())
+                                .industry(match.getIndustry())
+                                .marketCapType(match.getMarketCapType())
+                                .marketCapValue(match.getMarketCapValue() != null ? match.getMarketCapValue().doubleValue() : null)
+                                .companyName(match.getCompanyName())
+                                .updatedAt(LocalDateTime.now())
+                                .build())
+                        .collect(Collectors.toList());
+                marketCapMongoService.saveAll(docs);
+            }
+        }, taskExecutor);
+
+        // 2. 2-Tier Price Lookup Waterfall
+
+        // Tier 1: MongoDB (Live prices updated by Kafka)
+        final Map<String, StockPriceDocument> mongoData = stockPriceMongoService.getPrices(symbols);
+        log.info("MongoDB price hit: {}/{} symbols", mongoData.size(), symbols.size());
+
+        // Find missing for Tier 2
+        List<String> missingFromMongo = symbols.stream()
                 .filter(s -> !mongoData.containsKey(s))
                 .collect(Collectors.toList());
 
-        // Tier 3: API
+        // Tier 2: API
         Map<String, MarketData> apiData = Map.of();
         if (!missingFromMongo.isEmpty()) {
-            log.info("Cache miss for {} symbols in Redis and Mongo. Calling am-market API.", missingFromMongo.size());
+            log.info("Cache miss for {} symbols in Mongo. Calling am-market API.", missingFromMongo.size());
             try {
                 apiData = marketDataService.getMarketData(missingFromMongo);
 
@@ -136,14 +149,14 @@ public class PortfolioCalculator {
         final Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> finalMarketCapMap = marketCapMap;
 
         return equityHoldings.stream()
-                .map(holding -> enrichHolding(holding, finalApiDataForEnrich, finalMarketCapMap, redisData, mongoData))
+                .map(holding -> enrichHolding(holding, finalApiDataForEnrich, finalMarketCapMap, cachedMarketCap, mongoData))
                 .collect(Collectors.toList());
     }
 
     private EquityHoldings enrichHolding(EquityHoldings holding, 
             Map<String, MarketData> marketDataMap,
             Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap,
-            Map<String, com.portfolio.model.cache.StockPriceCache> cachedPricesMap,
+            Map<String, MarketCapDocument> cachedMarketCap,
             Map<String, StockPriceDocument> mongoPricesMap) {
             
         String symbol = holding.getSymbol();
@@ -151,7 +164,27 @@ public class PortfolioCalculator {
             return holding;
 
         // Enrich with market cap data
-        if (marketCapMap != null && marketCapMap.containsKey(symbol)) {
+        if (cachedMarketCap != null && cachedMarketCap.containsKey(symbol)) {
+            var cache = cachedMarketCap.get(symbol);
+            if (cache.getMarketCapValue() != null) {
+                holding.setMarketCapValue(cache.getMarketCapValue());
+            }
+            if (cache.getMarketCapType() != null) {
+                holding.setMarketCapCategory(cache.getMarketCapType());
+                if (holding.getMarketCap() == null) {
+                    holding.setMarketCap(cache.getMarketCapType());
+                }
+            }
+            if (cache.getCompanyName() != null) {
+                holding.setName(cache.getCompanyName());
+            }
+            if (cache.getSector() != null) {
+                holding.setSector(cache.getSector());
+            }
+            if (cache.getIndustry() != null) {
+                holding.setIndustry(cache.getIndustry());
+            }
+        } else if (marketCapMap != null && marketCapMap.containsKey(symbol)) {
             var match = marketCapMap.get(symbol);
             if (match.getMarketCapValue() != null) {
                 holding.setMarketCapValue(match.getMarketCapValue().doubleValue());
@@ -177,11 +210,7 @@ public class PortfolioCalculator {
         Double previousClosePrice = null;
 
         // Waterfall Price Assignment
-        if (cachedPricesMap != null && cachedPricesMap.containsKey(symbol)) {
-            var cacheItem = cachedPricesMap.get(symbol);
-            currentPrice = cacheItem.getClosePrice();
-            previousClosePrice = cacheItem.getPreviousClosePrice();
-        } else if (mongoPricesMap != null && mongoPricesMap.containsKey(symbol)) {
+        if (mongoPricesMap != null && mongoPricesMap.containsKey(symbol)) {
             var mongoItem = mongoPricesMap.get(symbol);
             currentPrice = mongoItem.getLastPrice();
             previousClosePrice = mongoItem.getPreviousClose();
