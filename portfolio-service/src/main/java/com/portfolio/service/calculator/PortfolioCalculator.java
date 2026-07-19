@@ -70,8 +70,8 @@ public class PortfolioCalculator {
         // 2. 3-Tier Price Lookup Waterfall
 
         // Tier 1: Redis
-        Map<String, com.portfolio.model.cache.StockPriceCache> redisData = stockPriceRedisService.getLatestPrices(symbols);
-        if (redisData == null) redisData = Map.of();
+        Map<String, com.portfolio.model.cache.StockPriceCache> rawRedisData = stockPriceRedisService.getLatestPrices(symbols);
+        final Map<String, com.portfolio.model.cache.StockPriceCache> redisData = (rawRedisData == null) ? Map.of() : rawRedisData;
 
         // Find missing for Tier 2
         List<String> missingFromRedis = symbols.stream()
@@ -79,9 +79,11 @@ public class PortfolioCalculator {
                 .collect(Collectors.toList());
 
         // Tier 2: MongoDB
-        Map<String, StockPriceDocument> mongoData = Map.of();
+        final Map<String, StockPriceDocument> mongoData;
         if (!missingFromRedis.isEmpty()) {
             mongoData = stockPriceMongoService.getPrices(missingFromRedis);
+        } else {
+            mongoData = Map.of();
         }
 
         // Find missing for Tier 3
@@ -120,7 +122,7 @@ public class PortfolioCalculator {
                 log.error("API fetch failed for missing symbols: {}", e.getMessage());
             }
         }
-        if (apiData == null) apiData = Map.of();
+        final Map<String, MarketData> finalApiDataForEnrich = (apiData == null) ? Map.of() : apiData;
 
         // Wait for Market Cap
         Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap;
@@ -131,13 +133,10 @@ public class PortfolioCalculator {
         }
 
         // 3. Enrich
-        final Map<String, com.portfolio.model.cache.StockPriceCache> finalRedisData = redisData;
-        final Map<String, StockPriceDocument> finalMongoData = mongoData;
-        final Map<String, MarketData> finalApiData = apiData;
         final Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> finalMarketCapMap = marketCapMap;
 
         return equityHoldings.stream()
-                .map(holding -> enrichHolding(holding, finalApiData, finalMarketCapMap, finalRedisData, finalMongoData))
+                .map(holding -> enrichHolding(holding, finalApiDataForEnrich, finalMarketCapMap, redisData, mongoData))
                 .collect(Collectors.toList());
     }
 
