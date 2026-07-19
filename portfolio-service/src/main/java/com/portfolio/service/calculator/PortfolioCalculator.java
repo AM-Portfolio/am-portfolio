@@ -203,7 +203,7 @@ public class PortfolioCalculator {
         }
 
         // Local development fallback to prevent UI from showing null values, but avoid fabricating Daily P&L
-        if (currentPrice == null) {
+        if (currentPrice == null || currentPrice == 0.0) {
             log.debug("No market data for {}. Using investment cost as price fallback.", symbol);
             if (holding.getAverageBuyingPrice() != null && holding.getAverageBuyingPrice() > 0) {
                 currentPrice = holding.getAverageBuyingPrice();
