@@ -287,8 +287,8 @@ am:
 
 cache:
   redis:
-    enabled: ${REDIS_CACHE_ENABLED:true}
+    enabled: ${REDIS_CACHE_ENABLED:false}
 
 portfolio:
   redis:
-    enabled: ${PORTFOLIO_REDIS_ENABLED:true}
+    enabled: ${PORTFOLIO_REDIS_ENABLED:false}
