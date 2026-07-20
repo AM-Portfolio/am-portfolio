@@ -1,4 +1,4 @@
-package com.portfolio.kafka.util;
+package com.portfolio.model.util;
 
 import java.util.Set;
 

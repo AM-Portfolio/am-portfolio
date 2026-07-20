@@ -45,14 +45,14 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         String portfolioId = request.getCoreIdentifiers().getPortfolioId();
         
         // Check cache first
-        Optional<Heatmap> cached = heatmapRedisService.getCachedHeatmap(portfolioId, request.getTimeFrameRequest());
+        Optional<Heatmap> cached = heatmapRedisService.getCachedHeatmap(portfolioId, request);
         if (cached.isPresent()) {
             return cached.get();
         }
 
         return processPortfolioData(
             portfolioId,
-            request.getTimeFrameRequest(),
+            request,
             this::createEmptyResult,
             (portfolio, portfolioSymbols, marketData) -> {
         
@@ -83,7 +83,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 
                 log.info("Generated heatmap with {} sectors for portfolio: {}", sectorPerformances.size(), portfolioId);
                 
-                heatmapRedisService.cacheHeatmap(heatmap, portfolioId, request.getTimeFrameRequest());
+                heatmapRedisService.cacheHeatmap(heatmap, portfolioId, request);
                 
                 return heatmap;
             }

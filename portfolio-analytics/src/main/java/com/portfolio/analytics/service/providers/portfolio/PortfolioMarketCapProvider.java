@@ -41,7 +41,7 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
     @Override
     public MarketCapAllocation generateAnalytics(AdvancedAnalyticsRequest request) {
         log.info("Calculating market cap allocations for portfolio: {}", request.getCoreIdentifiers().getPortfolioId());
-        return generateMarketCapAllocation(request.getCoreIdentifiers().getPortfolioId(), request.getTimeFrameRequest());
+        return generateMarketCapAllocation(request.getCoreIdentifiers().getPortfolioId(), request);
     }
     
     /**

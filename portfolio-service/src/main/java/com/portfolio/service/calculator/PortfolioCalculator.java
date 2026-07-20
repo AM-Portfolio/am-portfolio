@@ -69,11 +69,17 @@ public class PortfolioCalculator {
                 .filter(s -> !cachedMarketCap.containsKey(s))
                 .collect(Collectors.toList());
 
+        java.util.concurrent.CompletableFuture<Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch>> marketCapFuture = null;
         if (!missingMarketCap.isEmpty()) {
-            java.util.concurrent.CompletableFuture.supplyAsync(
+            marketCapFuture = java.util.concurrent.CompletableFuture.supplyAsync(
                     () -> marketDataService.getMarketCapData(missingMarketCap), taskExecutor)
                     .completeOnTimeout(Map.of(), 4, java.util.concurrent.TimeUnit.SECONDS)
-                    .thenAcceptAsync(apiResults -> {
+                    .exceptionally(ex -> {
+                        log.error("Market cap fetch failed: {}", ex.getMessage());
+                        return Map.of();
+                    });
+            
+            marketCapFuture.thenAcceptAsync(apiResults -> {
                         if (apiResults != null && !apiResults.isEmpty()) {
                             List<MarketCapDocument> docs = apiResults.values().stream()
                                     .map(match -> MarketCapDocument.builder()
@@ -136,9 +142,18 @@ public class PortfolioCalculator {
         }
         final Map<String, MarketData> finalApiDataForEnrich = (apiData == null) ? Map.of() : apiData;
 
-        // Market Cap is now fully async fire-and-forget. We don't join here.
-        // We will just pass an empty map since we only use cachedMarketCap for this request.
-        final Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> finalMarketCapMap = Map.of();
+        // Market Cap bounded wait (1.5 seconds) to ensure UI gets data on cold starts
+        Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> finalMarketCapMapTemp = Map.of();
+        if (marketCapFuture != null) {
+            try {
+                finalMarketCapMapTemp = marketCapFuture.get(1500, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                log.warn("Market cap fetch timed out at 1.5s wait. Proceeding without it.");
+            } catch (Exception e) {
+                log.error("Error waiting for market cap data", e);
+            }
+        }
+        final Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> finalMarketCapMap = finalMarketCapMapTemp;
 
         return equityHoldings.stream()
                 .map(holding -> enrichHolding(holding, finalApiDataForEnrich, finalMarketCapMap, cachedMarketCap, mongoData))
@@ -233,15 +248,6 @@ public class PortfolioCalculator {
                 currentPrice = impliedAvgPrice;
             } else {
                 currentPrice = 0.0;
-            }
-        }
-        
-        // Fallback for previousClosePrice for missing data
-        if (previousClosePrice == null || previousClosePrice == 0.0) {
-            if (holding.getAverageBuyingPrice() != null && holding.getAverageBuyingPrice() > 0) {
-                previousClosePrice = holding.getAverageBuyingPrice();
-            } else if (holding.getInvestmentCost() != null && holding.getQuantity() != null && holding.getQuantity() > 0) {
-                previousClosePrice = holding.getInvestmentCost() / holding.getQuantity();
             }
         }
 

@@ -9,10 +9,20 @@ import com.portfolio.model.analytics.MarketCapAllocation;
 import com.portfolio.model.analytics.SectorAllocation;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.analytics.response.AdvancedAnalyticsResponse;
+import com.am.common.amcommondata.service.PortfolioService;
+import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.asset.equity.EquityModel;
+import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.model.market.MarketData;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -27,10 +37,17 @@ public class PortfolioAnalyticsFacade {
     
     private final AnalyticsFactory analyticsFactory;
     private final Executor taskExecutor;
+    private final PortfolioService portfolioService;
+    private final MarketDataService marketDataService;
 
-    public PortfolioAnalyticsFacade(AnalyticsFactory analyticsFactory, @Qualifier("taskExecutor") Executor taskExecutor) {
+    public PortfolioAnalyticsFacade(AnalyticsFactory analyticsFactory, 
+                                    @Qualifier("taskExecutor") Executor taskExecutor,
+                                    PortfolioService portfolioService,
+                                    MarketDataService marketDataService) {
         this.analyticsFactory = analyticsFactory;
         this.taskExecutor = taskExecutor;
+        this.portfolioService = portfolioService;
+        this.marketDataService = marketDataService;
     }
     
     /**
@@ -94,6 +111,29 @@ public class PortfolioAnalyticsFacade {
             responseBuilder.comparisonIndexSymbol(request.getCoreIdentifiers().getComparisonIndexSymbol());
         }
         
+        // --- PREFETCH MARKET DATA ONCE ---
+        try {
+            UUID portfolioUuid = UUID.fromString(request.getCoreIdentifiers().getPortfolioId());
+            PortfolioModelV1 portfolio = portfolioService.getPortfolioById(portfolioUuid);
+            if (portfolio != null && portfolio.getEquityModels() != null && !portfolio.getEquityModels().isEmpty()) {
+                List<String> symbols = portfolio.getEquityModels().stream()
+                        .map(EquityModel::getSymbol)
+                        .filter(s -> s != null && !s.isEmpty())
+                        .collect(Collectors.toList());
+                
+                if (!symbols.isEmpty()) {
+                    log.info("[Optimization] Prefetching market data once for {} symbols", symbols.size());
+                    Map<String, MarketData> prefetched = marketDataService.getMarketData(symbols);
+                    if (prefetched != null) {
+                        request.setPrefetchedMarketData(prefetched);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to prefetch market data in facade. Providers will fallback to fetching individually.", e);
+        }
+        // ---------------------------------
+
         // Build analytics component with requested features
         AnalyticsComponent.AnalyticsComponentBuilder analyticsBuilder = AnalyticsComponent.builder();
         

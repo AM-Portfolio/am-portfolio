@@ -27,6 +27,10 @@ public class AdvancedAnalyticsRequest extends TimeFrameRequest {
     @lombok.Builder.Default
     private FeatureConfiguration featureConfiguration = new FeatureConfiguration();
 
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private transient java.util.Map<String, com.portfolio.model.market.MarketData> prefetchedMarketData;
+
+
     public AdvancedAnalyticsRequest() {
         this.coreIdentifiers = new CoreIdentifiers();
         this.pagination = new PaginationRequest();

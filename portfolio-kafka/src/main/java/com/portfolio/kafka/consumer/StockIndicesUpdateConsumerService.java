@@ -11,7 +11,7 @@ import org.springframework.stereotype.Service;
 import com.am.common.investment.model.events.StockInsidicesEventData;
 import com.am.common.amcommondata.document.price.StockPriceDocument;
 import com.am.common.amcommondata.service.price.StockPriceMongoService;
-import com.portfolio.kafka.util.SymbolResolver;
+import com.portfolio.model.util.SymbolResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
@@ -46,6 +46,10 @@ public class StockIndicesUpdateConsumerService {
             log.info("Stock price update processed and acknowledged successfully");
         } catch (Exception e) {
             log.error("Failed to process stock price update message: {}. Error: {}", message, e.getMessage(), e);
+            if (acknowledgment != null) {
+                acknowledgment.nack(java.time.Duration.ofSeconds(5));
+                log.info("Message nacked and will be retried");
+            }
         }
     }
 

@@ -23,6 +23,7 @@ import com.portfolio.marketdata.model.MarketDataResponseWrapper;
 import com.portfolio.marketdata.util.MarketDataConverter;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.market.TimeFrame;
+import com.portfolio.model.util.SymbolResolver;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -166,11 +167,12 @@ public class MarketDataService {
 
         // Check for exchange prefix pattern (like NSE:, BSE:, etc.)
         int colonIndex = symbol.indexOf(':');
+        String cleaned = symbol;
         if (colonIndex > 0 && colonIndex < symbol.length() - 1) {
-            return symbol.substring(colonIndex + 1);
+            cleaned = symbol.substring(colonIndex + 1);
         }
 
-        return symbol;
+        return SymbolResolver.normalize(cleaned);
     }
 
     private Map<String, MarketData> convertToMarketDataMap(MarketDataResponseWrapper wrapper, boolean isAsync) {
@@ -424,13 +426,7 @@ public class MarketDataService {
             .collect(Collectors.toList());
             
         if (!stillMissing.isEmpty()) {
-            log.info("[MarketData] OHLC returned empty for {} symbols. Assigning 0.0 to prevent blocking.", stillMissing.size());
-            for (String missingSymbol : stillMissing) {
-                MarketData zeroData = new MarketData();
-                zeroData.setSymbol(missingSymbol);
-                zeroData.setLastPrice(0.0);
-                result.put(missingSymbol, zeroData);
-            }
+            log.info("[MarketData] OHLC returned empty for {} symbols. Data will be left missing to allow downstream fallbacks.", stillMissing.size());
         }
 
         log.info("[MarketData] Result: {}/{} symbols returned.", result.size(), symbols.size());

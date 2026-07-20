@@ -51,7 +51,7 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
         // Use the common portfolio data processing method
         return processPortfolioData(
             portfolioId,
-            request.getTimeFrameRequest(),
+            request,
             this::createEmptyResponse,
             (portfolio, portfolioSymbols, marketData) -> {
                 // Get sector information for symbols

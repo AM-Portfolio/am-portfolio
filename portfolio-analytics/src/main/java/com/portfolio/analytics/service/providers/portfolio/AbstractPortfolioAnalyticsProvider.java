@@ -119,7 +119,7 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
      */
     protected <R> R processPortfolioData(
             String portfolioId,
-            TimeFrameRequest timeFrameRequest,
+            AdvancedAnalyticsRequest request,
             Supplier<R> emptyResultSupplier,
             PortfolioDataProcessor<R> resultProcessor) {
         
@@ -137,10 +137,14 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
             return emptyResultSupplier.get();
         }
         
-        // Fetch market data for all stocks in the portfolio
-        Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, timeFrameRequest);
+        // Use prefetched market data if available, otherwise fetch it
+        Map<String, MarketData> marketData = request.getPrefetchedMarketData();
+        if (marketData == null || marketData.isEmpty()) {
+            log.info("Prefetched market data missing, fetching specifically for provider {}", this.getClass().getSimpleName());
+            marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, request.getTimeFrameRequest());
+        }
         
-        if (marketData.isEmpty()) {
+        if (marketData == null || marketData.isEmpty()) {
             log.warn("No market data available for portfolio: {}", portfolioId);
             return emptyResultSupplier.get();
         }
