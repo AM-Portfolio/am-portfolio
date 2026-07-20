@@ -69,29 +69,28 @@ public class PortfolioCalculator {
                 .filter(s -> !cachedMarketCap.containsKey(s))
                 .collect(Collectors.toList());
 
-        java.util.concurrent.CompletableFuture<Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch>> marketCapFuture = missingMarketCap.isEmpty()
-                ? java.util.concurrent.CompletableFuture.completedFuture(Map.of())
-                : java.util.concurrent.CompletableFuture.supplyAsync(
-                        () -> marketDataService.getMarketCapData(missingMarketCap), taskExecutor)
-                        .completeOnTimeout(Map.of(), 4, java.util.concurrent.TimeUnit.SECONDS);
+        if (!missingMarketCap.isEmpty()) {
+            java.util.concurrent.CompletableFuture.supplyAsync(
+                    () -> marketDataService.getMarketCapData(missingMarketCap), taskExecutor)
+                    .completeOnTimeout(Map.of(), 4, java.util.concurrent.TimeUnit.SECONDS)
+                    .thenAcceptAsync(apiResults -> {
+                        if (apiResults != null && !apiResults.isEmpty()) {
+                            List<MarketCapDocument> docs = apiResults.values().stream()
+                                    .map(match -> MarketCapDocument.builder()
+                                            .symbol(match.getSymbol())
+                                            .sector(match.getSector())
+                                            .industry(match.getIndustry())
+                                            .marketCapType(match.getMarketCapType())
+                                            .marketCapValue(match.getMarketCapValue() != null ? match.getMarketCapValue().doubleValue() : null)
+                                            .companyName(match.getCompanyName())
+                                            .updatedAt(LocalDateTime.now())
+                                            .build())
+                                    .collect(Collectors.toList());
+                            marketCapMongoService.saveAll(docs);
+                        }
+                    }, taskExecutor);
+        }
 
-        // Self-heal: Cache API results to MongoDB
-        marketCapFuture.thenAcceptAsync(apiResults -> {
-            if (apiResults != null && !apiResults.isEmpty()) {
-                List<MarketCapDocument> docs = apiResults.values().stream()
-                        .map(match -> MarketCapDocument.builder()
-                                .symbol(match.getSymbol())
-                                .sector(match.getSector())
-                                .industry(match.getIndustry())
-                                .marketCapType(match.getMarketCapType())
-                                .marketCapValue(match.getMarketCapValue() != null ? match.getMarketCapValue().doubleValue() : null)
-                                .companyName(match.getCompanyName())
-                                .updatedAt(LocalDateTime.now())
-                                .build())
-                        .collect(Collectors.toList());
-                marketCapMongoService.saveAll(docs);
-            }
-        }, taskExecutor);
 
         // 2. 2-Tier Price Lookup Waterfall
 
@@ -137,16 +136,9 @@ public class PortfolioCalculator {
         }
         final Map<String, MarketData> finalApiDataForEnrich = (apiData == null) ? Map.of() : apiData;
 
-        // Wait for Market Cap
-        Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap;
-        try {
-            marketCapMap = marketCapFuture.join();
-        } catch (Exception e) {
-            marketCapMap = Map.of();
-        }
-
-        // 3. Enrich
-        final Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> finalMarketCapMap = marketCapMap;
+        // Market Cap is now fully async fire-and-forget. We don't join here.
+        // We will just pass an empty map since we only use cachedMarketCap for this request.
+        final Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> finalMarketCapMap = Map.of();
 
         return equityHoldings.stream()
                 .map(holding -> enrichHolding(holding, finalApiDataForEnrich, finalMarketCapMap, cachedMarketCap, mongoData))
@@ -241,6 +233,15 @@ public class PortfolioCalculator {
                 currentPrice = impliedAvgPrice;
             } else {
                 currentPrice = 0.0;
+            }
+        }
+        
+        // Fallback for previousClosePrice for missing data
+        if (previousClosePrice == null || previousClosePrice == 0.0) {
+            if (holding.getAverageBuyingPrice() != null && holding.getAverageBuyingPrice() > 0) {
+                previousClosePrice = holding.getAverageBuyingPrice();
+            } else if (holding.getInvestmentCost() != null && holding.getQuantity() != null && holding.getQuantity() > 0) {
+                previousClosePrice = holding.getInvestmentCost() / holding.getQuantity();
             }
         }
 

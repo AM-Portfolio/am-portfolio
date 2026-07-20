@@ -16,7 +16,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Document(collection = "stock_prices_cache")
-@CompoundIndex(name = "symbol_idx", def = "{'symbol': 1}", unique = true)
 public class StockPriceDocument {
     @Id
     private String symbol;

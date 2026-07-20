@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import com.am.common.investment.model.events.StockInsidicesEventData;
 import com.am.common.amcommondata.document.price.StockPriceDocument;
 import com.am.common.amcommondata.service.price.StockPriceMongoService;
+import com.portfolio.kafka.util.SymbolResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
@@ -53,7 +54,7 @@ public class StockIndicesUpdateConsumerService {
             List<StockPriceDocument> docs = event.getData().stream()
                 .filter(sd -> sd != null && sd.getSymbol() != null)
                 .map(sd -> StockPriceDocument.builder()
-                    .symbol(sd.getSymbol())
+                    .symbol(SymbolResolver.normalize(sd.getSymbol()))
                     .lastPrice(sd.getLastPrice())
                     .previousClose(sd.getPreviousClose())
                     .openPrice(sd.getOpen())
