@@ -58,8 +58,8 @@ public class PortfolioHoldingsService {
         log.info("Cache miss or skip for portfolio holdings - User: {}, fetching from source", userId);
         var portfolios = portfolioService.getPortfoliosByUserId(userId);
         if (portfolios == null || portfolios.isEmpty()) {
-            log.warn("No portfolios found for user: {}", userId);
-            return null;
+            log.info("No portfolios found for user: {} - Returning empty holdings", userId);
+            return new PortfolioHoldings();
         }
         log.info("Found {} portfolios for user: {}", portfolios.size(), userId);
 

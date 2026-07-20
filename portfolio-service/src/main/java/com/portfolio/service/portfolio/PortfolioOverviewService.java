@@ -47,8 +47,13 @@ public class PortfolioOverviewService {
                 portfolios != null ? portfolios.size() : 0, userId);
 
         if (portfolios == null || portfolios.isEmpty()) {
-            log.warn("No portfolios found for user: {}", userId);
-            return null;
+            log.info("No portfolios found for user: {} - Returning empty summary", userId);
+            com.portfolio.model.portfolio.v1.PortfolioSummaryV1 emptySummary = new com.portfolio.model.portfolio.v1.PortfolioSummaryV1();
+            emptySummary.setCurrentValue(0.0);
+            emptySummary.setInvestmentValue(0.0);
+            emptySummary.setTotalGainLoss(0.0);
+            emptySummary.setTotalGainLossPercentage(0.0);
+            return emptySummary;
         }
 
         PortfolioSummaryV1 finalSummary = buildPortfolioSummary(portfolios, userId, null, interval);
