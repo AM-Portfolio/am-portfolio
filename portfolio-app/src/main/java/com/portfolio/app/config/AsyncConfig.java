@@ -29,9 +29,9 @@ public class AsyncConfig {
     @Bean(name = "taskExecutor")
     public Executor taskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(20);
-        executor.setMaxPoolSize(50);
-        executor.setQueueCapacity(250);
+        executor.setCorePoolSize(100);
+        executor.setMaxPoolSize(500);
+        executor.setQueueCapacity(1000);
         executor.setThreadNamePrefix("PortfolioAsync-");
         // Propagate traceId/spanId/correlationId across async thread boundaries
         executor.setTaskDecorator(new MdcTaskDecorator());

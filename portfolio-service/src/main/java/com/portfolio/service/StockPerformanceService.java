@@ -158,7 +158,14 @@ public class StockPerformanceService {
             .toList();
 
         return futures.stream()
-            .mapToDouble(java.util.concurrent.CompletableFuture::join)
+            .mapToDouble(f -> {
+                try {
+                    return f.completeOnTimeout(0.0, 5, java.util.concurrent.TimeUnit.SECONDS).join();
+                } catch (Exception e) {
+                    log.warn("Future timed out or failed in calculateHistoricalValue: {}", e.getMessage());
+                    return 0.0;
+                }
+            })
             .sum();
     }
 
