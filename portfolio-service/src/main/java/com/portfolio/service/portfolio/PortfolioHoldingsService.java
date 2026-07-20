@@ -59,7 +59,9 @@ public class PortfolioHoldingsService {
         var portfolios = portfolioService.getPortfoliosByUserId(userId);
         if (portfolios == null || portfolios.isEmpty()) {
             log.info("No portfolios found for user: {} - Returning empty holdings", userId);
-            return new PortfolioHoldings();
+            PortfolioHoldings emptyHoldings = new PortfolioHoldings();
+            emptyHoldings.setEquityHoldings(java.util.Collections.emptyList());
+            return emptyHoldings;
         }
         log.info("Found {} portfolios for user: {}", portfolios.size(), userId);
 

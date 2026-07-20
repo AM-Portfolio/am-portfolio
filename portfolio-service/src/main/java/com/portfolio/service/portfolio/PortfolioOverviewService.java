@@ -53,6 +53,16 @@ public class PortfolioOverviewService {
             emptySummary.setInvestmentValue(0.0);
             emptySummary.setTotalGainLoss(0.0);
             emptySummary.setTotalGainLossPercentage(0.0);
+            emptySummary.setTodayGainLoss(0.0);
+            emptySummary.setTodayGainLossPercentage(0.0);
+            emptySummary.setTotalAssets(0);
+            emptySummary.setGainersCount(0);
+            emptySummary.setLosersCount(0);
+            emptySummary.setTodayGainersCount(0);
+            emptySummary.setTodayLosersCount(0);
+            emptySummary.setBrokerPortfolios(new java.util.HashMap<>());
+            emptySummary.setMarketCapHoldings(new java.util.HashMap<>());
+            emptySummary.setSectorialHoldings(new java.util.HashMap<>());
             return emptySummary;
         }
 
