@@ -98,48 +98,14 @@ public class PortfolioCalculator {
         }
 
 
-        // 2. 2-Tier Price Lookup Waterfall
-
-        // Tier 1: MongoDB (Live prices updated by Kafka)
-        final Map<String, StockPriceDocument> mongoData = stockPriceMongoService.getPrices(symbols);
-        log.info("MongoDB price hit: {}/{} symbols", mongoData.size(), symbols.size());
-
-        // Find missing for Tier 2
-        List<String> missingFromMongo = symbols.stream()
-                .filter(s -> !mongoData.containsKey(s))
-                .collect(Collectors.toList());
-
-        // Tier 2: API
+        // 2. Data Lookup (Redis -> Mongo -> API handled automatically by MarketDataService)
         Map<String, MarketData> apiData = Map.of();
-        if (!missingFromMongo.isEmpty()) {
-            log.info("Cache miss for {} symbols in Mongo. Calling am-market API.", missingFromMongo.size());
-            try {
-                apiData = marketDataService.getMarketData(missingFromMongo);
-
-                // Self-heal: Cache API results to MongoDB so next time it hits Tier 2
-                if (apiData != null && !apiData.isEmpty()) {
-                    final Map<String, MarketData> finalApiData = apiData;
-                    java.util.concurrent.CompletableFuture.runAsync(() -> {
-                        List<StockPriceDocument> docs = finalApiData.values().stream()
-                                .filter(md -> md != null && md.getLastPrice() != null)
-                                .map(md -> StockPriceDocument.builder()
-                                        .symbol(md.getSymbol())
-                                        .lastPrice(md.getLastPrice())
-                                        .previousClose(md.getPreviousClose())
-                                        .openPrice(md.getOhlc() != null ? md.getOhlc().getOpen() : null)
-                                        .highPrice(md.getOhlc() != null ? md.getOhlc().getHigh() : null)
-                                        .lowPrice(md.getOhlc() != null ? md.getOhlc().getLow() : null)
-                                        .timestamp(md.getTimestamp() != null ? md.getTimestamp().toEpochMilli() : System.currentTimeMillis())
-                                        .updatedAt(LocalDateTime.now())
-                                        .build())
-                                .collect(Collectors.toList());
-                        stockPriceMongoService.saveAll(docs);
-                    }, taskExecutor);
-                }
-            } catch (Exception e) {
-                log.error("API fetch failed for missing symbols: {}", e.getMessage());
-            }
+        try {
+            apiData = marketDataService.getMarketData(symbols);
+        } catch (Exception e) {
+            log.error("MarketDataService fetch failed: {}", e.getMessage());
         }
+        
         final Map<String, MarketData> finalApiDataForEnrich = (apiData == null) ? Map.of() : apiData;
 
         // Market Cap bounded wait (1.5 seconds) to ensure UI gets data on cold starts
@@ -156,15 +122,14 @@ public class PortfolioCalculator {
         final Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> finalMarketCapMap = finalMarketCapMapTemp;
 
         return equityHoldings.stream()
-                .map(holding -> enrichHolding(holding, finalApiDataForEnrich, finalMarketCapMap, cachedMarketCap, mongoData))
+                .map(holding -> enrichHolding(holding, finalApiDataForEnrich, finalMarketCapMap, cachedMarketCap))
                 .collect(Collectors.toList());
     }
 
     private EquityHoldings enrichHolding(EquityHoldings holding, 
             Map<String, MarketData> marketDataMap,
             Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap,
-            Map<String, MarketCapDocument> cachedMarketCap,
-            Map<String, StockPriceDocument> mongoPricesMap) {
+            Map<String, MarketCapDocument> cachedMarketCap) {
             
         String symbol = holding.getSymbol();
         if (symbol == null)
@@ -217,11 +182,7 @@ public class PortfolioCalculator {
         Double previousClosePrice = null;
 
         // Waterfall Price Assignment
-        if (mongoPricesMap != null && mongoPricesMap.containsKey(symbol)) {
-            var mongoItem = mongoPricesMap.get(symbol);
-            currentPrice = mongoItem.getLastPrice();
-            previousClosePrice = mongoItem.getPreviousClose();
-        } else if (marketDataMap != null && marketDataMap.containsKey(symbol)) {
+        if (marketDataMap != null && marketDataMap.containsKey(symbol)) {
             var apiItem = marketDataMap.get(symbol);
             if (apiItem.getLastPrice() != null) {
                 currentPrice = apiItem.getLastPrice();

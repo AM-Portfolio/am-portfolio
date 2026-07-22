@@ -29,13 +29,16 @@ class MarketDataServiceTest {
     @Mock
     private com.portfolio.redis.service.PortfolioMarketDataRedisService portfolioMarketDataRedisService;
 
+    @Mock
+    private com.am.common.amcommondata.service.price.StockPriceMongoService stockPriceMongoService;
+
     private Executor taskExecutor = Runnable::run;
 
     private MarketDataService marketDataService;
 
     @BeforeEach
     void setUp() {
-        marketDataService = new MarketDataService(marketDataApiClient, portfolioMarketDataRedisService, taskExecutor);
+        marketDataService = new MarketDataService(marketDataApiClient, portfolioMarketDataRedisService, stockPriceMongoService, taskExecutor);
     }
 
     @Test

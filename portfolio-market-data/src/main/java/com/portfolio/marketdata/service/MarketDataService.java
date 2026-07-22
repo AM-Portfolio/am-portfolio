@@ -42,14 +42,19 @@ public class MarketDataService {
     @org.springframework.lang.Nullable
     private final com.portfolio.redis.service.PortfolioMarketDataRedisService marketDataRedisService;
 
+    @org.springframework.lang.Nullable
+    private final com.am.common.amcommondata.service.price.StockPriceMongoService stockPriceMongoService;
+
     private final java.util.concurrent.Executor taskExecutor;
 
     public MarketDataService(
             MarketDataApiClient marketDataApiClient,
             @org.springframework.lang.Nullable com.portfolio.redis.service.PortfolioMarketDataRedisService marketDataRedisService,
+            @org.springframework.lang.Nullable com.am.common.amcommondata.service.price.StockPriceMongoService stockPriceMongoService,
             @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
         this.marketDataApiClient = marketDataApiClient;
         this.marketDataRedisService = marketDataRedisService;
+        this.stockPriceMongoService = stockPriceMongoService;
         this.taskExecutor = taskExecutor;
     }
 
@@ -391,13 +396,46 @@ public class MarketDataService {
             }
         }
 
-        // 2. Find symbols still missing after cache lookup
+        // 1.5. Find missing after Redis
         List<String> missing = normalized.stream()
             .filter(s -> !result.containsKey(s))
             .collect(Collectors.toList());
 
+        // 2. Try MongoDB cache next (populated by Kafka live stream)
+        if (stockPriceMongoService != null && !missing.isEmpty()) {
+            try {
+                java.util.Map<String, com.am.common.amcommondata.document.price.StockPriceDocument> mongoPrices = stockPriceMongoService.getPrices(missing);
+                if (mongoPrices != null && !mongoPrices.isEmpty()) {
+                    for (java.util.Map.Entry<String, com.am.common.amcommondata.document.price.StockPriceDocument> entry : mongoPrices.entrySet()) {
+                        com.am.common.amcommondata.document.price.StockPriceDocument doc = entry.getValue();
+                        MarketData md = MarketData.builder()
+                            .symbol(doc.getSymbol())
+                            .lastPrice(doc.getLastPrice())
+                            .previousClose(doc.getPreviousClose())
+                            .timestamp(java.time.Instant.ofEpochMilli(doc.getTimestamp() != null ? doc.getTimestamp() : System.currentTimeMillis()))
+                            .ohlc(com.portfolio.model.market.OhlcData.builder()
+                                .open(doc.getOpenPrice())
+                                .high(doc.getHighPrice())
+                                .low(doc.getLowPrice())
+                                .close(doc.getLastPrice())
+                                .build())
+                            .build();
+                        result.put(doc.getSymbol(), md);
+                    }
+                    log.info("[MarketData] MongoDB cache hit for {} symbols.", mongoPrices.size());
+                }
+            } catch (Exception e) {
+                log.warn("[MarketData] MongoDB read failed: {}", e.getMessage());
+            }
+            
+            // Re-evaluate missing after Mongo
+            missing = normalized.stream()
+                .filter(s -> !result.containsKey(s))
+                .collect(Collectors.toList());
+        }
+
         if (missing.isEmpty()) {
-            log.info("[MarketData] All {} symbols served from cache.", result.size());
+            log.info("[MarketData] All {} symbols served from caches.", result.size());
             return result;
         }
 
@@ -410,6 +448,31 @@ public class MarketDataService {
                 // Store in cache with SmartTTL
                 if (marketDataRedisService != null) {
                     marketDataRedisService.cacheMarketData(fetched);
+                }
+                
+                // Store in MongoDB asynchronously
+                if (stockPriceMongoService != null) {
+                    final java.util.Map<String, MarketData> finalFetched = fetched;
+                    java.util.concurrent.CompletableFuture.runAsync(() -> {
+                        try {
+                            List<com.am.common.amcommondata.document.price.StockPriceDocument> docs = finalFetched.values().stream()
+                                .filter(md -> md != null && md.getLastPrice() != null)
+                                .map(md -> com.am.common.amcommondata.document.price.StockPriceDocument.builder()
+                                    .symbol(md.getSymbol())
+                                    .lastPrice(md.getLastPrice())
+                                    .previousClose(md.getPreviousClose())
+                                    .openPrice(md.getOhlc() != null ? md.getOhlc().getOpen() : null)
+                                    .highPrice(md.getOhlc() != null ? md.getOhlc().getHigh() : null)
+                                    .lowPrice(md.getOhlc() != null ? md.getOhlc().getLow() : null)
+                                    .timestamp(md.getTimestamp() != null ? md.getTimestamp().toEpochMilli() : System.currentTimeMillis())
+                                    .updatedAt(java.time.LocalDateTime.now())
+                                    .build())
+                                .collect(Collectors.toList());
+                            stockPriceMongoService.saveAll(docs);
+                        } catch (Exception e) {
+                            log.error("[MarketData] MongoDB save failed", e);
+                        }
+                    }, taskExecutor);
                 }
             }
         } catch (Exception e) {

@@ -25,6 +25,7 @@ PROJ_REDIS_PASSWORD: ${REDIS_PASSWORD:password123}
 spring:
   main:
     lazy-initialization: true
+    allow-bean-definition-overriding: true
   application:
     name: portfolio-app
   profiles:

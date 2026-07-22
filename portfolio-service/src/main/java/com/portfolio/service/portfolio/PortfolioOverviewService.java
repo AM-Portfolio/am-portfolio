@@ -21,15 +21,30 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class PortfolioOverviewService {
 
     private final PortfolioService portfolioService;
     private final PortfolioHoldingsService portfolioHoldingsService;
     private final PortfolioMapperv1 portfolioMapper;
+    
+    @org.springframework.lang.Nullable
     private final PortfolioSummaryRedisService portfolioSummaryRedisService;
+    
     private final PortfolioCalculator portfolioCalculator;
+
+    public PortfolioOverviewService(
+            PortfolioService portfolioService,
+            PortfolioHoldingsService portfolioHoldingsService,
+            PortfolioMapperv1 portfolioMapper,
+            @org.springframework.lang.Nullable PortfolioSummaryRedisService portfolioSummaryRedisService,
+            PortfolioCalculator portfolioCalculator) {
+        this.portfolioService = portfolioService;
+        this.portfolioHoldingsService = portfolioHoldingsService;
+        this.portfolioMapper = portfolioMapper;
+        this.portfolioSummaryRedisService = portfolioSummaryRedisService;
+        this.portfolioCalculator = portfolioCalculator;
+    }
 
     public PortfolioSummaryV1 overviewPortfolio(String userId, TimeInterval interval) {
         log.info("Starting overviewPortfolio - User: {}, Interval: {}",
@@ -89,10 +104,13 @@ public class PortfolioOverviewService {
             throw new IllegalArgumentException("portfolioId cannot be blank");
         }
 
-        Optional<PortfolioSummaryV1> cachedSummary = portfolioSummaryRedisService.getLatestSummary(userId, interval, portfolioId);
-        if (cachedSummary.isPresent()) {
-            log.info("Returning cached portfolio summary for user: {} and portfolio: {}", userId, portfolioId);
-            return cachedSummary.get();
+        Optional<PortfolioSummaryV1> cachedSummary = Optional.empty();
+        if (portfolioSummaryRedisService != null) {
+            cachedSummary = portfolioSummaryRedisService.getLatestSummary(userId, interval, portfolioId);
+            if (cachedSummary.isPresent()) {
+                log.info("Returning cached portfolio summary for user: {} and portfolio: {}", userId, portfolioId);
+                return cachedSummary.get();
+            }
         }
 
         log.info("Cache miss for specific portfolio summary - User: {}, Portfolio: {}, fetching from source", userId, portfolioId);
@@ -177,7 +195,9 @@ public class PortfolioOverviewService {
 
         // Store in cache
         log.debug("Caching portfolio summary for user: {}", userId);
-        portfolioSummaryRedisService.cachePortfolioSummary(finalSummary, userId, interval, portfolioId);
+        if (portfolioSummaryRedisService != null) {
+            portfolioSummaryRedisService.cachePortfolioSummary(finalSummary, userId, interval, portfolioId);
+        }
 
         log.info("Completed overviewPortfolio for user: {}", userId);
         return finalSummary;
@@ -199,13 +219,16 @@ public class PortfolioOverviewService {
         log.debug("Checking cache for portfolio summary - User: {}, Interval: {}",
                 userId, interval != null ? interval.getCode() : "null");
 
-        Optional<PortfolioSummaryV1> cachedSummary = portfolioSummaryRedisService.getLatestSummary(userId, interval);
-        if (cachedSummary.isPresent()) {
-            log.info("Serving portfolio summary from cache - User: {}, Interval: {}",
-                    userId, interval != null ? interval.getCode() : "null");
-        } else {
-            log.debug("No cached summary found for user: {}", userId);
+        Optional<PortfolioSummaryV1> cachedSummary = Optional.empty();
+        if (portfolioSummaryRedisService != null) {
+            cachedSummary = portfolioSummaryRedisService.getLatestSummary(userId, interval);
+            if (cachedSummary.isPresent()) {
+                log.info("Serving portfolio summary from Redis cache - User: {}, Interval: {}",
+                        userId, interval != null ? interval.getCode() : "null");
+                return cachedSummary;
+            }
         }
+        log.debug("No cached summary found for user: {}", userId);
 
         return cachedSummary;
     }

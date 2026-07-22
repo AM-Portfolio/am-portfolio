@@ -23,15 +23,30 @@ import java.time.LocalDateTime;
 import io.micrometer.observation.annotation.Observed;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class PortfolioHoldingsService {
 
     private final PortfolioService portfolioService;
     private final PortfolioHoldingsMapper portfolioHoldingsMapper;
+    
+    @org.springframework.lang.Nullable
     private final PortfolioHoldingsRedisService portfolioHoldingsRedisService;
+    
     private final PortfolioCalculator portfolioCalculator;
     private final PortfolioHoldingsMongoService portfolioHoldingsMongoService;
+
+    public PortfolioHoldingsService(
+            PortfolioService portfolioService,
+            PortfolioHoldingsMapper portfolioHoldingsMapper,
+            @org.springframework.lang.Nullable PortfolioHoldingsRedisService portfolioHoldingsRedisService,
+            PortfolioCalculator portfolioCalculator,
+            PortfolioHoldingsMongoService portfolioHoldingsMongoService) {
+        this.portfolioService = portfolioService;
+        this.portfolioHoldingsMapper = portfolioHoldingsMapper;
+        this.portfolioHoldingsRedisService = portfolioHoldingsRedisService;
+        this.portfolioCalculator = portfolioCalculator;
+        this.portfolioHoldingsMongoService = portfolioHoldingsMongoService;
+    }
     
     @org.springframework.beans.factory.annotation.Value("${portfolio.redis.enabled:true}")
     private boolean isRedisEnabled;
@@ -105,10 +120,13 @@ public class PortfolioHoldingsService {
         }
 
         if (enrich) {
-            Optional<PortfolioHoldings> cachedHoldings = portfolioHoldingsRedisService.getLatestHoldings(userId, interval, portfolioId);
-            if (cachedHoldings.isPresent()) {
-                log.info("Returning cached portfolio holdings from Redis for user: {} and portfolio: {}", userId, portfolioId);
-                return cachedHoldings.get();
+            Optional<PortfolioHoldings> cachedHoldings = Optional.empty();
+            if (isRedisEnabled && portfolioHoldingsRedisService != null) {
+                cachedHoldings = portfolioHoldingsRedisService.getLatestHoldings(userId, interval, portfolioId);
+                if (cachedHoldings.isPresent()) {
+                    log.info("Returning cached portfolio holdings from Redis for user: {} and portfolio: {}", userId, portfolioId);
+                    return cachedHoldings.get();
+                }
             }
             if (!isRedisEnabled) {
                 cachedHoldings = portfolioHoldingsMongoService.getLatestFreshHoldings(userId, interval, portfolioId);
@@ -181,7 +199,10 @@ public class PortfolioHoldingsService {
         // Store in cache if enriched
         if (enrich) {
             log.info("Caching portfolio holdings for user: {} and context: {}", userId, context);
-            portfolioHoldingsRedisService.cachePortfolioHoldings(portfolioHoldings, userId, interval, portfolioId);
+            // Cache the enriched portfolio
+            if (isRedisEnabled && portfolioHoldingsRedisService != null) {
+                portfolioHoldingsRedisService.cachePortfolioHoldings(portfolioHoldings, userId, interval, portfolioId);
+            }
             portfolioHoldingsMongoService.cachePortfolioHoldings(portfolioHoldings, userId, interval, portfolioId);
         }
 
@@ -205,11 +226,14 @@ public class PortfolioHoldingsService {
         log.debug("Checking cache for portfolio holdings - User: {}, Interval: {}",
                 userId, interval != null ? interval.getCode() : "null");
 
-        Optional<PortfolioHoldings> cachedHoldings = portfolioHoldingsRedisService.getLatestHoldings(userId, interval);
-        if (cachedHoldings.isPresent()) {
-            log.info("Serving portfolio holdings from Redis cache - User: {}, Interval: {}",
-                    userId, interval != null ? interval.getCode() : "null");
-            return cachedHoldings;
+        Optional<PortfolioHoldings> cachedHoldings = Optional.empty();
+        if (isRedisEnabled && portfolioHoldingsRedisService != null) {
+            cachedHoldings = portfolioHoldingsRedisService.getLatestHoldings(userId, interval);
+            if (cachedHoldings.isPresent()) {
+                log.info("Serving portfolio holdings from Redis cache - User: {}, Interval: {}",
+                        userId, interval != null ? interval.getCode() : "null");
+                return cachedHoldings;
+            }
         }
 
         // Tier 2: Check MongoDB if Redis missed (especially when Redis is disabled)

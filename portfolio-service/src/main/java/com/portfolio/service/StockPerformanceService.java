@@ -27,6 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 public class StockPerformanceService {
+    @org.springframework.lang.Nullable
     private final StockIndicesRedisService stockPriceRedisService;
     private static final int DEFAULT_TOP_N = 5;
     private static final int DEFAULT_PAGE_SIZE = 5;
@@ -34,7 +35,7 @@ public class StockPerformanceService {
     private final java.util.concurrent.Executor taskExecutor;
 
     public StockPerformanceService(
-            StockIndicesRedisService stockPriceRedisService,
+            @org.springframework.lang.Nullable StockIndicesRedisService stockPriceRedisService,
             MarketDataService marketDataService,
             @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
         this.stockPriceRedisService = stockPriceRedisService;
@@ -123,11 +124,14 @@ public class StockPerformanceService {
         var futures = performances.stream()
             .map(performance -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
                 // Try Redis first for cached historical prices
-                List<StockPriceCache> historicalPrices = stockPriceRedisService.getHistoricalPrices(
-                    performance.getSymbol(),
-                    startTime.atZone(java.time.ZoneOffset.UTC).toLocalDateTime(),
-                    Instant.now().atZone(java.time.ZoneOffset.UTC).toLocalDateTime()
-                );
+                List<StockPriceCache> historicalPrices = new ArrayList<>();
+                if (stockPriceRedisService != null) {
+                    historicalPrices = stockPriceRedisService.getHistoricalPrices(
+                        performance.getSymbol(),
+                        startTime.atZone(java.time.ZoneOffset.UTC).toLocalDateTime(),
+                        Instant.now().atZone(java.time.ZoneOffset.UTC).toLocalDateTime()
+                    );
+                }
                 
                 if (!historicalPrices.isEmpty()) {
                     double historicalPrice = historicalPrices.get(0).getClosePrice();
@@ -174,16 +178,39 @@ public class StockPerformanceService {
         
         if (startTime != null) {
             // Use historical data for time-based analysis
-            List<StockPriceCache> prices = stockPriceRedisService.getHistoricalPrices(
-                asset.getSymbol(),
-                startTime.atZone(java.time.ZoneOffset.UTC).toLocalDateTime(),
-                LocalDateTime.now()
-            );
-            if (prices.isEmpty()) {
-                log.warn("No historical price data found for symbol: {} since {}", asset.getSymbol(), startTime);
-                return null;
+            List<StockPriceCache> prices = new ArrayList<>();
+            if (stockPriceRedisService != null) {
+                prices = stockPriceRedisService.getHistoricalPrices(
+                    asset.getSymbol(),
+                    startTime.atZone(java.time.ZoneOffset.UTC).toLocalDateTime(),
+                    LocalDateTime.now()
+                );
             }
-            currentPrice = prices.get(prices.size() - 1).getClosePrice();
+            if (prices.isEmpty()) {
+                // Try fetching from MarketDataService API
+                try {
+                    LocalDate fromDate = startTime.atZone(ZoneId.systemDefault()).toLocalDate();
+                    Map<String, MarketData> historicalData = marketDataService.getHistoricalData(
+                        List.of(asset.getSymbol()),
+                        fromDate, LocalDate.now(),
+                        null, null, null, null, null, null
+                    );
+                    MarketData data = historicalData.get(asset.getSymbol());
+                    if (data != null && data.getLastPrice() > 0.0) {
+                        currentPrice = data.getLastPrice();
+                    } else if (data != null && data.getOhlc() != null && data.getOhlc().getClose() > 0.0) {
+                        currentPrice = data.getOhlc().getClose();
+                    } else {
+                        log.warn("No historical price data found for symbol: {} since {}", asset.getSymbol(), startTime);
+                        return null;
+                    }
+                } catch (Exception e) {
+                    log.error("API fallback failed for getGainLossPercentage: {}", e.getMessage());
+                    return null;
+                }
+            } else {
+                currentPrice = prices.get(prices.size() - 1).getClosePrice();
+            }
         } else {
             // Use market data service for current prices
             var data = marketData.get(asset.getSymbol());

@@ -51,10 +51,10 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
      * @param timeFrameRequest Optional time frame parameters (can be null)
      * @return Market cap allocation analytics
      */
-    private MarketCapAllocation generateMarketCapAllocation(String portfolioId, TimeFrameRequest timeFrameRequest) {
+    private MarketCapAllocation generateMarketCapAllocation(String portfolioId, AdvancedAnalyticsRequest request) {
         return processPortfolioData(
             portfolioId,
-            null, // Force fetching fast current market data instead of heavy historical data
+            request,
             this::createEmptyResult,
             (portfolio, portfolioSymbols, marketData) -> {
         
