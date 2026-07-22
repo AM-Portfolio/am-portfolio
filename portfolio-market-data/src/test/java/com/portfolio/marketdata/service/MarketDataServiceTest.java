@@ -33,12 +33,13 @@ class MarketDataServiceTest {
     private com.am.common.amcommondata.service.price.StockPriceMongoService stockPriceMongoService;
 
     private Executor taskExecutor = Runnable::run;
+    private Executor externalApiExecutor = Runnable::run;
 
     private MarketDataService marketDataService;
 
     @BeforeEach
     void setUp() {
-        marketDataService = new MarketDataService(marketDataApiClient, portfolioMarketDataRedisService, stockPriceMongoService, taskExecutor);
+        marketDataService = new MarketDataService(marketDataApiClient, portfolioMarketDataRedisService, stockPriceMongoService, taskExecutor, externalApiExecutor);
     }
 
     @Test
