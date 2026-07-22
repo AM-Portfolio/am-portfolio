@@ -87,6 +87,7 @@ public class PortfolioSnapshotService {
         return Optional.empty();
     }
 
+    @org.springframework.cache.annotation.Cacheable(value = "portfolioHistory", key = "#userId + '_' + (#portfolioId != null ? #portfolioId : 'all') + '_' + #timeFrame")
     public List<PortfolioSnapshotModel> getHistory(String userId, String portfolioId, String timeFrame) {
         String frame = timeFrame != null ? timeFrame.toUpperCase() : "1M";
         LocalDate today = LocalDate.now();

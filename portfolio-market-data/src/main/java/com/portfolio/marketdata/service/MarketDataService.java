@@ -46,16 +46,19 @@ public class MarketDataService {
     private final com.am.common.amcommondata.service.price.StockPriceMongoService stockPriceMongoService;
 
     private final java.util.concurrent.Executor taskExecutor;
+    private final java.util.concurrent.Executor externalApiExecutor;
 
     public MarketDataService(
             MarketDataApiClient marketDataApiClient,
             @org.springframework.lang.Nullable com.portfolio.redis.service.PortfolioMarketDataRedisService marketDataRedisService,
             @org.springframework.lang.Nullable com.am.common.amcommondata.service.price.StockPriceMongoService stockPriceMongoService,
-            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
+            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
+            @org.springframework.beans.factory.annotation.Qualifier("externalApiExecutor") java.util.concurrent.Executor externalApiExecutor) {
         this.marketDataApiClient = marketDataApiClient;
         this.marketDataRedisService = marketDataRedisService;
         this.stockPriceMongoService = stockPriceMongoService;
         this.taskExecutor = taskExecutor;
+        this.externalApiExecutor = externalApiExecutor;
     }
 
     /**
@@ -144,7 +147,7 @@ public class MarketDataService {
                     log.warn("[HistoricalData chunk] Failed for chunk of {}: {}", chunk.size(), e.getMessage());
                     return java.util.Collections.<String, MarketData>emptyMap();
                 }
-            }, taskExecutor))
+            }, externalApiExecutor))
             .collect(Collectors.toList());
 
         Map<String, MarketData> merged = new java.util.HashMap<>();
@@ -253,7 +256,7 @@ public class MarketDataService {
                     log.warn("[OHLC data] API call failed: {}", e.getMessage());
                     return Collections.<String, MarketData>emptyMap();
                 }
-            }, taskExecutor)
+            }, externalApiExecutor)
             .exceptionally(e -> {
                 log.warn("[OHLC data] Fetch failed: {}", e.getMessage());
                 return Collections.<String, MarketData>emptyMap();

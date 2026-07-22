@@ -25,18 +25,32 @@ import java.util.concurrent.Executor;
 @Configuration
 @EnableAsync
 public class AsyncConfig {
-
     @Bean(name = "taskExecutor")
     public Executor taskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(100);
-        executor.setMaxPoolSize(500);
-        executor.setQueueCapacity(1000);
+        executor.setCorePoolSize(50);
+        executor.setMaxPoolSize(100);
+        executor.setQueueCapacity(500);
         executor.setThreadNamePrefix("PortfolioAsync-");
         // Propagate traceId/spanId/correlationId across async thread boundaries
         executor.setTaskDecorator(new MdcTaskDecorator());
         // If queue is full, run in caller's thread instead of throwing exception
         executor.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean(name = "externalApiExecutor")
+    public Executor externalApiExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(10);
+        executor.setMaxPoolSize(30);
+        executor.setQueueCapacity(50);
+        executor.setThreadNamePrefix("ExtApiAsync-");
+        // Propagate traceId/spanId/correlationId across async thread boundaries
+        executor.setTaskDecorator(new MdcTaskDecorator());
+        // Fail fast if queue is full to prevent caller thread blocking (Bulkhead pattern)
+        executor.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
         executor.initialize();
         return executor;
     }

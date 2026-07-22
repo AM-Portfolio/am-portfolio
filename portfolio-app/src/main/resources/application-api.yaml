@@ -18,6 +18,10 @@
 
 # Resilience settings
 resilience4j:
+  timelimiter:
+    instances:
+      market-data-api:
+        timeout-duration: 5s
   retry:
     instances:
       market-data-api:
@@ -29,6 +33,6 @@ resilience4j:
     instances:
       market-data-api:
         sliding-window-size: 10
-        failure-rate-threshold: 50
+        failure-rate-threshold: 40
         wait-duration-in-open-state: 30s
         permitted-number-of-calls-in-half-open-state: 5
