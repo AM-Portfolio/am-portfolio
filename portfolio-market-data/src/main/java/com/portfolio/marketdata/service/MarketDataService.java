@@ -249,9 +249,8 @@ public class MarketDataService {
                     return Collections.<String, MarketData>emptyMap();
                 }
             }, taskExecutor)
-            .completeOnTimeout(Collections.<String, MarketData>emptyMap(), 4, java.util.concurrent.TimeUnit.SECONDS)
             .exceptionally(e -> {
-                log.warn("[OHLC data] Fetch timed out or failed: {}", e.getMessage());
+                log.warn("[OHLC data] Fetch failed: {}", e.getMessage());
                 return Collections.<String, MarketData>emptyMap();
             }))
             .collect(Collectors.toList());

@@ -123,6 +123,7 @@ public class PortfolioAnalyticsFacade {
                 
                 if (!symbols.isEmpty()) {
                     log.info("[Optimization] Prefetching market data once for {} symbols", symbols.size());
+                    request.setPrefetchAttempted(true);
                     Map<String, MarketData> prefetched = marketDataService.getMarketData(symbols);
                     if (prefetched != null) {
                         request.setPrefetchedMarketData(prefetched);
