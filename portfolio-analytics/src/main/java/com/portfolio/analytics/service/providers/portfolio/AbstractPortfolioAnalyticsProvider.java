@@ -100,10 +100,9 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
     
     @Override
     public T generateAnalytics(String portfolioId, AdvancedAnalyticsRequest request) {
-        log.info("Generating {} analytics for portfolio {} with time frame: {} to {}, interval: {}", 
-                getType(), portfolioId, request.getFromDate(), 
-                request.getToDate(), request.getTimeFrame());
-        return generateAnalytics(portfolioId, request);
+        throw new UnsupportedOperationException(
+            getClass().getSimpleName() + " must override generateAnalytics(String, AdvancedAnalyticsRequest)"
+        );
     }
     
     /**
@@ -138,10 +137,10 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
         }
         
         // Use prefetched market data if available, otherwise fetch it
-        Map<String, MarketData> marketData = request.getPrefetchedMarketData();
+        Map<String, MarketData> marketData = (request != null) ? request.getPrefetchedMarketData() : null;
         if (marketData == null || marketData.isEmpty()) {
             log.info("Prefetched market data missing, fetching specifically for provider {}", this.getClass().getSimpleName());
-            marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, request.getTimeFrameRequest());
+            marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, request != null ? request.getTimeFrameRequest() : null);
         }
         
         if (marketData == null || marketData.isEmpty()) {
