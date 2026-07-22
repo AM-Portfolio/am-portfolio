@@ -120,56 +120,68 @@ public class StockPerformanceService {
     }
 
     public double calculateHistoricalValue(List<StockPerformance> performances, Instant startTime) {
-        // Run all slow blocking network I/O requests for historical values concurrently
-        var futures = performances.stream()
+        // Run Redis lookups concurrently
+        var redisFutures = performances.stream()
             .map(performance -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-                // Try Redis first for cached historical prices
-                List<StockPriceCache> historicalPrices = new ArrayList<>();
                 if (stockPriceRedisService != null) {
-                    historicalPrices = stockPriceRedisService.getHistoricalPrices(
+                    List<StockPriceCache> historicalPrices = stockPriceRedisService.getHistoricalPrices(
                         performance.getSymbol(),
                         startTime.atZone(java.time.ZoneOffset.UTC).toLocalDateTime(),
                         Instant.now().atZone(java.time.ZoneOffset.UTC).toLocalDateTime()
                     );
-                }
-                
-                if (!historicalPrices.isEmpty()) {
-                    double historicalPrice = historicalPrices.get(0).getClosePrice();
-                    return historicalPrice * performance.getQuantity();
-                }
-
-                // Fallback: fetch from market data API when Redis is empty/unavailable
-                try {
-                    LocalDate fromDate = startTime.atZone(ZoneId.systemDefault()).toLocalDate();
-                    Map<String, MarketData> historicalData = marketDataService.getHistoricalData(
-                        List.of(performance.getSymbol()),
-                        fromDate, LocalDate.now(),
-                        null, null, null, null, null, null
-                    );
-                    MarketData data = historicalData.get(performance.getSymbol());
-                    if (data != null && data.getLastPrice() > 0.0) {
-                        return data.getLastPrice() * performance.getQuantity();
-                    } else if (data != null && data.getOhlc() != null && data.getOhlc().getClose() > 0.0) {
-                        return data.getOhlc().getClose() * performance.getQuantity();
+                    if (!historicalPrices.isEmpty()) {
+                        return Map.entry(performance.getSymbol(), historicalPrices.get(0).getClosePrice());
                     }
-                } catch (Exception e) {
-                    log.warn("Fallback to market data API failed for {}: {}",
-                        performance.getSymbol(), e.getMessage());
                 }
-
-                return 0.0;
+                return Map.<String, Double>entry(performance.getSymbol(), -1.0); // -1.0 marks missing
             }, taskExecutor))
             .toList();
-
-        return futures.stream()
-            .mapToDouble(f -> {
-                try {
-                    return f.completeOnTimeout(0.0, 5, java.util.concurrent.TimeUnit.SECONDS).join();
-                } catch (Exception e) {
-                    log.warn("Future timed out or failed in calculateHistoricalValue: {}", e.getMessage());
-                    return 0.0;
+            
+        Map<String, Double> resolvedPrices = new java.util.HashMap<>();
+        List<String> missingSymbols = new ArrayList<>();
+        
+        for (var f : redisFutures) {
+            try {
+                var entry = f.join();
+                if (entry.getValue() < 0) {
+                    missingSymbols.add(entry.getKey());
+                } else {
+                    resolvedPrices.put(entry.getKey(), entry.getValue());
                 }
-            })
+            } catch (Exception e) {
+                // Ignore, will fetch from fallback
+            }
+        }
+
+        // Bulk fetch missing symbols from API (Solves N+1 latency)
+        if (!missingSymbols.isEmpty()) {
+            try {
+                LocalDate fromDate = startTime.atZone(ZoneId.systemDefault()).toLocalDate();
+                Map<String, MarketData> historicalData = marketDataService.getHistoricalData(
+                    missingSymbols,
+                    fromDate, LocalDate.now(),
+                    null, null, null, null, null, null
+                );
+                
+                if (historicalData != null) {
+                    for (Map.Entry<String, MarketData> entry : historicalData.entrySet()) {
+                        MarketData data = entry.getValue();
+                        if (data != null) {
+                            if (data.getLastPrice() > 0.0) {
+                                resolvedPrices.put(entry.getKey(), data.getLastPrice());
+                            } else if (data.getOhlc() != null && data.getOhlc().getClose() > 0.0) {
+                                resolvedPrices.put(entry.getKey(), data.getOhlc().getClose());
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Fallback to market data API failed for bulk fetch: {}", e.getMessage());
+            }
+        }
+
+        return performances.stream()
+            .mapToDouble(p -> resolvedPrices.getOrDefault(p.getSymbol(), 0.0) * p.getQuantity())
             .sum();
     }
 

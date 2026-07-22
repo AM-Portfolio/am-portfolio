@@ -296,7 +296,7 @@ public class MarketDataService {
      * @return Map of symbols to their respective current prices
      */
     public Map<String, Double> getCurrentPrices(List<String> symbols) {
-        Map<String, MarketData> data = getOhlcData(symbols, false);
+        Map<String, MarketData> data = getMarketData(symbols);
         return data.entrySet().stream()
                 .filter(e -> e.getValue() != null && e.getValue().getLastPrice() != null)
                 .collect(Collectors.toMap(
