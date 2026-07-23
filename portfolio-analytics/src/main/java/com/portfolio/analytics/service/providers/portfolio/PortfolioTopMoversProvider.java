@@ -58,7 +58,7 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
                 Map<String, String> symbolSectors = securityDetailsService.getSymbolMapSectors(portfolioSymbols);
                 
                 // Calculate top movers using the determined limit and include sector information
-                return TopMoverUtils.buildTopMoversResponse(marketData, limit, portfolioId, true, symbolSectors);
+                return TopMoverUtils.buildTopMoversResponse(portfolioSymbols, marketData, limit, portfolioId, true, symbolSectors);
             }
         );
     }

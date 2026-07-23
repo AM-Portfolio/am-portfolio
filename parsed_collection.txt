@@ -1,0 +1,24 @@
+🔧 DEV Admin
+  0a. [DEV] Trigger CatchUp for sahim99: POST {{base_url}}/v1/portfolios/dev/trigger-catchup?userId=sahim99
+  0b. [DEV] Trigger CatchUp for af30e0e6: POST {{base_url}}/v1/portfolios/dev/trigger-catchup?userId=af30e0e6-6a98-40ba-875e-a1490c0c8a11
+  0c. Trigger EOD Snapshot Job (All Users): POST {{base_url}}/v1/portfolios/trigger-snapshot
+📊 Dashboard
+  📁 Portfolios
+    1. Get All Portfolios: GET {{base_url}}/v1/portfolios
+    2. Get Portfolio by ID: GET {{base_url}}/v1/portfolios/{{portfolio_id}}
+    3. Get Portfolio List (Basic Info): GET {{base_url}}/v1/portfolios/list
+  4. Get Portfolio Summary (All): GET {{base_url}}/v1/portfolios/summary
+  4b. Get Portfolio Summary (Specific Portfolio): GET {{base_url}}/v1/portfolios/summary?portfolioId={{portfolio_id}}
+  5. Get Portfolio Holdings (All): GET {{base_url}}/v1/portfolios/holdings
+  5b. Get Portfolio Holdings (Specific Portfolio): GET {{base_url}}/v1/portfolios/holdings?portfolioId={{portfolio_id}}
+📈 History (Chart Data)
+  6a. History — 1 Week (1W): GET {{base_url}}/v1/portfolios/history?timeFrame=1W
+  6b. History — 1 Month (1M): GET {{base_url}}/v1/portfolios/history?timeFrame=1M
+  6c. History — 3 Months (3M): GET {{base_url}}/v1/portfolios/history?timeFrame=3M
+  6d. History — 6 Months (6M): GET {{base_url}}/v1/portfolios/history?timeFrame=6M
+  6e. History — 1 Year (1Y): GET {{base_url}}/v1/portfolios/history?timeFrame=1Y
+  6f. History — All Time: GET {{base_url}}/v1/portfolios/history?timeFrame=ALL
+  7a. Specific Portfolio History — 1M: GET {{base_url}}/v1/portfolios/{{portfolio_id}}/history?timeFrame=1M
+  7b. Specific Portfolio History — 1Y: GET {{base_url}}/v1/portfolios/{{portfolio_id}}/history?timeFrame=1Y
+🔬 Analytics
+  8. Portfolio Analysis (Hidden): GET {{base_url}}/v1/portfolios/{{portfolio_id}}/analysis

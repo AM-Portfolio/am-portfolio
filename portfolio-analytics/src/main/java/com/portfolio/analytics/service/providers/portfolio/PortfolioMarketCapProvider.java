@@ -145,7 +145,7 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
         double totalPortfolioValue = 0.0;
         
         for (String symbol : portfolioSymbols) {
-            MarketData data = marketData.get(symbol);
+            MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
             if (data == null) {
                 log.warn("No market data for symbol: {}", symbol);
                 continue;
@@ -157,8 +157,15 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
                 continue;
             }
             
+            // Resolve price using fallback chain: lastPrice → ohlc.close → previousClose
+            double resolvedPrice = com.portfolio.analytics.service.utils.AllocationUtils.resolvePrice(data);
+            if (resolvedPrice <= 0) {
+                log.warn("Symbol {} has no resolvable price, skipping from market cap allocation", symbol);
+                continue;
+            }
+            
             // Calculate market value of this holding
-            double marketValue = data.getLastPrice() * quantity;
+            double marketValue = resolvedPrice * quantity;
             stockMarketValues.put(symbol, marketValue);
             totalPortfolioValue += marketValue;
             

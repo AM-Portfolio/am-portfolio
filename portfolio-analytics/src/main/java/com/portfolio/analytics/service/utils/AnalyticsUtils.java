@@ -152,4 +152,35 @@ public class AnalyticsUtils {
         
         return marketData;
     }
+
+    /**
+     * Resolves market data for a symbol by handling potential prefix/suffix mismatches
+     * between the portfolio holding symbol (e.g. NSE:RELIANCE-EQ) and the
+     * market data map key (e.g. RELIANCE).
+     *
+     * @param marketData Map of market data
+     * @param rawSymbol The raw symbol from the portfolio
+     * @return MarketData object if found, null otherwise
+     */
+    public static MarketData resolveMarketData(Map<String, MarketData> marketData, String rawSymbol) {
+        if (marketData == null || rawSymbol == null) {
+            return null;
+        }
+        
+        // 1. Try exact match first
+        MarketData data = marketData.get(rawSymbol);
+        if (data != null) {
+            return data;
+        }
+        
+        // 2. Try fully normalized match (stripping NSE: and any suffixes)
+        String cleaned = rawSymbol;
+        int colonIndex = cleaned.indexOf(':');
+        if (colonIndex > 0 && colonIndex < cleaned.length() - 1) {
+            cleaned = cleaned.substring(colonIndex + 1);
+        }
+        cleaned = com.portfolio.model.util.SymbolResolver.normalize(cleaned);
+        
+        return marketData.get(cleaned);
+    }
 }

@@ -60,12 +60,16 @@ public class AllocationUtils {
         Map<String, Double> stockToMarketValue = new HashMap<>();
         
         symbolToQuantity.forEach((symbol, quantity) -> {
-            MarketData data = marketData.get(symbol);
+            MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
             if (data != null) {
-                double lastPrice = data.getLastPrice();
-                double marketValue = lastPrice * quantity;
-                stockToMarketValue.put(symbol, roundToTwoDecimals(marketValue));
-                log.trace("Symbol: {}, Quantity: {}, Market Value: {}", symbol, quantity, marketValue);
+                double lastPrice = resolvePrice(data);
+                if (lastPrice > 0) {
+                    double marketValue = lastPrice * quantity;
+                    stockToMarketValue.put(symbol, roundToTwoDecimals(marketValue));
+                    log.trace("Symbol: {}, Quantity: {}, Market Value: {}", symbol, quantity, marketValue);
+                } else {
+                    log.warn("Symbol {} has no resolvable price (lastPrice/ohlc.close/previousClose all zero/null), excluding from market value", symbol);
+                }
             }
         });
         
@@ -221,5 +225,27 @@ public class AllocationUtils {
         BigDecimal bd = BigDecimal.valueOf(value);
         bd = bd.setScale(2, RoundingMode.HALF_UP);
         return bd.doubleValue();
+    }
+
+    /**
+     * Resolve the best available price from a MarketData object using a
+     * graceful fallback chain:
+     *   1. lastPrice  (live ticker feed)
+     *   2. ohlc.close (end-of-day close from historical/OHLC feed)
+     *   3. previousClose (prior trading-day close)
+     *
+     * Returns 0.0 when none of the sources have a positive value.
+     *
+     * @param data MarketData object (may be from Redis, Mongo, or OHLC API)
+     * @return best available positive price, or 0.0 if none
+     */
+    public static double resolvePrice(MarketData data) {
+        if (data == null) return 0.0;
+        Double lastPrice = data.getLastPrice();
+        if (lastPrice != null && lastPrice > 0) return lastPrice;
+        if (data.getOhlc() != null && data.getOhlc().getClose() > 0) return data.getOhlc().getClose();
+        Double prevClose = data.getPreviousClose();
+        if (prevClose != null && prevClose > 0) return prevClose;
+        return 0.0;
     }
 }

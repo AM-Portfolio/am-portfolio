@@ -139,12 +139,10 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
         // Use prefetched market data if available, otherwise fetch it
         Map<String, MarketData> marketData = (request != null) ? request.getPrefetchedMarketData() : null;
         if (marketData == null || marketData.isEmpty()) {
-            if (request != null && request.isPrefetchAttempted()) {
-                log.info("Prefetch was already attempted and returned empty, skipping individual fetch for provider {}", this.getClass().getSimpleName());
-            } else {
-                log.info("Prefetched market data missing, fetching specifically for provider {}", this.getClass().getSimpleName());
-                marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, request != null ? request.getTimeFrameRequest() : null);
-            }
+            // Always attempt an individual fetch — the facade-level prefetch may have failed transiently
+            // (e.g. transient Redis miss, OHLC API timeout). Never permanently abort because of a failed prefetch.
+            log.info("Market data not in prefetch cache. Fetching individually for provider {}", this.getClass().getSimpleName());
+            marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, request != null ? request.getTimeFrameRequest() : null);
         }
         
         if (marketData == null || marketData.isEmpty()) {

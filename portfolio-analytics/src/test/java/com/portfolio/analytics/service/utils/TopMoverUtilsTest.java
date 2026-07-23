@@ -20,7 +20,7 @@ class TopMoverUtilsTest {
     @Test void performanceMetrics_calculates() {
         Map<String, Double> perf = new HashMap<>();
         Map<String, Double> change = new HashMap<>();
-        TopMoverUtils.calculatePerformanceMetrics(Map.of("A", md(110, 100, 105)), perf, change);
+        TopMoverUtils.calculatePerformanceMetrics(List.of("A"), Map.of("A", md(110, 100, 105)), perf, change);
         assertEquals(1, perf.size());
         assertTrue(perf.get("A") > 0);
         assertTrue(change.get("A") > 0);
@@ -29,7 +29,7 @@ class TopMoverUtilsTest {
     @Test void performanceMetrics_zeroPricesSkipped() {
         Map<String, Double> perf = new HashMap<>();
         Map<String, Double> change = new HashMap<>();
-        TopMoverUtils.calculatePerformanceMetrics(Map.of("A", md(100, 0, 0)), perf, change);
+        TopMoverUtils.calculatePerformanceMetrics(List.of("A"), Map.of("A", md(100, 0, 0)), perf, change);
         assertTrue(perf.isEmpty());
     }
 
@@ -37,7 +37,7 @@ class TopMoverUtilsTest {
         MarketData m = new MarketData(); m.setLastPrice(100.0); m.setOhlc(null);
         Map<String, Double> perf = new HashMap<>();
         Map<String, Double> change = new HashMap<>();
-        TopMoverUtils.calculatePerformanceMetrics(Map.of("A", m), perf, change);
+        TopMoverUtils.calculatePerformanceMetrics(List.of("A"), Map.of("A", m), perf, change);
         assertTrue(perf.isEmpty());
     }
 
@@ -86,7 +86,7 @@ class TopMoverUtilsTest {
     @Test void buildTopMoversResponse_basic() {
         Map<String, MarketData> data = Map.of(
                 "UP", md(110, 100, 100), "DOWN", md(90, 100, 100));
-        GainerLoser result = TopMoverUtils.buildTopMoversResponse(data, 5, "idx1", false, null);
+        GainerLoser result = TopMoverUtils.buildTopMoversResponse(List.of("UP", "DOWN"), data, 5, "idx1", false, null);
         assertNotNull(result);
         assertFalse(result.getTopGainers().isEmpty());
         assertFalse(result.getTopLosers().isEmpty());
@@ -95,7 +95,7 @@ class TopMoverUtilsTest {
     @Test void buildTopMoversResponse_withSectorInfo() {
         Map<String, MarketData> data = Map.of("UP", md(110, 100, 100));
         Map<String, String> sectors = Map.of("UP", "Tech");
-        GainerLoser result = TopMoverUtils.buildTopMoversResponse(data, 5, "p1", true, sectors);
+        GainerLoser result = TopMoverUtils.buildTopMoversResponse(List.of("UP"), data, 5, "p1", true, sectors);
         assertEquals("Tech", result.getTopGainers().get(0).getSector());
     }
 

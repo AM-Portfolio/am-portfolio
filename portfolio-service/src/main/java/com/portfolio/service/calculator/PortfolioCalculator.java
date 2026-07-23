@@ -182,20 +182,31 @@ public class PortfolioCalculator {
         Double previousClosePrice = null;
 
         // Waterfall Price Assignment
-        if (marketDataMap != null && marketDataMap.containsKey(symbol)) {
-            var apiItem = marketDataMap.get(symbol);
-            if (apiItem.getLastPrice() != null) {
-                currentPrice = apiItem.getLastPrice();
-            } else if (apiItem.getOhlc() != null) {
-                currentPrice = apiItem.getOhlc().getClose();
+        if (marketDataMap != null) {
+            MarketData apiItem = marketDataMap.get(symbol);
+            if (apiItem == null) {
+                // Try looking up with cleaned symbol (strips prefix and suffix)
+                String cleaned = cleanSymbol(symbol);
+                apiItem = marketDataMap.get(cleaned);
             }
-            if (apiItem.getPreviousClose() != null && apiItem.getPreviousClose() > 0) {
-                previousClosePrice = apiItem.getPreviousClose();
-            } else if (apiItem.getOhlc() != null && apiItem.getOhlc().getClose() > 0) {
-                log.debug("previousClose missing for {}. Falling back to OHLC close.", symbol);
-                previousClosePrice = apiItem.getOhlc().getClose();
-            } else {
-                log.warn("Missing previousClose for symbol {}. Daily P&L will not be calculated.", symbol);
+            
+            if (apiItem != null) {
+                Double lastPrice = apiItem.getLastPrice();
+                if (lastPrice != null && lastPrice > 0) {
+                    currentPrice = lastPrice;
+                } else if (apiItem.getOhlc() != null && apiItem.getOhlc().getClose() > 0) {
+                    currentPrice = apiItem.getOhlc().getClose();
+                }
+                
+                Double prevClose = apiItem.getPreviousClose();
+                if (prevClose != null && prevClose > 0) {
+                    previousClosePrice = prevClose;
+                } else if (apiItem.getOhlc() != null && apiItem.getOhlc().getClose() > 0) {
+                    log.debug("previousClose missing for {}. Falling back to OHLC close.", symbol);
+                    previousClosePrice = apiItem.getOhlc().getClose();
+                } else {
+                    log.warn("Missing previousClose for symbol {}. Daily P&L will not be calculated.", symbol);
+                }
             }
         }
 
@@ -326,5 +337,17 @@ public class PortfolioCalculator {
         if (value == null)
             return null;
         return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    private String cleanSymbol(String symbol) {
+        if (symbol == null || symbol.isEmpty()) {
+            return symbol;
+        }
+        int colonIndex = symbol.indexOf(':');
+        String cleaned = symbol;
+        if (colonIndex > 0 && colonIndex < symbol.length() - 1) {
+            cleaned = symbol.substring(colonIndex + 1);
+        }
+        return com.portfolio.model.util.SymbolResolver.normalize(cleaned);
     }
 }

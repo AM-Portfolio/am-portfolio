@@ -4,6 +4,7 @@ import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.analytics.model.AnalyticsType;
+import com.portfolio.analytics.service.utils.AnalyticsUtils;
 import com.portfolio.analytics.service.utils.HeatmapUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
@@ -137,8 +138,8 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             symbols.forEach(sym -> symbolToSector.put(sym, sector))
         );
         
-        for (String symbol : marketData.keySet()) {
-            MarketData data = marketData.get(symbol);
+        for (String symbol : symbolToQuantity.keySet()) {
+            MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
             if (data == null) {
                 log.warn("Null market data encountered for symbol: {}", symbol);
                 continue;
