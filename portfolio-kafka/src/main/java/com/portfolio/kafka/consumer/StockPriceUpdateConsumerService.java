@@ -53,20 +53,26 @@ public class StockPriceUpdateConsumerService {
     }
 
     private void processStockPriceUpdate(StockPriceUpdateEvent event) {
-        if (event != null && event.getData() != null && event.getData().getSymbol() != null) {
-            StockPriceUpdateEvent.StockPriceData sd = event.getData();
-            StockPriceDocument doc = StockPriceDocument.builder()
-                .symbol(cleanSymbol(sd.getSymbol()))
-                .lastPrice(sd.getLastPrice())
-                .previousClose(sd.getPreviousClose())
-                .openPrice(sd.getOpen())
-                .highPrice(sd.getDayHigh())
-                .lowPrice(sd.getDayLow())
-                .timestamp(System.currentTimeMillis())
-                .updatedAt(LocalDateTime.now())
-                .build();
-                
-            stockPriceMongoService.saveAll(Collections.singletonList(doc));
+        if (event != null && event.getData() != null && !event.getData().isEmpty()) {
+            List<StockPriceDocument> docs = new java.util.ArrayList<>();
+            for (StockPriceUpdateEvent.StockPriceData sd : event.getData()) {
+                if (sd != null && sd.getSymbol() != null) {
+                    StockPriceDocument doc = StockPriceDocument.builder()
+                        .symbol(cleanSymbol(sd.getSymbol()))
+                        .lastPrice(sd.getLastPrice())
+                        .previousClose(sd.getPreviousClose())
+                        .openPrice(sd.getOpen())
+                        .highPrice(sd.getDayHigh())
+                        .lowPrice(sd.getDayLow())
+                        .timestamp(System.currentTimeMillis())
+                        .updatedAt(LocalDateTime.now())
+                        .build();
+                    docs.add(doc);
+                }
+            }
+            if (!docs.isEmpty()) {
+                stockPriceMongoService.saveAll(docs);
+            }
         }
     }
 

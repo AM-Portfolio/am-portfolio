@@ -31,6 +31,9 @@ public class AdvancedAnalyticsRequest extends TimeFrameRequest {
     private transient java.util.Map<String, com.portfolio.model.market.MarketData> prefetchedMarketData;
 
     @com.fasterxml.jackson.annotation.JsonIgnore
+    private transient com.am.common.amcommondata.model.PortfolioModelV1 prefetchedPortfolio;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private transient boolean prefetchAttempted = false;
 
     public AdvancedAnalyticsRequest() {

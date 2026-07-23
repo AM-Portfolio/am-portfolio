@@ -122,8 +122,11 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
             Supplier<R> emptyResultSupplier,
             PortfolioDataProcessor<R> resultProcessor) {
         
-        // Get portfolio data
-        PortfolioModelV1 portfolio = getPortfolio(portfolioId);
+        // Get portfolio data (use prefetched if available to save DB calls)
+        PortfolioModelV1 portfolio = (request != null && request.getPrefetchedPortfolio() != null)
+            ? request.getPrefetchedPortfolio()
+            : getPortfolio(portfolioId);
+            
         if (portfolio == null || portfolio.getEquityModels() == null || portfolio.getEquityModels().isEmpty()) {
             log.warn("No portfolio or holdings found for ID: {}", portfolioId);
             return emptyResultSupplier.get();

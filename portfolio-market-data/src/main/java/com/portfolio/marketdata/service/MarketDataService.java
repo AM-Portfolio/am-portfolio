@@ -53,6 +53,9 @@ public class MarketDataService {
 
     private final java.util.concurrent.Executor taskExecutor;
     private final java.util.concurrent.Executor externalApiExecutor;
+    
+    // Tracks in-flight OHLC fetches to prevent cache stampedes
+    private final java.util.concurrent.ConcurrentHashMap<String, CompletableFuture<MarketData>> inFlightRequests = new java.util.concurrent.ConcurrentHashMap<>();
 
     public MarketDataService(
             MarketDataApiClient marketDataApiClient,
@@ -472,67 +475,107 @@ public class MarketDataService {
             return result;
         }
 
-        // 4. Fetch missing from OHLC API (Removed synchronized lock to prevent thread pool exhaustion)
-        if (true) {
-            // Double check L1 cache in case another thread just fetched them
-            List<String> stillMissing = new java.util.ArrayList<>();
-            for (String s : missing) {
-                MarketData cached = localCache.getIfPresent(s);
+        // 4. Fetch missing from OHLC API with in-flight deduplication to prevent cache stampedes
+        if (!missing.isEmpty()) {
+            List<String> toFetch = new java.util.ArrayList<>();
+            Map<String, CompletableFuture<MarketData>> waitFor = new HashMap<>();
+
+            for (String symbol : missing) {
+                // Double check L1 cache in case another thread just finished
+                MarketData cached = localCache.getIfPresent(symbol);
                 if (cached != null) {
-                    result.put(s, cached);
+                    result.put(symbol, cached);
+                    continue;
+                }
+                
+                CompletableFuture<MarketData> existing = inFlightRequests.get(symbol);
+                if (existing != null) {
+                    waitFor.put(symbol, existing); // coalesce with in-flight request
                 } else {
-                    stillMissing.add(s);
+                    toFetch.add(symbol);
                 }
             }
-            
-            missing = stillMissing;
-            
-            if (missing.isEmpty()) {
-                return result;
-            }
-            
-            log.info("[MarketData] Cache miss for {} symbols. Fetching from API.", missing.size());
-            try {
-                Map<String, MarketData> fetched = getOhlcData(missing, false);
-                if (fetched != null && !fetched.isEmpty()) {
-                    result.putAll(fetched);
-                    
-                    // Store in L1 cache
-                    fetched.forEach(localCache::put);
-                    
-                    // Store in Redis with SmartTTL
-                    if (marketDataRedisService != null) {
-                        marketDataRedisService.cacheMarketData(fetched);
-                    }
-                    
-                    // Store in MongoDB asynchronously
-                    if (stockPriceMongoService != null) {
-                        final java.util.Map<String, MarketData> finalFetched = fetched;
-                        java.util.concurrent.CompletableFuture.runAsync(() -> {
-                            try {
-                                List<com.am.common.amcommondata.document.price.StockPriceDocument> docs = finalFetched.values().stream()
-                                    .filter(md -> md != null && md.getLastPrice() != null)
-                                    .map(md -> com.am.common.amcommondata.document.price.StockPriceDocument.builder()
-                                        .symbol(md.getSymbol())
-                                        .lastPrice(md.getLastPrice())
-                                        .previousClose(md.getPreviousClose())
-                                        .openPrice(md.getOhlc() != null ? md.getOhlc().getOpen() : null)
-                                        .highPrice(md.getOhlc() != null ? md.getOhlc().getHigh() : null)
-                                        .lowPrice(md.getOhlc() != null ? md.getOhlc().getLow() : null)
-                                        .timestamp(md.getTimestamp() != null ? md.getTimestamp().toEpochMilli() : System.currentTimeMillis())
-                                        .updatedAt(java.time.LocalDateTime.now())
-                                        .build())
-                                    .collect(Collectors.toList());
-                                stockPriceMongoService.saveAll(docs);
-                            } catch (Exception e) {
-                                log.error("[MarketData] MongoDB save failed", e);
-                            }
-                        }, taskExecutor);
-                    }
+
+            // Fetch genuinely missing symbols
+            if (!toFetch.isEmpty()) {
+                log.info("[MarketData] Cache miss for {} symbols. Fetching from API.", toFetch.size());
+                
+                // Register in-flight futures per-symbol before fetching
+                Map<String, CompletableFuture<MarketData>> newFutures = new HashMap<>();
+                for (String s : toFetch) {
+                    CompletableFuture<MarketData> fut = new CompletableFuture<>();
+                    inFlightRequests.put(s, fut);
+                    newFutures.put(s, fut);
                 }
-            } catch (Exception e) {
-                log.error("[MarketData] OHLC fetch failed: {}", e.getMessage());
+                
+                try {
+                    Map<String, MarketData> fetched = getOhlcData(toFetch, false);
+                    if (fetched != null && !fetched.isEmpty()) {
+                        fetched.forEach((k, v) -> {
+                            result.put(k, v);
+                            localCache.put(k, v); // Update L1
+                            CompletableFuture<MarketData> fut = newFutures.get(k);
+                            if (fut != null) fut.complete(v);
+                        });
+                        
+                        // Store in Redis
+                        if (marketDataRedisService != null) {
+                            marketDataRedisService.cacheMarketData(fetched);
+                        }
+                        
+                        // Store in MongoDB asynchronously
+                        if (stockPriceMongoService != null) {
+                            final java.util.Map<String, MarketData> finalFetched = fetched;
+                            java.util.concurrent.CompletableFuture.runAsync(() -> {
+                                try {
+                                    List<com.am.common.amcommondata.document.price.StockPriceDocument> docs = finalFetched.values().stream()
+                                        .filter(md -> md != null && md.getLastPrice() != null)
+                                        .map(md -> com.am.common.amcommondata.document.price.StockPriceDocument.builder()
+                                            .symbol(md.getSymbol())
+                                            .lastPrice(md.getLastPrice())
+                                            .previousClose(md.getPreviousClose())
+                                            .openPrice(md.getOhlc() != null ? md.getOhlc().getOpen() : null)
+                                            .highPrice(md.getOhlc() != null ? md.getOhlc().getHigh() : null)
+                                            .lowPrice(md.getOhlc() != null ? md.getOhlc().getLow() : null)
+                                            .timestamp(md.getTimestamp() != null ? md.getTimestamp().toEpochMilli() : System.currentTimeMillis())
+                                            .updatedAt(java.time.LocalDateTime.now())
+                                            .build())
+                                        .collect(Collectors.toList());
+                                    stockPriceMongoService.saveAll(docs);
+                                } catch (Exception e) {
+                                    log.error("[MarketData] MongoDB save failed", e);
+                                }
+                            }, taskExecutor);
+                        }
+                    }
+                    
+                    // Complete any futures where data wasn't returned
+                    newFutures.forEach((k, fut) -> {
+                        if (!fut.isDone()) {
+                            fut.complete(null);
+                        }
+                    });
+                } catch (Exception e) {
+                    log.error("[MarketData] OHLC fetch failed: {}", e.getMessage());
+                    newFutures.values().forEach(fut -> {
+                        if (!fut.isDone()) fut.completeExceptionally(e);
+                    });
+                } finally {
+                    newFutures.keySet().forEach(inFlightRequests::remove);
+                }
             }
+
+            // Join coalesced futures
+            waitFor.forEach((symbol, fut) -> {
+                try {
+                    MarketData md = fut.get(15, java.util.concurrent.TimeUnit.SECONDS);
+                    if (md != null) {
+                        result.put(symbol, md);
+                    }
+                } catch (Exception e) {
+                    log.warn("[InFlight] Wait failed for {}: {}", symbol, e.getMessage());
+                }
+            });
         }
 
         // 5. Fallback for symbols that are STILL missing

@@ -115,18 +115,32 @@ public class PortfolioAnalyticsFacade {
         try {
             UUID portfolioUuid = UUID.fromString(request.getCoreIdentifiers().getPortfolioId());
             PortfolioModelV1 portfolio = portfolioService.getPortfolioById(portfolioUuid);
-            if (portfolio != null && portfolio.getEquityModels() != null && !portfolio.getEquityModels().isEmpty()) {
-                List<String> symbols = portfolio.getEquityModels().stream()
-                        .map(EquityModel::getSymbol)
-                        .filter(s -> s != null && !s.isEmpty())
-                        .collect(Collectors.toList());
+            if (portfolio != null) {
+                request.setPrefetchedPortfolio(portfolio);
                 
-                if (!symbols.isEmpty()) {
-                    log.info("[Optimization] Prefetching market data once for {} symbols", symbols.size());
-                    request.setPrefetchAttempted(true);
-                    Map<String, MarketData> prefetched = marketDataService.getMarketData(symbols);
-                    if (prefetched != null) {
-                        request.setPrefetchedMarketData(prefetched);
+                if (portfolio.getEquityModels() != null && !portfolio.getEquityModels().isEmpty()) {
+                    List<String> symbols = portfolio.getEquityModels().stream()
+                            .map(EquityModel::getSymbol)
+                            .filter(s -> s != null && !s.isEmpty())
+                            .collect(Collectors.toList());
+                    
+                    if (!symbols.isEmpty()) {
+                        log.info("[Optimization] Prefetching market data once for {} symbols", symbols.size());
+                        request.setPrefetchAttempted(true);
+                        Map<String, MarketData> prefetched = marketDataService.getMarketData(symbols);
+                        if (prefetched != null) {
+                            // Ensure normalized keys so analytics providers can look them up successfully
+                            Map<String, MarketData> normalizedPrefetch = new java.util.HashMap<>();
+                            for (Map.Entry<String, MarketData> entry : prefetched.entrySet()) {
+                                if (entry.getValue() != null) {
+                                    String cleaned = com.portfolio.model.util.SymbolResolver.normalize(
+                                            entry.getKey().contains(":") ? entry.getKey().substring(entry.getKey().indexOf(':') + 1) : entry.getKey()
+                                    );
+                                    normalizedPrefetch.put(cleaned, entry.getValue());
+                                }
+                            }
+                            request.setPrefetchedMarketData(normalizedPrefetch);
+                        }
                     }
                 }
             }
