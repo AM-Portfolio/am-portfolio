@@ -245,8 +245,8 @@ public class MarketDataService {
 
         log.info("Getting OHLC data for {} symbols with timeFrame={} refresh={}", validSymbols.size(), timeFrame, refresh);
 
-        // Chunking by 500
-        int CHUNK_SIZE = 500;
+        // Chunking by 20 to prevent timeouts
+        int CHUNK_SIZE = 20;
         List<List<String>> chunks = new java.util.ArrayList<>();
         for (int i = 0; i < validSymbols.size(); i += CHUNK_SIZE) {
             chunks.add(validSymbols.subList(i, Math.min(validSymbols.size(), i + CHUNK_SIZE)));
@@ -472,8 +472,8 @@ public class MarketDataService {
             return result;
         }
 
-        // 4. Fetch missing from OHLC API with double-checked locking
-        synchronized (this) {
+        // 4. Fetch missing from OHLC API (Removed synchronized lock to prevent thread pool exhaustion)
+        if (true) {
             // Double check L1 cache in case another thread just fetched them
             List<String> stillMissing = new java.util.ArrayList<>();
             for (String s : missing) {
@@ -629,24 +629,44 @@ public class MarketDataService {
         log.info("Getting historical charts for {} symbols with range={}", validSymbols.size(), range);
 
         try {
-            return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-                try {
-                    return marketDataApiClient.getHistoricalCharts(validSymbols, range).block();
-                } catch (Exception e) {
-                    log.error("[HistoricalCharts data] API call failed: {}", e.getMessage());
+            int CHUNK_SIZE = 20;
+            List<List<String>> chunks = new java.util.ArrayList<>();
+            for (int i = 0; i < validSymbols.size(); i += CHUNK_SIZE) {
+                chunks.add(validSymbols.subList(i, Math.min(validSymbols.size(), i + CHUNK_SIZE)));
+            }
+
+            List<java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalChartsResponse>> futures = chunks.stream()
+                .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return marketDataApiClient.getHistoricalCharts(chunk, range).block();
+                    } catch (Exception e) {
+                        log.error("[HistoricalCharts data] API call failed: {}", e.getMessage());
+                        com.portfolio.marketdata.model.HistoricalChartsResponse resp = new com.portfolio.marketdata.model.HistoricalChartsResponse();
+                        resp.setData(new java.util.HashMap<>());
+                        return resp;
+                    }
+                }, taskExecutor)
+                .orTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                .exceptionally(e -> {
+                    log.warn("[HistoricalCharts data] Fetch timed out or failed: {}", e.getMessage());
                     com.portfolio.marketdata.model.HistoricalChartsResponse resp = new com.portfolio.marketdata.model.HistoricalChartsResponse();
                     resp.setData(new java.util.HashMap<>());
                     return resp;
+                }))
+                .collect(Collectors.toList());
+
+            java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
+            
+            com.portfolio.marketdata.model.HistoricalChartsResponse finalResp = new com.portfolio.marketdata.model.HistoricalChartsResponse();
+            finalResp.setData(new java.util.HashMap<>());
+            
+            for (java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalChartsResponse> f : futures) {
+                com.portfolio.marketdata.model.HistoricalChartsResponse chunkResp = f.join();
+                if (chunkResp != null && chunkResp.getData() != null) {
+                    finalResp.getData().putAll(chunkResp.getData());
                 }
-            }, taskExecutor)
-            .orTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-            .exceptionally(e -> {
-                log.warn("[HistoricalCharts data] Fetch timed out or failed: {}", e.getMessage());
-                com.portfolio.marketdata.model.HistoricalChartsResponse resp = new com.portfolio.marketdata.model.HistoricalChartsResponse();
-                resp.setData(new java.util.HashMap<>());
-                return resp;
-            })
-            .join();
+            }
+            return finalResp;
         } catch (Exception e) {
             log.warn("[HistoricalCharts data] Unexpected error during fetch: {}", e.getMessage());
             com.portfolio.marketdata.model.HistoricalChartsResponse resp = new com.portfolio.marketdata.model.HistoricalChartsResponse();
