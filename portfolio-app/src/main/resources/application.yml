@@ -186,7 +186,7 @@ basket:
 market-data:
   client:
     connect-timeout-ms: ${MARKET_DATA_CONNECT_TIMEOUT_MS:3000}
-    read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:5000}
+    read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:15000}
   api:
     base-url: ${MARKET_DATA_API_URL:http://am-market-data:8080}
     ohlc-endpoint: /v1/market-data/ohlc
@@ -194,9 +194,9 @@ market-data:
     historical-charts-endpoint: /v1/analysis/historical-charts
     securities-endpoint: /v1/securities
     nse-indices-endpoint: /v1/indices
-    read-timeout: 5000      # Fast fail to prevent thread pool exhaustion
+    read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:15000}
     connection-timeout: 3000
-    max-retry-attempts: 1
+    max-retry-attempts: 0
 
 # OpenAPI Documentation
 springdoc:

@@ -43,14 +43,14 @@ public class AsyncConfig {
     @Bean(name = "externalApiExecutor")
     public Executor externalApiExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(10);
-        executor.setMaxPoolSize(30);
-        executor.setQueueCapacity(50);
+        executor.setCorePoolSize(20);
+        executor.setMaxPoolSize(50);
+        executor.setQueueCapacity(200);
         executor.setThreadNamePrefix("ExtApiAsync-");
         // Propagate traceId/spanId/correlationId across async thread boundaries
         executor.setTaskDecorator(new MdcTaskDecorator());
-        // Fail fast if queue is full to prevent caller thread blocking (Bulkhead pattern)
-        executor.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
+        // Backpressure via CallerRunsPolicy is now safe due to shorter timeouts
+        executor.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
         executor.initialize();
         return executor;
     }

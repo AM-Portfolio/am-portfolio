@@ -60,16 +60,29 @@ public class StockPerformanceService {
         // Get market data for all symbols at once
         var marketData = marketDataService.getMarketData(symbols);
         
+        // ONE batch call for ALL symbols — not per symbol
+        Map<String, MarketData> historicalMap = Map.of();
+        if (startTime != null) {
+            LocalDate fromDate = startTime.atZone(ZoneId.systemDefault()).toLocalDate();
+            try {
+                historicalMap = marketDataService.getHistoricalData(
+                    symbols, fromDate, LocalDate.now(), null, null, null, null, null, null);
+            } catch (Exception e) {
+                log.warn("Bulk historical prefetch failed: {}", e.getMessage());
+            }
+        }
+        final Map<String, MarketData> hMap = historicalMap;
+
         if (startTime != null) {
             // Normal in-memory fast-path (avoiding thread pool exhaustion)
             return equityHoldings.stream()
-                .map(asset -> getGainLossPercentage(asset, startTime, marketData))
+                .map(asset -> getGainLossPercentage(asset, startTime, hMap, marketData))
                 .filter(java.util.Objects::nonNull)
                 .toList();
         } else {
             // Normal in-memory fast-path
             return equityHoldings.stream()
-                .map(asset -> getGainLossPercentage(asset, startTime, marketData))
+                .map(asset -> getGainLossPercentage(asset, startTime, hMap, marketData))
                 .filter(java.util.Objects::nonNull)
                 .toList();
         }
@@ -185,7 +198,7 @@ public class StockPerformanceService {
             .sum();
     }
 
-    private StockPerformance getGainLossPercentage(AssetModel asset, Instant startTime, java.util.Map<String, com.portfolio.model.market.MarketData> marketData) {
+    private StockPerformance getGainLossPercentage(AssetModel asset, Instant startTime, java.util.Map<String, MarketData> historicalMap, java.util.Map<String, com.portfolio.model.market.MarketData> marketData) {
         double currentPrice;
         
         if (startTime != null) {
@@ -199,15 +212,9 @@ public class StockPerformanceService {
                 );
             }
             if (prices.isEmpty()) {
-                // Try fetching from MarketDataService API
+                // Try fetching from pre-fetched historicalMap
                 try {
-                    LocalDate fromDate = startTime.atZone(ZoneId.systemDefault()).toLocalDate();
-                    Map<String, MarketData> historicalData = marketDataService.getHistoricalData(
-                        List.of(asset.getSymbol()),
-                        fromDate, LocalDate.now(),
-                        null, null, null, null, null, null
-                    );
-                    MarketData data = historicalData.get(asset.getSymbol());
+                    MarketData data = historicalMap.get(asset.getSymbol());
                     if (data != null && data.getLastPrice() > 0.0) {
                         currentPrice = data.getLastPrice();
                     } else if (data != null && data.getOhlc() != null && data.getOhlc().getClose() > 0.0) {

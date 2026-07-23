@@ -58,7 +58,7 @@ public class StockIndicesUpdateConsumerService {
             List<StockPriceDocument> docs = event.getData().stream()
                 .filter(sd -> sd != null && sd.getSymbol() != null)
                 .map(sd -> StockPriceDocument.builder()
-                    .symbol(SymbolResolver.normalize(sd.getSymbol()))
+                    .symbol(cleanSymbol(sd.getSymbol()))
                     .lastPrice(sd.getLastPrice())
                     .previousClose(sd.getPreviousClose())
                     .openPrice(sd.getOpen())
@@ -73,5 +73,19 @@ public class StockIndicesUpdateConsumerService {
                 stockPriceMongoService.saveAll(docs);
             }
         }
+    }
+
+    String cleanSymbol(String symbol) {
+        if (symbol == null || symbol.isEmpty()) {
+            return symbol;
+        }
+
+        int colonIndex = symbol.indexOf(':');
+        String cleaned = symbol;
+        if (colonIndex > 0 && colonIndex < symbol.length() - 1) {
+            cleaned = symbol.substring(colonIndex + 1);
+        }
+
+        return SymbolResolver.normalize(cleaned);
     }
 }

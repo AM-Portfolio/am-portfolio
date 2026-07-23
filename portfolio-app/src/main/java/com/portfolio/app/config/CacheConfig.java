@@ -15,7 +15,16 @@ public class CacheConfig {
 
     @Bean
     public CacheManager cacheManager() {
-        CaffeineCacheManager cacheManager = new CaffeineCacheManager("portfolioHistory");
+        CaffeineCacheManager cacheManager = new CaffeineCacheManager(
+                "portfolioHistory",
+                "portfolioCache",
+                "securityDetails",
+                "symbolSectors",
+                "sectorGroupings",
+                "industryGroupings",
+                "marketTypeGroupings"
+        );
+        cacheManager.setAllowNullValues(false);
         cacheManager.setCaffeine(Caffeine.newBuilder()
                 .expireAfterWrite(5, TimeUnit.MINUTES)
                 .maximumSize(5000));

@@ -48,8 +48,7 @@ public class MarketDataApiClient extends AbstractApiClient {
          * @param refresh   whether to refresh the data or use cached data
          * @return a Mono of MarketDataResponseWrapper
          */
-        @io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker(name = "market-data-api")
-        @io.github.resilience4j.timelimiter.annotation.TimeLimiter(name = "market-data-api")
+        @io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker(name = "ohlcDataApi")
         public Mono<MarketDataResponseWrapper> getOhlcData(List<String> symbols, String timeFrame, boolean refresh) {
                 String symbolsParam = String.join(",", symbols);
 
@@ -129,8 +128,7 @@ public class MarketDataApiClient extends AbstractApiClient {
          * @param request the historical data request parameters
          * @return a Mono of HistoricalDataResponseWrapper
          */
-        @io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker(name = "market-data-api")
-        @io.github.resilience4j.timelimiter.annotation.TimeLimiter(name = "market-data-api")
+        @io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker(name = "historicalDataApi")
         public Mono<HistoricalDataResponseWrapper> getHistoricalData(HistoricalDataRequest request) {
                 // Ensure we have a comma-separated string of symbols
 
@@ -150,8 +148,6 @@ public class MarketDataApiClient extends AbstractApiClient {
         /**
          * Batch search securities
          */
-        @io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker(name = "market-data-api")
-        @io.github.resilience4j.timelimiter.annotation.TimeLimiter(name = "market-data-api")
         public Mono<com.portfolio.marketdata.model.BatchSearchResponse> batchSearch(
                         com.portfolio.marketdata.model.BatchSearchRequest request) {
                 String path = config.getSecuritiesEndpoint() + "/batch-search";
@@ -170,8 +166,6 @@ public class MarketDataApiClient extends AbstractApiClient {
          * @param range the timeframe range (e.g. 1D, 1M, 1Y)
          * @return a Mono of HistoricalChartsResponse
          */
-        @io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker(name = "market-data-api")
-        @io.github.resilience4j.timelimiter.annotation.TimeLimiter(name = "market-data-api")
         public Mono<com.portfolio.marketdata.model.HistoricalChartsResponse> getHistoricalCharts(List<String> symbols, String range) {
                 String symbolsParam = String.join(",", symbols);
                 String traceId = org.slf4j.MDC.get("traceId");

@@ -150,14 +150,14 @@ public class MarketDataService {
             }, externalApiExecutor))
             .collect(Collectors.toList());
 
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+            .orTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .exceptionally(e -> null)
+            .join();
         Map<String, MarketData> merged = new java.util.HashMap<>();
-        for (java.util.concurrent.CompletableFuture<Map<String, MarketData>> f : futures) {
-            try {
-                merged.putAll(f.get(30, java.util.concurrent.TimeUnit.SECONDS));
-            } catch (Exception e) {
-                log.warn("[HistoricalData chunk] Chunk future failed or timed out: {}", e.getMessage());
-            }
-        }
+        futures.stream()
+            .filter(f -> !f.isCompletedExceptionally())
+            .forEach(f -> merged.putAll(f.getNow(java.util.Collections.emptyMap())));
         
         return merged;
     }
