@@ -37,6 +37,12 @@ import reactor.core.scheduler.Schedulers;
 @Service
 public class MarketDataService {
 
+    private final com.github.benmanes.caffeine.cache.Cache<String, MarketData> localCache = 
+            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+            .expireAfterWrite(5, java.util.concurrent.TimeUnit.MINUTES)
+            .maximumSize(20000)
+            .build();
+
     private final MarketDataApiClient marketDataApiClient;
     
     @org.springframework.lang.Nullable
@@ -389,23 +395,47 @@ public class MarketDataService {
         Map<String, MarketData> result = new HashMap<>();
         List<String> normalized = symbols.stream().map(this::cleanSymbol).collect(Collectors.toList());
 
-        // 1. Try market data cache first (populated by am-market service or last live fetch)
-        if (marketDataRedisService != null) {
-            try {
-                Map<String, MarketData> cached = marketDataRedisService.getMarketData(normalized);
-                if (cached != null) result.putAll(cached);
-            } catch (Exception e) {
-                log.warn("[MarketData] Cache read failed: {}", e.getMessage());
+        // 1. Try L1 Caffeine cache first
+        for (String s : normalized) {
+            MarketData cached = localCache.getIfPresent(s);
+            if (cached != null) {
+                result.put(s, cached);
             }
         }
 
-        // 1.5. Find missing after Redis
+        // 1.5. Find missing after L1 cache
         List<String> missing = normalized.stream()
             .filter(s -> !result.containsKey(s))
             .collect(Collectors.toList());
 
-        // 2. Try MongoDB cache next (populated by Kafka live stream)
-        if (stockPriceMongoService != null && !missing.isEmpty()) {
+        if (missing.isEmpty()) {
+            return result;
+        }
+
+        // 2. Try market data cache next (populated by am-market service or last live fetch)
+        if (marketDataRedisService != null) {
+            try {
+                Map<String, MarketData> cached = marketDataRedisService.getMarketData(missing);
+                if (cached != null) {
+                    result.putAll(cached);
+                    // Update L1
+                    cached.forEach(localCache::put);
+                }
+            } catch (Exception e) {
+                log.warn("[MarketData] Cache read failed: {}", e.getMessage());
+            }
+            
+            missing = normalized.stream()
+                .filter(s -> !result.containsKey(s))
+                .collect(Collectors.toList());
+        }
+
+        if (missing.isEmpty()) {
+            return result;
+        }
+
+        // 3. Try MongoDB cache next (populated by Kafka live stream)
+        if (stockPriceMongoService != null) {
             try {
                 java.util.Map<String, com.am.common.amcommondata.document.price.StockPriceDocument> mongoPrices = stockPriceMongoService.getPrices(missing);
                 if (mongoPrices != null && !mongoPrices.isEmpty()) {
@@ -424,6 +454,7 @@ public class MarketDataService {
                                 .build())
                             .build();
                         result.put(doc.getSymbol(), md);
+                        localCache.put(doc.getSymbol(), md); // Update L1
                     }
                     log.info("[MarketData] MongoDB cache hit for {} symbols.", mongoPrices.size());
                 }
@@ -431,7 +462,6 @@ public class MarketDataService {
                 log.warn("[MarketData] MongoDB read failed: {}", e.getMessage());
             }
             
-            // Re-evaluate missing after Mongo
             missing = normalized.stream()
                 .filter(s -> !result.containsKey(s))
                 .collect(Collectors.toList());
@@ -442,56 +472,79 @@ public class MarketDataService {
             return result;
         }
 
-        // 3. Fetch missing from OHLC API
-        log.info("[MarketData] Cache miss for {} symbols. Fetching from API.", missing.size());
-        try {
-            Map<String, MarketData> fetched = getOhlcData(missing, false);
-            if (fetched != null && !fetched.isEmpty()) {
-                result.putAll(fetched);
-                // Store in cache with SmartTTL
-                if (marketDataRedisService != null) {
-                    marketDataRedisService.cacheMarketData(fetched);
-                }
-                
-                // Store in MongoDB asynchronously
-                if (stockPriceMongoService != null) {
-                    final java.util.Map<String, MarketData> finalFetched = fetched;
-                    java.util.concurrent.CompletableFuture.runAsync(() -> {
-                        try {
-                            List<com.am.common.amcommondata.document.price.StockPriceDocument> docs = finalFetched.values().stream()
-                                .filter(md -> md != null && md.getLastPrice() != null)
-                                .map(md -> com.am.common.amcommondata.document.price.StockPriceDocument.builder()
-                                    .symbol(md.getSymbol())
-                                    .lastPrice(md.getLastPrice())
-                                    .previousClose(md.getPreviousClose())
-                                    .openPrice(md.getOhlc() != null ? md.getOhlc().getOpen() : null)
-                                    .highPrice(md.getOhlc() != null ? md.getOhlc().getHigh() : null)
-                                    .lowPrice(md.getOhlc() != null ? md.getOhlc().getLow() : null)
-                                    .timestamp(md.getTimestamp() != null ? md.getTimestamp().toEpochMilli() : System.currentTimeMillis())
-                                    .updatedAt(java.time.LocalDateTime.now())
-                                    .build())
-                                .collect(Collectors.toList());
-                            stockPriceMongoService.saveAll(docs);
-                        } catch (Exception e) {
-                            log.error("[MarketData] MongoDB save failed", e);
-                        }
-                    }, taskExecutor);
+        // 4. Fetch missing from OHLC API with double-checked locking
+        synchronized (this) {
+            // Double check L1 cache in case another thread just fetched them
+            List<String> stillMissing = new java.util.ArrayList<>();
+            for (String s : missing) {
+                MarketData cached = localCache.getIfPresent(s);
+                if (cached != null) {
+                    result.put(s, cached);
+                } else {
+                    stillMissing.add(s);
                 }
             }
-        } catch (Exception e) {
-            log.error("[MarketData] OHLC fetch failed: {}", e.getMessage());
+            
+            missing = stillMissing;
+            
+            if (missing.isEmpty()) {
+                return result;
+            }
+            
+            log.info("[MarketData] Cache miss for {} symbols. Fetching from API.", missing.size());
+            try {
+                Map<String, MarketData> fetched = getOhlcData(missing, false);
+                if (fetched != null && !fetched.isEmpty()) {
+                    result.putAll(fetched);
+                    
+                    // Store in L1 cache
+                    fetched.forEach(localCache::put);
+                    
+                    // Store in Redis with SmartTTL
+                    if (marketDataRedisService != null) {
+                        marketDataRedisService.cacheMarketData(fetched);
+                    }
+                    
+                    // Store in MongoDB asynchronously
+                    if (stockPriceMongoService != null) {
+                        final java.util.Map<String, MarketData> finalFetched = fetched;
+                        java.util.concurrent.CompletableFuture.runAsync(() -> {
+                            try {
+                                List<com.am.common.amcommondata.document.price.StockPriceDocument> docs = finalFetched.values().stream()
+                                    .filter(md -> md != null && md.getLastPrice() != null)
+                                    .map(md -> com.am.common.amcommondata.document.price.StockPriceDocument.builder()
+                                        .symbol(md.getSymbol())
+                                        .lastPrice(md.getLastPrice())
+                                        .previousClose(md.getPreviousClose())
+                                        .openPrice(md.getOhlc() != null ? md.getOhlc().getOpen() : null)
+                                        .highPrice(md.getOhlc() != null ? md.getOhlc().getHigh() : null)
+                                        .lowPrice(md.getOhlc() != null ? md.getOhlc().getLow() : null)
+                                        .timestamp(md.getTimestamp() != null ? md.getTimestamp().toEpochMilli() : System.currentTimeMillis())
+                                        .updatedAt(java.time.LocalDateTime.now())
+                                        .build())
+                                    .collect(Collectors.toList());
+                                stockPriceMongoService.saveAll(docs);
+                            } catch (Exception e) {
+                                log.error("[MarketData] MongoDB save failed", e);
+                            }
+                        }, taskExecutor);
+                    }
+                }
+            } catch (Exception e) {
+                log.error("[MarketData] OHLC fetch failed: {}", e.getMessage());
+            }
         }
 
-        // 4. Fallback for symbols that are STILL missing (e.g., after market hours or OHLC timeout)
-        List<String> stillMissing = symbols.stream().map(this::cleanSymbol)
+        // 5. Fallback for symbols that are STILL missing
+        List<String> stillMissingFallback = symbols.stream().map(this::cleanSymbol)
             .filter(s -> {
                 MarketData data = result.get(s);
                 return data == null || data.getLastPrice() == null || data.getLastPrice() == 0.0;
             })
             .collect(Collectors.toList());
             
-        if (!stillMissing.isEmpty()) {
-            log.info("[MarketData] OHLC returned empty for {} symbols. Data will be left missing to allow downstream fallbacks.", stillMissing.size());
+        if (!stillMissingFallback.isEmpty()) {
+            log.info("[MarketData] OHLC returned empty for {} symbols. Data will be left missing to allow downstream fallbacks.", stillMissingFallback.size());
         }
 
         log.info("[MarketData] Result: {}/{} symbols returned.", result.size(), symbols.size());
