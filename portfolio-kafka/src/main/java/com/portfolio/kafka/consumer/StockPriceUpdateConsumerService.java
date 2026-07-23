@@ -8,21 +8,21 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
 
-import com.am.common.investment.model.events.StockInsidicesEventData;
+import com.portfolio.model.events.StockPriceUpdateEvent;
 import com.am.common.amcommondata.document.price.StockPriceDocument;
 import com.am.common.amcommondata.service.price.StockPriceMongoService;
 import com.portfolio.model.util.SymbolResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 @ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = false)
-public class StockIndicesUpdateConsumerService {
+public class StockPriceUpdateConsumerService {
 
     private final ObjectMapper objectMapper;
     private final StockPriceMongoService stockPriceMongoService;
@@ -34,15 +34,14 @@ public class StockIndicesUpdateConsumerService {
         try {
             log.info("Received stock price update message: {}", message);
             
-            // Convert JSON string to StockInsidicesEventData
-            StockInsidicesEventData event = objectMapper.readValue(message, StockInsidicesEventData.class);
+            StockPriceUpdateEvent event = objectMapper.readValue(message, StockPriceUpdateEvent.class);
             log.info("Converted to stock price event: {}", event);
             
-            // Process the event
             processStockPriceUpdate(event);
             
-            // If processing was successful, acknowledge the message
-            acknowledgment.acknowledge();
+            if (acknowledgment != null) {
+                acknowledgment.acknowledge();
+            }
             log.info("Stock price update processed and acknowledged successfully");
         } catch (Exception e) {
             log.error("Failed to process stock price update message: {}. Error: {}", message, e.getMessage(), e);
@@ -53,25 +52,21 @@ public class StockIndicesUpdateConsumerService {
         }
     }
 
-    private void processStockPriceUpdate(StockInsidicesEventData event) {
-        if (event != null && event.getData() != null) {
-            List<StockPriceDocument> docs = event.getData().stream()
-                .filter(sd -> sd != null && sd.getSymbol() != null)
-                .map(sd -> StockPriceDocument.builder()
-                    .symbol(cleanSymbol(sd.getSymbol()))
-                    .lastPrice(sd.getLastPrice())
-                    .previousClose(sd.getPreviousClose())
-                    .openPrice(sd.getOpen())
-                    .highPrice(sd.getDayHigh())
-                    .lowPrice(sd.getDayLow())
-                    .timestamp(System.currentTimeMillis())
-                    .updatedAt(LocalDateTime.now())
-                    .build())
-                .collect(Collectors.toList());
+    private void processStockPriceUpdate(StockPriceUpdateEvent event) {
+        if (event != null && event.getData() != null && event.getData().getSymbol() != null) {
+            StockPriceUpdateEvent.StockPriceData sd = event.getData();
+            StockPriceDocument doc = StockPriceDocument.builder()
+                .symbol(cleanSymbol(sd.getSymbol()))
+                .lastPrice(sd.getLastPrice())
+                .previousClose(sd.getPreviousClose())
+                .openPrice(sd.getOpen())
+                .highPrice(sd.getDayHigh())
+                .lowPrice(sd.getDayLow())
+                .timestamp(System.currentTimeMillis())
+                .updatedAt(LocalDateTime.now())
+                .build();
                 
-            if (!docs.isEmpty()) {
-                stockPriceMongoService.saveAll(docs);
-            }
+            stockPriceMongoService.saveAll(Collections.singletonList(doc));
         }
     }
 

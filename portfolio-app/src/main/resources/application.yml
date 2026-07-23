@@ -34,7 +34,7 @@ spring:
   kafka:
     bootstrap-servers: ${PROJ_KAFKA_BOOTSTRAP_SERVERS}
     listener:
-      auto-startup: ${KAFKA_ENABLED:false}
+      auto-startup: ${KAFKA_ENABLED:true}
     consumer:
       group-id: ${PORTFOLIO_CONSUMER_GROUP}
       auto-offset-reset: latest
@@ -132,14 +132,14 @@ app:
     secret: ${JWT_SECRET:internal-service-super-secret-key-32chars-minimum-change-in-prod}
     algorithm: ${JWT_ALGORITHM:HS256}
   kafka:
-    enabled: ${KAFKA_ENABLED:false}
+    enabled: ${KAFKA_ENABLED:true}
     trigger-calculation:
       consumer:
         id: am-portfolio-trigger-calculation-group
     portfolio:
       consumer:
         id: ${PORTFOLIO_CONSUMER_GROUP}
-        enabled: ${KAFKA_ENABLED:false}
+        enabled: ${KAFKA_ENABLED:true}
       topic: ${PORTFOLIO_TOPIC_NAME}
       publish-topic: ${PORTFOLIO_PUBLISH_TOPIC:am-portfolio-update}
       stream:
@@ -152,17 +152,17 @@ app:
     stock:
       consumer:
         id: ${STOCK_CONSUMER_GROUP}
-        enabled: ${KAFKA_ENABLED:false}
+        enabled: ${KAFKA_ENABLED:true}
       topic: ${STOCK_TOPIC_NAME}
     holding:
       consumer:
         id: ${HOLDING_CONSUMER_ID:am-portfolio-holding-group}
-        enabled: ${KAFKA_ENABLED:false}
+        enabled: ${KAFKA_ENABLED:true}
       topic: ${HOLDING_TOPIC:am-holding-update}
     market-index:
       consumer:
         id: ${MARKET_INDEX_CONSUMER_GROUP}
-        enabled: ${KAFKA_ENABLED:false}
+        enabled: ${KAFKA_ENABLED:true}
       topic: ${MARKET_INDEX_TOPIC_NAME}
 
 server:
@@ -255,7 +255,7 @@ management:
     redis:
       enabled: ${PORTFOLIO_REDIS_ENABLED:false}
     kafka:
-      enabled: ${KAFKA_ENABLED:false}
+      enabled: ${KAFKA_ENABLED:true}
   tracing:
     enabled: true
     sampling:
