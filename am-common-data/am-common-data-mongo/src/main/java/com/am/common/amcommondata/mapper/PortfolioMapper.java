@@ -12,6 +12,9 @@ import com.am.common.amcommondata.mapper.asset.EquityMapper;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.enums.Currency;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 @Component
 public class PortfolioMapper {
 
@@ -23,8 +26,14 @@ public class PortfolioMapper {
             return null;
         }
 
+        UUID id = parseUuidOrNull(document.getId());
+        if (id == null) {
+            log.warn("Skipping portfolio document with non-UUID id: {}", document.getId());
+            return null;
+        }
+
         PortfolioModelV1 model = PortfolioModelV1.builder()
-                .id(UUID.fromString(document.getId()))
+                .id(id)
                 .name(document.getName())
                 .description(document.getDescription())
                 .owner(document.getOwner())
@@ -33,7 +42,7 @@ public class PortfolioMapper {
                 //.status(document.getPortfolioStatus() != null ? document.getPortfolioStatus().name() : null)
                 //.tags(document.getTags() != null ? document.getTags().stream().map(String::valueOf).collect(Collectors.toList()) : null)
                 .notes(document.getNotes())
-                .equityModels(document.getEquities() != null 
+                .equityModels(document.getEquities() != null
                     ? document.getEquities().stream()
                         .map(equityMapper::toModel)
                         .collect(Collectors.toList())
@@ -67,7 +76,7 @@ public class PortfolioMapper {
                 .fundType(model.getFundType())
                 //.tags(model.getTags())
                 .notes(model.getNotes())
-                .equities(model.getEquityModels() != null 
+                .equities(model.getEquityModels() != null
                     ? model.getEquityModels().stream()
                         .map(equityMapper::toDocument)
                         .collect(Collectors.toList())
@@ -90,5 +99,16 @@ public class PortfolioMapper {
                 .build());
 
         return document;
+    }
+
+    static UUID parseUuidOrNull(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return UUID.fromString(raw.trim());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 }

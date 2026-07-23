@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -28,6 +29,7 @@ public class PortfolioServiceImpl implements PortfolioService {
     public List<PortfolioModelV1> getPortfoliosByUserId(String userId) {
         return portfolioDocumentRepository.findByOwner(userId).stream()
                 .map(portfolioMapper::toModel)
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
     }
 
