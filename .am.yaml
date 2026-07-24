@@ -1,0 +1,15 @@
+﻿name: am-portfolio
+release: am-portfolio
+image: ghcr.io/am-portfolio/am-portfolio
+runtime: java
+language: java
+dockerfile: Dockerfile
+context: .
+github:
+  repo: AM-Portfolio/am-portfolio
+  deploy_workflow: direct-deploy.yml
+  service: am-portfolio
+  ref: master
+deploy:
+  via: helm
+  rebuild: on-change

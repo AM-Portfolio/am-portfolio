@@ -38,7 +38,9 @@ public class PortfolioOverviewService {
         Optional<PortfolioSummaryV1> cachedSummary = getCachedSummary(userId, interval);
         if (cachedSummary.isPresent()) {
             log.info("Returning cached portfolio summary for user: {}", userId);
-            return cachedSummary.get();
+            PortfolioSummaryV1 cached = cachedSummary.get();
+            sanitizeSummaryMaps(cached);
+            return cached;
         }
 
         log.info("Cache miss for portfolio summary - User: {}, fetching from source", userId);
@@ -77,7 +79,9 @@ public class PortfolioOverviewService {
         Optional<PortfolioSummaryV1> cachedSummary = portfolioSummaryRedisService.getLatestSummary(userId, interval, portfolioId);
         if (cachedSummary.isPresent()) {
             log.info("Returning cached portfolio summary for user: {} and portfolio: {}", userId, portfolioId);
-            return cachedSummary.get();
+            PortfolioSummaryV1 cached = cachedSummary.get();
+            sanitizeSummaryMaps(cached);
+            return cached;
         }
 
         log.info("Cache miss for specific portfolio summary - User: {}, Portfolio: {}, fetching from source", userId, portfolioId);
@@ -146,8 +150,15 @@ public class PortfolioOverviewService {
             log.debug("Processing portfolio: ID={}, Broker={}, Value={}",
                     portfolio.getId(), portfolio.getBrokerType(), portfolio.getTotalValue());
 
+            BrokerType brokerType = portfolio.getBrokerType() != null
+                    ? portfolio.getBrokerType()
+                    : BrokerType.UNKNOWN;
+            if (portfolio.getBrokerType() == null) {
+                log.warn("Portfolio {} has null brokerType — grouping under UNKNOWN", portfolio.getId());
+            }
+
             var portfolioSummary = portfolioMapper.toPortfolioModelV1(portfolio);
-            brokerSummaryMap.computeIfAbsent(portfolio.getBrokerType(), brokerType -> portfolioSummary);
+            brokerSummaryMap.computeIfAbsent(brokerType, ignored -> portfolioSummary);
         }
 
         log.debug("Created broker summary map with {} entries for {}", brokerSummaryMap.size(), context);
@@ -156,6 +167,7 @@ public class PortfolioOverviewService {
         log.debug("Creating final portfolio summary for user: {} and {}", userId, context);
         PortfolioSummaryV1 finalSummary = getPortfolioSummary(portfolios);
         finalSummary.setBrokerPortfolios(brokerSummaryMap);
+        sanitizeSummaryMaps(finalSummary);
 
         log.info("Total portfolio value for user {} and {}: {}",
                 userId, context, finalSummary.getInvestmentValue());
@@ -193,5 +205,27 @@ public class PortfolioOverviewService {
         }
 
         return cachedSummary;
+    }
+
+    /**
+     * Jackson rejects Map entries with null keys ("Null key for a Map not allowed in JSON").
+     */
+    private static void sanitizeSummaryMaps(PortfolioSummaryV1 summary) {
+        if (summary == null) {
+            return;
+        }
+        Map<BrokerType, BrokerPortfolioSummary> brokers = summary.getBrokerPortfolios();
+        if (brokers != null && brokers.containsKey(null)) {
+            BrokerPortfolioSummary orphan = brokers.remove(null);
+            if (orphan != null) {
+                brokers.putIfAbsent(BrokerType.UNKNOWN, orphan);
+            }
+        }
+        if (summary.getMarketCapHoldings() != null) {
+            summary.getMarketCapHoldings().remove(null);
+        }
+        if (summary.getSectorialHoldings() != null) {
+            summary.getSectorialHoldings().remove(null);
+        }
     }
 }

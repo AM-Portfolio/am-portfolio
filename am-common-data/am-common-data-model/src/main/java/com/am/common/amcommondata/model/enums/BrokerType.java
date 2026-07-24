@@ -8,7 +8,8 @@ public enum BrokerType {
     GROW("Groww"), // Fallback for existing db records
     KOTAK("Kotak"),
     ANGEL_ONE("Angel One"),
-    UPSTOX("Upstox");
+    UPSTOX("Upstox"),
+    UNKNOWN("Unknown");
 
     private String brokerName;
 

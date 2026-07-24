@@ -94,6 +94,30 @@ class PortfolioOverviewServiceTest {
     }
 
     @Test
+    void overviewPortfolio_NullBrokerType_UsesUnknownKey() {
+        String userId = "user-1";
+        PortfolioModelV1 p1 = new PortfolioModelV1();
+        p1.setId(UUID.randomUUID());
+        p1.setBrokerType(null);
+        p1.setTotalValue(1000.0);
+
+        when(portfolioSummaryRedisService.getLatestSummary(userId, TimeInterval.ONE_DAY))
+                .thenReturn(Optional.empty());
+        when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(List.of(p1));
+        when(portfolioMapper.toPortfolioModelV1(p1))
+                .thenReturn(com.portfolio.model.portfolio.v1.BrokerPortfolioSummary.builder().build());
+        when(portfolioCalculator.calculateSummary(anyList(), anyDouble()))
+                .thenReturn(PortfolioSummaryV1.builder().build());
+
+        PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, TimeInterval.ONE_DAY);
+
+        assertNotNull(result);
+        assertNotNull(result.getBrokerPortfolios());
+        assertFalse(result.getBrokerPortfolios().containsKey(null));
+        assertTrue(result.getBrokerPortfolios().containsKey(BrokerType.UNKNOWN));
+    }
+
+    @Test
     void overviewPortfolio_NoPortfolios_ReturnsNull() {
         String userId = "user-none";
         when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(Collections.emptyList());
