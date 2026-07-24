@@ -16,6 +16,7 @@ import com.portfolio.model.portfolio.v1.BrokerPortfolioSummary;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.redis.service.PortfolioSummaryRedisService;
 import com.portfolio.service.calculator.PortfolioCalculator;
+import com.am.observability.flow.FlowLogger;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,25 +40,26 @@ public class PortfolioOverviewService {
             .build();
 
     private final PortfolioCalculator portfolioCalculator;
+    private final FlowLogger flowLogger;
 
     public PortfolioOverviewService(
             PortfolioService portfolioService,
             PortfolioHoldingsService portfolioHoldingsService,
             PortfolioMapperv1 portfolioMapper,
             @org.springframework.lang.Nullable PortfolioSummaryRedisService portfolioSummaryRedisService,
-            PortfolioCalculator portfolioCalculator) {
+            PortfolioCalculator portfolioCalculator,
+            FlowLogger flowLogger) {
         this.portfolioService = portfolioService;
         this.portfolioHoldingsService = portfolioHoldingsService;
         this.portfolioMapper = portfolioMapper;
         this.portfolioSummaryRedisService = portfolioSummaryRedisService;
         this.portfolioCalculator = portfolioCalculator;
+        this.flowLogger = flowLogger;
     }
 
     public PortfolioSummaryV1 overviewPortfolio(String userId, TimeInterval interval) {
-        log.info("Starting overviewPortfolio - User: {}, Interval: {}",
-                userId, interval != null ? interval.getCode() : "null");
-
-        String l1Key = userId + ":" + (interval != null ? interval.getCode() : "ALL");
+        try (var span = flowLogger.start("overviewPortfolio", "user", userId, "interval", interval != null ? interval.getCode() : "null")) {
+            String l1Key = userId + ":" + (interval != null ? interval.getCode() : "ALL");
         PortfolioSummaryV1 l1Hit = summaryL1.getIfPresent(l1Key);
         if (l1Hit != null) {
             log.debug("[Summary] L1 cache hit for user={}", userId);
@@ -95,10 +97,13 @@ public class PortfolioOverviewService {
             return emptySummary;
         }
 
-        PortfolioSummaryV1 finalSummary = buildPortfolioSummary(portfolios, userId, null, interval);
-        summaryL1.put(l1Key, finalSummary);
-        log.info("Completed overviewPortfolio for user: {}", userId);
-        return finalSummary;
+            PortfolioSummaryV1 finalSummary = buildPortfolioSummary(portfolios, userId, null, interval);
+            summaryL1.put(l1Key, finalSummary);
+            return finalSummary;
+        } catch (Exception e) {
+            log.error("Error in overviewPortfolio", e);
+            throw e;
+        }
     }
 
     /**
@@ -111,10 +116,8 @@ public class PortfolioOverviewService {
      * @return the portfolio summary for the specific portfolio
      */
     public PortfolioSummaryV1 overviewPortfolio(String userId, String portfolioId, TimeInterval interval) {
-        log.info("Starting overviewPortfolio for specific portfolio - User: {}, Portfolio: {}, Interval: {}",
-                userId, portfolioId, interval != null ? interval.getCode() : "null");
-
-        if (portfolioId == null || portfolioId.trim().isEmpty()) {
+        try (var span = flowLogger.start("overviewPortfolioSpecific", "user", userId, "portfolio", portfolioId, "interval", interval != null ? interval.getCode() : "null")) {
+            if (portfolioId == null || portfolioId.trim().isEmpty()) {
             log.warn("Blank portfolioId provided for specific portfolio overview - User: {}", userId);
             throw new IllegalArgumentException("portfolioId cannot be blank");
         }
@@ -158,11 +161,14 @@ public class PortfolioOverviewService {
         log.info("Found {} matching portfolio(s) for ID: {} and user: {}",
                 filteredPortfolios.size(), portfolioId, userId);
 
-        PortfolioSummaryV1 finalSummary = buildPortfolioSummary(filteredPortfolios, userId, portfolioId, interval);
+            PortfolioSummaryV1 finalSummary = buildPortfolioSummary(filteredPortfolios, userId, portfolioId, interval);
 
-        summaryL1.put(l1Key, finalSummary);
-        log.info("Completed overviewPortfolio for user: {} and portfolio: {}", userId, portfolioId);
-        return finalSummary;
+            summaryL1.put(l1Key, finalSummary);
+            return finalSummary;
+        } catch (Exception e) {
+            log.error("Error in specific overviewPortfolio", e);
+            throw e;
+        }
     }
 
     /**
