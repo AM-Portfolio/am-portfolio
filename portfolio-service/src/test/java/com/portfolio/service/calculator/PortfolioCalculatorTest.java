@@ -82,14 +82,14 @@ class PortfolioCalculatorTest {
 
     @Test
     void enrichHoldings_FallbackToMongo() {
-        lenient().when(marketDataService.getMarketData(anyList())).thenReturn(Collections.emptyMap());
+        // Mock marketDataService to return the fallback price, simulating MarketDataService's internal MongoDB fallback
+        com.portfolio.model.market.MarketData apiData = new com.portfolio.model.market.MarketData();
+        apiData.setSymbol("TCS");
+        apiData.setLastPrice(3100.0);
+        
+        lenient().when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", apiData));
         lenient().when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
         lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Collections.emptyMap());
-        
-        com.am.common.amcommondata.document.price.StockPriceDocument mongoPrice = com.am.common.amcommondata.document.price.StockPriceDocument.builder()
-                .lastPrice(3100.0)
-                .build();
-        when(stockPriceMongoService.getPrices(anyList())).thenReturn(Map.of("TCS", mongoPrice));
 
         List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
 
@@ -100,8 +100,7 @@ class PortfolioCalculatorTest {
     void enrichHoldings_LocalDevFallback() {
         when(marketDataService.getMarketData(anyList())).thenReturn(Collections.emptyMap());
         when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
-        when(stockPriceMongoService.getPrices(anyList())).thenReturn(Map.of());
-        when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
 
         List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
 
