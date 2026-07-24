@@ -44,12 +44,12 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
     /**
      * Common method to generate sector allocation with or without time frame
      */
-    private SectorAllocation generateSectorAllocation(String portfolioId, TimeFrameRequest timeFrameRequest) {
+    private SectorAllocation generateSectorAllocation(String portfolioId, AdvancedAnalyticsRequest request) {
         log.info("Calculating sector allocations for portfolio: {} with fast current market data", portfolioId);
         
         return processPortfolioData(
             portfolioId,
-            null, // Force fetching fast current market data instead of heavy historical data
+            request,
             this::createEmptyResult,
             (portfolio, portfolioSymbols, marketData) -> {
         

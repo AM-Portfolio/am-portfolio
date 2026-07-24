@@ -3,24 +3,27 @@ package com.portfolio.service.portfolio;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyList;
+
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import java.util.concurrent.Executor;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.service.PortfolioService;
@@ -30,6 +33,8 @@ import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
 import com.portfolio.service.calculator.PortfolioCalculator;
+import com.portfolio.service.portfolio.PortfolioHoldingsMongoService;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 public class PortfolioHoldingsServiceTest {
@@ -46,8 +51,19 @@ public class PortfolioHoldingsServiceTest {
     @Mock
     private PortfolioCalculator portfolioCalculator;
 
+    @Mock
+    private PortfolioHoldingsMongoService portfolioHoldingsMongoService;
+
+    @Mock
+    private Executor taskExecutor;
+
     @InjectMocks
     private PortfolioHoldingsService portfolioHoldingsService;
+
+    @BeforeEach
+    public void setup() {
+        ReflectionTestUtils.setField(portfolioHoldingsService, "isRedisEnabled", true);
+    }
 
     @Test
     @DisplayName("getPortfolioHoldings should return cached holdings if present when enrichment is enabled")
@@ -66,7 +82,7 @@ public class PortfolioHoldingsServiceTest {
         assertThat(result).isNotNull();
         assertThat(result.getUserId()).isEqualTo(userId);
         verify(portfolioService, never()).getPortfoliosByUserId(anyString());
-        verify(portfolioHoldingsMapper, never()).toPortfolioHoldingsV1(anyList());
+        verify(portfolioHoldingsMapper, never()).toPortfolioHoldingsV1(any());
     }
 
     @Test
@@ -86,8 +102,9 @@ public class PortfolioHoldingsServiceTest {
 
         when(portfolioHoldingsRedisService.getLatestHoldings(userId, interval)).thenReturn(Optional.empty());
         when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(portfolios);
+        lenient().when(portfolioHoldingsMapper.toEquityHoldings(any())).thenReturn(Collections.emptyList());
         when(portfolioHoldingsMapper.toPortfolioHoldingsV1(portfolios)).thenReturn(mappedHoldings);
-        when(portfolioCalculator.enrichHoldings(holdings)).thenReturn(holdings);
+        when(portfolioCalculator.enrichHoldings(any())).thenReturn(holdings);
 
         // When
         PortfolioHoldings result = portfolioHoldingsService.getPortfolioHoldings(userId, interval, true);
@@ -120,7 +137,7 @@ public class PortfolioHoldingsServiceTest {
         // Then
         assertThat(result).isNotNull();
         verify(portfolioHoldingsRedisService, never()).getLatestHoldings(anyString(), any());
-        verify(portfolioCalculator, never()).enrichHoldings(anyList());
+        verify(portfolioCalculator, never()).enrichHoldings(any());
         verify(portfolioHoldingsRedisService, never()).cachePortfolioHoldings(any(), anyString(), any(), any());
     }
 
@@ -138,7 +155,7 @@ public class PortfolioHoldingsServiceTest {
         PortfolioHoldings result = portfolioHoldingsService.getPortfolioHoldings(userId, interval, true);
 
         // Then
-        assertThat(result).isNull();
+        assertThat(result.getEquityHoldings()).isEmpty();
     }
 
     @Test
@@ -157,6 +174,7 @@ public class PortfolioHoldingsServiceTest {
         PortfolioHoldings mappedHoldings = PortfolioHoldings.builder().equityHoldings(Collections.emptyList()).build();
 
         when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(portfolios);
+        lenient().when(portfolioHoldingsMapper.toEquityHoldings(any())).thenReturn(Collections.emptyList());
         when(portfolioHoldingsMapper.toPortfolioHoldingsV1(List.of(p1))).thenReturn(mappedHoldings);
 
         // When

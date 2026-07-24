@@ -21,22 +21,35 @@ public class TopMoverUtils {
 
     /**
      * Calculate performance metrics for each stock
+     * @param portfolioSymbols List of raw symbols from the portfolio
      * @param marketData Map of market data by symbol
      * @param symbolToPerformance Map to store performance metrics
      * @param symbolToChangePercent Map to store change percentages
      */
     public static void calculatePerformanceMetrics(
+            List<String> portfolioSymbols,
             Map<String, MarketData> marketData,
             Map<String, Double> symbolToPerformance,
             Map<String, Double> symbolToChangePercent) {
         
-        log.debug("Calculating performance metrics for {} stocks", marketData.size());
+        log.debug("Calculating performance metrics for {} stocks", portfolioSymbols.size());
         
-        marketData.forEach((symbol, data) -> {
+        for (String symbol : portfolioSymbols) {
+            MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
             if (data != null) {
                 if (data.getPreviousClose() != null && data.getPreviousClose() > 0) {
                     double previousClose = data.getPreviousClose();
-                    double lastPrice = data.getLastPrice();
+                    // Resolve lastPrice with fallback to ohlc.close to prevent NPE on unboxing
+                    Double rawLastPrice = data.getLastPrice();
+                    double lastPrice;
+                    if (rawLastPrice != null && rawLastPrice > 0) {
+                        lastPrice = rawLastPrice;
+                    } else if (data.getOhlc() != null && data.getOhlc().getClose() > 0) {
+                        lastPrice = data.getOhlc().getClose();
+                    } else {
+                        log.trace("Symbol {} has no resolvable lastPrice for performance calculation, skipping", symbol);
+                        continue;
+                    }
                     
                     double changePercent = ((lastPrice - previousClose) / previousClose) * 100;
                     symbolToChangePercent.put(symbol, changePercent);
@@ -46,7 +59,8 @@ public class TopMoverUtils {
                             symbol, changePercent, changePercent);
                 }
             }
-        });
+        }
+
         
         log.debug("Calculated performance metrics for {} stocks", symbolToPerformance.size());
     }
@@ -125,12 +139,22 @@ public class TopMoverUtils {
         
         return symbols.stream()
                 .<GainerLoser.StockMovement>map(symbol -> {
-                    MarketData data = marketData.get(symbol);
+                    MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
                     if (data == null) {
                         return null;
                     }
                     
-                    double lastPrice = data.getLastPrice();
+                    // Resolve lastPrice with null-safe fallback
+                    Double rawLastPrice = data.getLastPrice();
+                    double lastPrice;
+                    if (rawLastPrice != null && rawLastPrice > 0) {
+                        lastPrice = rawLastPrice;
+                    } else if (data.getOhlc() != null && data.getOhlc().getClose() > 0) {
+                        lastPrice = data.getOhlc().getClose();
+                    } else {
+                        lastPrice = 0.0;
+                    }
+                    
                     double changeAmount = 0.0;
                     if (data.getPreviousClose() != null && data.getPreviousClose() > 0) {
                         changeAmount = lastPrice - data.getPreviousClose();
@@ -263,9 +287,9 @@ public class TopMoverUtils {
         
         // Calculate total portfolio value
         double totalPortfolioValue = symbols.stream()
-                .filter(symbol -> marketData.containsKey(symbol) && symbolToQuantity.containsKey(symbol))
+                .filter(symbol -> AnalyticsUtils.resolveMarketData(marketData, symbol) != null && symbolToQuantity.containsKey(symbol))
                 .mapToDouble(symbol -> {
-                    MarketData data = marketData.get(symbol);
+                    MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
                     double quantity = symbolToQuantity.getOrDefault(symbol, 0.0);
                     return data.getLastPrice() * quantity;
                 })
@@ -282,8 +306,8 @@ public class TopMoverUtils {
                     double weightedChangeSum = 0.0;
                     
                     for (String symbol : sectorSymbols) {
-                        if (marketData.containsKey(symbol) && symbolToQuantity.containsKey(symbol)) {
-                            MarketData data = marketData.get(symbol);
+                        MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
+                        if (data != null && symbolToQuantity.containsKey(symbol)) {
                             double quantity = symbolToQuantity.get(symbol);
                             double value = data.getLastPrice() * quantity;
                             sectorValue += value;
@@ -361,7 +385,7 @@ public class TopMoverUtils {
      * @param isPortfolio True if this is for a portfolio, false for an index
      * @return GainerLoser response with top gainers and losers
      */
-    public static GainerLoser buildTopMoversResponse(Map<String, MarketData> marketData, int limit, String id, boolean isPortfolio, Map<String, String> symbolSectors) {
+    public static GainerLoser buildTopMoversResponse(List<String> symbols, Map<String, MarketData> marketData, int limit, String id, boolean isPortfolio, Map<String, String> symbolSectors) {
 
         log.debug("Building top movers response for {} {}", isPortfolio ? "portfolio" : "index", id);
         
@@ -370,7 +394,7 @@ public class TopMoverUtils {
         Map<String, Double> symbolToChangePercent = new HashMap<>();
         
         // Calculate performance metrics
-        calculatePerformanceMetrics(marketData, symbolToPerformance, symbolToChangePercent);
+        calculatePerformanceMetrics(symbols, marketData, symbolToPerformance, symbolToChangePercent);
         
         // Get top gainers and losers
         List<GainerLoser.StockMovement> gainers = getTopGainers(marketData, symbolToPerformance, symbolToChangePercent, limit);

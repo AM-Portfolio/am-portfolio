@@ -26,7 +26,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         @ComponentScan("com.am.common.amcommondata.mapper"),
         @ComponentScan("com.am.common.amcommondata.repository.security"),
         @ComponentScan("com.portfolio.kafka"),
-        @ComponentScan("com.portfolio")
+        @ComponentScan("com.portfolio"),
+        @ComponentScan("com.am.libraries.featureflag")
 })
 @EntityScan(basePackages = {
         "com.am.common.amcommondata.domain",

@@ -16,24 +16,55 @@ import com.portfolio.model.portfolio.v1.BrokerPortfolioSummary;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.redis.service.PortfolioSummaryRedisService;
 import com.portfolio.service.calculator.PortfolioCalculator;
+import com.am.observability.flow.FlowLogger;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class PortfolioOverviewService {
 
     private final PortfolioService portfolioService;
     private final PortfolioHoldingsService portfolioHoldingsService;
     private final PortfolioMapperv1 portfolioMapper;
+    
+    @org.springframework.lang.Nullable
     private final PortfolioSummaryRedisService portfolioSummaryRedisService;
+    
+    private final com.github.benmanes.caffeine.cache.Cache<String, PortfolioSummaryV1> summaryL1 =
+        com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+            .expireAfterWrite(60, java.util.concurrent.TimeUnit.SECONDS)
+            .maximumSize(500)
+            .recordStats()
+            .build();
+
     private final PortfolioCalculator portfolioCalculator;
+    private final FlowLogger flowLogger;
+
+    public PortfolioOverviewService(
+            PortfolioService portfolioService,
+            PortfolioHoldingsService portfolioHoldingsService,
+            PortfolioMapperv1 portfolioMapper,
+            @org.springframework.lang.Nullable PortfolioSummaryRedisService portfolioSummaryRedisService,
+            PortfolioCalculator portfolioCalculator,
+            FlowLogger flowLogger) {
+        this.portfolioService = portfolioService;
+        this.portfolioHoldingsService = portfolioHoldingsService;
+        this.portfolioMapper = portfolioMapper;
+        this.portfolioSummaryRedisService = portfolioSummaryRedisService;
+        this.portfolioCalculator = portfolioCalculator;
+        this.flowLogger = flowLogger;
+    }
 
     public PortfolioSummaryV1 overviewPortfolio(String userId, TimeInterval interval) {
-        log.info("Starting overviewPortfolio - User: {}, Interval: {}",
-                userId, interval != null ? interval.getCode() : "null");
+        try (var span = flowLogger.start("overviewPortfolio", "user", userId, "interval", interval != null ? interval.getCode() : "null")) {
+            String l1Key = userId + ":" + (interval != null ? interval.getCode() : "ALL");
+        PortfolioSummaryV1 l1Hit = summaryL1.getIfPresent(l1Key);
+        if (l1Hit != null) {
+            log.debug("[Summary] L1 cache hit for user={}", userId);
+            return l1Hit;
+        }
 
         Optional<PortfolioSummaryV1> cachedSummary = getCachedSummary(userId, interval);
         if (cachedSummary.isPresent()) {
@@ -47,13 +78,32 @@ public class PortfolioOverviewService {
                 portfolios != null ? portfolios.size() : 0, userId);
 
         if (portfolios == null || portfolios.isEmpty()) {
-            log.warn("No portfolios found for user: {}", userId);
-            return null;
+            log.info("No portfolios found for user: {} - Returning empty summary", userId);
+            com.portfolio.model.portfolio.v1.PortfolioSummaryV1 emptySummary = new com.portfolio.model.portfolio.v1.PortfolioSummaryV1();
+            emptySummary.setCurrentValue(0.0);
+            emptySummary.setInvestmentValue(0.0);
+            emptySummary.setTotalGainLoss(0.0);
+            emptySummary.setTotalGainLossPercentage(0.0);
+            emptySummary.setTodayGainLoss(0.0);
+            emptySummary.setTodayGainLossPercentage(0.0);
+            emptySummary.setTotalAssets(0);
+            emptySummary.setGainersCount(0);
+            emptySummary.setLosersCount(0);
+            emptySummary.setTodayGainersCount(0);
+            emptySummary.setTodayLosersCount(0);
+            emptySummary.setBrokerPortfolios(new java.util.HashMap<>());
+            emptySummary.setMarketCapHoldings(new java.util.HashMap<>());
+            emptySummary.setSectorialHoldings(new java.util.HashMap<>());
+            return emptySummary;
         }
 
-        PortfolioSummaryV1 finalSummary = buildPortfolioSummary(portfolios, userId, null, interval);
-        log.info("Completed overviewPortfolio for user: {}", userId);
-        return finalSummary;
+            PortfolioSummaryV1 finalSummary = buildPortfolioSummary(portfolios, userId, null, interval);
+            summaryL1.put(l1Key, finalSummary);
+            return finalSummary;
+        } catch (Exception e) {
+            log.error("Error in overviewPortfolio", e);
+            throw e;
+        }
     }
 
     /**
@@ -66,18 +116,26 @@ public class PortfolioOverviewService {
      * @return the portfolio summary for the specific portfolio
      */
     public PortfolioSummaryV1 overviewPortfolio(String userId, String portfolioId, TimeInterval interval) {
-        log.info("Starting overviewPortfolio for specific portfolio - User: {}, Portfolio: {}, Interval: {}",
-                userId, portfolioId, interval != null ? interval.getCode() : "null");
-
-        if (portfolioId == null || portfolioId.trim().isEmpty()) {
+        try (var span = flowLogger.start("overviewPortfolioSpecific", "user", userId, "portfolio", portfolioId, "interval", interval != null ? interval.getCode() : "null")) {
+            if (portfolioId == null || portfolioId.trim().isEmpty()) {
             log.warn("Blank portfolioId provided for specific portfolio overview - User: {}", userId);
             throw new IllegalArgumentException("portfolioId cannot be blank");
         }
 
-        Optional<PortfolioSummaryV1> cachedSummary = portfolioSummaryRedisService.getLatestSummary(userId, interval, portfolioId);
-        if (cachedSummary.isPresent()) {
-            log.info("Returning cached portfolio summary for user: {} and portfolio: {}", userId, portfolioId);
-            return cachedSummary.get();
+        String l1Key = userId + ":" + portfolioId + ":" + (interval != null ? interval.getCode() : "ALL");
+        PortfolioSummaryV1 l1Hit = summaryL1.getIfPresent(l1Key);
+        if (l1Hit != null) {
+            log.debug("[Summary] L1 cache hit for user={} portfolio={}", userId, portfolioId);
+            return l1Hit;
+        }
+
+        Optional<PortfolioSummaryV1> cachedSummary = Optional.empty();
+        if (portfolioSummaryRedisService != null) {
+            cachedSummary = portfolioSummaryRedisService.getLatestSummary(userId, interval, portfolioId);
+            if (cachedSummary.isPresent()) {
+                log.info("Returning cached portfolio summary for user: {} and portfolio: {}", userId, portfolioId);
+                return cachedSummary.get();
+            }
         }
 
         log.info("Cache miss for specific portfolio summary - User: {}, Portfolio: {}, fetching from source", userId, portfolioId);
@@ -103,10 +161,14 @@ public class PortfolioOverviewService {
         log.info("Found {} matching portfolio(s) for ID: {} and user: {}",
                 filteredPortfolios.size(), portfolioId, userId);
 
-        PortfolioSummaryV1 finalSummary = buildPortfolioSummary(filteredPortfolios, userId, portfolioId, interval);
+            PortfolioSummaryV1 finalSummary = buildPortfolioSummary(filteredPortfolios, userId, portfolioId, interval);
 
-        log.info("Completed overviewPortfolio for user: {} and portfolio: {}", userId, portfolioId);
-        return finalSummary;
+            summaryL1.put(l1Key, finalSummary);
+            return finalSummary;
+        } catch (Exception e) {
+            log.error("Error in specific overviewPortfolio", e);
+            throw e;
+        }
     }
 
     /**
@@ -147,7 +209,13 @@ public class PortfolioOverviewService {
                     portfolio.getId(), portfolio.getBrokerType(), portfolio.getTotalValue());
 
             var portfolioSummary = portfolioMapper.toPortfolioModelV1(portfolio);
-            brokerSummaryMap.computeIfAbsent(portfolio.getBrokerType(), brokerType -> portfolioSummary);
+            brokerSummaryMap.merge(portfolio.getBrokerType(), portfolioSummary,
+                (existing, incoming) -> {
+                    double inc = incoming.getInvestmentValue() != null ? incoming.getInvestmentValue() : 0.0;
+                    double ex  = existing.getInvestmentValue() != null ? existing.getInvestmentValue() : 0.0;
+                    existing.setInvestmentValue(ex + inc);
+                    return existing;
+                });
         }
 
         log.debug("Created broker summary map with {} entries for {}", brokerSummaryMap.size(), context);
@@ -162,7 +230,9 @@ public class PortfolioOverviewService {
 
         // Store in cache
         log.debug("Caching portfolio summary for user: {}", userId);
-        portfolioSummaryRedisService.cachePortfolioSummary(finalSummary, userId, interval, portfolioId);
+        if (portfolioSummaryRedisService != null) {
+            portfolioSummaryRedisService.cachePortfolioSummary(finalSummary, userId, interval, portfolioId);
+        }
 
         log.info("Completed overviewPortfolio for user: {}", userId);
         return finalSummary;
@@ -171,7 +241,9 @@ public class PortfolioOverviewService {
     private PortfolioSummaryV1 getPortfolioSummary(List<PortfolioModelV1> portfolios) {
         log.debug("Calculating total portfolio value from {} portfolios", portfolios.size());
 
-        var totalValue = portfolios.stream().mapToDouble(PortfolioModelV1::getTotalValue).sum();
+        var totalValue = portfolios.stream()
+                .mapToDouble(p -> p.getTotalValue() != null ? p.getTotalValue() : 0.0)
+                .sum();
         log.debug("Calculated total value: {}", totalValue);
 
         var equityHoldings = portfolioHoldingsService.getHoldings(portfolios);
@@ -184,13 +256,16 @@ public class PortfolioOverviewService {
         log.debug("Checking cache for portfolio summary - User: {}, Interval: {}",
                 userId, interval != null ? interval.getCode() : "null");
 
-        Optional<PortfolioSummaryV1> cachedSummary = portfolioSummaryRedisService.getLatestSummary(userId, interval);
-        if (cachedSummary.isPresent()) {
-            log.info("Serving portfolio summary from cache - User: {}, Interval: {}",
-                    userId, interval != null ? interval.getCode() : "null");
-        } else {
-            log.debug("No cached summary found for user: {}", userId);
+        Optional<PortfolioSummaryV1> cachedSummary = Optional.empty();
+        if (portfolioSummaryRedisService != null) {
+            cachedSummary = portfolioSummaryRedisService.getLatestSummary(userId, interval);
+            if (cachedSummary.isPresent()) {
+                log.info("Serving portfolio summary from Redis cache - User: {}, Interval: {}",
+                        userId, interval != null ? interval.getCode() : "null");
+                return cachedSummary;
+            }
         }
+        log.debug("No cached summary found for user: {}", userId);
 
         return cachedSummary;
     }

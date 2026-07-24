@@ -51,14 +51,14 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
         // Use the common portfolio data processing method
         return processPortfolioData(
             portfolioId,
-            request.getTimeFrameRequest(),
+            request,
             this::createEmptyResponse,
             (portfolio, portfolioSymbols, marketData) -> {
                 // Get sector information for symbols
                 Map<String, String> symbolSectors = securityDetailsService.getSymbolMapSectors(portfolioSymbols);
                 
                 // Calculate top movers using the determined limit and include sector information
-                return TopMoverUtils.buildTopMoversResponse(marketData, limit, portfolioId, true, symbolSectors);
+                return TopMoverUtils.buildTopMoversResponse(portfolioSymbols, marketData, limit, portfolioId, true, symbolSectors);
             }
         );
     }

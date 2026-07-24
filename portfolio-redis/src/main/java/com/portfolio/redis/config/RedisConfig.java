@@ -56,6 +56,9 @@ public class RedisConfig {
     @Autowired
     private ObservationRegistry observationRegistry;
 
+    @Autowired(required = false)
+    private com.am.libraries.featureflag.service.GrowthBookService growthBookService;
+
     @Bean
     public RedisConnectionFactory redisConnectionFactory() {
         RedisStandaloneConfiguration redisConfig = new RedisStandaloneConfiguration();
@@ -108,7 +111,9 @@ public class RedisConfig {
      * @return a configured RedisTemplate instance
      */
     private <T> RedisTemplate<String, T> createRedisTemplate(RedisConnectionFactory connectionFactory, Class<T> targetClass) {
-        RedisTemplate<String, T> template = new RedisTemplate<>();
+        RedisTemplate<String, T> template = growthBookService != null 
+            ? new FeatureFlaggedRedisTemplate<>(growthBookService) 
+            : new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
         template.setKeySerializer(new StringRedisSerializer());
         
@@ -179,7 +184,9 @@ public class RedisConfig {
     @Bean
     @Primary
     public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {
-        RedisTemplate<String, Object> template = new RedisTemplate<>();
+        RedisTemplate<String, Object> template = growthBookService != null 
+            ? new FeatureFlaggedRedisTemplate<>(growthBookService) 
+            : new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
         
         ObjectMapper mapper = new ObjectMapper();

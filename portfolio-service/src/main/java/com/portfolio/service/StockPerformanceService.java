@@ -27,6 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 public class StockPerformanceService {
+    @org.springframework.lang.Nullable
     private final StockIndicesRedisService stockPriceRedisService;
     private static final int DEFAULT_TOP_N = 5;
     private static final int DEFAULT_PAGE_SIZE = 5;
@@ -34,7 +35,7 @@ public class StockPerformanceService {
     private final java.util.concurrent.Executor taskExecutor;
 
     public StockPerformanceService(
-            StockIndicesRedisService stockPriceRedisService,
+            @org.springframework.lang.Nullable StockIndicesRedisService stockPriceRedisService,
             MarketDataService marketDataService,
             @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
         this.stockPriceRedisService = stockPriceRedisService;
@@ -59,16 +60,29 @@ public class StockPerformanceService {
         // Get market data for all symbols at once
         var marketData = marketDataService.getMarketData(symbols);
         
+        // ONE batch call for ALL symbols — not per symbol
+        Map<String, MarketData> historicalMap = Map.of();
+        if (startTime != null) {
+            LocalDate fromDate = startTime.atZone(ZoneId.systemDefault()).toLocalDate();
+            try {
+                historicalMap = marketDataService.getHistoricalData(
+                    symbols, fromDate, LocalDate.now(), null, null, null, null, null, null);
+            } catch (Exception e) {
+                log.warn("Bulk historical prefetch failed: {}", e.getMessage());
+            }
+        }
+        final Map<String, MarketData> hMap = historicalMap;
+
         if (startTime != null) {
             // Normal in-memory fast-path (avoiding thread pool exhaustion)
             return equityHoldings.stream()
-                .map(asset -> getGainLossPercentage(asset, startTime, marketData))
+                .map(asset -> getGainLossPercentage(asset, startTime, hMap, marketData))
                 .filter(java.util.Objects::nonNull)
                 .toList();
         } else {
             // Normal in-memory fast-path
             return equityHoldings.stream()
-                .map(asset -> getGainLossPercentage(asset, startTime, marketData))
+                .map(asset -> getGainLossPercentage(asset, startTime, hMap, marketData))
                 .filter(java.util.Objects::nonNull)
                 .toList();
         }
@@ -119,64 +133,103 @@ public class StockPerformanceService {
     }
 
     public double calculateHistoricalValue(List<StockPerformance> performances, Instant startTime) {
-        // Run all slow blocking network I/O requests for historical values concurrently
-        var futures = performances.stream()
+        // Run Redis lookups concurrently
+        var redisFutures = performances.stream()
             .map(performance -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-                // Try Redis first for cached historical prices
-                List<StockPriceCache> historicalPrices = stockPriceRedisService.getHistoricalPrices(
-                    performance.getSymbol(),
-                    startTime.atZone(java.time.ZoneOffset.UTC).toLocalDateTime(),
-                    Instant.now().atZone(java.time.ZoneOffset.UTC).toLocalDateTime()
-                );
-                
-                if (!historicalPrices.isEmpty()) {
-                    double historicalPrice = historicalPrices.get(0).getClosePrice();
-                    return historicalPrice * performance.getQuantity();
-                }
-
-                // Fallback: fetch from market data API when Redis is empty/unavailable
-                try {
-                    LocalDate fromDate = startTime.atZone(ZoneId.systemDefault()).toLocalDate();
-                    Map<String, MarketData> historicalData = marketDataService.getHistoricalData(
-                        List.of(performance.getSymbol()),
-                        fromDate, LocalDate.now(),
-                        null, null, null, null, null, null
+                if (stockPriceRedisService != null) {
+                    List<StockPriceCache> historicalPrices = stockPriceRedisService.getHistoricalPrices(
+                        performance.getSymbol(),
+                        startTime.atZone(java.time.ZoneOffset.UTC).toLocalDateTime(),
+                        Instant.now().atZone(java.time.ZoneOffset.UTC).toLocalDateTime()
                     );
-                    MarketData data = historicalData.get(performance.getSymbol());
-                    if (data != null && data.getLastPrice() > 0.0) {
-                        return data.getLastPrice() * performance.getQuantity();
-                    } else if (data != null && data.getOhlc() != null && data.getOhlc().getClose() > 0.0) {
-                        return data.getOhlc().getClose() * performance.getQuantity();
+                    if (!historicalPrices.isEmpty()) {
+                        return Map.entry(performance.getSymbol(), historicalPrices.get(0).getClosePrice());
                     }
-                } catch (Exception e) {
-                    log.warn("Fallback to market data API failed for {}: {}",
-                        performance.getSymbol(), e.getMessage());
                 }
-
-                return 0.0;
+                return Map.<String, Double>entry(performance.getSymbol(), -1.0); // -1.0 marks missing
             }, taskExecutor))
             .toList();
+            
+        Map<String, Double> resolvedPrices = new java.util.HashMap<>();
+        List<String> missingSymbols = new ArrayList<>();
+        
+        for (var f : redisFutures) {
+            try {
+                var entry = f.join();
+                if (entry.getValue() < 0) {
+                    missingSymbols.add(entry.getKey());
+                } else {
+                    resolvedPrices.put(entry.getKey(), entry.getValue());
+                }
+            } catch (Exception e) {
+                // Ignore, will fetch from fallback
+            }
+        }
 
-        return futures.stream()
-            .mapToDouble(java.util.concurrent.CompletableFuture::join)
+        // Bulk fetch missing symbols from API (Solves N+1 latency)
+        if (!missingSymbols.isEmpty()) {
+            try {
+                LocalDate fromDate = startTime.atZone(ZoneId.systemDefault()).toLocalDate();
+                Map<String, MarketData> historicalData = marketDataService.getHistoricalData(
+                    missingSymbols,
+                    fromDate, LocalDate.now(),
+                    null, null, null, null, null, null
+                );
+                
+                if (historicalData != null) {
+                    for (Map.Entry<String, MarketData> entry : historicalData.entrySet()) {
+                        MarketData data = entry.getValue();
+                        if (data != null) {
+                            if (data.getLastPrice() > 0.0) {
+                                resolvedPrices.put(entry.getKey(), data.getLastPrice());
+                            } else if (data.getOhlc() != null && data.getOhlc().getClose() > 0.0) {
+                                resolvedPrices.put(entry.getKey(), data.getOhlc().getClose());
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Fallback to market data API failed for bulk fetch: {}", e.getMessage());
+            }
+        }
+
+        return performances.stream()
+            .mapToDouble(p -> resolvedPrices.getOrDefault(p.getSymbol(), 0.0) * p.getQuantity())
             .sum();
     }
 
-    private StockPerformance getGainLossPercentage(AssetModel asset, Instant startTime, java.util.Map<String, com.portfolio.model.market.MarketData> marketData) {
+    private StockPerformance getGainLossPercentage(AssetModel asset, Instant startTime, java.util.Map<String, MarketData> historicalMap, java.util.Map<String, com.portfolio.model.market.MarketData> marketData) {
         double currentPrice;
         
         if (startTime != null) {
             // Use historical data for time-based analysis
-            List<StockPriceCache> prices = stockPriceRedisService.getHistoricalPrices(
-                asset.getSymbol(),
-                startTime.atZone(java.time.ZoneOffset.UTC).toLocalDateTime(),
-                LocalDateTime.now()
-            );
-            if (prices.isEmpty()) {
-                log.warn("No historical price data found for symbol: {} since {}", asset.getSymbol(), startTime);
-                return null;
+            List<StockPriceCache> prices = new ArrayList<>();
+            if (stockPriceRedisService != null) {
+                prices = stockPriceRedisService.getHistoricalPrices(
+                    asset.getSymbol(),
+                    startTime.atZone(java.time.ZoneOffset.UTC).toLocalDateTime(),
+                    LocalDateTime.now()
+                );
             }
-            currentPrice = prices.get(prices.size() - 1).getClosePrice();
+            if (prices.isEmpty()) {
+                // Try fetching from pre-fetched historicalMap
+                try {
+                    MarketData data = historicalMap.get(asset.getSymbol());
+                    if (data != null && data.getLastPrice() > 0.0) {
+                        currentPrice = data.getLastPrice();
+                    } else if (data != null && data.getOhlc() != null && data.getOhlc().getClose() > 0.0) {
+                        currentPrice = data.getOhlc().getClose();
+                    } else {
+                        log.warn("No historical price data found for symbol: {} since {}", asset.getSymbol(), startTime);
+                        return null;
+                    }
+                } catch (Exception e) {
+                    log.error("API fallback failed for getGainLossPercentage: {}", e.getMessage());
+                    return null;
+                }
+            } else {
+                currentPrice = prices.get(prices.size() - 1).getClosePrice();
+            }
         } else {
             // Use market data service for current prices
             var data = marketData.get(asset.getSymbol());

@@ -2,6 +2,7 @@ package com.portfolio.model.portfolio.v1;
 
 import java.time.LocalDateTime;
 
+import com.portfolio.model.portfolio.DataStatus;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
 
@@ -36,4 +37,5 @@ public class BasePortfolioSummay {
     private Integer todayLosersCount;
     
     private LocalDateTime lastUpdated;
+    private DataStatus dataStatus;
 }

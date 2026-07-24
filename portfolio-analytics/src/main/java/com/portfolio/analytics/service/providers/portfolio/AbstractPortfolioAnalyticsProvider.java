@@ -100,10 +100,9 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
     
     @Override
     public T generateAnalytics(String portfolioId, AdvancedAnalyticsRequest request) {
-        log.info("Generating {} analytics for portfolio {} with time frame: {} to {}, interval: {}", 
-                getType(), portfolioId, request.getFromDate(), 
-                request.getToDate(), request.getTimeFrame());
-        return generateAnalytics(portfolioId, request);
+        throw new UnsupportedOperationException(
+            getClass().getSimpleName() + " must override generateAnalytics(String, AdvancedAnalyticsRequest)"
+        );
     }
     
     /**
@@ -119,12 +118,15 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
      */
     protected <R> R processPortfolioData(
             String portfolioId,
-            TimeFrameRequest timeFrameRequest,
+            AdvancedAnalyticsRequest request,
             Supplier<R> emptyResultSupplier,
             PortfolioDataProcessor<R> resultProcessor) {
         
-        // Get portfolio data
-        PortfolioModelV1 portfolio = getPortfolio(portfolioId);
+        // Get portfolio data (use prefetched if available to save DB calls)
+        PortfolioModelV1 portfolio = (request != null && request.getPrefetchedPortfolio() != null)
+            ? request.getPrefetchedPortfolio()
+            : getPortfolio(portfolioId);
+            
         if (portfolio == null || portfolio.getEquityModels() == null || portfolio.getEquityModels().isEmpty()) {
             log.warn("No portfolio or holdings found for ID: {}", portfolioId);
             return emptyResultSupplier.get();
@@ -137,10 +139,16 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
             return emptyResultSupplier.get();
         }
         
-        // Fetch market data for all stocks in the portfolio
-        Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, timeFrameRequest);
+        // Use prefetched market data if available, otherwise fetch it
+        Map<String, MarketData> marketData = (request != null) ? request.getPrefetchedMarketData() : null;
+        if (marketData == null || marketData.isEmpty()) {
+            // Always attempt an individual fetch — the facade-level prefetch may have failed transiently
+            // (e.g. transient Redis miss, OHLC API timeout). Never permanently abort because of a failed prefetch.
+            log.info("Market data not in prefetch cache. Fetching individually for provider {}", this.getClass().getSimpleName());
+            marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, request != null ? request.getTimeFrameRequest() : null);
+        }
         
-        if (marketData.isEmpty()) {
+        if (marketData == null || marketData.isEmpty()) {
             log.warn("No market data available for portfolio: {}", portfolioId);
             return emptyResultSupplier.get();
         }

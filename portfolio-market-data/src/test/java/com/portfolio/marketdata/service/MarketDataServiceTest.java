@@ -11,7 +11,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
 
+import java.util.concurrent.Executor;
 import java.util.List;
+import org.junit.jupiter.api.BeforeEach;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -24,8 +26,24 @@ class MarketDataServiceTest {
     @Mock
     private MarketDataApiClient marketDataApiClient;
 
-    @InjectMocks
+    @Mock
+    private com.portfolio.redis.service.PortfolioMarketDataRedisService portfolioMarketDataRedisService;
+
+    @Mock
+    private com.am.common.amcommondata.service.price.StockPriceMongoService stockPriceMongoService;
+
+    @Mock
+    private com.am.common.amcommondata.service.price.StockPriceHistoryMongoService stockPriceHistoryMongoService;
+
+    private Executor taskExecutor = Runnable::run;
+    private Executor externalApiExecutor = Runnable::run;
+
     private MarketDataService marketDataService;
+
+    @BeforeEach
+    void setUp() {
+        marketDataService = new MarketDataService(marketDataApiClient, portfolioMarketDataRedisService, stockPriceMongoService, stockPriceHistoryMongoService, taskExecutor, externalApiExecutor);
+    }
 
     @Test
     void getOhlcData_Success() {

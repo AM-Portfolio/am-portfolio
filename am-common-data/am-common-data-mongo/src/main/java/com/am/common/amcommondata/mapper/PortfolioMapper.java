@@ -18,13 +18,22 @@ public class PortfolioMapper {
     @Autowired
     private EquityMapper equityMapper;
 
+    private UUID parseOrGenerateUUID(String id) {
+        if (id == null) return null;
+        try {
+            return UUID.fromString(id);
+        } catch (IllegalArgumentException e) {
+            return UUID.nameUUIDFromBytes(id.getBytes());
+        }
+    }
+
     public PortfolioModelV1 toModel(PortfolioDocument document) {
         if (document == null) {
             return null;
         }
 
         PortfolioModelV1 model = PortfolioModelV1.builder()
-                .id(UUID.fromString(document.getId()))
+                .id(parseOrGenerateUUID(document.getId()))
                 .name(document.getName())
                 .description(document.getDescription())
                 .owner(document.getOwner())

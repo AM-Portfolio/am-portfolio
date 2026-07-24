@@ -60,14 +60,14 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
         Map<String, String> symbolSectors = securityDetailsService.getSymbolMapSectors(indexStockSymbols);
         
         // Use TopMoverUtils to build the response with top gainers and losers
-        GainerLoser gainerLoser = TopMoverUtils.buildTopMoversResponse(marketData, limit, indexSymbol, false, symbolSectors);
+        GainerLoser gainerLoser = TopMoverUtils.buildTopMoversResponse(indexStockSymbols, marketData, limit, indexSymbol, false, symbolSectors);
         
         // Create maps for performance metrics (already calculated in buildTopMoversResponse)
         Map<String, Double> symbolToPerformance = new HashMap<>();
         Map<String, Double> symbolToChangePercent = new HashMap<>();
         
         // Calculate performance metrics to use for sector movements
-        TopMoverUtils.calculatePerformanceMetrics(marketData, symbolToPerformance, symbolToChangePercent);
+        TopMoverUtils.calculatePerformanceMetrics(indexStockSymbols, marketData, symbolToPerformance, symbolToChangePercent);
         
         // Calculate sector movements using utility
         List<GainerLoser.SectorMovement> sectorMovements = TopMoverUtils.calculateSectorMovements(

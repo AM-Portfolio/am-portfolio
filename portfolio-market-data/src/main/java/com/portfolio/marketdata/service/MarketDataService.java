@@ -1,6 +1,13 @@
 package com.portfolio.marketdata.service;
 
+import java.time.DayOfWeek;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -11,6 +18,9 @@ import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 
+import com.am.common.amcommondata.document.price.StockPriceDocument;
+import com.am.common.amcommondata.document.price.StockPriceHistoryDocument;
+import com.am.common.investment.model.historical.OHLCVTPoint;
 import com.portfolio.marketdata.client.MarketDataApiClient;
 import com.portfolio.marketdata.model.FilterType;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
@@ -23,6 +33,7 @@ import com.portfolio.marketdata.model.MarketDataResponseWrapper;
 import com.portfolio.marketdata.util.MarketDataConverter;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.market.TimeFrame;
+import com.portfolio.model.util.SymbolResolver;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,20 +47,64 @@ import reactor.core.scheduler.Schedulers;
 @Service
 public class MarketDataService {
 
+    private final com.github.benmanes.caffeine.cache.Cache<String, MarketData> localCache = 
+            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+            .expireAfterWrite(5, java.util.concurrent.TimeUnit.MINUTES)
+            .maximumSize(20000)
+            .build();
+
+    private final com.github.benmanes.caffeine.cache.Cache<String, com.portfolio.marketdata.model.HistoricalData> chartCache = 
+            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+            .expireAfterWrite(3, java.util.concurrent.TimeUnit.MINUTES)
+            .maximumSize(5000)
+            .build();
+
     private final MarketDataApiClient marketDataApiClient;
     
     @org.springframework.lang.Nullable
     private final com.portfolio.redis.service.PortfolioMarketDataRedisService marketDataRedisService;
 
+    @org.springframework.lang.Nullable
+    private final com.am.common.amcommondata.service.price.StockPriceMongoService stockPriceMongoService;
+
+    @org.springframework.lang.Nullable
+    private final com.am.common.amcommondata.service.price.StockPriceHistoryMongoService stockPriceHistoryMongoService;
+
     private final java.util.concurrent.Executor taskExecutor;
+    private final java.util.concurrent.Executor externalApiExecutor;
+    
+    // Tracks in-flight OHLC fetches to prevent cache stampedes
+    private final java.util.concurrent.ConcurrentHashMap<String, CompletableFuture<MarketData>> inFlightRequests = new java.util.concurrent.ConcurrentHashMap<>();
 
     public MarketDataService(
             MarketDataApiClient marketDataApiClient,
             @org.springframework.lang.Nullable com.portfolio.redis.service.PortfolioMarketDataRedisService marketDataRedisService,
-            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
+            @org.springframework.lang.Nullable com.am.common.amcommondata.service.price.StockPriceMongoService stockPriceMongoService,
+            @org.springframework.lang.Nullable com.am.common.amcommondata.service.price.StockPriceHistoryMongoService stockPriceHistoryMongoService,
+            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
+            @org.springframework.beans.factory.annotation.Qualifier("externalApiExecutor") java.util.concurrent.Executor externalApiExecutor) {
         this.marketDataApiClient = marketDataApiClient;
         this.marketDataRedisService = marketDataRedisService;
+        this.stockPriceMongoService = stockPriceMongoService;
+        this.stockPriceHistoryMongoService = stockPriceHistoryMongoService;
         this.taskExecutor = taskExecutor;
+        this.externalApiExecutor = externalApiExecutor;
+    }
+
+    // Constants
+    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+    private static final LocalTime MARKET_OPEN = LocalTime.of(9, 15);
+
+    // --- NEW HELPER: Find last valid trading day start epoch ---
+    private long findLastTradingDayStartEpoch() {
+        ZonedDateTime now = ZonedDateTime.now(IST);
+        // If before market open today, use yesterday
+        if (now.toLocalTime().isBefore(MARKET_OPEN)) now = now.minusDays(1);
+        // Roll back over weekends
+        while (now.getDayOfWeek() == DayOfWeek.SATURDAY || now.getDayOfWeek() == DayOfWeek.SUNDAY) {
+            now = now.minusDays(1);
+        }
+        return now.with(MARKET_OPEN).toInstant().toEpochMilli();
     }
 
     /**
@@ -138,17 +193,17 @@ public class MarketDataService {
                     log.warn("[HistoricalData chunk] Failed for chunk of {}: {}", chunk.size(), e.getMessage());
                     return java.util.Collections.<String, MarketData>emptyMap();
                 }
-            }, taskExecutor))
+            }, externalApiExecutor))
             .collect(Collectors.toList());
 
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+            .orTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .exceptionally(e -> null)
+            .join();
         Map<String, MarketData> merged = new java.util.HashMap<>();
-        for (java.util.concurrent.CompletableFuture<Map<String, MarketData>> f : futures) {
-            try {
-                merged.putAll(f.get(30, java.util.concurrent.TimeUnit.SECONDS));
-            } catch (Exception e) {
-                log.warn("[HistoricalData chunk] Chunk future failed or timed out: {}", e.getMessage());
-            }
-        }
+        futures.stream()
+            .filter(f -> !f.isCompletedExceptionally())
+            .forEach(f -> merged.putAll(f.getNow(java.util.Collections.emptyMap())));
         
         return merged;
     }
@@ -166,11 +221,12 @@ public class MarketDataService {
 
         // Check for exchange prefix pattern (like NSE:, BSE:, etc.)
         int colonIndex = symbol.indexOf(':');
+        String cleaned = symbol;
         if (colonIndex > 0 && colonIndex < symbol.length() - 1) {
-            return symbol.substring(colonIndex + 1);
+            cleaned = symbol.substring(colonIndex + 1);
         }
 
-        return symbol;
+        return SymbolResolver.normalize(cleaned);
     }
 
     private Map<String, MarketData> convertToMarketDataMap(MarketDataResponseWrapper wrapper, boolean isAsync) {
@@ -229,8 +285,8 @@ public class MarketDataService {
 
         log.info("Getting OHLC data for {} symbols with timeFrame={} refresh={}", validSymbols.size(), timeFrame, refresh);
 
-        // Chunking by 500
-        int CHUNK_SIZE = 500;
+        // Chunking by 20 to prevent timeouts
+        int CHUNK_SIZE = 20;
         List<List<String>> chunks = new java.util.ArrayList<>();
         for (int i = 0; i < validSymbols.size(); i += CHUNK_SIZE) {
             chunks.add(validSymbols.subList(i, Math.min(validSymbols.size(), i + CHUNK_SIZE)));
@@ -246,18 +302,25 @@ public class MarketDataService {
                     log.warn("[OHLC data] API call failed: {}", e.getMessage());
                     return Collections.<String, MarketData>emptyMap();
                 }
-            }, taskExecutor)
-            .completeOnTimeout(Collections.<String, MarketData>emptyMap(), 4, java.util.concurrent.TimeUnit.SECONDS)
+            }, externalApiExecutor)
             .exceptionally(e -> {
-                log.warn("[OHLC data] Fetch timed out or failed: {}", e.getMessage());
+                log.warn("[OHLC data] Fetch failed: {}", e.getMessage());
                 return Collections.<String, MarketData>emptyMap();
             }))
             .collect(Collectors.toList());
 
         Map<String, MarketData> merged = new java.util.HashMap<>();
-        for (java.util.concurrent.CompletableFuture<Map<String, MarketData>> f : futures) {
-            merged.putAll(f.join());
+        try {
+            java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0]))
+                .get(12, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.warn("[OHLC] Chunk futures timed out at 12s — collecting completed results");
+        } catch (Exception e) {
+            log.warn("[OHLC] Error waiting for chunk futures: {}", e.getMessage());
         }
+        futures.stream()
+            .filter(f -> f.isDone() && !f.isCompletedExceptionally())
+            .forEach(f -> merged.putAll(f.getNow(Collections.emptyMap())));
         return merged;
     }
 
@@ -290,7 +353,7 @@ public class MarketDataService {
      * @return Map of symbols to their respective current prices
      */
     public Map<String, Double> getCurrentPrices(List<String> symbols) {
-        Map<String, MarketData> data = getOhlcData(symbols, false);
+        Map<String, MarketData> data = getMarketData(symbols);
         return data.entrySet().stream()
                 .filter(e -> e.getValue() != null && e.getValue().getLastPrice() != null)
                 .collect(Collectors.toMap(
@@ -380,57 +443,210 @@ public class MarketDataService {
         Map<String, MarketData> result = new HashMap<>();
         List<String> normalized = symbols.stream().map(this::cleanSymbol).collect(Collectors.toList());
 
-        // 1. Try market data cache first (populated by am-market service or last live fetch)
-        if (marketDataRedisService != null) {
-            try {
-                Map<String, MarketData> cached = marketDataRedisService.getMarketData(normalized);
-                if (cached != null) result.putAll(cached);
-            } catch (Exception e) {
-                log.warn("[MarketData] Cache read failed: {}", e.getMessage());
+        // 1. Try L1 Caffeine cache first
+        for (String s : normalized) {
+            MarketData cached = localCache.getIfPresent(s);
+            if (cached != null) {
+                result.put(s, cached);
             }
         }
 
-        // 2. Find symbols still missing after cache lookup
+        // 1.5. Find missing after L1 cache
         List<String> missing = normalized.stream()
             .filter(s -> !result.containsKey(s))
             .collect(Collectors.toList());
 
         if (missing.isEmpty()) {
-            log.info("[MarketData] All {} symbols served from cache.", result.size());
             return result;
         }
 
-        // 3. Fetch missing from OHLC API
-        log.info("[MarketData] Cache miss for {} symbols. Fetching from API.", missing.size());
-        try {
-            Map<String, MarketData> fetched = getOhlcData(missing, false);
-            if (fetched != null && !fetched.isEmpty()) {
-                result.putAll(fetched);
-                // Store in cache with SmartTTL
-                if (marketDataRedisService != null) {
-                    marketDataRedisService.cacheMarketData(fetched);
+        // 2. Try market data cache next (populated by am-market service or last live fetch)
+        if (marketDataRedisService != null) {
+            try {
+                Map<String, MarketData> cached = marketDataRedisService.getMarketData(missing);
+                if (cached != null) {
+                    result.putAll(cached);
+                    // Update L1
+                    cached.forEach(localCache::put);
                 }
+            } catch (Exception e) {
+                log.warn("[MarketData] Cache read failed: {}", e.getMessage());
             }
-        } catch (Exception e) {
-            log.error("[MarketData] OHLC fetch failed: {}", e.getMessage());
+            
+            missing = normalized.stream()
+                .filter(s -> !result.containsKey(s))
+                .collect(Collectors.toList());
         }
 
-        // 4. Fallback for symbols that are STILL missing (e.g., after market hours or OHLC timeout)
-        List<String> stillMissing = symbols.stream().map(this::cleanSymbol)
+        if (missing.isEmpty()) {
+            return result;
+        }
+
+        // 3. Try MongoDB cache next (populated by Kafka live stream)
+        if (stockPriceMongoService != null) {
+            try {
+                java.util.Map<String, com.am.common.amcommondata.document.price.StockPriceDocument> mongoPrices = stockPriceMongoService.getPrices(missing);
+                if (mongoPrices != null && !mongoPrices.isEmpty()) {
+                    for (java.util.Map.Entry<String, com.am.common.amcommondata.document.price.StockPriceDocument> entry : mongoPrices.entrySet()) {
+                        com.am.common.amcommondata.document.price.StockPriceDocument doc = entry.getValue();
+                        MarketData md = MarketData.builder()
+                            .symbol(doc.getSymbol())
+                            .lastPrice(doc.getLastPrice())
+                            .previousClose(doc.getPreviousClose())
+                            .timestamp(java.time.Instant.ofEpochMilli(doc.getTimestamp() != null ? doc.getTimestamp() : System.currentTimeMillis()))
+                            .ohlc(com.portfolio.model.market.OhlcData.builder()
+                                .open(doc.getOpenPrice())
+                                .high(doc.getHighPrice())
+                                .low(doc.getLowPrice())
+                                .close(doc.getLastPrice())
+                                .build())
+                            .build();
+                        result.put(doc.getSymbol(), md);
+                        localCache.put(doc.getSymbol(), md); // Update L1
+                    }
+                    log.info("[MarketData] MongoDB cache hit for {} symbols.", mongoPrices.size());
+                }
+            } catch (Exception e) {
+                log.warn("[MarketData] MongoDB read failed: {}", e.getMessage());
+            }
+            
+            missing = normalized.stream()
+                .filter(s -> !result.containsKey(s))
+                .collect(Collectors.toList());
+        }
+
+        if (missing.isEmpty()) {
+            log.info("[MarketData] All {} symbols served from caches.", result.size());
+            return result;
+        }
+
+        // 4. Fetch missing from OHLC API with in-flight deduplication to prevent cache stampedes
+        if (!missing.isEmpty()) {
+            List<String> toFetch = new java.util.ArrayList<>();
+            Map<String, CompletableFuture<MarketData>> waitFor = new HashMap<>();
+
+            for (String symbol : missing) {
+                // Double check L1 cache in case another thread just finished
+                MarketData cached = localCache.getIfPresent(symbol);
+                if (cached != null) {
+                    result.put(symbol, cached);
+                    continue;
+                }
+                
+                boolean[] isNew = {false};
+                CompletableFuture<MarketData> fut = inFlightRequests.computeIfAbsent(symbol, k -> {
+                    isNew[0] = true;
+                    return new CompletableFuture<>();
+                });
+                
+                if (isNew[0]) {
+                    toFetch.add(symbol);
+                } else {
+                    waitFor.put(symbol, fut); // coalesce with in-flight request
+                }
+            }
+
+            // Fetch genuinely missing symbols
+            if (!toFetch.isEmpty()) {
+                log.info("[MarketData] Cache miss for {} symbols. Fetching from API.", toFetch.size());
+                
+                Map<String, CompletableFuture<MarketData>> newFutures = new HashMap<>();
+                for (String s : toFetch) {
+                    newFutures.put(s, inFlightRequests.get(s));
+                }
+                
+                try {
+                    Map<String, MarketData> fetched = getOhlcData(toFetch, false);
+                    if (fetched != null && !fetched.isEmpty()) {
+                        fetched.forEach((k, v) -> {
+                            result.put(k, v);
+                            localCache.put(k, v); // Update L1
+                            CompletableFuture<MarketData> fut = newFutures.get(k);
+                            if (fut != null) fut.complete(v);
+                        });
+                        
+                        // Store in Redis
+                        if (marketDataRedisService != null) {
+                            marketDataRedisService.cacheMarketData(fetched);
+                        }
+                        
+                        // Store in MongoDB asynchronously
+                        if (stockPriceMongoService != null) {
+                            final java.util.Map<String, MarketData> finalFetched = fetched;
+                            java.util.concurrent.CompletableFuture.runAsync(() -> {
+                                try {
+                                    List<com.am.common.amcommondata.document.price.StockPriceDocument> docs = finalFetched.values().stream()
+                                        .filter(md -> md != null && md.getLastPrice() != null)
+                                        .map(md -> com.am.common.amcommondata.document.price.StockPriceDocument.builder()
+                                            .symbol(md.getSymbol())
+                                            .lastPrice(md.getLastPrice())
+                                            .previousClose(md.getPreviousClose())
+                                            .openPrice(md.getOhlc() != null ? md.getOhlc().getOpen() : null)
+                                            .highPrice(md.getOhlc() != null ? md.getOhlc().getHigh() : null)
+                                            .lowPrice(md.getOhlc() != null ? md.getOhlc().getLow() : null)
+                                            .timestamp(md.getTimestamp() != null ? md.getTimestamp().toEpochMilli() : System.currentTimeMillis())
+                                            .updatedAt(java.time.LocalDateTime.now())
+                                            .build())
+                                        .collect(Collectors.toList());
+                                    stockPriceMongoService.saveAll(docs);
+                                } catch (Exception e) {
+                                    log.error("[MarketData] MongoDB save failed", e);
+                                }
+                            }, taskExecutor);
+                        }
+                    }
+                    
+                    // Complete any futures where data wasn't returned
+                    newFutures.forEach((k, fut) -> {
+                        if (!fut.isDone()) {
+                            fut.complete(null);
+                        }
+                    });
+                } catch (Exception e) {
+                    log.error("[MarketData] OHLC fetch failed: {}", e.getMessage());
+                    newFutures.values().forEach(fut -> {
+                        if (!fut.isDone()) fut.completeExceptionally(e);
+                    });
+                } finally {
+                    newFutures.keySet().forEach(inFlightRequests::remove);
+                }
+            }
+
+            // Join coalesced futures
+            if (!waitFor.isEmpty()) {
+                CompletableFuture<Void> allWaiting = CompletableFuture.allOf(
+                    waitFor.values().toArray(new CompletableFuture[0])
+                );
+                try {
+                    allWaiting.get(5, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (java.util.concurrent.TimeoutException e) {
+                    log.warn("[InFlight] Coalesced futures timed out at 5s");
+                } catch (Exception e) {
+                    log.warn("[InFlight] Error waiting for coalesced futures", e);
+                }
+                waitFor.forEach((symbol, fut) -> {
+                    if (fut.isDone() && !fut.isCompletedExceptionally()) {
+                        try {
+                            MarketData md = fut.get();
+                            if (md != null) {
+                                result.put(symbol, md);
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                });
+            }
+        }
+
+        // 5. Fallback for symbols that are STILL missing
+        List<String> stillMissingFallback = symbols.stream().map(this::cleanSymbol)
             .filter(s -> {
                 MarketData data = result.get(s);
                 return data == null || data.getLastPrice() == null || data.getLastPrice() == 0.0;
             })
             .collect(Collectors.toList());
             
-        if (!stillMissing.isEmpty()) {
-            log.info("[MarketData] OHLC returned empty for {} symbols. Assigning 0.0 to prevent blocking.", stillMissing.size());
-            for (String missingSymbol : stillMissing) {
-                MarketData zeroData = new MarketData();
-                zeroData.setSymbol(missingSymbol);
-                zeroData.setLastPrice(0.0);
-                result.put(missingSymbol, zeroData);
-            }
+        if (!stillMissingFallback.isEmpty()) {
+            log.info("[MarketData] OHLC returned empty for {} symbols. Data will be left missing to allow downstream fallbacks.", stillMissingFallback.size());
         }
 
         log.info("[MarketData] Result: {}/{} symbols returned.", result.size(), symbols.size());
@@ -512,32 +728,197 @@ public class MarketDataService {
             return new com.portfolio.marketdata.model.HistoricalChartsResponse();
         }
 
-        log.info("Getting historical charts for {} symbols with range={}", validSymbols.size(), range);
+        com.portfolio.marketdata.model.HistoricalChartsResponse finalResp = new com.portfolio.marketdata.model.HistoricalChartsResponse();
+        finalResp.setData(new java.util.HashMap<>());
+        
+        List<String> missingSymbols = new java.util.ArrayList<>();
+        for (String symbol : validSymbols) {
+            String cacheKey = symbol + ":" + range;
+            com.portfolio.marketdata.model.HistoricalData cachedData = chartCache.getIfPresent(cacheKey);
+            if (cachedData != null) {
+                finalResp.getData().put(symbol, cachedData);
+            } else {
+                missingSymbols.add(symbol);
+            }
+        }
+        
+        if (missingSymbols.isEmpty()) {
+            log.info("Served {} historical charts from L1 cache for range={}", validSymbols.size(), range);
+            return finalResp;
+        }
 
+        log.info("Getting historical charts for {} missing symbols with range={}", missingSymbols.size(), range);
+
+        if ("1D".equalsIgnoreCase(range) && stockPriceHistoryMongoService != null) {
+            return buildIntradayFromMongo(missingSymbols, finalResp);
+        }
+
+        return callExternalApiForRange(missingSymbols, range, finalResp);
+    }
+
+    private com.portfolio.marketdata.model.HistoricalChartsResponse callExternalApiForRange(
+            List<String> missingSymbols, String range, 
+            com.portfolio.marketdata.model.HistoricalChartsResponse finalResp) {
         try {
-            return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-                try {
-                    return marketDataApiClient.getHistoricalCharts(validSymbols, range).block();
-                } catch (Exception e) {
-                    log.error("[HistoricalCharts data] API call failed: {}", e.getMessage());
+            int CHUNK_SIZE = 20;
+            List<List<String>> chunks = new java.util.ArrayList<>();
+            for (int i = 0; i < missingSymbols.size(); i += CHUNK_SIZE) {
+                chunks.add(missingSymbols.subList(i, Math.min(missingSymbols.size(), i + CHUNK_SIZE)));
+            }
+
+            List<java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalChartsResponse>> futures = chunks.stream()
+                .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return marketDataApiClient.getHistoricalCharts(chunk, range).block();
+                    } catch (Exception e) {
+                        log.error("[HistoricalCharts data] API call failed: {}", e.getMessage());
+                        com.portfolio.marketdata.model.HistoricalChartsResponse resp = new com.portfolio.marketdata.model.HistoricalChartsResponse();
+                        resp.setData(new java.util.HashMap<>());
+                        return resp;
+                    }
+                }, taskExecutor)
+                .orTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                .exceptionally(e -> {
+                    log.warn("[HistoricalCharts data] Fetch timed out or failed: {}", e.getMessage());
                     com.portfolio.marketdata.model.HistoricalChartsResponse resp = new com.portfolio.marketdata.model.HistoricalChartsResponse();
                     resp.setData(new java.util.HashMap<>());
                     return resp;
+                }))
+                .collect(Collectors.toList());
+
+            java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
+            
+            for (java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalChartsResponse> f : futures) {
+                com.portfolio.marketdata.model.HistoricalChartsResponse chunkResp = f.join();
+                if (chunkResp != null && chunkResp.getData() != null) {
+                    chunkResp.getData().forEach((symbol, data) -> {
+                        finalResp.getData().put(symbol, data);
+                        chartCache.put(symbol + ":" + range, data);
+                    });
                 }
-            }, taskExecutor)
-            .orTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-            .exceptionally(e -> {
-                log.warn("[HistoricalCharts data] Fetch timed out or failed: {}", e.getMessage());
-                com.portfolio.marketdata.model.HistoricalChartsResponse resp = new com.portfolio.marketdata.model.HistoricalChartsResponse();
-                resp.setData(new java.util.HashMap<>());
-                return resp;
-            })
-            .join();
+            }
+            return finalResp;
         } catch (Exception e) {
             log.warn("[HistoricalCharts data] Unexpected error during fetch: {}", e.getMessage());
-            com.portfolio.marketdata.model.HistoricalChartsResponse resp = new com.portfolio.marketdata.model.HistoricalChartsResponse();
-            resp.setData(new java.util.HashMap<>());
-            return resp;
+            return finalResp;
         }
+    }
+
+    private com.portfolio.marketdata.model.HistoricalChartsResponse buildIntradayFromMongo(
+            List<String> symbols, com.portfolio.marketdata.model.HistoricalChartsResponse partial) {
+        
+        long startEpoch;
+        try {
+            startEpoch = findLastTradingDayStartEpoch();
+        } catch (Exception e) {
+            log.error("[Intraday-Mongo] Date resolution failed, falling back to API", e);
+            return callExternalApiForRange(symbols, "1D", partial);
+        }
+
+        Map<String, List<StockPriceHistoryDocument>> historyBySymbol = new HashMap<>();
+        try {
+            historyBySymbol = stockPriceHistoryMongoService.getIntradayHistory(symbols, startEpoch);
+        } catch (Exception e) {
+            log.error("[Intraday-Mongo] DB query failed, falling back to API for all symbols", e);
+            return callExternalApiForRange(symbols, "1D", partial);
+        }
+
+        List<String> fallbackSymbols = new ArrayList<>();
+        Map<String, Double> liveSnapshots = new HashMap<>();
+
+        for (String symbol : symbols) {
+            List<StockPriceHistoryDocument> ticks = historyBySymbol.getOrDefault(symbol, List.of());
+
+            if (ticks.isEmpty()) {
+                // No history in DB for this symbol — schedule it for fallback
+                fallbackSymbols.add(symbol);
+                continue;
+            }
+
+            // Convert MongoDB ticks → OHLCVTPoint (IST timestamps, price fills OHLC)
+            List<OHLCVTPoint> points = ticks.stream().map(tick -> {
+                LocalDateTime ldt = Instant.ofEpochMilli(tick.getTimestampMinute())
+                    .atZone(IST).toLocalDateTime();
+                return OHLCVTPoint.builder()
+                    .time(ldt)
+                    .open(tick.getPrice())
+                    .high(tick.getPrice())
+                    .low(tick.getPrice())
+                    .close(tick.getPrice())
+                    .volume(0L)
+                    .build();
+            }).collect(Collectors.toList());
+
+            com.portfolio.marketdata.model.HistoricalData hd = com.portfolio.marketdata.model.HistoricalData.builder()
+                .tradingSymbol(symbol)
+                .interval("1min")
+                .dataPoints(points)
+                .dataPointCount(points.size())
+                .build();
+
+            partial.getData().put(symbol, hd);
+            chartCache.put(symbol + ":1D", hd); // Populate L1 cache for next call
+        }
+
+        // ── FALLBACK: Symbols missing from MongoDB ──
+        if (!fallbackSymbols.isEmpty()) {
+            log.warn("[Intraday-Mongo] {} symbols missing from DB, falling back to API individually: {}",
+                fallbackSymbols.size(), fallbackSymbols);
+            
+            try {
+                Map<String, StockPriceDocument> liveDocs = 
+                    stockPriceMongoService != null ? 
+                    stockPriceMongoService.getPrices(fallbackSymbols) : Map.of();
+
+                // Call external API for the missing symbols
+                com.portfolio.marketdata.model.HistoricalChartsResponse apiResp = 
+                    callExternalApiForRange(fallbackSymbols, "1D", new com.portfolio.marketdata.model.HistoricalChartsResponse());
+                
+                for (String symbol : fallbackSymbols) {
+                    com.portfolio.marketdata.model.HistoricalData apiData = (apiResp != null && apiResp.getData() != null)
+                        ? apiResp.getData().get(symbol) : null;
+                    
+                    boolean apiDataValid = apiData != null 
+                        && apiData.getDataPoints() != null 
+                        && !apiData.getDataPoints().isEmpty()
+                        && apiData.getDataPoints().stream().anyMatch(p -> p.getClose() != null && p.getClose() > 0);
+
+                    if (apiDataValid) {
+                        // API returned good data
+                        partial.getData().put(symbol, apiData);
+                        chartCache.put(symbol + ":1D", apiData);
+                    } else {
+                        // API also returned null/0.0 → create a flat-line chart using live price
+                        StockPriceDocument liveDoc = liveDocs.get(symbol);
+                        if (liveDoc != null && liveDoc.getLastPrice() != null && liveDoc.getLastPrice() > 0) {
+                            log.warn("[Intraday-Mongo] Symbol {} has no OHLC data, using flat live price: {}", 
+                                symbol, liveDoc.getLastPrice());
+                            com.portfolio.marketdata.model.HistoricalData flatLine = buildFlatLineChart(symbol, liveDoc.getLastPrice());
+                            partial.getData().put(symbol, flatLine);
+                            chartCache.put(symbol + ":1D", flatLine);
+                        } else {
+                            log.warn("[Intraday-Mongo] Symbol {} has no data at all, omitting from chart.", symbol);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.error("[Intraday-Mongo] Fallback API call failed: {}", e.getMessage());
+            }
+        }
+
+        return partial;
+    }
+
+    /** Creates a flat-line chart using a fixed price for the entire trading session. */
+    private com.portfolio.marketdata.model.HistoricalData buildFlatLineChart(String symbol, double price) {
+        List<OHLCVTPoint> points = new ArrayList<>();
+        LocalDate today = LocalDate.now(IST);
+        LocalDateTime t = LocalDateTime.of(today, MARKET_OPEN);
+        LocalDateTime end = LocalDateTime.of(today, LocalTime.of(15, 30));
+        while (!t.isAfter(end)) {
+            points.add(OHLCVTPoint.builder().time(t).open(price).high(price).low(price).close(price).volume(0L).build());
+            t = t.plusMinutes(1);
+        }
+        return com.portfolio.marketdata.model.HistoricalData.builder().tradingSymbol(symbol).interval("1min").dataPoints(points).dataPointCount(points.size()).build();
     }
 }

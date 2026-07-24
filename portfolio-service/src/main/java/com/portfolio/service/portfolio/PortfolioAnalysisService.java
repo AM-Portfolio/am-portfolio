@@ -22,14 +22,26 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class PortfolioAnalysisService {
     
     private final PortfolioService portfolioService;
     private final StockPerformanceService stockPerformanceService;
     private final PortfolioAnalysisBuilder portfolioAnalysisBuilder;
+    
+    @org.springframework.lang.Nullable
     private final PortfolioAnalysisRedisService portfolioAnalysisRedisService;
+
+    public PortfolioAnalysisService(
+            PortfolioService portfolioService,
+            StockPerformanceService stockPerformanceService,
+            PortfolioAnalysisBuilder portfolioAnalysisBuilder,
+            @org.springframework.lang.Nullable PortfolioAnalysisRedisService portfolioAnalysisRedisService) {
+        this.portfolioService = portfolioService;
+        this.stockPerformanceService = stockPerformanceService;
+        this.portfolioAnalysisBuilder = portfolioAnalysisBuilder;
+        this.portfolioAnalysisRedisService = portfolioAnalysisRedisService;
+    }
 
     public PortfolioAnalysis analyzePortfolio(
             String portfolioId, 
@@ -64,7 +76,9 @@ public class PortfolioAnalysisService {
                 startProcessing
             );
 
-            portfolioAnalysisRedisService.cachePortfolioAnalysis(analysis, portfolioId, userId, interval);
+            if (portfolioAnalysisRedisService != null) {
+                portfolioAnalysisRedisService.cachePortfolioAnalysis(analysis, portfolioId, userId, interval);
+            }
             return analysis;
 
         } catch (Exception e) {
@@ -77,8 +91,10 @@ public class PortfolioAnalysisService {
         log.debug("Checking cache for portfolio analysis - Portfolio: {}, User: {}, Interval: {}", 
             portfolioId, userId, interval != null ? interval.getCode() : "null");
             
-        Optional<PortfolioAnalysis> cachedAnalysis = 
-            portfolioAnalysisRedisService.getLatestAnalysis(portfolioId, userId, interval);
+        Optional<PortfolioAnalysis> cachedAnalysis = Optional.empty();
+        if (portfolioAnalysisRedisService != null) {
+            cachedAnalysis = portfolioAnalysisRedisService.getLatestAnalysis(portfolioId, userId, interval);
+        }
             
         if (cachedAnalysis.isPresent()) {
             log.info("Serving portfolio analysis from cache - Portfolio: {}, User: {}, Interval: {}", 

@@ -32,8 +32,17 @@ public class MarketDataAutoConfiguration {
     public MarketDataService marketDataService(
             MarketDataApiClient marketDataApiClient,
             org.springframework.beans.factory.ObjectProvider<com.portfolio.redis.service.PortfolioMarketDataRedisService> marketDataRedisServiceProvider,
-            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
-        return new MarketDataService(marketDataApiClient, marketDataRedisServiceProvider.getIfAvailable(), taskExecutor);
+            org.springframework.beans.factory.ObjectProvider<com.am.common.amcommondata.service.price.StockPriceMongoService> stockPriceMongoServiceProvider,
+            org.springframework.beans.factory.ObjectProvider<com.am.common.amcommondata.service.price.StockPriceHistoryMongoService> stockPriceHistoryMongoServiceProvider,
+            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
+            @org.springframework.beans.factory.annotation.Qualifier("externalApiExecutor") java.util.concurrent.Executor externalApiExecutor) {
+        return new MarketDataService(
+                marketDataApiClient, 
+                marketDataRedisServiceProvider.getIfAvailable(), 
+                stockPriceMongoServiceProvider.getIfAvailable(), 
+                stockPriceHistoryMongoServiceProvider.getIfAvailable(),
+                taskExecutor,
+                externalApiExecutor);
     }
     
     @Bean

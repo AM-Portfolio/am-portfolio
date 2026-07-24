@@ -4,6 +4,7 @@ import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.analytics.model.AnalyticsType;
+import com.portfolio.analytics.service.utils.AnalyticsUtils;
 import com.portfolio.analytics.service.utils.HeatmapUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
@@ -26,9 +27,10 @@ import com.portfolio.redis.service.PortfolioHeatmapRedisService;
 @Slf4j
 public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider<Heatmap> {
 
+    @org.springframework.lang.Nullable
     private final PortfolioHeatmapRedisService heatmapRedisService;
 
-    public PortfolioHeatmapProvider(PortfolioService portfolioService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService, PortfolioHeatmapRedisService heatmapRedisService) {
+    public PortfolioHeatmapProvider(PortfolioService portfolioService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService, @org.springframework.lang.Nullable PortfolioHeatmapRedisService heatmapRedisService) {
         super(portfolioService, marketDataService, securityDetailsService);
         this.heatmapRedisService = heatmapRedisService;
     }
@@ -45,14 +47,16 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         String portfolioId = request.getCoreIdentifiers().getPortfolioId();
         
         // Check cache first
-        Optional<Heatmap> cached = heatmapRedisService.getCachedHeatmap(portfolioId, request.getTimeFrameRequest());
-        if (cached.isPresent()) {
-            return cached.get();
+        if (heatmapRedisService != null) {
+            Optional<Heatmap> cached = heatmapRedisService.getCachedHeatmap(portfolioId, request);
+            if (cached.isPresent()) {
+                return cached.get();
+            }
         }
 
         return processPortfolioData(
             portfolioId,
-            request.getTimeFrameRequest(),
+            request,
             this::createEmptyResult,
             (portfolio, portfolioSymbols, marketData) -> {
         
@@ -83,7 +87,9 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 
                 log.info("Generated heatmap with {} sectors for portfolio: {}", sectorPerformances.size(), portfolioId);
                 
-                heatmapRedisService.cacheHeatmap(heatmap, portfolioId, request.getTimeFrameRequest());
+                if (heatmapRedisService != null) {
+                    heatmapRedisService.cacheHeatmap(heatmap, portfolioId, request);
+                }
                 
                 return heatmap;
             }
@@ -132,8 +138,8 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             symbols.forEach(sym -> symbolToSector.put(sym, sector))
         );
         
-        for (String symbol : marketData.keySet()) {
-            MarketData data = marketData.get(symbol);
+        for (String symbol : symbolToQuantity.keySet()) {
+            MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
             if (data == null) {
                 log.warn("Null market data encountered for symbol: {}", symbol);
                 continue;

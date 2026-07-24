@@ -24,7 +24,8 @@ PROJ_REDIS_PASSWORD: ${REDIS_PASSWORD:password123}
 
 spring:
   main:
-    lazy-initialization: true
+    lazy-initialization: false
+    allow-bean-definition-overriding: true
   application:
     name: portfolio-app
   profiles:
@@ -33,7 +34,7 @@ spring:
   kafka:
     bootstrap-servers: ${PROJ_KAFKA_BOOTSTRAP_SERVERS}
     listener:
-      auto-startup: ${KAFKA_ENABLED:false}
+      auto-startup: ${KAFKA_ENABLED:true}
     consumer:
       group-id: ${PORTFOLIO_CONSUMER_GROUP}
       auto-offset-reset: latest
@@ -131,14 +132,14 @@ app:
     secret: ${JWT_SECRET:internal-service-super-secret-key-32chars-minimum-change-in-prod}
     algorithm: ${JWT_ALGORITHM:HS256}
   kafka:
-    enabled: ${KAFKA_ENABLED:false}
+    enabled: ${KAFKA_ENABLED:true}
     trigger-calculation:
       consumer:
         id: am-portfolio-trigger-calculation-group
     portfolio:
       consumer:
         id: ${PORTFOLIO_CONSUMER_GROUP}
-        enabled: ${KAFKA_ENABLED:false}
+        enabled: ${KAFKA_ENABLED:true}
       topic: ${PORTFOLIO_TOPIC_NAME}
       publish-topic: ${PORTFOLIO_PUBLISH_TOPIC:am-portfolio-update}
       stream:
@@ -151,17 +152,17 @@ app:
     stock:
       consumer:
         id: ${STOCK_CONSUMER_GROUP}
-        enabled: ${KAFKA_ENABLED:false}
+        enabled: ${KAFKA_ENABLED:true}
       topic: ${STOCK_TOPIC_NAME}
     holding:
       consumer:
         id: ${HOLDING_CONSUMER_ID:am-portfolio-holding-group}
-        enabled: ${KAFKA_ENABLED:false}
+        enabled: ${KAFKA_ENABLED:true}
       topic: ${HOLDING_TOPIC:am-holding-update}
     market-index:
       consumer:
         id: ${MARKET_INDEX_CONSUMER_GROUP}
-        enabled: ${KAFKA_ENABLED:false}
+        enabled: ${KAFKA_ENABLED:true}
       topic: ${MARKET_INDEX_TOPIC_NAME}
 
 server:
@@ -169,9 +170,10 @@ server:
   servlet:
     context-path: /
   tomcat:
-    max-threads: 20
-    min-spare-threads: 10
-    max-connections: 200
+    max-threads: 200
+    min-spare-threads: 30
+    max-connections: 4096
+    accept-count: 100
 
 etf:
   url: ${ETF_API_URL:http://localhost:8022}
@@ -183,8 +185,8 @@ basket:
 
 market-data:
   client:
-    connect-timeout-ms: ${MARKET_DATA_CONNECT_TIMEOUT_MS:5000}
-    read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:45000}
+    connect-timeout-ms: ${MARKET_DATA_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:15000}
   api:
     base-url: ${MARKET_DATA_API_URL:http://am-market-data:8080}
     ohlc-endpoint: /v1/market-data/ohlc
@@ -192,9 +194,9 @@ market-data:
     historical-charts-endpoint: /v1/analysis/historical-charts
     securities-endpoint: /v1/securities
     nse-indices-endpoint: /v1/indices
-    read-timeout: 30000      # Must be < PortfolioCalculator.enrichHoldings() 34s blocking wait
-    connection-timeout: 5000
-    max-retry-attempts: 1
+    read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:15000}
+    connection-timeout: 3000
+    max-retry-attempts: 0
 
 # OpenAPI Documentation
 springdoc:
@@ -251,9 +253,9 @@ management:
     mongo:
       enabled: true
     redis:
-      enabled: true
+      enabled: ${PORTFOLIO_REDIS_ENABLED:false}
     kafka:
-      enabled: ${KAFKA_ENABLED:false}
+      enabled: ${KAFKA_ENABLED:true}
   tracing:
     enabled: true
     sampling:
@@ -287,8 +289,12 @@ am:
 
 cache:
   redis:
-    enabled: ${REDIS_CACHE_ENABLED:true}
+    enabled: ${REDIS_CACHE_ENABLED:false}
 
 portfolio:
   redis:
-    enabled: ${PORTFOLIO_REDIS_ENABLED:true}
+    enabled: ${PORTFOLIO_REDIS_ENABLED:false}
+
+growthbook:
+  api-host: ${GROWTHBOOK_API_HOST:https://growthbook.asrax.in/gbapi}
+  client-key: ${GROWTHBOOK_CLIENT_KEY:sdk-8WmIFrhYLelAXr8}

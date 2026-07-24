@@ -48,6 +48,7 @@ public class MarketDataApiClient extends AbstractApiClient {
          * @param refresh   whether to refresh the data or use cached data
          * @return a Mono of MarketDataResponseWrapper
          */
+        @io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker(name = "ohlcDataApi")
         public Mono<MarketDataResponseWrapper> getOhlcData(List<String> symbols, String timeFrame, boolean refresh) {
                 String symbolsParam = String.join(",", symbols);
 
@@ -127,6 +128,7 @@ public class MarketDataApiClient extends AbstractApiClient {
          * @param request the historical data request parameters
          * @return a Mono of HistoricalDataResponseWrapper
          */
+        @io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker(name = "historicalDataApi")
         public Mono<HistoricalDataResponseWrapper> getHistoricalData(HistoricalDataRequest request) {
                 // Ensure we have a comma-separated string of symbols
 

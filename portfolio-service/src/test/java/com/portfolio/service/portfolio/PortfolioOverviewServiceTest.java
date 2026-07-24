@@ -8,6 +8,8 @@ import com.portfolio.model.mapper.PortfolioMapperv1;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.redis.service.PortfolioSummaryRedisService;
 import com.portfolio.service.calculator.PortfolioCalculator;
+import com.am.observability.flow.FlowLogger;
+import com.am.observability.flow.FlowSpan;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -41,6 +43,9 @@ class PortfolioOverviewServiceTest {
     @Mock
     private PortfolioCalculator portfolioCalculator;
 
+    @Mock
+    private FlowLogger flowLogger;
+
     @InjectMocks
     private PortfolioOverviewService portfolioOverviewService;
 
@@ -51,6 +56,7 @@ class PortfolioOverviewServiceTest {
 
         when(portfolioSummaryRedisService.getLatestSummary(userId, TimeInterval.ONE_DAY))
                 .thenReturn(Optional.of(cached));
+        lenient().when(flowLogger.start(anyString(), any())).thenReturn(mock(FlowSpan.class));
 
         PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, TimeInterval.ONE_DAY);
 
@@ -70,6 +76,8 @@ class PortfolioOverviewServiceTest {
                 .thenReturn(Optional.empty());
         when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(List.of(p1));
         when(portfolioCalculator.calculateSummary(anyList(), anyDouble())).thenReturn(PortfolioSummaryV1.builder().build());
+        when(portfolioCalculator.enrichHoldings(anyList())).thenReturn(Collections.emptyList());
+        lenient().when(flowLogger.start(anyString(), any())).thenReturn(mock(FlowSpan.class));
 
         PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, TimeInterval.ONE_DAY);
 
@@ -87,6 +95,8 @@ class PortfolioOverviewServiceTest {
 
         when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(List.of(p1));
         when(portfolioCalculator.calculateSummary(anyList(), anyDouble())).thenReturn(PortfolioSummaryV1.builder().build());
+        when(portfolioCalculator.enrichHoldings(anyList())).thenReturn(Collections.emptyList());
+        lenient().when(flowLogger.start(anyString(), any())).thenReturn(mock(FlowSpan.class));
 
         PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, portId.toString(), TimeInterval.ONE_DAY);
 
@@ -97,6 +107,7 @@ class PortfolioOverviewServiceTest {
     void overviewPortfolio_NoPortfolios_ReturnsNull() {
         String userId = "user-none";
         when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(Collections.emptyList());
+        lenient().when(flowLogger.start(anyString(), any())).thenReturn(mock(FlowSpan.class));
 
         PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, TimeInterval.ONE_DAY);
 

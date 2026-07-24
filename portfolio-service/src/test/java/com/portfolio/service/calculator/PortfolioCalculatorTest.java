@@ -7,13 +7,14 @@ import com.portfolio.model.market.OhlcData;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.model.cache.StockPriceCache;
-import com.portfolio.redis.service.StockIndicesRedisService;
+import com.am.common.amcommondata.service.marketcap.MarketCapMongoService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import com.am.common.amcommondata.service.price.StockPriceMongoService;
 
 import java.util.Collections;
 import java.util.List;
@@ -22,6 +23,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -31,7 +33,10 @@ class PortfolioCalculatorTest {
     private MarketDataService marketDataService;
 
     @Mock
-    private StockIndicesRedisService stockPriceRedisService;
+    private MarketCapMongoService marketCapMongoService;
+
+    @Mock
+    private StockPriceMongoService stockPriceMongoService;
 
     private PortfolioCalculator portfolioCalculator;
 
@@ -40,7 +45,7 @@ class PortfolioCalculatorTest {
 
     @BeforeEach
     void setUp() {
-        portfolioCalculator = new PortfolioCalculator(marketDataService, stockPriceRedisService, Runnable::run);
+        portfolioCalculator = new PortfolioCalculator(marketDataService, marketCapMongoService, stockPriceMongoService, Runnable::run);
         holding = new EquityHoldings();
         holding.setSymbol("TCS");
         holding.setQuantity(10.0);
@@ -76,14 +81,15 @@ class PortfolioCalculatorTest {
     }
 
     @Test
-    void enrichHoldings_FallbackToRedis() {
-        when(marketDataService.getMarketData(anyList())).thenReturn(Collections.emptyMap());
-        when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+    void enrichHoldings_FallbackToMongo() {
+        // Mock marketDataService to return the fallback price, simulating MarketDataService's internal MongoDB fallback
+        com.portfolio.model.market.MarketData apiData = new com.portfolio.model.market.MarketData();
+        apiData.setSymbol("TCS");
+        apiData.setLastPrice(3100.0);
         
-        StockPriceCache redisPrice = StockPriceCache.builder()
-                .closePrice(3100.0)
-                .build();
-        when(stockPriceRedisService.getLatestPrices(anyList())).thenReturn(Map.of("TCS", redisPrice));
+        lenient().when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", apiData));
+        lenient().when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Collections.emptyMap());
 
         List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
 
@@ -94,7 +100,7 @@ class PortfolioCalculatorTest {
     void enrichHoldings_LocalDevFallback() {
         when(marketDataService.getMarketData(anyList())).thenReturn(Collections.emptyMap());
         when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
-        when(stockPriceRedisService.getLatestPrices(anyList())).thenReturn(Map.of());
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
 
         List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
 

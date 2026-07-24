@@ -27,6 +27,7 @@ class PortfolioSummaryRedisServiceTest {
     @InjectMocks private PortfolioSummaryRedisService service;
 
     @BeforeEach void setUp() {
+        ReflectionTestUtils.setField(service, "isRedisEnabled", true);
         ReflectionTestUtils.setField(service, "portfolioSummaryTtl", 600);
         ReflectionTestUtils.setField(service, "portfolioSummaryKeyPrefix", "ps:");
         lenient().when(portfolioSummaryRedisTemplate.opsForValue()).thenReturn(valueOps);
@@ -34,7 +35,7 @@ class PortfolioSummaryRedisServiceTest {
 
     private TimeInterval interval(String code, Duration d) {
         TimeInterval ti = mock(TimeInterval.class);
-        when(ti.getCode()).thenReturn(code);
+        lenient().when(ti.getCode()).thenReturn(code);
         lenient().when(ti.getDuration()).thenReturn(d);
         return ti;
     }
@@ -63,7 +64,7 @@ class PortfolioSummaryRedisServiceTest {
 
     @Test void getLatestSummary_notFound() {
         TimeInterval ti = interval("1d", Duration.ofDays(1));
-        when(valueOps.get(anyString())).thenReturn(null);
+        lenient().when(valueOps.get(anyString())).thenReturn(null);
         assertTrue(service.getLatestSummary("user1", ti).isEmpty());
     }
 
@@ -77,14 +78,14 @@ class PortfolioSummaryRedisServiceTest {
 
     @Test void getLatestSummary_redisError_returnsEmpty() {
         TimeInterval ti = interval("1d", Duration.ofDays(1));
-        when(valueOps.get(anyString())).thenThrow(new RuntimeException("conn err"));
+        lenient().when(valueOps.get(anyString())).thenThrow(new RuntimeException("conn err"));
         assertTrue(service.getLatestSummary("user1", ti).isEmpty());
     }
 
     @Test void getLatestSummary_nullDuration_returnsWithoutFreshnessCheck() {
         TimeInterval ti = mock(TimeInterval.class);
-        when(ti.getCode()).thenReturn("all");
-        when(ti.getDuration()).thenReturn(null);
+        lenient().when(ti.getCode()).thenReturn("all");
+        lenient().when(ti.getDuration()).thenReturn(null);
         PortfolioSummaryV1 summary = new PortfolioSummaryV1();
         summary.setLastUpdated(LocalDateTime.now());
         when(valueOps.get("ps:user1:all:all")).thenReturn(summary);

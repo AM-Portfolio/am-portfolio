@@ -16,11 +16,18 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class MarketIndexIndicesService {
+    @org.springframework.lang.Nullable
     private final MarketIndexIndicesRedisService marketIndexIndicesRedisService;
     private final NSEIndicesConfig nseIndicesConfig;
+
+    public MarketIndexIndicesService(
+            @org.springframework.lang.Nullable MarketIndexIndicesRedisService marketIndexIndicesRedisService,
+            NSEIndicesConfig nseIndicesConfig) {
+        this.marketIndexIndicesRedisService = marketIndexIndicesRedisService;
+        this.nseIndicesConfig = nseIndicesConfig;
+    }
 
     public List<IndexIndices> getAllMarketIndices(TimeInterval timeInterval, String type) {
         if (type != null && !type.isEmpty()) {
@@ -48,7 +55,7 @@ public class MarketIndexIndicesService {
         }
 
         return indices.stream()
-            .map(symbol -> marketIndexIndicesRedisService.getPrice(symbol, timeInterval))
+            .map(symbol -> marketIndexIndicesRedisService != null ? marketIndexIndicesRedisService.getPrice(symbol, timeInterval) : Optional.<IndexIndices>empty())
             .filter(Optional::isPresent)
             .map(Optional::get)
             .sorted((i1, i2) -> {

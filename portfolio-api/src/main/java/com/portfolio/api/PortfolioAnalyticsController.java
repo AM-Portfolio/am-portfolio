@@ -46,6 +46,25 @@ public class PortfolioAnalyticsController {
     public ResponseEntity<AdvancedAnalyticsResponse> getAdvancedAnalytics(
             @PathVariable String portfolioId,
             @RequestBody AdvancedAnalyticsRequest request) {
+        if (portfolioId == null || portfolioId.equals("undefined") || portfolioId.equals("null")) {
+            log.warn("REST request for advanced analytics on invalid portfolio: {}", portfolioId);
+            return ResponseEntity.badRequest().build();
+        }
+
+        if (request == null) {
+            request = new AdvancedAnalyticsRequest();
+        }
+        if (request.getCoreIdentifiers() == null) {
+            request.setCoreIdentifiers(new com.portfolio.model.analytics.request.CoreIdentifiers());
+        }
+
+        try {
+            java.util.UUID.fromString(portfolioId);
+        } catch (IllegalArgumentException e) {
+            log.warn("REST request for advanced analytics with malformed UUID: {}", portfolioId);
+            return ResponseEntity.badRequest().build();
+        }
+
         log.info("REST request for advanced analytics on portfolio: {} with timeframe: {} to {}",
                 portfolioId, request.getTimeFrame());
 

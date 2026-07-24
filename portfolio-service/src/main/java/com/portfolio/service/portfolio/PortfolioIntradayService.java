@@ -35,15 +35,30 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class PortfolioIntradayService {
 
     private final PortfolioSnapshotService snapshotService;
     private final PortfolioHoldingsService holdingsService;
     private final MarketDataService marketDataService;
+    
+    @org.springframework.lang.Nullable
     private final PortfolioIntradayRedisService intradayRedisService;
+    
     private final PortfolioDocumentRepository portfolioDocumentRepository;
+
+    public PortfolioIntradayService(
+            PortfolioSnapshotService snapshotService,
+            PortfolioHoldingsService holdingsService,
+            MarketDataService marketDataService,
+            @org.springframework.lang.Nullable PortfolioIntradayRedisService intradayRedisService,
+            PortfolioDocumentRepository portfolioDocumentRepository) {
+        this.snapshotService = snapshotService;
+        this.holdingsService = holdingsService;
+        this.marketDataService = marketDataService;
+        this.intradayRedisService = intradayRedisService;
+        this.portfolioDocumentRepository = portfolioDocumentRepository;
+    }
 
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
     private static final LocalTime MARKET_OPEN = LocalTime.of(9, 15);
@@ -55,10 +70,13 @@ public class PortfolioIntradayService {
         boolean marketOpen = !nowIST.isBefore(MARKET_OPEN) && !nowIST.isAfter(MARKET_CLOSE);
 
         // ── CACHE CHECK ───────────────────────────────────────────────────────────
-        Optional<List<IntradayDataPoint>> cached = intradayRedisService.getIntradayData(userId, portfolioId);
-        if (cached.isPresent()) {
-            log.info("[Intraday] Serving intraday chart from cache for user={}, portfolioId={}", userId, portfolioId);
-            return cached.get();
+        Optional<List<IntradayDataPoint>> cached = Optional.empty();
+        if (intradayRedisService != null) {
+            cached = intradayRedisService.getIntradayData(userId, portfolioId);
+            if (cached.isPresent()) {
+                log.info("[Intraday] Serving intraday chart from cache for user={}, portfolioId={}", userId, portfolioId);
+                return cached.get();
+            }
         }
 
         // ── STEP 1: Get yesterday's EOD snapshot ──────────────────────────────
@@ -284,7 +302,9 @@ public class PortfolioIntradayService {
         }
 
         // Cache the result before returning
-        intradayRedisService.cacheIntradayData(userId, portfolioId, result, marketOpen);
+        if (intradayRedisService != null) {
+            intradayRedisService.cacheIntradayData(userId, portfolioId, result, marketOpen);
+        }
 
         return result;
     }
