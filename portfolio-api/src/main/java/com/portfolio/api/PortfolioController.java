@@ -207,9 +207,9 @@ public class PortfolioController {
             }
 
             if (portfolioSummary == null) {
-                log.warn("PortfolioController - getPortfolioSummary - No summary found for user: {} and portfolio: {}",
+                log.info("PortfolioController - getPortfolioSummary - No summary found for user: {} and portfolio: {}. Returning empty state.",
                         userId, portfolioId != null ? portfolioId : "all");
-                return ResponseEntity.notFound().build();
+                return ResponseEntity.ok(PortfolioSummaryV1.empty());
             }
 
             log.info(
@@ -252,10 +252,10 @@ public class PortfolioController {
             }
 
             if (portfolioHoldings == null) {
-                log.warn(
-                        "PortfolioController - getPortfolioHoldings - No holdings found for user: {} and portfolio: {}",
+                log.info(
+                        "PortfolioController - getPortfolioHoldings - No holdings found for user: {} and portfolio: {}. Returning empty state.",
                         userId, portfolioId != null ? portfolioId : "all");
-                return ResponseEntity.notFound().build();
+                return ResponseEntity.ok(PortfolioHoldings.empty());
             }
 
             log.info(

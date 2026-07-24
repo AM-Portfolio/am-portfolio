@@ -42,7 +42,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         
         Map<String, Object> responseBody = new LinkedHashMap<>();
         responseBody.put("timestamp", LocalDateTime.now());
-        responseBody.put("message", "Internal Server Error: " + ex.getMessage());
+        responseBody.put("message", "An unexpected error occurred. Please try again later.");
         responseBody.put("type", ex.getClass().getSimpleName());
         responseBody.put("status", HttpStatus.INTERNAL_SERVER_ERROR.value());
 

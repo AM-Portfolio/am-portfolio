@@ -21,4 +21,11 @@ public class PortfolioHoldings {
     private String portfolioId;
     private List<EquityHoldings> equityHoldings;
     private LocalDateTime lastUpdated;
+
+    public static PortfolioHoldings empty() {
+        return PortfolioHoldings.builder()
+            .equityHoldings(java.util.Collections.emptyList())
+            .lastUpdated(LocalDateTime.now())
+            .build();
+    }
 }

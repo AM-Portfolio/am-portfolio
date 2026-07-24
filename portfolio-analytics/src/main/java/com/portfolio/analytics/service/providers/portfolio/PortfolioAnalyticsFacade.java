@@ -40,6 +40,12 @@ public class PortfolioAnalyticsFacade {
     private final PortfolioService portfolioService;
     private final MarketDataService marketDataService;
 
+    private final com.github.benmanes.caffeine.cache.Cache<String, AdvancedAnalyticsResponse> analyticsCache =
+        com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+            .expireAfterWrite(90, java.util.concurrent.TimeUnit.SECONDS)
+            .maximumSize(500)
+            .build();
+
     public PortfolioAnalyticsFacade(AnalyticsFactory analyticsFactory, 
                                     @Qualifier("taskExecutor") Executor taskExecutor,
                                     PortfolioService portfolioService,
@@ -99,6 +105,22 @@ public class PortfolioAnalyticsFacade {
         log.info("Calculating advanced analytics for portfolio: {} from {} to {}", 
                 request.getCoreIdentifiers().getPortfolioId(), request.getFromDate(), request.getToDate());
         
+        // Generate a cache key based on the request parameters
+        String cacheKey = String.format("%s|%s|%s|H:%b|M:%b|S:%b|C:%b",
+                request.getCoreIdentifiers().getPortfolioId(),
+                request.getFromDate(),
+                request.getToDate(),
+                request.getFeatureToggles().isIncludeHeatmap(),
+                request.getFeatureToggles().isIncludeMovers(),
+                request.getFeatureToggles().isIncludeSectorAllocation(),
+                request.getFeatureToggles().isIncludeMarketCapAllocation());
+        
+        AdvancedAnalyticsResponse cachedResponse = analyticsCache.getIfPresent(cacheKey);
+        if (cachedResponse != null) {
+            log.info("Serving advanced analytics from L1 cache for portfolio: {}", request.getCoreIdentifiers().getPortfolioId());
+            return cachedResponse;
+        }
+
         // Start building the response
         AdvancedAnalyticsResponse.AdvancedAnalyticsResponseBuilder responseBuilder = AdvancedAnalyticsResponse.builder()
                 .portfolioId(request.getCoreIdentifiers().getPortfolioId())
@@ -194,6 +216,9 @@ public class PortfolioAnalyticsFacade {
         // Add the analytics component to the response
         responseBuilder.analytics(analyticsBuilder.build());
         
-        return responseBuilder.build();
+        AdvancedAnalyticsResponse finalResponse = responseBuilder.build();
+        analyticsCache.put(cacheKey, finalResponse);
+        
+        return finalResponse;
     }
 }

@@ -32,6 +32,9 @@ class MarketDataServiceTest {
     @Mock
     private com.am.common.amcommondata.service.price.StockPriceMongoService stockPriceMongoService;
 
+    @Mock
+    private com.am.common.amcommondata.service.price.StockPriceHistoryMongoService stockPriceHistoryMongoService;
+
     private Executor taskExecutor = Runnable::run;
     private Executor externalApiExecutor = Runnable::run;
 
@@ -39,7 +42,7 @@ class MarketDataServiceTest {
 
     @BeforeEach
     void setUp() {
-        marketDataService = new MarketDataService(marketDataApiClient, portfolioMarketDataRedisService, stockPriceMongoService, taskExecutor, externalApiExecutor);
+        marketDataService = new MarketDataService(marketDataApiClient, portfolioMarketDataRedisService, stockPriceMongoService, stockPriceHistoryMongoService, taskExecutor, externalApiExecutor);
     }
 
     @Test

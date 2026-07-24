@@ -14,9 +14,17 @@ import com.am.common.amcommondata.service.price.StockPriceMongoService;
 import com.portfolio.model.util.SymbolResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.time.DayOfWeek;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import java.util.concurrent.Executor;
 
 @Slf4j
 @Service
@@ -26,6 +34,22 @@ public class StockPriceUpdateConsumerService {
 
     private final ObjectMapper objectMapper;
     private final StockPriceMongoService stockPriceMongoService;
+    private final com.am.common.amcommondata.service.price.StockPriceHistoryMongoService stockPriceHistoryMongoService;
+    
+    @Qualifier("historyWriterExecutor")
+    private final Executor historyWriterExecutor;
+
+    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+    private static final LocalTime MARKET_OPEN = LocalTime.of(9, 15);
+    private static final LocalTime MARKET_CLOSE = LocalTime.of(15, 30);
+
+    private boolean isMarketHours() {
+        ZonedDateTime now = ZonedDateTime.now(IST);
+        DayOfWeek day = now.getDayOfWeek();
+        if (day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY) return false;
+        LocalTime t = now.toLocalTime();
+        return !t.isBefore(MARKET_OPEN) && !t.isAfter(MARKET_CLOSE);
+    }
 
     @KafkaListener(topics = "${app.kafka.stock.topic}", 
                   groupId = "${app.kafka.stock.consumer.id}",
@@ -72,6 +96,18 @@ public class StockPriceUpdateConsumerService {
             }
             if (!docs.isEmpty()) {
                 stockPriceMongoService.saveAll(docs);
+                
+                // HISTORY WRITE — fire-and-forget, market hours only, never blocks consumer
+                if (isMarketHours()) {
+                    final List<StockPriceDocument> snapshot = List.copyOf(docs);
+                    CompletableFuture.runAsync(() -> {
+                        try {
+                            stockPriceHistoryMongoService.saveAll(snapshot);
+                        } catch (Exception e) {
+                            log.warn("[PriceHistory] Non-critical: history tick failed: {}", e.getMessage());
+                        }
+                    }, historyWriterExecutor);
+                }
             }
         }
     }
