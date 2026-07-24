@@ -310,9 +310,17 @@ public class MarketDataService {
             .collect(Collectors.toList());
 
         Map<String, MarketData> merged = new java.util.HashMap<>();
-        for (java.util.concurrent.CompletableFuture<Map<String, MarketData>> f : futures) {
-            merged.putAll(f.join());
+        try {
+            java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0]))
+                .get(12, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.warn("[OHLC] Chunk futures timed out at 12s — collecting completed results");
+        } catch (Exception e) {
+            log.warn("[OHLC] Error waiting for chunk futures: {}", e.getMessage());
         }
+        futures.stream()
+            .filter(f -> f.isDone() && !f.isCompletedExceptionally())
+            .forEach(f -> merged.putAll(f.getNow(Collections.emptyMap())));
         return merged;
     }
 

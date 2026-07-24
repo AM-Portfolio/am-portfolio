@@ -34,6 +34,7 @@ public class PortfolioHoldingsService {
     
     private final PortfolioCalculator portfolioCalculator;
     private final PortfolioHoldingsMongoService portfolioHoldingsMongoService;
+    private final java.util.concurrent.Executor taskExecutor;
 
     private final com.github.benmanes.caffeine.cache.Cache<String, PortfolioHoldings> holdingsL1 =
             com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
@@ -46,12 +47,14 @@ public class PortfolioHoldingsService {
             PortfolioHoldingsMapper portfolioHoldingsMapper,
             @org.springframework.lang.Nullable PortfolioHoldingsRedisService portfolioHoldingsRedisService,
             PortfolioCalculator portfolioCalculator,
-            PortfolioHoldingsMongoService portfolioHoldingsMongoService) {
+            PortfolioHoldingsMongoService portfolioHoldingsMongoService,
+            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
         this.portfolioService = portfolioService;
         this.portfolioHoldingsMapper = portfolioHoldingsMapper;
         this.portfolioHoldingsRedisService = portfolioHoldingsRedisService;
         this.portfolioCalculator = portfolioCalculator;
         this.portfolioHoldingsMongoService = portfolioHoldingsMongoService;
+        this.taskExecutor = taskExecutor;
     }
     
     @org.springframework.beans.factory.annotation.Value("${portfolio.redis.enabled:true}")
@@ -208,7 +211,7 @@ public class PortfolioHoldingsService {
                 } catch (Exception e) {
                     log.error("Failed to update persistent cache", e);
                 }
-            });
+            }, taskExecutor);
         }
 
         log.info("Completed getPortfolioHoldings for user: {}", userId);

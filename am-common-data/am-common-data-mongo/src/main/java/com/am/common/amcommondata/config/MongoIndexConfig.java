@@ -36,6 +36,15 @@ public class MongoIndexConfig {
                 .expire(48, TimeUnit.HOURS));
 
             log.info("[MongoIndex] Indexes ensured on stock_price_history collection.");
+
+            // portfolio_snapshots: userId + snapshotDate for history range queries
+            IndexOperations snapOps = mongoTemplate.indexOps("portfolio_snapshots");
+            snapOps.ensureIndex(new Index()
+                .on("userId", Sort.Direction.ASC)
+                .on("snapshotDate", Sort.Direction.ASC)
+                .unique()
+                .named("user_date_idx"));
+            log.info("[MongoIndex] portfolio_snapshots index ensured.");
         } catch (Exception e) {
             log.error("[MongoIndex] Failed to ensure indexes. Check MongoDB connectivity.", e);
         }

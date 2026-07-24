@@ -180,37 +180,52 @@ public class PortfolioAnalyticsFacade {
         CompletableFuture<MarketCapAllocation> marketCapAllocationFuture = null;
 
         // Start futures
+        final AdvancedAnalyticsRequest frozenRequest = request;
         if (request.getFeatureToggles().isIncludeHeatmap()) {
-            heatmapFuture = CompletableFuture.supplyAsync(() -> generateSectorHeatmap(request), taskExecutor);
+            heatmapFuture = CompletableFuture.supplyAsync(() -> generateSectorHeatmap(frozenRequest), taskExecutor);
         }
         
         if (request.getFeatureToggles().isIncludeMovers()) {
-            moversFuture = CompletableFuture.supplyAsync(() -> getTopGainersLosers(request), taskExecutor);
+            moversFuture = CompletableFuture.supplyAsync(() -> getTopGainersLosers(frozenRequest), taskExecutor);
         }
         
         if (request.getFeatureToggles().isIncludeSectorAllocation()) {
-            sectorAllocationFuture = CompletableFuture.supplyAsync(() -> calculateSectorAllocations(request), taskExecutor);
+            sectorAllocationFuture = CompletableFuture.supplyAsync(() -> calculateSectorAllocations(frozenRequest), taskExecutor);
         }
         
         if (request.getFeatureToggles().isIncludeMarketCapAllocation()) {
-            marketCapAllocationFuture = CompletableFuture.supplyAsync(() -> calculateMarketCapAllocations(request), taskExecutor);
+            marketCapAllocationFuture = CompletableFuture.supplyAsync(() -> calculateMarketCapAllocations(frozenRequest), taskExecutor);
         }
         
         // Join futures and populate builder
-        if (heatmapFuture != null) {
-            analyticsBuilder.heatmap(heatmapFuture.join());
+        java.util.List<CompletableFuture<?>> allFutures = java.util.stream.Stream
+            .of(heatmapFuture, moversFuture, sectorAllocationFuture, marketCapAllocationFuture)
+            .filter(java.util.Objects::nonNull)
+            .collect(java.util.stream.Collectors.toList());
+            
+        try {
+            CompletableFuture.allOf(allFutures.toArray(new CompletableFuture[0]))
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.warn("[AdvancedAnalytics] Partial timeout after 5s — returning completed components only");
+        } catch (Exception e) {
+            log.error("[AdvancedAnalytics] Error joining futures", e);
         }
         
-        if (moversFuture != null) {
-            analyticsBuilder.movers(moversFuture.join());
+        if (heatmapFuture != null && heatmapFuture.isDone() && !heatmapFuture.isCompletedExceptionally()) {
+            analyticsBuilder.heatmap(heatmapFuture.getNow(null));
         }
         
-        if (sectorAllocationFuture != null) {
-            analyticsBuilder.sectorAllocation(sectorAllocationFuture.join());
+        if (moversFuture != null && moversFuture.isDone() && !moversFuture.isCompletedExceptionally()) {
+            analyticsBuilder.movers(moversFuture.getNow(null));
         }
         
-        if (marketCapAllocationFuture != null) {
-            analyticsBuilder.marketCapAllocation(marketCapAllocationFuture.join());
+        if (sectorAllocationFuture != null && sectorAllocationFuture.isDone() && !sectorAllocationFuture.isCompletedExceptionally()) {
+            analyticsBuilder.sectorAllocation(sectorAllocationFuture.getNow(null));
+        }
+        
+        if (marketCapAllocationFuture != null && marketCapAllocationFuture.isDone() && !marketCapAllocationFuture.isCompletedExceptionally()) {
+            analyticsBuilder.marketCapAllocation(marketCapAllocationFuture.getNow(null));
         }
         
         // Add the analytics component to the response

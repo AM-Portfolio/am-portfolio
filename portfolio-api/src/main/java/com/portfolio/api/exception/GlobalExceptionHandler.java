@@ -29,8 +29,9 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
         Map<String, Object> responseBody = new LinkedHashMap<>();
         responseBody.put("timestamp", LocalDateTime.now());
-        responseBody.put("message", ex.getMessage() != null ? ex.getMessage() : "An error occurred");
-        responseBody.put("type", ex.getClass().getSimpleName());
+        responseBody.put("message", statusCode.value() >= 500
+            ? "An unexpected error occurred. Please try again later."
+            : ex.getMessage() != null ? ex.getMessage() : "Request could not be processed.");
         responseBody.put("status", statusCode.value());
 
         return new ResponseEntity<>(responseBody, headers, statusCode);

@@ -43,9 +43,9 @@ public class AsyncConfig {
     @Bean(name = "externalApiExecutor")
     public Executor externalApiExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(20);
-        executor.setMaxPoolSize(50);
-        executor.setQueueCapacity(200);
+        executor.setCorePoolSize(50);
+        executor.setMaxPoolSize(150);
+        executor.setQueueCapacity(500);
         executor.setThreadNamePrefix("ExtApiAsync-");
         // Propagate traceId/spanId/correlationId across async thread boundaries
         executor.setTaskDecorator(new MdcTaskDecorator());

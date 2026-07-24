@@ -31,6 +31,13 @@ public class PortfolioOverviewService {
     @org.springframework.lang.Nullable
     private final PortfolioSummaryRedisService portfolioSummaryRedisService;
     
+    private final com.github.benmanes.caffeine.cache.Cache<String, PortfolioSummaryV1> summaryL1 =
+        com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+            .expireAfterWrite(60, java.util.concurrent.TimeUnit.SECONDS)
+            .maximumSize(500)
+            .recordStats()
+            .build();
+
     private final PortfolioCalculator portfolioCalculator;
 
     public PortfolioOverviewService(
@@ -49,6 +56,13 @@ public class PortfolioOverviewService {
     public PortfolioSummaryV1 overviewPortfolio(String userId, TimeInterval interval) {
         log.info("Starting overviewPortfolio - User: {}, Interval: {}",
                 userId, interval != null ? interval.getCode() : "null");
+
+        String l1Key = userId + ":" + (interval != null ? interval.getCode() : "ALL");
+        PortfolioSummaryV1 l1Hit = summaryL1.getIfPresent(l1Key);
+        if (l1Hit != null) {
+            log.debug("[Summary] L1 cache hit for user={}", userId);
+            return l1Hit;
+        }
 
         Optional<PortfolioSummaryV1> cachedSummary = getCachedSummary(userId, interval);
         if (cachedSummary.isPresent()) {
@@ -82,6 +96,7 @@ public class PortfolioOverviewService {
         }
 
         PortfolioSummaryV1 finalSummary = buildPortfolioSummary(portfolios, userId, null, interval);
+        summaryL1.put(l1Key, finalSummary);
         log.info("Completed overviewPortfolio for user: {}", userId);
         return finalSummary;
     }
@@ -102,6 +117,13 @@ public class PortfolioOverviewService {
         if (portfolioId == null || portfolioId.trim().isEmpty()) {
             log.warn("Blank portfolioId provided for specific portfolio overview - User: {}", userId);
             throw new IllegalArgumentException("portfolioId cannot be blank");
+        }
+
+        String l1Key = userId + ":" + portfolioId + ":" + (interval != null ? interval.getCode() : "ALL");
+        PortfolioSummaryV1 l1Hit = summaryL1.getIfPresent(l1Key);
+        if (l1Hit != null) {
+            log.debug("[Summary] L1 cache hit for user={} portfolio={}", userId, portfolioId);
+            return l1Hit;
         }
 
         Optional<PortfolioSummaryV1> cachedSummary = Optional.empty();
@@ -138,6 +160,7 @@ public class PortfolioOverviewService {
 
         PortfolioSummaryV1 finalSummary = buildPortfolioSummary(filteredPortfolios, userId, portfolioId, interval);
 
+        summaryL1.put(l1Key, finalSummary);
         log.info("Completed overviewPortfolio for user: {} and portfolio: {}", userId, portfolioId);
         return finalSummary;
     }
@@ -180,7 +203,13 @@ public class PortfolioOverviewService {
                     portfolio.getId(), portfolio.getBrokerType(), portfolio.getTotalValue());
 
             var portfolioSummary = portfolioMapper.toPortfolioModelV1(portfolio);
-            brokerSummaryMap.computeIfAbsent(portfolio.getBrokerType(), brokerType -> portfolioSummary);
+            brokerSummaryMap.merge(portfolio.getBrokerType(), portfolioSummary,
+                (existing, incoming) -> {
+                    double inc = incoming.getInvestmentValue() != null ? incoming.getInvestmentValue() : 0.0;
+                    double ex  = existing.getInvestmentValue() != null ? existing.getInvestmentValue() : 0.0;
+                    existing.setInvestmentValue(ex + inc);
+                    return existing;
+                });
         }
 
         log.debug("Created broker summary map with {} entries for {}", brokerSummaryMap.size(), context);
@@ -206,7 +235,9 @@ public class PortfolioOverviewService {
     private PortfolioSummaryV1 getPortfolioSummary(List<PortfolioModelV1> portfolios) {
         log.debug("Calculating total portfolio value from {} portfolios", portfolios.size());
 
-        var totalValue = portfolios.stream().mapToDouble(PortfolioModelV1::getTotalValue).sum();
+        var totalValue = portfolios.stream()
+                .mapToDouble(p -> p.getTotalValue() != null ? p.getTotalValue() : 0.0)
+                .sum();
         log.debug("Calculated total value: {}", totalValue);
 
         var equityHoldings = portfolioHoldingsService.getHoldings(portfolios);
