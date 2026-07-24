@@ -110,7 +110,6 @@ report.md
 
 ### SPT Test Files ###
 spt/
-spt.yaml
 
 ### Scratch / Temp ###
 dummy_settings.xml
