@@ -1,4 +1,4 @@
-﻿### Maven ###
+### Maven ###
 target/
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
@@ -107,3 +107,14 @@ jdk-*/
 *.js
 *.sh
 report.md
+
+### SPT Test Files ###
+spt/
+spt.yaml
+
+### Scratch / Temp ###
+dummy_settings.xml
+logs.txt
+parsed_collection.txt
+pr19_diff.patch
+pr_diff.txt
