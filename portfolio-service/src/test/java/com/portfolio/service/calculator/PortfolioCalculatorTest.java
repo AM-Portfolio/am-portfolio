@@ -104,8 +104,8 @@ class PortfolioCalculatorTest {
 
         List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
 
-        // Fallback is 0% gain (same as avg buying price) since mock data was removed
-        assertEquals(3000.0, results.get(0).getCurrentPrice());
+        // Fallback was removed; currentPrice is null if missing from API
+        assertNull(results.get(0).getCurrentPrice());
     }
 
     @Test

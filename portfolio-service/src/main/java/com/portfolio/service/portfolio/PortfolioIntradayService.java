@@ -149,25 +149,16 @@ public class PortfolioIntradayService {
             return List.of(makeGlobalPoint("09:15", baselineWealth, baselineWealth, false));
         }
 
-        // Fetch current portfolio value from MongoDB to compute the Mutual Fund offset
-        double currentMongoValue = 0.0;
-        try {
-            if (portfolioId == null || portfolioId.trim().isEmpty()) {
-                List<PortfolioDocument> portfolios = portfolioDocumentRepository.findByOwner(userId);
-                if (portfolios != null) {
-                    currentMongoValue = portfolios.stream()
-                            .mapToDouble(p -> p.getTotalValue() != null ? p.getTotalValue() : 0.0)
-                            .sum();
-                }
-            } else {
-                Optional<PortfolioDocument> pOpt = portfolioDocumentRepository.findById(portfolioId);
-                if (pOpt.isPresent()) {
-                    currentMongoValue = pOpt.get().getTotalValue() != null ? pOpt.get().getTotalValue() : 0.0;
+        // Compute missing asset value (Mutual Funds / Bonds) directly from yesterday's snapshot
+        double baselineEquityWealth = 0.0;
+        if (baselineSnap.getPortfolios() != null) {
+            for (PortfolioSnapshotEntryModel entry : baselineSnap.getPortfolios()) {
+                if (portfolioId == null || portfolioId.equals(entry.getPortfolioId())) {
+                    baselineEquityWealth += entry.getClose() != null ? entry.getClose() : 0.0;
                 }
             }
-        } catch (Exception e) {
-            log.error("[Intraday] Failed to fetch current totalValue from MongoDB", e);
         }
+        double missingAssetValue = Math.max(0.0, baselineWealth - baselineEquityWealth);
 
         // ── STEP 3: Fetch 1D OHLC candles for all symbols in batch ─────────────
         List<String> symbols = new ArrayList<>(symbolQty.keySet());
@@ -245,23 +236,112 @@ public class PortfolioIntradayService {
             log.error("[Intraday] Failed to fetch live prices or compute live equity wealth", e);
         }
 
-        // Compute flat offset for unsupported assets (Mutual Funds / Bonds)
-        double finalMongoVal = currentMongoValue > 0.0 ? currentMongoValue : baselineWealth;
-        double missingAssetValue = finalMongoVal - liveEquityWealth;
-        if (missingAssetValue < 0.0) {
-            missingAssetValue = 0.0;
+        // ── STEP 4.5: Weekend/Non-Trading Day Real Lookback ───
+        if (priceSeries.isEmpty()) {
+            java.time.DayOfWeek dayOfWeek = today.getDayOfWeek();
+            boolean isWeekend = dayOfWeek == java.time.DayOfWeek.SATURDAY || dayOfWeek == java.time.DayOfWeek.SUNDAY;
+            boolean noLivePrices = livePrices == null || livePrices.isEmpty();
+
+            if (isWeekend || noLivePrices || nowIST.isBefore(MARKET_OPEN)) {
+                log.info("[Intraday] priceSeries and livePrices are empty. Attempting 1W fallback for realistic chart.");
+                try {
+                    com.portfolio.marketdata.model.HistoricalChartsResponse fallbackResponse = marketDataService.getHistoricalCharts(symbols, "1W");
+                    if (fallbackResponse != null && fallbackResponse.getData() != null) {
+                        // Find the maximum date in the 1W payload
+                        java.time.LocalDate maxDate = null;
+                        for (com.portfolio.marketdata.model.HistoricalData hd : fallbackResponse.getData().values()) {
+                            if (hd != null && hd.getDataPoints() != null) {
+                                for (com.am.common.investment.model.historical.OHLCVTPoint pt : hd.getDataPoints()) {
+                                    if (pt.getTime() != null) {
+                                        java.time.LocalDate ptDate = pt.getTime().toLocalDate();
+                                        if (maxDate == null || ptDate.isAfter(maxDate)) {
+                                            maxDate = ptDate;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (maxDate != null) {
+                            final java.time.LocalDate targetDate = maxDate;
+                            log.info("[Intraday] Extracted max date from 1W fallback: {}", targetDate);
+                            
+                            // Rebuild priceSeries using only data from targetDate
+                            for (Map.Entry<String, com.portfolio.marketdata.model.HistoricalData> entry : fallbackResponse.getData().entrySet()) {
+                                String sym = entry.getKey();
+                                com.portfolio.marketdata.model.HistoricalData hd = entry.getValue();
+                                if (hd == null || hd.getDataPoints() == null) continue;
+
+                                boolean isUtcPayload = false;
+                                if (!hd.getDataPoints().isEmpty()) {
+                                    com.am.common.investment.model.historical.OHLCVTPoint firstPt = hd.getDataPoints().get(0);
+                                    if (firstPt != null && firstPt.getTime() != null && firstPt.getTime().toLocalTime().getHour() < 9) {
+                                        isUtcPayload = true;
+                                    }
+                                }
+
+                                for (com.am.common.investment.model.historical.OHLCVTPoint pt : hd.getDataPoints()) {
+                                    if (pt.getTime() == null || pt.getClose() == null) continue;
+                                    
+                                    java.time.LocalDate ptDate = pt.getTime().toLocalDate();
+                                    LocalTime t = pt.getTime().toLocalTime().withSecond(0).withNano(0);
+                                    if (isUtcPayload) {
+                                        java.time.LocalDateTime adjusted = pt.getTime().plusHours(5).plusMinutes(30);
+                                        ptDate = adjusted.toLocalDate();
+                                        t = adjusted.toLocalTime().withSecond(0).withNano(0);
+                                    }
+
+                                    if (!ptDate.equals(targetDate)) continue;
+                                    if (t.isBefore(MARKET_OPEN) || t.isAfter(MARKET_CLOSE)) continue;
+                                    
+                                    priceSeries.computeIfAbsent(t, k -> new HashMap<>()).put(sym, pt.getClose());
+                                    
+                                    // Update livePrices with the latest known price for this day
+                                    livePrices.put(sym, pt.getClose());
+                                }
+                            }
+                            
+                            // Recalculate liveEquityWealth based on updated livePrices
+                            liveEquityWealth = 0.0;
+                            for (Map.Entry<String, Double> sq : symbolQty.entrySet()) {
+                                Double price = livePrices.get(sq.getKey());
+                                if (price != null) {
+                                    liveEquityWealth += price * sq.getValue();
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("[Intraday] Failed to fetch or process 1W fallback charts", e);
+                }
+            }
         }
 
-        // Fallback: If 1D candles are empty (e.g., market not open yet), generate flat 75-point chart using previous close
+        // Fallback: If STILL empty, generate a flat chart using the last known prices
         if (priceSeries.isEmpty()) {
             if (livePrices != null && !livePrices.isEmpty()) {
                 LocalTime t = MARKET_OPEN;
-                while (!t.isAfter(MARKET_CLOSE)) {
+                
+                java.time.DayOfWeek dayOfWeek = today.getDayOfWeek();
+                boolean isWeekend = dayOfWeek == java.time.DayOfWeek.SATURDAY || dayOfWeek == java.time.DayOfWeek.SUNDAY;
+                
+                LocalTime limit;
+                if (isWeekend || nowIST.isAfter(MARKET_CLOSE)) {
+                    limit = MARKET_CLOSE; // Full day flatline
+                } else if (nowIST.isBefore(MARKET_OPEN)) {
+                    limit = MARKET_OPEN; // Only the opening point
+                } else {
+                    limit = nowIST; // Fill up to current time
+                }
+
+                while (!t.isAfter(limit)) {
                     priceSeries.put(t, livePrices);
                     t = t.plusMinutes(5);
                 }
             }
         }
+
+
 
         // ── STEP 5: Compute portfolio value per candle with carry-forward ──────
         Map<String, Double> lastKnown = new HashMap<>();

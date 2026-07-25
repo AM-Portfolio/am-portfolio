@@ -37,27 +37,34 @@ public class TopMoverUtils {
         for (String symbol : portfolioSymbols) {
             MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
             if (data != null) {
-                if (data.getPreviousClose() != null && data.getPreviousClose() > 0) {
-                    double previousClose = data.getPreviousClose();
-                    // Resolve lastPrice with fallback to ohlc.close to prevent NPE on unboxing
-                    Double rawLastPrice = data.getLastPrice();
-                    double lastPrice;
-                    if (rawLastPrice != null && rawLastPrice > 0) {
-                        lastPrice = rawLastPrice;
-                    } else if (data.getOhlc() != null && data.getOhlc().getClose() > 0) {
-                        lastPrice = data.getOhlc().getClose();
-                    } else {
-                        log.trace("Symbol {} has no resolvable lastPrice for performance calculation, skipping", symbol);
-                        continue;
-                    }
-                    
-                    double changePercent = ((lastPrice - previousClose) / previousClose) * 100;
-                    symbolToChangePercent.put(symbol, changePercent);
-                    symbolToPerformance.put(symbol, changePercent);
-                    
-                    log.trace("Symbol: {}, Performance: {}, Change: {}%", 
-                            symbol, changePercent, changePercent);
+                // Resolve lastPrice with fallback to ohlc.close to prevent NPE on unboxing
+                Double rawLastPrice = data.getLastPrice();
+                double lastPrice;
+                if (rawLastPrice != null && rawLastPrice > 0) {
+                    lastPrice = rawLastPrice;
+                } else if (data.getOhlc() != null && data.getOhlc().getClose() > 0) {
+                    lastPrice = data.getOhlc().getClose();
+                } else {
+                    log.trace("Symbol {} has no resolvable lastPrice for performance calculation, skipping", symbol);
+                    continue;
                 }
+                
+                double refPrice = 0;
+                if (data.getPreviousClose() != null && data.getPreviousClose() > 0) {
+                    refPrice = data.getPreviousClose();
+                } else if (data.getOhlc() != null && data.getOhlc().getOpen() > 0) {
+                    refPrice = data.getOhlc().getOpen(); // intraday fallback
+                } else {
+                    log.trace("No reference price for {}. Skipping from movers.", symbol);
+                    continue;
+                }
+                
+                double changePercent = ((lastPrice - refPrice) / refPrice) * 100;
+                symbolToChangePercent.put(symbol, changePercent);
+                symbolToPerformance.put(symbol, changePercent);
+                
+                log.trace("Symbol: {}, Performance: {}, Change: {}%", 
+                        symbol, changePercent, changePercent);
             }
         }
 

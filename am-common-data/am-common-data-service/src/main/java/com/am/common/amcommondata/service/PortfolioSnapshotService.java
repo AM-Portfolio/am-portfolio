@@ -35,6 +35,7 @@ public class PortfolioSnapshotService {
         "5Y",  java.time.Period.ofYears(5)
     );
 
+    @org.springframework.cache.annotation.CacheEvict(value = "portfolioHistory", allEntries = true)
     public void saveUserSnapshot(String userId, Double totalUserWealth, Double totalUserInvestment, Double totalUserGainLoss, Double totalUserGainLossPercentage, List<PortfolioSnapshotEntry> entries) {
         LocalDate today = LocalDate.now();
 
@@ -114,7 +115,9 @@ public class PortfolioSnapshotService {
         }
 
         return documents.stream()
+                .filter(doc -> doc.getPortfolios() != null && !doc.getPortfolios().isEmpty())
                 .map(doc -> toModel(doc, portfolioId))
+                .filter(java.util.Objects::nonNull)
                 .collect(Collectors.toList());
     }
 
@@ -135,11 +138,15 @@ public class PortfolioSnapshotService {
                 investment += p.getTotalInvestment() != null ? p.getTotalInvestment() : 0.0;
                 entryModels.add(toEntryModel(p));
             }
-        } else {
-            // Null-safe fallback for documents without nested portfolios
+        } else if (targetPortfolioId == null) {
+            // Pre-V2 legacy snapshot — ONLY safe for global queries (all portfolios)
             double fallback = doc.getTotalUserWealth() != null ? doc.getTotalUserWealth() : 0.0;
             wealth = fallback; open = fallback; high = fallback; low = fallback;
             investment = doc.getTotalUserInvestment() != null ? doc.getTotalUserInvestment() : 0.0;
+        }
+
+        if (wealth == 0.0 && investment == 0.0 && targetPortfolioId != null) {
+            return null; // Caller will filter this out
         }
 
         double gainLoss    = wealth - investment;

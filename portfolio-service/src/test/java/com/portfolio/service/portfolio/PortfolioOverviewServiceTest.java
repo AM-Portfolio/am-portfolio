@@ -76,7 +76,7 @@ class PortfolioOverviewServiceTest {
                 .thenReturn(Optional.empty());
         when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(List.of(p1));
         when(portfolioCalculator.calculateSummary(anyList(), anyDouble())).thenReturn(PortfolioSummaryV1.builder().build());
-        when(portfolioCalculator.enrichHoldings(anyList())).thenReturn(Collections.emptyList());
+        when(portfolioMapper.toPortfolioModelV1(any(PortfolioModelV1.class))).thenReturn(com.portfolio.model.portfolio.v1.BrokerPortfolioSummary.builder().build());
         lenient().when(flowLogger.start(anyString(), any())).thenReturn(mock(FlowSpan.class));
 
         PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, TimeInterval.ONE_DAY);
@@ -95,7 +95,7 @@ class PortfolioOverviewServiceTest {
 
         when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(List.of(p1));
         when(portfolioCalculator.calculateSummary(anyList(), anyDouble())).thenReturn(PortfolioSummaryV1.builder().build());
-        when(portfolioCalculator.enrichHoldings(anyList())).thenReturn(Collections.emptyList());
+        when(portfolioMapper.toPortfolioModelV1(any(PortfolioModelV1.class))).thenReturn(com.portfolio.model.portfolio.v1.BrokerPortfolioSummary.builder().build());
         lenient().when(flowLogger.start(anyString(), any())).thenReturn(mock(FlowSpan.class));
 
         PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, portId.toString(), TimeInterval.ONE_DAY);
@@ -104,13 +104,14 @@ class PortfolioOverviewServiceTest {
     }
 
     @Test
-    void overviewPortfolio_NoPortfolios_ReturnsNull() {
+    void overviewPortfolio_NoPortfolios_ReturnsEmptySummary() {
         String userId = "user-none";
         when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(Collections.emptyList());
         lenient().when(flowLogger.start(anyString(), any())).thenReturn(mock(FlowSpan.class));
 
         PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, TimeInterval.ONE_DAY);
 
-        assertNull(result);
+        assertNotNull(result);
+        assertEquals(0.0, result.getInvestmentValue());
     }
 }

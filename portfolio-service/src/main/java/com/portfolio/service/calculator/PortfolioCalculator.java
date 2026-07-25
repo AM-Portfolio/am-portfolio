@@ -201,27 +201,15 @@ public class PortfolioCalculator {
                 Double prevClose = apiItem.getPreviousClose();
                 if (prevClose != null && prevClose > 0) {
                     previousClosePrice = prevClose;
-                } else if (apiItem.getOhlc() != null && apiItem.getOhlc().getClose() > 0) {
-                    log.debug("previousClose missing for {}. Falling back to OHLC close.", symbol);
-                    previousClosePrice = apiItem.getOhlc().getClose();
+                } else if (apiItem.getOhlc() != null && apiItem.getOhlc().getOpen() > 0) {
+                    log.debug("previousClose missing for {}. Falling back to OHLC open for intraday P&L.", symbol);
+                    previousClosePrice = apiItem.getOhlc().getOpen();
                 } else {
-                    log.warn("Missing previousClose for symbol {}. Daily P&L will not be calculated.", symbol);
+                    log.warn("Missing previousClose and openPrice for symbol {}. Daily P&L will not be calculated.", symbol);
                 }
             }
         }
 
-        // Local development fallback to prevent UI from showing null values, but avoid fabricating Daily P&L
-        if (currentPrice == null || currentPrice == 0.0) {
-            log.debug("No market data for {}. Using investment cost as price fallback.", symbol);
-            if (holding.getAverageBuyingPrice() != null && holding.getAverageBuyingPrice() > 0) {
-                currentPrice = holding.getAverageBuyingPrice();
-            } else if (holding.getInvestmentCost() != null && holding.getQuantity() != null && holding.getQuantity() > 0) {
-                double impliedAvgPrice = holding.getInvestmentCost() / holding.getQuantity();
-                currentPrice = impliedAvgPrice;
-            } else {
-                currentPrice = 0.0;
-            }
-        }
 
         if (currentPrice != null) {
             holding.setCurrentPrice(round(currentPrice));

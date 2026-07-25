@@ -59,6 +59,9 @@ class PortfolioControllerTest {
     @MockBean
     private SnapshotCatchUpService snapshotCatchUpService;
 
+    @MockBean
+    private com.portfolio.service.portfolio.PortfolioIntradayService portfolioIntradayService;
+
     @AfterEach
     void tearDown() {
         UserContext.clear();
