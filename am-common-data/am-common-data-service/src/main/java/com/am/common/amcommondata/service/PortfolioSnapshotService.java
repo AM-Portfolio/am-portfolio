@@ -115,6 +115,7 @@ public class PortfolioSnapshotService {
         }
 
         return documents.stream()
+                .filter(doc -> doc.getPortfolios() != null && !doc.getPortfolios().isEmpty())
                 .map(doc -> toModel(doc, portfolioId))
                 .filter(java.util.Objects::nonNull)
                 .collect(Collectors.toList());

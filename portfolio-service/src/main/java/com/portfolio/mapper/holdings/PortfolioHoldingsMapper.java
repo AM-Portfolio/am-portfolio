@@ -39,8 +39,9 @@ public class PortfolioHoldingsMapper {
 
         for (PortfolioModelV1 portfolio : portfolios) {
             for (EquityModel equity : portfolio.getEquityModels()) {
-                // Use symbol instead of ISIN as the key
-                String symbol = equity.getSymbol();
+                // Use normalized symbol instead of ISIN as the key
+                String rawSymbol = equity.getSymbol();
+                String symbol = com.portfolio.model.util.SymbolResolver.normalize(rawSymbol);
 
                 if (symbol == null) {
                     continue; // Skip equities without a symbol

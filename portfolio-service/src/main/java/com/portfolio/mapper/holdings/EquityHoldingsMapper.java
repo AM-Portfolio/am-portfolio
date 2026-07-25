@@ -8,9 +8,10 @@ import com.portfolio.model.portfolio.EquityHoldings;
 @Component
 public class EquityHoldingsMapper {
     public EquityHoldings toEquityHoldings(EquityModel equityModel) {
+        String normalizedSymbol = com.portfolio.model.util.SymbolResolver.normalize(equityModel.getSymbol());
         return EquityHoldings.builder()
             .isin(equityModel.getIsin())
-            .symbol(equityModel.getSymbol())
+            .symbol(normalizedSymbol)
             .name(equityModel.getName())
             .sector(equityModel.getSector())
             .industry(equityModel.getIndustry())

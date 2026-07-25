@@ -25,8 +25,8 @@ public class PortfolioIntradayRedisService {
 private final RedisTemplate<String, IntradayDataPoint[]> portfolioIntradayRedisTemplate;
 
     private static final String KEY_PREFIX = "portfolio:intraday:v10:";
-    private static final int MARKET_HOURS_TTL_MINUTES = 5;
-    private static final int OFF_MARKET_HOURS_TTL_HOURS = 24;
+    private static final int MARKET_HOURS_TTL_MINUTES = 2;
+    private static final int OFF_MARKET_HOURS_TTL_MINUTES = 30;
 
     private String buildKey(String userId, String portfolioId) {
         String safePortfolioId = (portfolioId != null && !portfolioId.trim().isEmpty()) ? portfolioId : "all";
@@ -37,10 +37,10 @@ private final RedisTemplate<String, IntradayDataPoint[]> portfolioIntradayRedisT
         if (!isRedisEnabled) return;
         String key = buildKey(userId, portfolioId);
         try {
-            Duration ttl = isMarketOpen ? Duration.ofMinutes(MARKET_HOURS_TTL_MINUTES) : Duration.ofHours(OFF_MARKET_HOURS_TTL_HOURS);
+            Duration ttl = isMarketOpen ? Duration.ofMinutes(MARKET_HOURS_TTL_MINUTES) : Duration.ofMinutes(OFF_MARKET_HOURS_TTL_MINUTES);
             log.debug("Caching intraday data for key: {} with TTL: {} {}", key, 
-                      isMarketOpen ? MARKET_HOURS_TTL_MINUTES : OFF_MARKET_HOURS_TTL_HOURS, 
-                      isMarketOpen ? "minutes" : "hours");
+                      isMarketOpen ? MARKET_HOURS_TTL_MINUTES : OFF_MARKET_HOURS_TTL_MINUTES, 
+                      "minutes");
             
             IntradayDataPoint[] array = data.toArray(new IntradayDataPoint[0]);
             portfolioIntradayRedisTemplate.opsForValue().set(key, array, ttl);

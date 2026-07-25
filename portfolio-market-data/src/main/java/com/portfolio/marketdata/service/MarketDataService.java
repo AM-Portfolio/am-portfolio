@@ -655,7 +655,35 @@ public class MarketDataService {
             .collect(Collectors.toList());
             
         if (!stillMissingFallback.isEmpty()) {
-            log.info("[MarketData] OHLC returned empty for {} symbols. Data will be left missing to allow downstream fallbacks.", stillMissingFallback.size());
+            log.info("[MarketData] OHLC returned empty for {} symbols. Attempting L5 Smart Lookback (1W fallback).", stillMissingFallback.size());
+
+            try {
+                // Fetch 1W historical data to get the last known close price
+                HistoricalDataRequest fallbackReq = HistoricalDataRequest.builder()
+                        .symbols(String.join(",", stillMissingFallback))
+                        .interval(com.portfolio.model.market.TimeFrame.WEEK.getValue())
+                        .fromDate(java.time.LocalDate.now(IST).minusDays(14).toString())
+                        .toDate(java.time.LocalDate.now(IST).toString())
+                        .build();
+
+                Map<String, MarketData> fallbackData = getHistoricalData(fallbackReq);
+                if (fallbackData != null) {
+                    fallbackData.forEach((symbol, md) -> {
+                        if (md != null && md.getLastPrice() != null && md.getLastPrice() > 0) {
+                            // If we found a valid price from 1W, inject it as the current live price
+                            result.put(symbol, MarketData.builder()
+                                    .symbol(symbol)
+                                    .lastPrice(md.getLastPrice())
+                                    .previousClose(md.getPreviousClose() != null ? md.getPreviousClose() : md.getLastPrice())
+                                    .timestamp(md.getTimestamp())
+                                    .build());
+                            log.info("[MarketData] L5 Fallback successful for symbol: {} (Price: {})", symbol, md.getLastPrice());
+                        }
+                    });
+                }
+            } catch (Exception e) {
+                log.warn("[MarketData] L5 Smart Lookback failed: {}", e.getMessage());
+            }
         }
 
         log.info("[MarketData] Result: {}/{} symbols returned.", result.size(), symbols.size());
