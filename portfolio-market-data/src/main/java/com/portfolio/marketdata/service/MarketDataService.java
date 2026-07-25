@@ -646,45 +646,7 @@ public class MarketDataService {
             }
         }
 
-        // 5. Fallback for symbols that are STILL missing
-        List<String> stillMissingFallback = symbols.stream().map(this::cleanSymbol)
-            .filter(s -> {
-                MarketData data = result.get(s);
-                return data == null || data.getLastPrice() == null || data.getLastPrice() == 0.0;
-            })
-            .collect(Collectors.toList());
-            
-        if (!stillMissingFallback.isEmpty()) {
-            log.info("[MarketData] OHLC returned empty for {} symbols. Attempting L5 Smart Lookback (1W fallback).", stillMissingFallback.size());
 
-            try {
-                // Fetch 1W historical data to get the last known close price
-                HistoricalDataRequest fallbackReq = HistoricalDataRequest.builder()
-                        .symbols(String.join(",", stillMissingFallback))
-                        .interval(com.portfolio.model.market.TimeFrame.WEEK.getValue())
-                        .fromDate(java.time.LocalDate.now(IST).minusDays(14).toString())
-                        .toDate(java.time.LocalDate.now(IST).toString())
-                        .build();
-
-                Map<String, MarketData> fallbackData = getHistoricalData(fallbackReq);
-                if (fallbackData != null) {
-                    fallbackData.forEach((symbol, md) -> {
-                        if (md != null && md.getLastPrice() != null && md.getLastPrice() > 0) {
-                            // If we found a valid price from 1W, inject it as the current live price
-                            result.put(symbol, MarketData.builder()
-                                    .symbol(symbol)
-                                    .lastPrice(md.getLastPrice())
-                                    .previousClose(md.getPreviousClose() != null ? md.getPreviousClose() : md.getLastPrice())
-                                    .timestamp(md.getTimestamp())
-                                    .build());
-                            log.info("[MarketData] L5 Fallback successful for symbol: {} (Price: {})", symbol, md.getLastPrice());
-                        }
-                    });
-                }
-            } catch (Exception e) {
-                log.warn("[MarketData] L5 Smart Lookback failed: {}", e.getMessage());
-            }
-        }
 
         log.info("[MarketData] Result: {}/{} symbols returned.", result.size(), symbols.size());
         return result;
@@ -707,9 +669,17 @@ public class MarketDataService {
         try {
             return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
                 try {
+                    Map<String, String> cleanToRaw = new HashMap<>();
+                    List<String> cleanedSymbols = new java.util.ArrayList<>();
+                    for (String s : symbols) {
+                        String clean = cleanSymbol(s);
+                        cleanToRaw.put(clean, s);
+                        cleanedSymbols.add(clean);
+                    }
+
                     com.portfolio.marketdata.model.BatchSearchRequest request = com.portfolio.marketdata.model.BatchSearchRequest
                             .builder()
-                            .queries(symbols)
+                            .queries(cleanedSymbols)
                             .limit(1)
                             .minMatchScore(0.9)
                             .build();
@@ -724,7 +694,8 @@ public class MarketDataService {
                     Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> result = new HashMap<>();
                     for (com.portfolio.marketdata.model.BatchSearchResponse.QueryResult qr : response.getResults()) {
                         if (qr.getMatches() != null && !qr.getMatches().isEmpty()) {
-                            result.put(qr.getQuery(), qr.getMatches().get(0));
+                            String rawSymbol = cleanToRaw.getOrDefault(qr.getQuery(), qr.getQuery());
+                            result.put(rawSymbol, qr.getMatches().get(0));
                         }
                     }
                     return result;
@@ -768,14 +739,21 @@ public class MarketDataService {
         com.portfolio.marketdata.model.HistoricalChartsResponse finalResp = new com.portfolio.marketdata.model.HistoricalChartsResponse();
         finalResp.setData(new java.util.HashMap<>());
         
+        Map<String, String> cleanToRaw = new java.util.HashMap<>();
         List<String> missingSymbols = new java.util.ArrayList<>();
+        
         for (String symbol : validSymbols) {
-            String cacheKey = symbol + ":" + range;
+            String cleanSym = cleanSymbol(symbol);
+            cleanToRaw.put(cleanSym, symbol);
+            
+            String cacheKey = cleanSym + ":" + range;
             com.portfolio.marketdata.model.HistoricalData cachedData = chartCache.getIfPresent(cacheKey);
             if (cachedData != null) {
                 finalResp.getData().put(symbol, cachedData);
             } else {
-                missingSymbols.add(symbol);
+                if (!missingSymbols.contains(cleanSym)) {
+                    missingSymbols.add(cleanSym);
+                }
             }
         }
         
@@ -787,15 +765,16 @@ public class MarketDataService {
         log.info("Getting historical charts for {} missing symbols with range={}", missingSymbols.size(), range);
 
         if ("1D".equalsIgnoreCase(range) && stockPriceHistoryMongoService != null) {
-            return buildIntradayFromMongo(missingSymbols, finalResp);
+            return buildIntradayFromMongo(missingSymbols, finalResp, cleanToRaw);
         }
 
-        return callExternalApiForRange(missingSymbols, range, finalResp);
+        return callExternalApiForRange(missingSymbols, range, finalResp, cleanToRaw);
     }
 
     private com.portfolio.marketdata.model.HistoricalChartsResponse callExternalApiForRange(
             List<String> missingSymbols, String range, 
-            com.portfolio.marketdata.model.HistoricalChartsResponse finalResp) {
+            com.portfolio.marketdata.model.HistoricalChartsResponse finalResp,
+            Map<String, String> cleanToRaw) {
         try {
             int CHUNK_SIZE = 20;
             List<List<String>> chunks = new java.util.ArrayList<>();
@@ -828,9 +807,10 @@ public class MarketDataService {
             for (java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalChartsResponse> f : futures) {
                 com.portfolio.marketdata.model.HistoricalChartsResponse chunkResp = f.join();
                 if (chunkResp != null && chunkResp.getData() != null) {
-                    chunkResp.getData().forEach((symbol, data) -> {
-                        finalResp.getData().put(symbol, data);
-                        chartCache.put(symbol + ":" + range, data);
+                    chunkResp.getData().forEach((cleanSym, data) -> {
+                        String rawSym = cleanToRaw.getOrDefault(cleanSym, cleanSym);
+                        finalResp.getData().put(rawSym, data);
+                        chartCache.put(cleanSym + ":" + range, data);
                     });
                 }
             }
@@ -842,14 +822,14 @@ public class MarketDataService {
     }
 
     private com.portfolio.marketdata.model.HistoricalChartsResponse buildIntradayFromMongo(
-            List<String> symbols, com.portfolio.marketdata.model.HistoricalChartsResponse partial) {
+            List<String> symbols, com.portfolio.marketdata.model.HistoricalChartsResponse partial, Map<String, String> cleanToRaw) {
         
         long startEpoch;
         try {
             startEpoch = findLastTradingDayStartEpoch();
         } catch (Exception e) {
             log.error("[Intraday-Mongo] Date resolution failed, falling back to API", e);
-            return callExternalApiForRange(symbols, "1D", partial);
+            return callExternalApiForRange(symbols, "1D", partial, cleanToRaw);
         }
 
         Map<String, List<StockPriceHistoryDocument>> historyBySymbol = new HashMap<>();
@@ -857,18 +837,18 @@ public class MarketDataService {
             historyBySymbol = stockPriceHistoryMongoService.getIntradayHistory(symbols, startEpoch);
         } catch (Exception e) {
             log.error("[Intraday-Mongo] DB query failed, falling back to API for all symbols", e);
-            return callExternalApiForRange(symbols, "1D", partial);
+            return callExternalApiForRange(symbols, "1D", partial, cleanToRaw);
         }
 
         List<String> fallbackSymbols = new ArrayList<>();
         Map<String, Double> liveSnapshots = new HashMap<>();
 
-        for (String symbol : symbols) {
-            List<StockPriceHistoryDocument> ticks = historyBySymbol.getOrDefault(symbol, List.of());
+        for (String cleanSymbol : symbols) {
+            List<StockPriceHistoryDocument> ticks = historyBySymbol.getOrDefault(cleanSymbol, List.of());
 
             if (ticks.isEmpty()) {
                 // No history in DB for this symbol — schedule it for fallback
-                fallbackSymbols.add(symbol);
+                fallbackSymbols.add(cleanSymbol);
                 continue;
             }
 
@@ -887,14 +867,15 @@ public class MarketDataService {
             }).collect(Collectors.toList());
 
             com.portfolio.marketdata.model.HistoricalData hd = com.portfolio.marketdata.model.HistoricalData.builder()
-                .tradingSymbol(symbol)
+                .tradingSymbol(cleanSymbol)
                 .interval("1min")
                 .dataPoints(points)
                 .dataPointCount(points.size())
                 .build();
 
-            partial.getData().put(symbol, hd);
-            chartCache.put(symbol + ":1D", hd); // Populate L1 cache for next call
+            String rawSymbol = cleanToRaw.getOrDefault(cleanSymbol, cleanSymbol);
+            partial.getData().put(rawSymbol, hd);
+            chartCache.put(cleanSymbol + ":1D", hd); // Populate L1 cache for next call
         }
 
         // ── FALLBACK: Symbols missing from MongoDB ──
@@ -909,11 +890,12 @@ public class MarketDataService {
 
                 // Call external API for the missing symbols
                 com.portfolio.marketdata.model.HistoricalChartsResponse apiResp = 
-                    callExternalApiForRange(fallbackSymbols, "1D", new com.portfolio.marketdata.model.HistoricalChartsResponse());
+                    callExternalApiForRange(fallbackSymbols, "1D", new com.portfolio.marketdata.model.HistoricalChartsResponse(), cleanToRaw);
                 
-                for (String symbol : fallbackSymbols) {
+                for (String cleanSymbol : fallbackSymbols) {
+                    String rawSymbol = cleanToRaw.getOrDefault(cleanSymbol, cleanSymbol);
                     com.portfolio.marketdata.model.HistoricalData apiData = (apiResp != null && apiResp.getData() != null)
-                        ? apiResp.getData().get(symbol) : null;
+                        ? apiResp.getData().get(rawSymbol) : null;
                     
                     boolean apiDataValid = apiData != null 
                         && apiData.getDataPoints() != null 
@@ -921,20 +903,21 @@ public class MarketDataService {
                         && apiData.getDataPoints().stream().anyMatch(p -> p.getClose() != null && p.getClose() > 0);
 
                     if (apiDataValid) {
-                        // API returned good data
-                        partial.getData().put(symbol, apiData);
-                        chartCache.put(symbol + ":1D", apiData);
+                        // API returned good data (callExternalApiForRange already put it in partial under rawSymbol if we passed partial, 
+                        // but here we passed a new response, so we extract and put it manually)
+                        partial.getData().put(rawSymbol, apiData);
+                        chartCache.put(cleanSymbol + ":1D", apiData);
                     } else {
                         // API also returned null/0.0 → create a flat-line chart using live price
-                        StockPriceDocument liveDoc = liveDocs.get(symbol);
+                        StockPriceDocument liveDoc = liveDocs.get(cleanSymbol);
                         if (liveDoc != null && liveDoc.getLastPrice() != null && liveDoc.getLastPrice() > 0) {
                             log.warn("[Intraday-Mongo] Symbol {} has no OHLC data, using flat live price: {}", 
-                                symbol, liveDoc.getLastPrice());
-                            com.portfolio.marketdata.model.HistoricalData flatLine = buildFlatLineChart(symbol, liveDoc.getLastPrice());
-                            partial.getData().put(symbol, flatLine);
-                            chartCache.put(symbol + ":1D", flatLine);
+                                cleanSymbol, liveDoc.getLastPrice());
+                            com.portfolio.marketdata.model.HistoricalData flatLine = buildFlatLineChart(cleanSymbol, liveDoc.getLastPrice());
+                            partial.getData().put(rawSymbol, flatLine);
+                            chartCache.put(cleanSymbol + ":1D", flatLine);
                         } else {
-                            log.warn("[Intraday-Mongo] Symbol {} has no data at all, omitting from chart.", symbol);
+                            log.warn("[Intraday-Mongo] Symbol {} has no data at all, omitting from chart.", cleanSymbol);
                         }
                     }
                 }
