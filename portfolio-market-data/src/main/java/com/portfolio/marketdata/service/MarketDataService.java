@@ -76,6 +76,9 @@ public class MarketDataService {
     // Tracks in-flight OHLC fetches to prevent cache stampedes
     private final java.util.concurrent.ConcurrentHashMap<String, CompletableFuture<MarketData>> inFlightRequests = new java.util.concurrent.ConcurrentHashMap<>();
 
+    // Tracks in-flight Historical Chart fetches to prevent cache stampedes
+    private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalData>> inFlightChartRequests = new java.util.concurrent.ConcurrentHashMap<>();
+
     public MarketDataService(
             MarketDataApiClient marketDataApiClient,
             @org.springframework.lang.Nullable com.portfolio.redis.service.PortfolioMarketDataRedisService marketDataRedisService,
@@ -741,6 +744,8 @@ public class MarketDataService {
         
         Map<String, String> cleanToRaw = new java.util.HashMap<>();
         List<String> missingSymbols = new java.util.ArrayList<>();
+        List<String> toFetch = new java.util.ArrayList<>();
+        Map<String, java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalData>> waitFor = new java.util.HashMap<>();
         
         for (String symbol : validSymbols) {
             String cleanSym = cleanSymbol(symbol);
@@ -753,22 +758,74 @@ public class MarketDataService {
             } else {
                 if (!missingSymbols.contains(cleanSym)) {
                     missingSymbols.add(cleanSym);
+                    boolean[] isNew = {false};
+                    java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalData> fut = inFlightChartRequests.computeIfAbsent(cacheKey, k -> {
+                        isNew[0] = true;
+                        return new java.util.concurrent.CompletableFuture<>();
+                    });
+                    
+                    if (isNew[0]) {
+                        toFetch.add(cleanSym);
+                    } else {
+                        waitFor.put(cleanSym, fut); // coalesce with in-flight request
+                    }
                 }
             }
         }
         
-        if (missingSymbols.isEmpty()) {
-            log.info("Served {} historical charts from L1 cache for range={}", validSymbols.size(), range);
+        // Wait for any in-flight deduplicated requests to finish
+        if (!waitFor.isEmpty()) {
+            java.util.concurrent.CompletableFuture.allOf(waitFor.values().toArray(new java.util.concurrent.CompletableFuture[0]))
+                .orTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+                .exceptionally(e -> null)
+                .join();
+            for (Map.Entry<String, java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalData>> entry : waitFor.entrySet()) {
+                String cleanSym = entry.getKey();
+                String rawSym = cleanToRaw.get(cleanSym);
+                try {
+                    com.portfolio.marketdata.model.HistoricalData hd = entry.getValue().getNow(null);
+                    if (hd != null) {
+                        finalResp.getData().put(rawSym, hd);
+                    }
+                } catch (Exception e) {
+                    log.warn("[HistoricalCharts data] Waiting on future failed: {}", e.getMessage());
+                }
+            }
+        }
+
+        if (toFetch.isEmpty()) {
+            log.info("Served {} historical charts from L1 cache / coalesced requests for range={}", validSymbols.size(), range);
             return finalResp;
         }
 
-        log.info("Getting historical charts for {} missing symbols with range={}", missingSymbols.size(), range);
+        log.info("Getting historical charts for {} missing symbols with range={}", toFetch.size(), range);
+
+        com.portfolio.marketdata.model.HistoricalChartsResponse fetchedResp = new com.portfolio.marketdata.model.HistoricalChartsResponse();
+        fetchedResp.setData(new java.util.HashMap<>());
 
         if ("1D".equalsIgnoreCase(range) && stockPriceHistoryMongoService != null) {
-            return buildIntradayFromMongo(missingSymbols, finalResp, cleanToRaw);
+            buildIntradayFromMongo(toFetch, fetchedResp, cleanToRaw);
+        } else {
+            callExternalApiForRange(toFetch, range, fetchedResp, cleanToRaw);
         }
 
-        return callExternalApiForRange(missingSymbols, range, finalResp, cleanToRaw);
+        // Add fetched data to finalResp and complete the futures for any waiting threads
+        for (String cleanSym : toFetch) {
+            String rawSym = cleanToRaw.get(cleanSym);
+            com.portfolio.marketdata.model.HistoricalData hd = null;
+            if (fetchedResp != null && fetchedResp.getData() != null) {
+                hd = fetchedResp.getData().get(rawSym);
+                if (hd != null) {
+                    finalResp.getData().put(rawSym, hd);
+                }
+            }
+            java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalData> fut = inFlightChartRequests.remove(cleanSym + ":" + range);
+            if (fut != null) {
+                fut.complete(hd);
+            }
+        }
+
+        return finalResp;
     }
 
     private com.portfolio.marketdata.model.HistoricalChartsResponse callExternalApiForRange(
