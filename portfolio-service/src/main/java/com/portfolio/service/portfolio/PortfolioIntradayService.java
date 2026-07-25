@@ -149,25 +149,16 @@ public class PortfolioIntradayService {
             return List.of(makeGlobalPoint("09:15", baselineWealth, baselineWealth, false));
         }
 
-        // Fetch current portfolio value from MongoDB to compute the Mutual Fund offset
-        double currentMongoValue = 0.0;
-        try {
-            if (portfolioId == null || portfolioId.trim().isEmpty()) {
-                List<PortfolioDocument> portfolios = portfolioDocumentRepository.findByOwner(userId);
-                if (portfolios != null) {
-                    currentMongoValue = portfolios.stream()
-                            .mapToDouble(p -> p.getTotalValue() != null ? p.getTotalValue() : 0.0)
-                            .sum();
-                }
-            } else {
-                Optional<PortfolioDocument> pOpt = portfolioDocumentRepository.findById(portfolioId);
-                if (pOpt.isPresent()) {
-                    currentMongoValue = pOpt.get().getTotalValue() != null ? pOpt.get().getTotalValue() : 0.0;
+        // Compute missing asset value (Mutual Funds / Bonds) directly from yesterday's snapshot
+        double baselineEquityWealth = 0.0;
+        if (baselineSnap.getPortfolios() != null) {
+            for (PortfolioSnapshotEntryModel entry : baselineSnap.getPortfolios()) {
+                if (portfolioId == null || portfolioId.equals(entry.getPortfolioId())) {
+                    baselineEquityWealth += entry.getClose() != null ? entry.getClose() : 0.0;
                 }
             }
-        } catch (Exception e) {
-            log.error("[Intraday] Failed to fetch current totalValue from MongoDB", e);
         }
+        double missingAssetValue = Math.max(0.0, baselineWealth - baselineEquityWealth);
 
         // ── STEP 3: Fetch 1D OHLC candles for all symbols in batch ─────────────
         List<String> symbols = new ArrayList<>(symbolQty.keySet());
@@ -245,23 +236,32 @@ public class PortfolioIntradayService {
             log.error("[Intraday] Failed to fetch live prices or compute live equity wealth", e);
         }
 
-        // Compute flat offset for unsupported assets (Mutual Funds / Bonds)
-        double finalMongoVal = currentMongoValue > 0.0 ? currentMongoValue : baselineWealth;
-        double missingAssetValue = finalMongoVal - liveEquityWealth;
-        if (missingAssetValue < 0.0) {
-            missingAssetValue = 0.0;
-        }
-
-        // Fallback: If 1D candles are empty (e.g., market not open yet), generate flat 75-point chart using previous close
+        // Fallback: If 1D candles are empty (e.g. weekend, holiday, or before market opens),
+        // generate a flat chart using the last known prices so the UI shows the "last data".
         if (priceSeries.isEmpty()) {
             if (livePrices != null && !livePrices.isEmpty()) {
                 LocalTime t = MARKET_OPEN;
-                while (!t.isAfter(MARKET_CLOSE)) {
+                
+                java.time.DayOfWeek dayOfWeek = today.getDayOfWeek();
+                boolean isWeekend = dayOfWeek == java.time.DayOfWeek.SATURDAY || dayOfWeek == java.time.DayOfWeek.SUNDAY;
+                
+                LocalTime limit;
+                if (isWeekend || nowIST.isAfter(MARKET_CLOSE)) {
+                    limit = MARKET_CLOSE; // Full day flatline for weekends or after market closes
+                } else if (nowIST.isBefore(MARKET_OPEN)) {
+                    limit = MARKET_OPEN; // Only the opening point if before market
+                } else {
+                    limit = nowIST; // Fill up to current time if we are in the middle of a trading day (e.g. holiday)
+                }
+
+                while (!t.isAfter(limit)) {
                     priceSeries.put(t, livePrices);
                     t = t.plusMinutes(5);
                 }
             }
         }
+
+
 
         // ── STEP 5: Compute portfolio value per candle with carry-forward ──────
         Map<String, Double> lastKnown = new HashMap<>();

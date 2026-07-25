@@ -10,6 +10,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.doAnswer;
 
 import java.util.Collections;
 import java.util.List;
@@ -105,6 +106,12 @@ public class PortfolioHoldingsServiceTest {
         lenient().when(portfolioHoldingsMapper.toEquityHoldings(any())).thenReturn(Collections.emptyList());
         when(portfolioHoldingsMapper.toPortfolioHoldingsV1(portfolios)).thenReturn(mappedHoldings);
         when(portfolioCalculator.enrichHoldings(any())).thenReturn(holdings);
+
+        doAnswer(invocation -> {
+            Runnable runnable = invocation.getArgument(0);
+            runnable.run();
+            return null;
+        }).when(taskExecutor).execute(any(Runnable.class));
 
         // When
         PortfolioHoldings result = portfolioHoldingsService.getPortfolioHoldings(userId, interval, true);

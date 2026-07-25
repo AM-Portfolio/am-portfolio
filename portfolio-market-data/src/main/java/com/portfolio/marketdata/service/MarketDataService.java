@@ -465,9 +465,16 @@ public class MarketDataService {
             try {
                 Map<String, MarketData> cached = marketDataRedisService.getMarketData(missing);
                 if (cached != null) {
-                    result.putAll(cached);
-                    // Update L1
-                    cached.forEach(localCache::put);
+                    cached.forEach((symbol, md) -> {
+                        boolean hasUsableData = md.getPreviousClose() != null && md.getPreviousClose() > 0
+                            || (md.getOhlc() != null && md.getOhlc().getOpen() > 0);
+                        if (hasUsableData) {
+                            result.put(symbol, md);
+                            localCache.put(symbol, md); // promote to L1
+                        } else {
+                            log.debug("[MarketData] Skipping stale Redis entry for {} due to missing previousClose/openPrice", symbol);
+                        }
+                    });
                 }
             } catch (Exception e) {
                 log.warn("[MarketData] Cache read failed: {}", e.getMessage());
@@ -494,12 +501,14 @@ public class MarketDataService {
                             .lastPrice(doc.getLastPrice())
                             .previousClose(doc.getPreviousClose())
                             .timestamp(java.time.Instant.ofEpochMilli(doc.getTimestamp() != null ? doc.getTimestamp() : System.currentTimeMillis()))
-                            .ohlc(com.portfolio.model.market.OhlcData.builder()
-                                .open(doc.getOpenPrice())
-                                .high(doc.getHighPrice())
-                                .low(doc.getLowPrice())
-                                .close(doc.getLastPrice())
-                                .build())
+                            .ohlc(doc.getOpenPrice() != null && doc.getOpenPrice() > 0 
+                                ? com.portfolio.model.market.OhlcData.builder()
+                                    .open(doc.getOpenPrice())
+                                    .high(doc.getHighPrice())
+                                    .low(doc.getLowPrice())
+                                    .close(0.0)
+                                    .build()
+                                : null)
                             .build();
                         result.put(doc.getSymbol(), md);
                         localCache.put(doc.getSymbol(), md); // Update L1
