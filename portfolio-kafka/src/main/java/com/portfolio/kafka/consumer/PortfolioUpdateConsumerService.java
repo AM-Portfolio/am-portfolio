@@ -142,8 +142,10 @@ public class PortfolioUpdateConsumerService {
             String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
             portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
             portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
+            publishUpdate(saved, event.getSource(), portfolioId);
+        } else {
+            publishUpdate(saved, event.getSource(), event.getPortfolioId());
         }
-        publishUpdate(saved, event.getSource(), event.getPortfolioId());
     }
 
     private void processTradeMessage(com.portfolio.model.events.trade.TradePortfolioSyncEvent event) {

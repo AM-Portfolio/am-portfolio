@@ -229,6 +229,7 @@ public class PortfolioServiceImpl implements PortfolioService {
 
             PortfolioDocument incoming = portfolioMapper.toDocument(portfolioModel);
             doc.setEquities(incoming.getEquities());
+            doc.setMutualFunds(incoming.getMutualFunds());
             if (portfolioModel.getTotalValue() != null) {
                 doc.setTotalValue(portfolioModel.getTotalValue());
             }

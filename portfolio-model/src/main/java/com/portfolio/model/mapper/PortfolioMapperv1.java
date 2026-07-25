@@ -19,17 +19,21 @@ public class PortfolioMapperv1 {
 
     public PortfolioModelV1 toPortfolioModelV1(PortfolioUpdateEvent portfolioEvent) {
 
+        List<EquityModel> equityModels = mapToEquityModels(portfolioEvent, portfolioEvent.getBrokerType());
+        List<MutualFundModel> mutualFundModels = mapToMutualFundModels(portfolioEvent, portfolioEvent.getBrokerType());
+
         PortfolioModelV1 portfolioModel = PortfolioModelV1.builder()
                 .id(portfolioEvent.getId())
-                .name(portfolioEvent.getPortfolioId())
+                .name(portfolioEvent.getBrokerType() != null ? portfolioEvent.getBrokerType().getCode() : "Unknown Broker")
                 .owner(portfolioEvent.getUserId())
                 .brokerType(portfolioEvent.getBrokerType())
                 .fundType(FundType.DEFAULT)
                 .status("Active")
                 .createdBy(portfolioEvent.getUserId())
-                .equityModels(portfolioEvent.getEquities())
-                .assetCount(calculateAssetCount(portfolioEvent.getEquities()))
-                .totalValue(calculateTotalValue(portfolioEvent.getEquities()))
+                .equityModels(equityModels)
+                .mutualFundModels(mutualFundModels)
+                .assetCount(calculateAssetCount(equityModels, mutualFundModels))
+                .totalValue(calculateTotalValue(equityModels, mutualFundModels))
                 .version(0L)
                 .build();
         return portfolioModel;
@@ -69,8 +73,8 @@ public class PortfolioMapperv1 {
                 .status("Active")
                 .createdBy(tradeEvent.getUserId())
                 .equityModels(equityModels)
-                .assetCount(calculateAssetCount(equityModels))
-                .totalValue(calculateTotalValue(equityModels))
+                .assetCount(calculateAssetCount(equityModels, null))
+                .totalValue(calculateTotalValue(equityModels, null))
                 .version(0L)
                 .lastTradeAction(action)
                 .build();
@@ -79,7 +83,7 @@ public class PortfolioMapperv1 {
     public BrokerPortfolioSummary toPortfolioModelV1(PortfolioModelV1 portfolio) {
 
         BrokerPortfolioSummary portfolioModel = BrokerPortfolioSummary.builder()
-                .investmentValue(calculateTotalValue(portfolio.getEquityModels()))
+                .investmentValue(calculateTotalValue(portfolio.getEquityModels(), portfolio.getMutualFundModels()))
                 .totalAssets(portfolio.getAssetCount())
                 .lastUpdated(portfolio.getUpdatedAt())
                 .build();
@@ -88,50 +92,68 @@ public class PortfolioMapperv1 {
 
     private List<EquityModel> mapToEquityModels(PortfolioUpdateEvent portfolio, BrokerType brokerType) {
         List<EquityModel> equities = portfolio.getEquities();
-        List<MutualFundModel> mutualFunds = portfolio.getMutualFunds();
         List<EquityModel> assets = new ArrayList<>();
 
         if (equities != null) {
             var assetModels = equities.stream()
-                    .filter(e -> e.getIsin() != null && e.getSymbol() != null) // @todo all values symbol, isin, name
-                                                                               // shoudl comes from PortfolioUpdateEvent
-                                                                               // . Remove filter in upcoming release
+                    .filter(e -> e.getIsin() != null && e.getSymbol() != null)
                     .map(e -> mapEquityModelToAsset(e, brokerType))
-                    .collect(Collectors.toSet());
+                    .collect(Collectors.toList());
             assets.addAll(assetModels);
         }
-
-        // if (mutualFunds != null) {
-        // var fundModels = mutualFunds.stream()
-        // .filter(e -> e.getIsin() != null && e.getSymbol() != null) // @todo all value
-        // shoudl comes from PortfolioUpdateEvent . Remove filter in upcoming release
-        // .map(e -> mapToAsset(e, brokerType))
-        // .collect(Collectors.toSet());
-        // assets.addAll(fundModels);
-        // }
 
         return assets;
     }
 
-    private Double calculateTotalValue(List<EquityModel> equityModels) {
-        if (equityModels == null || equityModels.isEmpty()) {
-            return 0.0;
+    private List<MutualFundModel> mapToMutualFundModels(PortfolioUpdateEvent portfolio, BrokerType brokerType) {
+        List<MutualFundModel> mutualFunds = portfolio.getMutualFunds();
+        List<MutualFundModel> assets = new ArrayList<>();
+
+        if (mutualFunds != null) {
+            var fundModels = mutualFunds.stream()
+                    .filter(e -> e.getIsin() != null && e.getSymbol() != null)
+                    .map(e -> mapToAsset(e, brokerType))
+                    .collect(Collectors.toList());
+            assets.addAll(fundModels);
         }
-        return equityModels.stream()
-                .filter(equity -> equity != null)
-                .map(equity -> {
-                    Double price = equity.getAvgBuyingPrice() != null ? equity.getAvgBuyingPrice() : 0.0;
-                    Double quantity = equity.getQuantity() != null ? equity.getQuantity() : 0.0;
-                    return price * quantity;
-                })
-                .reduce(0.0, Double::sum);
+
+        return assets;
     }
 
-    private Integer calculateAssetCount(List<EquityModel> equityModels) {
-        if (equityModels == null || equityModels.isEmpty()) {
-            return 0;
+    private Double calculateTotalValue(List<EquityModel> equityModels, List<MutualFundModel> mutualFundModels) {
+        double total = 0.0;
+        if (equityModels != null) {
+            total += equityModels.stream()
+                    .filter(equity -> equity != null)
+                    .map(equity -> {
+                        Double price = equity.getAvgBuyingPrice() != null ? equity.getAvgBuyingPrice() : 0.0;
+                        Double quantity = equity.getQuantity() != null ? equity.getQuantity() : 0.0;
+                        return price * quantity;
+                    })
+                    .reduce(0.0, Double::sum);
         }
-        return equityModels.size();
+        if (mutualFundModels != null) {
+            total += mutualFundModels.stream()
+                    .filter(mf -> mf != null)
+                    .map(mf -> {
+                        Double price = mf.getAvgBuyingPrice() != null ? mf.getAvgBuyingPrice() : 0.0;
+                        Double quantity = mf.getQuantity() != null ? mf.getQuantity() : 0.0;
+                        return price * quantity;
+                    })
+                    .reduce(0.0, Double::sum);
+        }
+        return total;
+    }
+
+    private Integer calculateAssetCount(List<EquityModel> equityModels, List<MutualFundModel> mutualFundModels) {
+        int count = 0;
+        if (equityModels != null) {
+            count += equityModels.size();
+        }
+        if (mutualFundModels != null) {
+            count += mutualFundModels.size();
+        }
+        return count;
     }
 
     private EquityModel mapEquityModelToAsset(EquityModel equityModel, BrokerType brokerType) {
@@ -164,13 +186,14 @@ public class PortfolioMapperv1 {
                 .name(fundModel.getName())
                 .avgBuyingPrice(fundModel.getAvgBuyingPrice())
                 .quantity(fundModel.getQuantity())
+                // Pass through any other fields needed
+                .currentPrice(fundModel.getCurrentPrice())
+                .category(fundModel.getCategory())
+                .subCategory(fundModel.getSubCategory())
+                .fundHouse(fundModel.getFundHouse())
                 .build();
     }
 
-    /**
-     * Trade publishes enum names (ZERODHA, GROW, UNKNOWN, …). Portfolio enum is a subset
-     * (GROWW not GROW). Fall back via display code, then ZERODHA-safe null avoidance for create.
-     */
     private BrokerType resolveBrokerType(String raw) {
         if (raw == null || raw.isBlank() || "UNKNOWN".equalsIgnoreCase(raw) || "OTHER".equalsIgnoreCase(raw)) {
             return null;
