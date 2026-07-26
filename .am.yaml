@@ -3,7 +3,7 @@ name: am-portfolio
 release: am-portfolio
 image: ghcr.io/sahim99/am-portfolio
 runtime: java
-language: docker
+language: java
 dockerfile: Dockerfile
 context: .
 github:
