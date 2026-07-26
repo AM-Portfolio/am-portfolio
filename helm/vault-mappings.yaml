@@ -23,9 +23,9 @@ vault:
       mappings:
         KAFKA_BOOTSTRAP_SERVERS: "bootstrap_servers"
         SPRING_KAFKA_BOOTSTRAP_SERVERS: "bootstrap_servers"
-        KAFKA_JAAS_CONFIG: "__jaas__"
         KAFKA_USERNAME: "username"
         KAFKA_PASSWORD: "password"
+        KAFKA_JAAS_CONFIG: "__jaas__"
     redis:
       mappings:
         SPRING_DATA_REDIS_HOST: "host"
