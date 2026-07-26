@@ -1,7 +1,6 @@
 # Multi-stage build for Portfolio Service (Unified Monorepo)
 # Stage 1: Build with Maven
-ARG BASE_REGISTRY=""
-FROM ${BASE_REGISTRY}am-java-maven-base:latest AS build
+FROM maven:3.9.6-eclipse-temurin-21 AS build
 
 # Build arguments for GitHub authentication
 ARG GITHUB_PACKAGES_USERNAME
