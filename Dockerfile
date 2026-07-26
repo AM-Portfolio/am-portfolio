@@ -17,8 +17,10 @@ COPY . .
 # Build everything in one go
 # Because am-common-data is now a module in the root POM,
 # Maven will build it and make it available to other modules automatically.
-RUN GITHUB_PACKAGES_USERNAME=${GITHUB_PACKAGES_USERNAME} GITHUB_PACKAGES_TOKEN=${GITHUB_PACKAGES_TOKEN} \
-    mvn clean package -DskipTests -B -s settings.xml -U
+# We use a Docker BuildKit cache mount for ~/.m2 so we don't re-download dependencies every time!
+RUN --mount=type=cache,target=/root/.m2 \
+    GITHUB_PACKAGES_USERNAME=${GITHUB_PACKAGES_USERNAME} GITHUB_PACKAGES_TOKEN=${GITHUB_PACKAGES_TOKEN} \
+    mvn clean package -T 1C -DskipTests -B -s settings.xml
 
 # Stage 2: Runtime with JRE 21
 FROM eclipse-temurin:21-jdk-jammy
