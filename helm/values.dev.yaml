@@ -60,6 +60,12 @@ global:
 strategy:
   type: Recreate
 
+probes:
+  liveness:
+    initialDelaySeconds: 0
+  readiness:
+    initialDelaySeconds: 0
+
 env:
   SPRING_PROFILES_ACTIVE: "dev,security"
   KAFKA_ENABLED: "true"
