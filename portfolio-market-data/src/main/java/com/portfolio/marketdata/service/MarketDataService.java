@@ -509,7 +509,7 @@ public class MarketDataService {
                                     .open(doc.getOpenPrice())
                                     .high(doc.getHighPrice())
                                     .low(doc.getLowPrice())
-                                    .close(0.0)
+                                    .close(doc.getPreviousClose() != null && doc.getPreviousClose() > 0 ? doc.getPreviousClose() : (doc.getOpenPrice() != null && doc.getOpenPrice() > 0 ? doc.getOpenPrice() : 0.0))
                                     .build()
                                 : null)
                             .build();

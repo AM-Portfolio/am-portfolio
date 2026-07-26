@@ -41,12 +41,12 @@ spring:
       enable-auto-commit: false
       max-poll-records: 100
     properties:
-      security-protocol: ${PROJ_KAFKA_SECURITY_PROTOCOL}
-      sasl-mechanism: ${PROJ_KAFKA_SASL_MECHANISM}
-      sasl-jaas-config: ${PROJ_KAFKA_JAAS_CONFIG}
-      ssl-endpoint-identification-algorithm: ""
-      ssl-truststore-location: /etc/ssl/certs/java/cacerts
-      ssl-truststore-password: changeit
+      "[security.protocol]": ${PROJ_KAFKA_SECURITY_PROTOCOL}
+      "[sasl.mechanism]": ${PROJ_KAFKA_SASL_MECHANISM}
+      "[sasl.jaas.config]": ${PROJ_KAFKA_JAAS_CONFIG}
+      "[ssl.endpoint.identification.algorithm]": ""
+      "[ssl.truststore.location]": /etc/ssl/certs/java/cacerts
+      "[ssl.truststore.password]": changeit
   data:
     redis:
       host: ${PROJ_REDIS_HOSTNAME}

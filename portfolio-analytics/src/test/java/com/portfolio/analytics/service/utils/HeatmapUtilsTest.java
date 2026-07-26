@@ -77,6 +77,20 @@ class HeatmapUtilsTest {
         assertEquals(0.0, metrics.getChangePercent());
     }
 
+    @Test void weightedSectorMetrics_nullLastPrice_usesFallback() {
+        MarketData m = new MarketData();
+        m.setLastPrice(null);
+        m.setPreviousClose(100.0);
+        m.setOhlc(OhlcData.builder().open(100.0).close(110.0).build());
+        
+        var metrics = HeatmapUtils.calculateWeightedSectorMetrics(
+                List.of(m), List.of(10.0)); // 110 * 10 = 1100 total value
+        
+        // (110 - 100) / 100 = 10% change
+        assertEquals(10.0, metrics.getChangePercent());
+        assertEquals(10.0, metrics.getPerformance());
+    }
+
     @Test void sectorMetricsConstructor_twoArg() {
         var m = new HeatmapUtils.SectorMetrics(1.234, 5.678);
         assertEquals(1.23, m.getPerformance());

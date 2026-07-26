@@ -159,6 +159,8 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 resolvedPrice = data.getLastPrice();
             } else if (data.getOhlc() != null && data.getOhlc().getClose() > 0) {
                 resolvedPrice = data.getOhlc().getClose();
+            } else if (data.getPreviousClose() != null && data.getPreviousClose() > 0) {
+                resolvedPrice = data.getPreviousClose();
             }
             totalPortfolioValue[0] += resolvedPrice * quantity;
         }
