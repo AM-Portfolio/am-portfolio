@@ -57,6 +57,9 @@ global:
     imagePullSecrets:
       - name: ghcr-sahim99-secret
 
+strategy:
+  type: Recreate
+
 env:
   SPRING_PROFILES_ACTIVE: "dev,security"
   KAFKA_ENABLED: "true"
