@@ -40,11 +40,7 @@ public class PortfolioAnalyticsFacade {
     private final PortfolioService portfolioService;
     private final MarketDataService marketDataService;
 
-    private final com.github.benmanes.caffeine.cache.Cache<String, AdvancedAnalyticsResponse> analyticsCache =
-        com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
-            .expireAfterWrite(90, java.util.concurrent.TimeUnit.SECONDS)
-            .maximumSize(500)
-            .build();
+
 
     public PortfolioAnalyticsFacade(AnalyticsFactory analyticsFactory, 
                                     @Qualifier("taskExecutor") Executor taskExecutor,
@@ -115,11 +111,6 @@ public class PortfolioAnalyticsFacade {
                 request.getFeatureToggles().isIncludeSectorAllocation(),
                 request.getFeatureToggles().isIncludeMarketCapAllocation());
         
-        AdvancedAnalyticsResponse cachedResponse = analyticsCache.getIfPresent(cacheKey);
-        if (cachedResponse != null) {
-            log.info("Serving advanced analytics from L1 cache for portfolio: {}", request.getCoreIdentifiers().getPortfolioId());
-            return cachedResponse;
-        }
 
         // Start building the response
         AdvancedAnalyticsResponse.AdvancedAnalyticsResponseBuilder responseBuilder = AdvancedAnalyticsResponse.builder()
@@ -234,7 +225,6 @@ public class PortfolioAnalyticsFacade {
         responseBuilder.analytics(analyticsBuilder.build());
         
         AdvancedAnalyticsResponse finalResponse = responseBuilder.build();
-        analyticsCache.put(cacheKey, finalResponse);
         
         return finalResponse;
     }

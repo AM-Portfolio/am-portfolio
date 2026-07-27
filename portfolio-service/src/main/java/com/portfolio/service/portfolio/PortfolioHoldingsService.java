@@ -36,11 +36,7 @@ public class PortfolioHoldingsService {
     private final PortfolioHoldingsMongoService portfolioHoldingsMongoService;
     private final java.util.concurrent.Executor taskExecutor;
 
-    private final com.github.benmanes.caffeine.cache.Cache<String, PortfolioHoldings> holdingsL1 =
-            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
-            .expireAfterWrite(60, java.util.concurrent.TimeUnit.SECONDS)
-            .maximumSize(1000)
-            .build();
+
 
     public PortfolioHoldingsService(
             PortfolioService portfolioService,
@@ -198,8 +194,6 @@ public class PortfolioHoldingsService {
         // Store in cache if enriched
         if (enrich) {
             log.info("Caching portfolio holdings for user: {} and context: {}", userId, context);
-            String cacheKey = userId + ":" + (portfolioId != null ? portfolioId : "ALL") + ":" + (interval != null ? interval.getCode() : "null");
-            holdingsL1.put(cacheKey, portfolioHoldings);
             
             // Cache the enriched portfolio asynchronously
             java.util.concurrent.CompletableFuture.runAsync(() -> {
@@ -234,13 +228,6 @@ public class PortfolioHoldingsService {
         log.debug("Checking cache for portfolio holdings - User: {}, Interval: {}, Portfolio: {}",
                 userId, interval != null ? interval.getCode() : "null", portfolioId);
                 
-        String cacheKey = userId + ":" + (portfolioId != null ? portfolioId : "ALL") + ":" + (interval != null ? interval.getCode() : "null");
-        PortfolioHoldings l1Cache = holdingsL1.getIfPresent(cacheKey);
-        if (l1Cache != null) {
-            log.info("Serving portfolio holdings from L1 cache - User: {}, Portfolio: {}", userId, portfolioId);
-            return Optional.of(l1Cache);
-        }
-
         Optional<PortfolioHoldings> cachedHoldings = Optional.empty();
         if (isRedisEnabled && portfolioHoldingsRedisService != null) {
             if (portfolioId == null) {

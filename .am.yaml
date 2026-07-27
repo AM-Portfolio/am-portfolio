@@ -8,8 +8,7 @@ dockerfile: Dockerfile
 context: .
 github:
   repo: AM-Portfolio/am-portfolio
-  deploy_workflow: direct-deploy.yml
-  service: am-portfolio
+  deploy_workflow: deploy-portfolio.yml
   # workflow_dispatch ref — must be default branch once workflow is registered
   ref: feature/mongo-live-price
 deploy:
@@ -17,7 +16,7 @@ deploy:
   # actions = GitHub Direct Deploy (same Helm as CI)
   # helm    = laptop Helm against VPS kubeconfig
   via: helm
-  # skip_github_actions: true   # equivalent to via: helm
+  skip_github_actions: true   # equivalent to via: helm
   # Rebuild image only when service sources change (skip mvn/docker otherwise).
   # always | on-change | never — override with --rebuild / --skip-build
   rebuild: on-change

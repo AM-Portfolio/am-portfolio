@@ -6,6 +6,10 @@ name: Manual Deploy (Portfolio Service)
 on:
   workflow_dispatch:
     inputs:
+      service:
+        description: "Service Name"
+        required: false
+        type: string
       image_tag:
         description: "Select Image Tag"
         required: true

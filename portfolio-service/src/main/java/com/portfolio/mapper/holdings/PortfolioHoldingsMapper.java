@@ -38,6 +38,8 @@ public class PortfolioHoldingsMapper {
         Map<String, EquityHoldings> equityHoldingsMap = new HashMap<>();
 
         for (PortfolioModelV1 portfolio : portfolios) {
+            if (portfolio.getEquityModels() == null) continue;
+
             for (EquityModel equity : portfolio.getEquityModels()) {
                 // Use normalized symbol instead of ISIN as the key
                 String rawSymbol = equity.getSymbol();
@@ -46,6 +48,10 @@ public class PortfolioHoldingsMapper {
                 if (symbol == null) {
                     continue; // Skip equities without a symbol
                 }
+
+                double addedQty = equity.getQuantity() != null ? equity.getQuantity() : 0;
+                double addedCost = (equity.getAvgBuyingPrice() != null && equity.getQuantity() != null)
+                    ? equity.getAvgBuyingPrice() * equity.getQuantity() : 0.0;
 
                 // If this is the first time we're seeing this symbol, create a new holding
                 if (!equityHoldingsMap.containsKey(symbol)) {
@@ -57,15 +63,24 @@ public class PortfolioHoldingsMapper {
                     holdings.setPortfolioName(portfolio.getName());
 
                     equityHoldingsMap.put(symbol, holdings);
+                } else {
+                    // Symbol already exists in another broker portfolio - merge quantities and cost
+                    EquityHoldings existing = equityHoldingsMap.get(symbol);
+                    double mergedQty = (existing.getQuantity() != null ? existing.getQuantity() : 0) + addedQty;
+                    double mergedCost = (existing.getInvestmentCost() != null ? existing.getInvestmentCost() : 0) + addedCost;
+                    
+                    existing.setQuantity(mergedQty);
+                    existing.setInvestmentCost(mergedCost);
+                    
+                    if (mergedQty > 0) {
+                        existing.setAverageBuyingPrice(mergedCost / mergedQty);
+                    }
                 }
 
-                // Get the holdings (either newly created or existing)
-                EquityHoldings holdings = equityHoldingsMap.get(symbol);
-
-                // Add broker holding
-                holdings.getBrokerPortfolios().add(EquityBrokerHolding.builder()
+                // Add broker holding to the aggregated holding object
+                equityHoldingsMap.get(symbol).getBrokerPortfolios().add(EquityBrokerHolding.builder()
                         .brokerType(portfolio.getBrokerType())
-                        .quantity(equity.getQuantity())
+                        .quantity(addedQty)
                         .build());
             }
         }

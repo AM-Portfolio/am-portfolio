@@ -32,12 +32,7 @@ public class PortfolioOverviewService {
     @org.springframework.lang.Nullable
     private final PortfolioSummaryRedisService portfolioSummaryRedisService;
     
-    private final com.github.benmanes.caffeine.cache.Cache<String, PortfolioSummaryV1> summaryL1 =
-        com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
-            .expireAfterWrite(60, java.util.concurrent.TimeUnit.SECONDS)
-            .maximumSize(500)
-            .recordStats()
-            .build();
+
 
     private final PortfolioCalculator portfolioCalculator;
     private final FlowLogger flowLogger;
@@ -59,13 +54,6 @@ public class PortfolioOverviewService {
 
     public PortfolioSummaryV1 overviewPortfolio(String userId, TimeInterval interval) {
         try (var span = flowLogger.start("overviewPortfolio", "user", userId, "interval", interval != null ? interval.getCode() : "null")) {
-            String l1Key = userId + ":" + (interval != null ? interval.getCode() : "ALL");
-        PortfolioSummaryV1 l1Hit = summaryL1.getIfPresent(l1Key);
-        if (l1Hit != null) {
-            log.debug("[Summary] L1 cache hit for user={}", userId);
-            return l1Hit;
-        }
-
         Optional<PortfolioSummaryV1> cachedSummary = getCachedSummary(userId, interval);
         if (cachedSummary.isPresent()) {
             log.info("Returning cached portfolio summary for user: {}", userId);
@@ -97,9 +85,8 @@ public class PortfolioOverviewService {
             return emptySummary;
         }
 
-            PortfolioSummaryV1 finalSummary = buildPortfolioSummary(portfolios, userId, null, interval);
-            summaryL1.put(l1Key, finalSummary);
-            return finalSummary;
+        PortfolioSummaryV1 finalSummary = buildPortfolioSummary(portfolios, userId, null, interval);
+        return finalSummary;
         } catch (Exception e) {
             log.error("Error in overviewPortfolio", e);
             throw e;
@@ -121,14 +108,6 @@ public class PortfolioOverviewService {
             log.warn("Blank portfolioId provided for specific portfolio overview - User: {}", userId);
             throw new IllegalArgumentException("portfolioId cannot be blank");
         }
-
-        String l1Key = userId + ":" + portfolioId + ":" + (interval != null ? interval.getCode() : "ALL");
-        PortfolioSummaryV1 l1Hit = summaryL1.getIfPresent(l1Key);
-        if (l1Hit != null) {
-            log.debug("[Summary] L1 cache hit for user={} portfolio={}", userId, portfolioId);
-            return l1Hit;
-        }
-
         Optional<PortfolioSummaryV1> cachedSummary = Optional.empty();
         if (portfolioSummaryRedisService != null) {
             cachedSummary = portfolioSummaryRedisService.getLatestSummary(userId, interval, portfolioId);
@@ -161,10 +140,8 @@ public class PortfolioOverviewService {
         log.info("Found {} matching portfolio(s) for ID: {} and user: {}",
                 filteredPortfolios.size(), portfolioId, userId);
 
-            PortfolioSummaryV1 finalSummary = buildPortfolioSummary(filteredPortfolios, userId, portfolioId, interval);
-
-            summaryL1.put(l1Key, finalSummary);
-            return finalSummary;
+        PortfolioSummaryV1 finalSummary = buildPortfolioSummary(filteredPortfolios, userId, portfolioId, interval);
+        return finalSummary;
         } catch (Exception e) {
             log.error("Error in specific overviewPortfolio", e);
             throw e;
@@ -247,9 +224,15 @@ public class PortfolioOverviewService {
         log.debug("Calculated total value: {}", totalValue);
 
         var equityHoldings = portfolioHoldingsService.getHoldings(portfolios);
+        
+        var investmentValue = equityHoldings.stream()
+                .mapToDouble(h -> h.getInvestmentCost() != null ? h.getInvestmentCost() : 0.0)
+                .sum();
 
         // Use calculator to generate the summary
-        return portfolioCalculator.calculateSummary(equityHoldings, totalValue);
+        PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(equityHoldings, totalValue);
+        summary.setInvestmentValue(investmentValue);
+        return summary;
     }
 
     private Optional<PortfolioSummaryV1> getCachedSummary(String userId, TimeInterval interval) {

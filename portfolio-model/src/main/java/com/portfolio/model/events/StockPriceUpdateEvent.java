@@ -14,7 +14,7 @@ import lombok.Builder;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class StockPriceUpdateEvent {
     private String eventType;
-    private String timestamp;
+    private Object timestamp;
     
     @com.fasterxml.jackson.annotation.JsonFormat(with = com.fasterxml.jackson.annotation.JsonFormat.Feature.ACCEPT_SINGLE_VALUE_AS_ARRAY)
     private java.util.List<StockPriceData> data;

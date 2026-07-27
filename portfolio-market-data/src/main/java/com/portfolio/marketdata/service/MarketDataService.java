@@ -47,17 +47,7 @@ import reactor.core.scheduler.Schedulers;
 @Service
 public class MarketDataService {
 
-    private final com.github.benmanes.caffeine.cache.Cache<String, MarketData> localCache = 
-            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
-            .expireAfterWrite(5, java.util.concurrent.TimeUnit.MINUTES)
-            .maximumSize(20000)
-            .build();
 
-    private final com.github.benmanes.caffeine.cache.Cache<String, com.portfolio.marketdata.model.HistoricalData> chartCache = 
-            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
-            .expireAfterWrite(3, java.util.concurrent.TimeUnit.MINUTES)
-            .maximumSize(5000)
-            .build();
 
     private final MarketDataApiClient marketDataApiClient;
     
@@ -446,14 +436,6 @@ public class MarketDataService {
         Map<String, MarketData> result = new HashMap<>();
         List<String> normalized = symbols.stream().map(this::cleanSymbol).collect(Collectors.toList());
 
-        // 1. Try L1 Caffeine cache first
-        for (String s : normalized) {
-            MarketData cached = localCache.getIfPresent(s);
-            if (cached != null) {
-                result.put(s, cached);
-            }
-        }
-
         // 1.5. Find missing after L1 cache
         List<String> missing = normalized.stream()
             .filter(s -> !result.containsKey(s))
@@ -473,7 +455,6 @@ public class MarketDataService {
                             || (md.getOhlc() != null && md.getOhlc().getOpen() > 0);
                         if (hasUsableData) {
                             result.put(symbol, md);
-                            localCache.put(symbol, md); // promote to L1
                         } else {
                             log.debug("[MarketData] Skipping stale Redis entry for {} due to missing previousClose/openPrice", symbol);
                         }
@@ -514,7 +495,6 @@ public class MarketDataService {
                                 : null)
                             .build();
                         result.put(doc.getSymbol(), md);
-                        localCache.put(doc.getSymbol(), md); // Update L1
                     }
                     log.info("[MarketData] MongoDB cache hit for {} symbols.", mongoPrices.size());
                 }
@@ -538,13 +518,6 @@ public class MarketDataService {
             Map<String, CompletableFuture<MarketData>> waitFor = new HashMap<>();
 
             for (String symbol : missing) {
-                // Double check L1 cache in case another thread just finished
-                MarketData cached = localCache.getIfPresent(symbol);
-                if (cached != null) {
-                    result.put(symbol, cached);
-                    continue;
-                }
-                
                 boolean[] isNew = {false};
                 CompletableFuture<MarketData> fut = inFlightRequests.computeIfAbsent(symbol, k -> {
                     isNew[0] = true;
@@ -572,7 +545,6 @@ public class MarketDataService {
                     if (fetched != null && !fetched.isEmpty()) {
                         fetched.forEach((k, v) -> {
                             result.put(k, v);
-                            localCache.put(k, v); // Update L1
                             CompletableFuture<MarketData> fut = newFutures.get(k);
                             if (fut != null) fut.complete(v);
                         });
@@ -752,23 +724,18 @@ public class MarketDataService {
             cleanToRaw.put(cleanSym, symbol);
             
             String cacheKey = cleanSym + ":" + range;
-            com.portfolio.marketdata.model.HistoricalData cachedData = chartCache.getIfPresent(cacheKey);
-            if (cachedData != null) {
-                finalResp.getData().put(symbol, cachedData);
-            } else {
-                if (!missingSymbols.contains(cleanSym)) {
-                    missingSymbols.add(cleanSym);
-                    boolean[] isNew = {false};
-                    java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalData> fut = inFlightChartRequests.computeIfAbsent(cacheKey, k -> {
-                        isNew[0] = true;
-                        return new java.util.concurrent.CompletableFuture<>();
-                    });
-                    
-                    if (isNew[0]) {
-                        toFetch.add(cleanSym);
-                    } else {
-                        waitFor.put(cleanSym, fut); // coalesce with in-flight request
-                    }
+            if (!missingSymbols.contains(cleanSym)) {
+                missingSymbols.add(cleanSym);
+                boolean[] isNew = {false};
+                java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalData> fut = inFlightChartRequests.computeIfAbsent(cacheKey, k -> {
+                    isNew[0] = true;
+                    return new java.util.concurrent.CompletableFuture<>();
+                });
+                
+                if (isNew[0]) {
+                    toFetch.add(cleanSym);
+                } else {
+                    waitFor.put(cleanSym, fut); // coalesce with in-flight request
                 }
             }
         }
@@ -867,7 +834,6 @@ public class MarketDataService {
                     chunkResp.getData().forEach((cleanSym, data) -> {
                         String rawSym = cleanToRaw.getOrDefault(cleanSym, cleanSym);
                         finalResp.getData().put(rawSym, data);
-                        chartCache.put(cleanSym + ":" + range, data);
                     });
                 }
             }
@@ -932,7 +898,6 @@ public class MarketDataService {
 
             String rawSymbol = cleanToRaw.getOrDefault(cleanSymbol, cleanSymbol);
             partial.getData().put(rawSymbol, hd);
-            chartCache.put(cleanSymbol + ":1D", hd); // Populate L1 cache for next call
         }
 
         // ── FALLBACK: Symbols missing from MongoDB ──
@@ -963,7 +928,6 @@ public class MarketDataService {
                         // API returned good data (callExternalApiForRange already put it in partial under rawSymbol if we passed partial, 
                         // but here we passed a new response, so we extract and put it manually)
                         partial.getData().put(rawSymbol, apiData);
-                        chartCache.put(cleanSymbol + ":1D", apiData);
                     } else {
                         // API also returned null/0.0 → create a flat-line chart using live price
                         StockPriceDocument liveDoc = liveDocs.get(cleanSymbol);
@@ -972,7 +936,6 @@ public class MarketDataService {
                                 cleanSymbol, liveDoc.getLastPrice());
                             com.portfolio.marketdata.model.HistoricalData flatLine = buildFlatLineChart(cleanSymbol, liveDoc.getLastPrice());
                             partial.getData().put(rawSymbol, flatLine);
-                            chartCache.put(cleanSymbol + ":1D", flatLine);
                         } else {
                             log.warn("[Intraday-Mongo] Symbol {} has no data at all, omitting from chart.", cleanSymbol);
                         }
