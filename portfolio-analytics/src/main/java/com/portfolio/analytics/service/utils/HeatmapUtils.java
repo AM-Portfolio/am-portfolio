@@ -80,7 +80,7 @@ public class HeatmapUtils {
                     continue;
                 }
                 double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0) 
-                        ? stock.getPreviousClose() : (stock.getOhlc() != null ? stock.getOhlc().getClose() : 0.0);
+                        ? stock.getPreviousClose() : (stock.getOhlc() != null ? stock.getOhlc().getOpen() : 0.0);
                 
                 if (previousClose > 0) {
                     // Calculate change percentage relative to previous close (acts as baseline for timeframe)
@@ -163,7 +163,7 @@ public class HeatmapUtils {
             totalValue += value;
             
             double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0) 
-                    ? stock.getPreviousClose() : (stock.getOhlc() != null ? stock.getOhlc().getClose() : 0.0);
+                    ? stock.getPreviousClose() : (stock.getOhlc() != null ? stock.getOhlc().getOpen() : 0.0);
             
             if (previousClose > 0) {
                 // Calculate timeframe change percentage based on previous close

@@ -178,7 +178,7 @@ public class PortfolioOverviewService {
         String context = portfolioId != null ? "portfolio: " + portfolioId : "all portfolios";
 
         // Group by broker and create summary
-        Map<BrokerType, BrokerPortfolioSummary> brokerSummaryMap = new HashMap<>();
+        Map<String, BrokerPortfolioSummary> brokerSummaryMap = new HashMap<>();
         log.debug("Grouping portfolios by broker for user: {} and {}", userId, context);
 
         for (var portfolio : portfolios) {
@@ -186,7 +186,8 @@ public class PortfolioOverviewService {
                     portfolio.getId(), portfolio.getBrokerType(), portfolio.getTotalValue());
 
             var portfolioSummary = portfolioMapper.toPortfolioModelV1(portfolio);
-            brokerSummaryMap.merge(portfolio.getBrokerType(), portfolioSummary,
+            String brokerKey = portfolio.getBrokerType() != null ? portfolio.getBrokerType().name() : "UNKNOWN";
+            brokerSummaryMap.merge(brokerKey, portfolioSummary,
                 (existing, incoming) -> {
                     double inc = incoming.getInvestmentValue() != null ? incoming.getInvestmentValue() : 0.0;
                     double ex  = existing.getInvestmentValue() != null ? existing.getInvestmentValue() : 0.0;

@@ -64,6 +64,9 @@ private final RedisTemplate<String, PortfolioAnalysis> portfolioAnalysisRedisTem
                         log.debug("Found stale portfolio analysis in cache for key: {}, deleting", key);
                         portfolioAnalysisRedisTemplate.delete(key);
                     }
+                } else {
+                    log.debug("Found portfolio analysis in cache with no interval constraint - User: {}, Key: {}", userId, key);
+                    return Optional.of(analysis);
                 }
             }
         } catch (Exception e) {

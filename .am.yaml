@@ -16,7 +16,7 @@ deploy:
   # actions = GitHub Direct Deploy (same Helm as CI)
   # helm    = laptop Helm against VPS kubeconfig
   via: helm
-  skip_github_actions: true   # equivalent to via: helm
+  # skip_github_actions: true   # equivalent to via: helm
   # Rebuild image only when service sources change (skip mvn/docker otherwise).
   # always | on-change | never — override with --rebuild / --skip-build
   rebuild: on-change

@@ -44,13 +44,24 @@ public class SecurityDetailsService {
         log.debug("Symbols to fetch: {}", symbols);
         
         try {
-            // Attempt to retrieve security details from the service
-            List<SecurityModel> securityModels = securityService.findBySymbols(symbols);
+            // Map normalized symbols back to original raw symbols
+            Map<String, String> normalizedToRawMap = new HashMap<>();
+            List<String> normalizedSymbols = new ArrayList<>();
             
-            // Convert list to map using symbol as key
+            for (String rawSymbol : symbols) {
+                String normalized = com.portfolio.model.util.SymbolResolver.normalize(rawSymbol);
+                normalizedToRawMap.put(normalized, rawSymbol);
+                normalizedSymbols.add(normalized);
+            }
+
+            // Attempt to retrieve security details from the service using normalized symbols
+            List<SecurityModel> securityModels = securityService.findBySymbols(normalizedSymbols);
+            
+            // Convert list to map using ORIGINAL raw symbol as key
             Map<String, SecurityModel> resultMap = securityModels.stream()
+                    .filter(model -> model.getKey() != null && model.getKey().getSymbol() != null)
                     .collect(Collectors.toMap(
-                            securityModel -> securityModel.getKey().getSymbol(),
+                            model -> normalizedToRawMap.getOrDefault(model.getKey().getSymbol(), model.getKey().getSymbol()),
                             Function.identity(),    
                             (existing, replacement) -> existing
                     ));
@@ -87,14 +98,15 @@ public class SecurityDetailsService {
         log.info("Attempting fallback retrieval for {} symbols", symbols.size());
         Map<String, SecurityModel> resultMap = new HashMap<>();
         
-        for (String symbol : symbols) {
+        for (String rawSymbol : symbols) {
             try {
-                List<SecurityModel> models = securityService.findBySymbols(Collections.singletonList(symbol));
+                String normalized = com.portfolio.model.util.SymbolResolver.normalize(rawSymbol);
+                List<SecurityModel> models = securityService.findBySymbols(Collections.singletonList(normalized));
                 if (!models.isEmpty()) {
-                    resultMap.put(symbol, models.get(0));
+                    resultMap.put(rawSymbol, models.get(0));
                 }
             } catch (Exception e) {
-                log.warn("Failed to retrieve details for symbol: {}", symbol, e);
+                log.warn("Failed to retrieve details for symbol: {}", rawSymbol, e);
             }
         }
         
@@ -113,11 +125,12 @@ public class SecurityDetailsService {
         Map<String, SecurityModel> securityDetails = getSecurityDetails(symbols);
         Map<String, String> sectorMap = new HashMap<>();
         
-        securityDetails.forEach((symbol, security) -> {
-            String sector = security != null && security.getMetadata() != null && security.getMetadata().getSector() != null ? 
+        for (String symbol : symbols) {
+            SecurityModel security = securityDetails.get(symbol);
+            String sector = (security != null && security.getMetadata() != null && security.getMetadata().getSector() != null) ? 
                     security.getMetadata().getSector() : "Unknown";
             sectorMap.put(symbol, sector);
-        });
+        }
         
         return sectorMap;
     }
@@ -140,15 +153,17 @@ public class SecurityDetailsService {
         
         Map<String, List<String>> sectorToSymbols = new HashMap<>();
         
-        securityDetails.forEach((symbol, securityModel) -> {
-            String sector = securityModel.getMetadata().getSector();
-            if (sector == null) {
-                sector = "Unknown";
+        for (String symbol : symbols) {
+            SecurityModel securityModel = securityDetails.get(symbol);
+            String sector = "Unknown";
+            if (securityModel != null && securityModel.getMetadata() != null && securityModel.getMetadata().getSector() != null) {
+                sector = securityModel.getMetadata().getSector();
+            } else {
                 log.debug("Symbol {} has no sector information, using 'Unknown'", symbol);
             }
             
             sectorToSymbols.computeIfAbsent(sector, k -> new ArrayList<>()).add(symbol);
-        });
+        }
         
         log.info("Identified {} unique sectors across {} symbols", sectorToSymbols.size(), symbols.size());
         sectorToSymbols.forEach((sector, sectorSymbols) -> {
@@ -176,15 +191,17 @@ public class SecurityDetailsService {
         
         Map<String, List<String>> industryToSymbols = new HashMap<>();
         
-        securityDetails.forEach((symbol, securityModel) -> {
-            String industry = securityModel.getMetadata().getIndustry();
-            if (industry == null) {
-                industry = "Unknown";
+        for (String symbol : symbols) {
+            SecurityModel securityModel = securityDetails.get(symbol);
+            String industry = "Unknown";
+            if (securityModel != null && securityModel.getMetadata() != null && securityModel.getMetadata().getIndustry() != null) {
+                industry = securityModel.getMetadata().getIndustry();
+            } else {
                 log.debug("Symbol {} has no industry information, using 'Unknown'", symbol);
             }
             
             industryToSymbols.computeIfAbsent(industry, k -> new ArrayList<>()).add(symbol);
-        });
+        }
         
         log.info("Identified {} unique industries across {} symbols", industryToSymbols.size(), symbols.size());
         industryToSymbols.forEach((industry, industrySymbols) -> {
@@ -212,18 +229,18 @@ public class SecurityDetailsService {
         
         Map<String, List<String>> marketTypeToSymbols = new HashMap<>();
         
-        securityDetails.forEach((symbol, securityModel) -> {
-            MarketCapType marketCapType = securityModel.getMetadata().getMarketCapType();
+        for (String symbol : symbols) {
+            SecurityModel securityModel = securityDetails.get(symbol);
             String marketCapName = "UNKNOWN";
             
-            if (marketCapType != null) {
-                marketCapName = marketCapType.name();
+            if (securityModel != null && securityModel.getMetadata() != null && securityModel.getMetadata().getMarketCapType() != null) {
+                marketCapName = securityModel.getMetadata().getMarketCapType().name();
             } else {
                 log.debug("Symbol {} has no market cap type information, using 'UNKNOWN'", symbol);
             }
             
             marketTypeToSymbols.computeIfAbsent(marketCapName, k -> new ArrayList<>()).add(symbol);
-        });
+        }
         
         log.info("Identified {} unique market cap types across {} symbols", marketTypeToSymbols.size(), symbols.size());
         marketTypeToSymbols.forEach((marketType, marketTypeSymbols) -> {
