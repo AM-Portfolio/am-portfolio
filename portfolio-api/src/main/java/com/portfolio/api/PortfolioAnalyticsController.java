@@ -59,12 +59,7 @@ public class PortfolioAnalyticsController {
             request.setCoreIdentifiers(new com.portfolio.model.analytics.request.CoreIdentifiers());
         }
 
-        try {
-            java.util.UUID.fromString(portfolioId);
-        } catch (IllegalArgumentException e) {
-            log.warn("REST request for advanced analytics with malformed UUID: {}", portfolioId);
-            return ResponseEntity.badRequest().build();
-        }
+        // portfolioId can be a MongoDB ObjectId or an external ID, so we don't enforce UUID parsing here.
 
         log.info("REST request for advanced analytics on portfolio: {} with timeframe: {} to {}",
                 portfolioId, request.getTimeFrame());

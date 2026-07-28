@@ -202,13 +202,9 @@ public class PortfolioHoldingsService {
                 // Cache the enriched portfolio asynchronously
                 java.util.concurrent.CompletableFuture.runAsync(() -> {
                     try {
-                        // Redis write intentionally disabled
-                        // TODO: Re-enable when Redis is back online
-                        /*
                         if (isRedisEnabled && portfolioHoldingsRedisService != null) {
                             portfolioHoldingsRedisService.cachePortfolioHoldings(portfolioHoldings, userId, interval, portfolioId);
                         }
-                        */
                         portfolioHoldingsMongoService.cachePortfolioHoldings(portfolioHoldings, userId, interval, portfolioId);
                     } catch (Exception e) {
                         log.error("Failed to update persistent cache", e);
@@ -241,9 +237,6 @@ public class PortfolioHoldingsService {
                 
         Optional<PortfolioHoldings> cachedHoldings = Optional.empty();
         
-        // Redis read intentionally disabled
-        // TODO: Re-enable when Redis is back online
-        /*
         if (isRedisEnabled && portfolioHoldingsRedisService != null) {
             if (portfolioId == null) {
                 cachedHoldings = portfolioHoldingsRedisService.getLatestHoldings(userId, interval);
@@ -256,13 +249,15 @@ public class PortfolioHoldingsService {
                 return cachedHoldings;
             }
         }
-        */
 
         // Tier 2: Check MongoDB if Redis missed
         cachedHoldings = portfolioHoldingsMongoService.getLatestFreshHoldings(userId, interval, portfolioId);
         if (cachedHoldings.isPresent()) {
-            // Force rebuild once to clear stale cache that had mixed 0 and valid prices
-            boolean hasLivePrices = false; 
+            List<EquityHoldings> cachedList = cachedHoldings.get().getEquityHoldings();
+            boolean hasLivePrices = cachedList != null && !cachedList.isEmpty()
+                && cachedList.stream()
+                    .filter(h -> h.getCurrentPrice() != null && h.getCurrentPrice() > 0)
+                    .count() >= cachedList.size() * 0.5;
             
             if (hasLivePrices) {
                 log.info("Serving valid portfolio holdings from MongoDB cache - User: {}", userId);

@@ -278,16 +278,38 @@ public class MarketDataService {
 
         log.info("Getting OHLC data for {} symbols with timeFrame={} refresh={}", validSymbols.size(), timeFrame, refresh);
 
-        Map<String, MarketData> merged = new java.util.HashMap<>();
-        try {
-            MarketDataResponseWrapper w = marketDataApiClient
-                    .getOhlcData(validSymbols, timeFrame, refresh).block();
-            if (w != null) {
-                merged.putAll(convertToMarketDataMap(w, true));
-            }
-        } catch (Exception e) {
-            log.warn("[OHLC data] API call failed: {}", e.getMessage());
+        final int CHUNK_SIZE = 20;
+        List<List<String>> chunks = new java.util.ArrayList<>();
+        for (int i = 0; i < validSymbols.size(); i += CHUNK_SIZE) {
+            chunks.add(validSymbols.subList(i, Math.min(i + CHUNK_SIZE, validSymbols.size())));
         }
+
+        List<java.util.concurrent.CompletableFuture<Map<String, MarketData>>> futures = chunks.stream()
+            .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                try {
+                    MarketDataResponseWrapper w = marketDataApiClient
+                            .getOhlcData(chunk, timeFrame, refresh).block();
+                    if (w != null) {
+                        return convertToMarketDataMap(w, true);
+                    }
+                    return Collections.<String, MarketData>emptyMap();
+                } catch (Exception e) {
+                    log.warn("[OHLC data] API call failed for chunk of {}: {}", chunk.size(), e.getMessage());
+                    return Collections.<String, MarketData>emptyMap();
+                }
+            }, externalApiExecutor))
+            .collect(Collectors.toList());
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+            .orTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+            .exceptionally(e -> null)
+            .join();
+
+        Map<String, MarketData> merged = new java.util.HashMap<>();
+        futures.stream()
+            .filter(f -> !f.isCompletedExceptionally())
+            .forEach(f -> merged.putAll(f.getNow(Collections.emptyMap())));
+        
         return merged;
     }
 
@@ -420,9 +442,6 @@ public class MarketDataService {
         }
 
         // 2. Try market data cache next (populated by am-market service or last live fetch)
-        // Redis block intentionally disabled — all lookups go through MongoDB → OHLC API
-        // TODO: Re-enable when Redis is back online
-        /*
         if (marketDataRedisService != null) {
             try {
                 Map<String, MarketData> cached = marketDataRedisService.getMarketData(missing);
@@ -445,7 +464,6 @@ public class MarketDataService {
                 .filter(s -> !result.containsKey(s))
                 .collect(Collectors.toList());
         }
-        */
 
         if (missing.isEmpty()) {
             return result;
@@ -465,17 +483,15 @@ public class MarketDataService {
                                       doc.getSymbol(), doc.getLastPrice());
                             continue;
                         }
-                        // Also reject if previousClose is missing — OHLC API will give the real value
-                        if (doc.getPreviousClose() == null || doc.getPreviousClose() <= 0) {
-                            log.debug("[MarketData] Skipping MongoDB entry for {} — no previousClose, needs OHLC refresh",
-                                      doc.getSymbol());
-                            continue;
-                        }
+                        // Use lastPrice as same-day previousClose fallback (safe for live intraday data)
+                        Double previousClose = (doc.getPreviousClose() != null && doc.getPreviousClose() > 0)
+                            ? doc.getPreviousClose()
+                            : doc.getLastPrice();
 
                         MarketData md = MarketData.builder()
                             .symbol(doc.getSymbol())
                             .lastPrice(doc.getLastPrice())
-                            .previousClose(doc.getPreviousClose())
+                            .previousClose(previousClose)
                             .timestamp(java.time.Instant.ofEpochMilli(doc.getTimestamp() != null ? doc.getTimestamp() : System.currentTimeMillis()))
                             .ohlc(doc.getOpenPrice() != null && doc.getOpenPrice() > 0 
                                 ? com.portfolio.model.market.OhlcData.builder()
@@ -542,13 +558,9 @@ public class MarketDataService {
                         });
                         
                         // Store in Redis
-                        // Redis write intentionally disabled
-                        // TODO: Re-enable when Redis is back online
-                        /*
                         if (marketDataRedisService != null) {
                             marketDataRedisService.cacheMarketData(fetched);
                         }
-                        */
                         
                         // Store in MongoDB asynchronously
                         if (stockPriceMongoService != null) {

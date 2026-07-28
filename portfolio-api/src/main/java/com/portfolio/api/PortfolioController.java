@@ -28,6 +28,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/v1/portfolios")
@@ -42,6 +43,9 @@ public class PortfolioController {
     private final PortfolioSnapshotService portfolioSnapshotService;
     private final SnapshotCatchUpService snapshotCatchUpService;
     private final com.portfolio.service.portfolio.PortfolioIntradayService portfolioIntradayService;
+
+    @org.springframework.beans.factory.annotation.Value("${app.jwt.internal-secret}")
+    private String internalSecret;
 
     @Operation(summary = "Get intraday data for all portfolios")
     @GetMapping("/intraday")
@@ -313,10 +317,53 @@ public class PortfolioController {
     @Hidden
     @PostMapping("/dev/trigger-catchup")
     public ResponseEntity<String> triggerCatchUpForUser(
-            @RequestParam String userId) {
+            @RequestParam String userId,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            return ResponseEntity.status(403).body("Forbidden");
+        }
         log.info("[DEV] Manual catch-up trigger for userId={}", userId);
         snapshotCatchUpService.triggerCatchUp(userId);
         return ResponseEntity.ok("CatchUp triggered for userId=" + userId + ". Check server logs for progress.");
+    }
+
+    /**
+     * DEV/ADMIN ONLY — Hidden from Swagger.
+     * Triggers manual EOD snapshot for today or a specific date.
+     * Usage: POST /v1/portfolios/dev/trigger-snapshot?userId=sahim99&date=2026-07-28
+     */
+    @Hidden
+    @PostMapping("/dev/trigger-snapshot")
+    public ResponseEntity<String> triggerSnapshotForUser(
+            @RequestParam String userId,
+            @RequestParam(required = false) String date,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            return ResponseEntity.status(403).body("Forbidden");
+        }
+        LocalDate targetDate = date != null ? LocalDate.parse(date) : LocalDate.now();
+        log.info("[DEV] Manual snapshot trigger for userId={} date={}", userId, targetDate);
+        portfolioHistoryScheduler.runEndOfDayJobForUserAndDateAsync(userId, targetDate);
+        return ResponseEntity.ok("Snapshot generation triggered for userId=" + userId + " date=" + targetDate);
+    }
+
+    /**
+     * DEV/ADMIN ONLY — Hidden from Swagger.
+     * Triggers snapshot backfilling for a range of past dates.
+     * Usage: POST /v1/portfolios/dev/backfill-snapshots?userId=sahim99&days=30
+     */
+    @Hidden
+    @PostMapping("/dev/backfill-snapshots")
+    public ResponseEntity<String> backfillSnapshots(
+            @RequestParam String userId,
+            @RequestParam(defaultValue = "30") int days,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            return ResponseEntity.status(403).body("Forbidden");
+        }
+        log.info("[DEV] Backfill trigger for userId={} days={}", userId, days);
+        portfolioHistoryScheduler.backfillSnapshotsAsync(userId, days);
+        return ResponseEntity.ok("Backfill triggered for userId=" + userId + " for last " + days + " days.");
     }
 
     /**
@@ -326,7 +373,11 @@ public class PortfolioController {
     @Hidden
     @PostMapping("/dev/migrate-groww")
     public ResponseEntity<String> migrateGrowwNames(
-            @org.springframework.beans.factory.annotation.Autowired com.am.common.amcommondata.repository.portfolio.PortfolioDocumentRepository repo) {
+            @org.springframework.beans.factory.annotation.Autowired com.am.common.amcommondata.repository.portfolio.PortfolioDocumentRepository repo,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            return ResponseEntity.status(403).body("Forbidden");
+        }
         log.info("[DEV] Running Groww name migration...");
         java.util.List<com.am.common.amcommondata.document.portfolio.PortfolioDocument> allDocs = repo.findAll();
         int updated = 0;

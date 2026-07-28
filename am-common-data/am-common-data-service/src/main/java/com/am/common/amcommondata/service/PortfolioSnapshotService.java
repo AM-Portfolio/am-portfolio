@@ -37,13 +37,16 @@ public class PortfolioSnapshotService {
 
     @org.springframework.cache.annotation.CacheEvict(value = "portfolioHistory", allEntries = true)
     public void saveUserSnapshot(String userId, Double totalUserWealth, Double totalUserInvestment, Double totalUserGainLoss, Double totalUserGainLossPercentage, List<PortfolioSnapshotEntry> entries) {
-        LocalDate today = LocalDate.now();
+        saveUserSnapshot(userId, totalUserWealth, totalUserInvestment, totalUserGainLoss, totalUserGainLossPercentage, entries, LocalDate.now());
+    }
 
-        Optional<PortfolioSnapshotDocument> existing = portfolioSnapshotRepository.findByUserIdAndSnapshotDate(userId, today);
+    @org.springframework.cache.annotation.CacheEvict(value = "portfolioHistory", allEntries = true)
+    public void saveUserSnapshot(String userId, Double totalUserWealth, Double totalUserInvestment, Double totalUserGainLoss, Double totalUserGainLossPercentage, List<PortfolioSnapshotEntry> entries, LocalDate snapshotDate) {
+        Optional<PortfolioSnapshotDocument> existing = portfolioSnapshotRepository.findByUserIdAndSnapshotDate(userId, snapshotDate);
         PortfolioSnapshotDocument snapshot;
         
         if (existing.isPresent()) {
-            // Update existing snapshot for today (Upsert)
+            // Update existing snapshot for the given date (Upsert)
             snapshot = existing.get();
             snapshot.setTotalUserWealth(totalUserWealth);
             snapshot.setTotalUserInvestment(totalUserInvestment);
@@ -58,7 +61,7 @@ public class PortfolioSnapshotService {
                     .id(snapshotId)
                     .snapshotId(snapshotId)
                     .userId(userId)
-                    .snapshotDate(today)
+                    .snapshotDate(snapshotDate)
                     .totalUserWealth(totalUserWealth)
                     .totalUserInvestment(totalUserInvestment)
                     .totalUserGainLoss(totalUserGainLoss)
@@ -69,7 +72,7 @@ public class PortfolioSnapshotService {
         }
 
         portfolioSnapshotRepository.save(snapshot);
-        log.info("Successfully upserted User-Centric EOD snapshot for user {} totalWealth={}", userId, totalUserWealth);
+        log.info("Successfully upserted User-Centric snapshot for user {} on date {} totalWealth={}", userId, snapshotDate, totalUserWealth);
     }
 
     public Optional<PortfolioSnapshotModel> getLatestFreshSnapshot(String userId, int freshnessMinutes) {

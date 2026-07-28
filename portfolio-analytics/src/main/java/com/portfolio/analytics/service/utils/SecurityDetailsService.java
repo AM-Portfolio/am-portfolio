@@ -63,7 +63,13 @@ public class SecurityDetailsService {
                     .collect(Collectors.toMap(
                             model -> normalizedToRawMap.getOrDefault(model.getKey().getSymbol(), model.getKey().getSymbol()),
                             Function.identity(),    
-                            (existing, replacement) -> existing
+                            (existing, replacement) -> {
+                                boolean existingValid = existing.getMetadata() != null
+                                    && existing.getMetadata().getSector() != null
+                                    && !existing.getMetadata().getSector().trim().isEmpty()
+                                    && !existing.getMetadata().getSector().trim().equals("-");
+                                return existingValid ? existing : replacement;
+                            }
                     ));
             
             log.info("Successfully retrieved {} security models out of {} requested symbols", 
@@ -155,12 +161,10 @@ public class SecurityDetailsService {
         
         for (String symbol : symbols) {
             SecurityModel securityModel = securityDetails.get(symbol);
-            String sector = "Unknown";
-            if (securityModel != null && securityModel.getMetadata() != null && securityModel.getMetadata().getSector() != null) {
-                sector = securityModel.getMetadata().getSector();
-            } else {
-                log.debug("Symbol {} has no sector information, using 'Unknown'", symbol);
-            }
+            String rawSector = (securityModel != null && securityModel.getMetadata() != null)
+                ? securityModel.getMetadata().getSector() : null;
+            String sector = (rawSector != null && !rawSector.trim().isEmpty() && !rawSector.trim().equals("-"))
+                ? rawSector.trim() : "Unknown";
             
             sectorToSymbols.computeIfAbsent(sector, k -> new ArrayList<>()).add(symbol);
         }
@@ -193,12 +197,10 @@ public class SecurityDetailsService {
         
         for (String symbol : symbols) {
             SecurityModel securityModel = securityDetails.get(symbol);
-            String industry = "Unknown";
-            if (securityModel != null && securityModel.getMetadata() != null && securityModel.getMetadata().getIndustry() != null) {
-                industry = securityModel.getMetadata().getIndustry();
-            } else {
-                log.debug("Symbol {} has no industry information, using 'Unknown'", symbol);
-            }
+            String rawIndustry = (securityModel != null && securityModel.getMetadata() != null)
+                ? securityModel.getMetadata().getIndustry() : null;
+            String industry = (rawIndustry != null && !rawIndustry.trim().isEmpty() && !rawIndustry.trim().equals("-"))
+                ? rawIndustry.trim() : "Unknown";
             
             industryToSymbols.computeIfAbsent(industry, k -> new ArrayList<>()).add(symbol);
         }

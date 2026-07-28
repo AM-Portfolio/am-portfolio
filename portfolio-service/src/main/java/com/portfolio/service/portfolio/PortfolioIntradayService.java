@@ -89,12 +89,20 @@ public class PortfolioIntradayService {
                 .max(Comparator.comparing(PortfolioSnapshotModel::getSnapshotDate))
                 .orElse(null);
 
+        double baselineWealth;
         if (baselineSnap == null) {
-            // No history at all — return empty, UI shows "No history yet"
-            return List.of();
+            log.warn("[Intraday] No snapshot found for user={}, using portfolio totalValue as baseline", userId);
+            List<PortfolioDocument> portfolios = portfolioDocumentRepository.findByOwner(userId);
+            baselineWealth = portfolios.stream()
+                .filter(p -> portfolioId == null || (p.getId() != null && p.getId().equals(portfolioId)))
+                .mapToDouble(p -> p.getTotalValue() != null ? p.getTotalValue() : 0.0)
+                .sum();
+            if (baselineWealth <= 0) {
+                return List.of();
+            }
+        } else {
+            baselineWealth = baselineSnap.getTotalUserWealth() != null ? baselineSnap.getTotalUserWealth() : 0.0;
         }
-
-        double baselineWealth = baselineSnap.getTotalUserWealth() != null ? baselineSnap.getTotalUserWealth() : 0.0;
 
         // ── STEP 2: Get holdings from the snapshot document (most reliable) ──
         Map<String, Double> symbolQty = new HashMap<>();
