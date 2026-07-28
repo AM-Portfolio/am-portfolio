@@ -125,41 +125,43 @@ public class PortfolioAnalyticsFacade {
         }
         
         // --- PREFETCH MARKET DATA ONCE ---
-        try {
-            UUID portfolioUuid = UUID.fromString(request.getCoreIdentifiers().getPortfolioId());
-            PortfolioModelV1 portfolio = portfolioService.getPortfolioById(portfolioUuid);
-            if (portfolio != null) {
-                request.setPrefetchedPortfolio(portfolio);
-                
-                if (portfolio.getEquityModels() != null && !portfolio.getEquityModels().isEmpty()) {
-                    List<String> symbols = portfolio.getEquityModels().stream()
-                            .map(EquityModel::getSymbol)
-                            .filter(s -> s != null && !s.isEmpty())
-                            .collect(Collectors.toList());
+        CompletableFuture<Void> prefetchFuture = CompletableFuture.runAsync(() -> {
+            try {
+                UUID portfolioUuid = UUID.fromString(request.getCoreIdentifiers().getPortfolioId());
+                PortfolioModelV1 portfolio = portfolioService.getPortfolioById(portfolioUuid);
+                if (portfolio != null) {
+                    request.setPrefetchedPortfolio(portfolio);
                     
-                    if (!symbols.isEmpty()) {
-                        log.info("[Optimization] Prefetching market data once for {} symbols", symbols.size());
-                        request.setPrefetchAttempted(true);
-                        Map<String, MarketData> prefetched = marketDataService.getMarketData(symbols);
-                        if (prefetched != null) {
-                            // Ensure normalized keys so analytics providers can look them up successfully
-                            Map<String, MarketData> normalizedPrefetch = new java.util.HashMap<>();
-                            for (Map.Entry<String, MarketData> entry : prefetched.entrySet()) {
-                                if (entry.getValue() != null) {
-                                    String cleaned = com.portfolio.model.util.SymbolResolver.normalize(
-                                            entry.getKey().contains(":") ? entry.getKey().substring(entry.getKey().indexOf(':') + 1) : entry.getKey()
-                                    );
-                                    normalizedPrefetch.put(cleaned, entry.getValue());
+                    if (portfolio.getEquityModels() != null && !portfolio.getEquityModels().isEmpty()) {
+                        List<String> symbols = portfolio.getEquityModels().stream()
+                                .map(EquityModel::getSymbol)
+                                .filter(s -> s != null && !s.isEmpty())
+                                .collect(Collectors.toList());
+                        
+                        if (!symbols.isEmpty()) {
+                            log.info("[Optimization] Prefetching market data once for {} symbols", symbols.size());
+                            request.setPrefetchAttempted(true);
+                            Map<String, MarketData> prefetched = marketDataService.getMarketData(symbols);
+                            if (prefetched != null) {
+                                // Ensure normalized keys so analytics providers can look them up successfully
+                                Map<String, MarketData> normalizedPrefetch = new java.util.HashMap<>();
+                                for (Map.Entry<String, MarketData> entry : prefetched.entrySet()) {
+                                    if (entry.getValue() != null) {
+                                        String cleaned = com.portfolio.model.util.SymbolResolver.normalize(
+                                                entry.getKey().contains(":") ? entry.getKey().substring(entry.getKey().indexOf(':') + 1) : entry.getKey()
+                                        );
+                                        normalizedPrefetch.put(cleaned, entry.getValue());
+                                    }
                                 }
+                                request.setPrefetchedMarketData(normalizedPrefetch);
                             }
-                            request.setPrefetchedMarketData(normalizedPrefetch);
                         }
                     }
                 }
+            } catch (Exception e) {
+                log.warn("Failed to prefetch market data in facade. Providers will fallback to fetching individually.", e);
             }
-        } catch (Exception e) {
-            log.warn("Failed to prefetch market data in facade. Providers will fallback to fetching individually.", e);
-        }
+        }, taskExecutor);
         // ---------------------------------
 
         // Build analytics component with requested features
@@ -190,7 +192,7 @@ public class PortfolioAnalyticsFacade {
         
         // Join futures and populate builder
         java.util.List<CompletableFuture<?>> allFutures = java.util.stream.Stream
-            .of(heatmapFuture, moversFuture, sectorAllocationFuture, marketCapAllocationFuture)
+            .of(prefetchFuture, heatmapFuture, moversFuture, sectorAllocationFuture, marketCapAllocationFuture)
             .filter(java.util.Objects::nonNull)
             .collect(java.util.stream.Collectors.toList());
             

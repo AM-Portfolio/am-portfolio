@@ -451,6 +451,7 @@ public class MarketDataService {
                             || (md.getOhlc() != null && md.getOhlc().getOpen() > 0);
                         if (hasUsableData) {
                             result.put(symbol, md);
+                            localCache.put(symbol, md); // promote to L1
                         } else {
                             log.debug("[MarketData] Skipping stale Redis entry for {} due to missing previousClose/openPrice", symbol);
                         }
@@ -732,18 +733,23 @@ public class MarketDataService {
             cleanToRaw.put(cleanSym, symbol);
             
             String cacheKey = cleanSym + ":" + range;
-            if (!missingSymbols.contains(cleanSym)) {
-                missingSymbols.add(cleanSym);
-                boolean[] isNew = {false};
-                java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalData> fut = inFlightChartRequests.computeIfAbsent(cacheKey, k -> {
-                    isNew[0] = true;
-                    return new java.util.concurrent.CompletableFuture<>();
-                });
-                
-                if (isNew[0]) {
-                    toFetch.add(cleanSym);
-                } else {
-                    waitFor.put(cleanSym, fut); // coalesce with in-flight request
+            com.portfolio.marketdata.model.HistoricalData cachedData = chartCache.getIfPresent(cacheKey);
+            if (cachedData != null) {
+                finalResp.getData().put(symbol, cachedData);
+            } else {
+                if (!missingSymbols.contains(cleanSym)) {
+                    missingSymbols.add(cleanSym);
+                    boolean[] isNew = {false};
+                    java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalData> fut = inFlightChartRequests.computeIfAbsent(cacheKey, k -> {
+                        isNew[0] = true;
+                        return new java.util.concurrent.CompletableFuture<>();
+                    });
+                    
+                    if (isNew[0]) {
+                        toFetch.add(cleanSym);
+                    } else {
+                        waitFor.put(cleanSym, fut); // coalesce with in-flight request
+                    }
                 }
             }
         }
@@ -808,16 +814,43 @@ public class MarketDataService {
             com.portfolio.marketdata.model.HistoricalChartsResponse finalResp,
             Map<String, String> cleanToRaw) {
         try {
-            try {
-                com.portfolio.marketdata.model.HistoricalChartsResponse resp = marketDataApiClient.getHistoricalCharts(missingSymbols, range).block();
-                if (resp != null && resp.getData() != null) {
-                    resp.getData().forEach((cleanSym, data) -> {
+            int CHUNK_SIZE = 20;
+            List<List<String>> chunks = new java.util.ArrayList<>();
+            for (int i = 0; i < missingSymbols.size(); i += CHUNK_SIZE) {
+                chunks.add(missingSymbols.subList(i, Math.min(missingSymbols.size(), i + CHUNK_SIZE)));
+            }
+
+            List<java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalChartsResponse>> futures = chunks.stream()
+                .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return marketDataApiClient.getHistoricalCharts(chunk, range).block();
+                    } catch (Exception e) {
+                        log.error("[HistoricalCharts data] API call failed: {}", e.getMessage());
+                        com.portfolio.marketdata.model.HistoricalChartsResponse resp = new com.portfolio.marketdata.model.HistoricalChartsResponse();
+                        resp.setData(new java.util.HashMap<>());
+                        return resp;
+                    }
+                }, taskExecutor)
+                .orTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                .exceptionally(e -> {
+                    log.warn("[HistoricalCharts data] Fetch timed out or failed: {}", e.getMessage());
+                    com.portfolio.marketdata.model.HistoricalChartsResponse resp = new com.portfolio.marketdata.model.HistoricalChartsResponse();
+                    resp.setData(new java.util.HashMap<>());
+                    return resp;
+                }))
+                .collect(Collectors.toList());
+
+            java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
+            
+            for (java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalChartsResponse> f : futures) {
+                com.portfolio.marketdata.model.HistoricalChartsResponse chunkResp = f.join();
+                if (chunkResp != null && chunkResp.getData() != null) {
+                    chunkResp.getData().forEach((cleanSym, data) -> {
                         String rawSym = cleanToRaw.getOrDefault(cleanSym, cleanSym);
                         finalResp.getData().put(rawSym, data);
+                        chartCache.put(cleanSym + ":" + range, data);
                     });
                 }
-            } catch (Exception e) {
-                log.error("[HistoricalCharts data] API call failed: {}", e.getMessage());
             }
             return finalResp;
         } catch (Exception e) {
@@ -880,6 +913,7 @@ public class MarketDataService {
 
             String rawSymbol = cleanToRaw.getOrDefault(cleanSymbol, cleanSymbol);
             partial.getData().put(rawSymbol, hd);
+            chartCache.put(cleanSymbol + ":1D", hd); // Populate L1 cache for next call
         }
 
         // ── FALLBACK: Symbols missing from MongoDB ──
@@ -910,6 +944,7 @@ public class MarketDataService {
                         // API returned good data (callExternalApiForRange already put it in partial under rawSymbol if we passed partial, 
                         // but here we passed a new response, so we extract and put it manually)
                         partial.getData().put(rawSymbol, apiData);
+                        chartCache.put(cleanSymbol + ":1D", apiData);
                     } else {
                         // API also returned null/0.0 → create a flat-line chart using live price
                         StockPriceDocument liveDoc = liveDocs.get(cleanSymbol);
@@ -918,6 +953,7 @@ public class MarketDataService {
                                 cleanSymbol, liveDoc.getLastPrice());
                             com.portfolio.marketdata.model.HistoricalData flatLine = buildFlatLineChart(cleanSymbol, liveDoc.getLastPrice());
                             partial.getData().put(rawSymbol, flatLine);
+                            chartCache.put(cleanSymbol + ":1D", flatLine);
                         } else {
                             log.warn("[Intraday-Mongo] Symbol {} has no data at all, omitting from chart.", cleanSymbol);
                         }
