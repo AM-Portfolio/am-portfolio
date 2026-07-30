@@ -18,6 +18,7 @@ import com.portfolio.model.portfolio.v1.BrokerPortfolioSummary;
 public class PortfolioMapperv1 {
 
     public PortfolioModelV1 toPortfolioModelV1(PortfolioUpdateEvent portfolioEvent) {
+        List<EquityModel> mappedEquities = mapToEquityModels(portfolioEvent, portfolioEvent.getBrokerType());
 
         PortfolioModelV1 portfolioModel = PortfolioModelV1.builder()
                 .id(portfolioEvent.getId())
@@ -27,9 +28,9 @@ public class PortfolioMapperv1 {
                 .fundType(FundType.DEFAULT)
                 .status("Active")
                 .createdBy(portfolioEvent.getUserId())
-                .equityModels(portfolioEvent.getEquities())
-                .assetCount(calculateAssetCount(portfolioEvent.getEquities()))
-                .totalValue(calculateTotalValue(portfolioEvent.getEquities()))
+                .equityModels(mappedEquities)
+                .assetCount(calculateAssetCount(mappedEquities))
+                .totalValue(calculateTotalValue(mappedEquities))
                 .version(0L)
                 .build();
         return portfolioModel;
@@ -88,27 +89,15 @@ public class PortfolioMapperv1 {
 
     private List<EquityModel> mapToEquityModels(PortfolioUpdateEvent portfolio, BrokerType brokerType) {
         List<EquityModel> equities = portfolio.getEquities();
-        List<MutualFundModel> mutualFunds = portfolio.getMutualFunds();
         List<EquityModel> assets = new ArrayList<>();
 
         if (equities != null) {
             var assetModels = equities.stream()
-                    .filter(e -> e.getIsin() != null && e.getSymbol() != null) // @todo all values symbol, isin, name
-                                                                               // shoudl comes from PortfolioUpdateEvent
-                                                                               // . Remove filter in upcoming release
+                    .filter(e -> e != null)
                     .map(e -> mapEquityModelToAsset(e, brokerType))
-                    .collect(Collectors.toSet());
+                    .collect(Collectors.toList());
             assets.addAll(assetModels);
         }
-
-        // if (mutualFunds != null) {
-        // var fundModels = mutualFunds.stream()
-        // .filter(e -> e.getIsin() != null && e.getSymbol() != null) // @todo all value
-        // shoudl comes from PortfolioUpdateEvent . Remove filter in upcoming release
-        // .map(e -> mapToAsset(e, brokerType))
-        // .collect(Collectors.toSet());
-        // assets.addAll(fundModels);
-        // }
 
         return assets;
     }
@@ -135,17 +124,41 @@ public class PortfolioMapperv1 {
     }
 
     private EquityModel mapEquityModelToAsset(EquityModel equityModel, BrokerType brokerType) {
+        // Fallback for symbol: symbol -> isin -> name
+        String resolvedSymbol = equityModel.getSymbol();
+        if (resolvedSymbol == null || resolvedSymbol.isBlank()) {
+            if (equityModel.getIsin() != null && !equityModel.getIsin().isBlank()) {
+                resolvedSymbol = equityModel.getIsin();
+            } else if (equityModel.getName() != null && !equityModel.getName().isBlank()) {
+                resolvedSymbol = equityModel.getName();
+            }
+        }
+
+        // Fallback for avgBuyingPrice: avgBuyingPrice -> investmentValue / quantity
+        Double resolvedAvgPrice = equityModel.getAvgBuyingPrice();
+        if ((resolvedAvgPrice == null || resolvedAvgPrice == 0.0)
+                && equityModel.getInvestmentValue() != null 
+                && equityModel.getQuantity() != null && equityModel.getQuantity() > 0) {
+            resolvedAvgPrice = equityModel.getInvestmentValue() / equityModel.getQuantity();
+        }
+
+        Double computedInvestmentValue = equityModel.getInvestmentValue();
+        if (computedInvestmentValue == null && resolvedAvgPrice != null && equityModel.getQuantity() != null) {
+            computedInvestmentValue = resolvedAvgPrice * equityModel.getQuantity();
+        }
+
         return EquityModel.builder()
                 .assetType(AssetType.EQUITY)
                 .brokerType(brokerType)
-                .symbol(equityModel.getSymbol())
+                .symbol(resolvedSymbol)
                 .name(equityModel.getName())
                 .companyName(equityModel.getCompanyName() != null ? equityModel.getCompanyName() : equityModel.getName())
                 .isin(equityModel.getIsin())
-                .avgBuyingPrice(equityModel.getAvgBuyingPrice())
+                .avgBuyingPrice(resolvedAvgPrice)
                 .currentPrice(equityModel.getCurrentPrice())
                 .quantity(equityModel.getQuantity())
                 .currentValue(equityModel.getCurrentValue())
+                .investmentValue(computedInvestmentValue)
                 .sector(equityModel.getSector())
                 .industry(equityModel.getIndustry())
                 .marketCap(equityModel.getMarketCap())
