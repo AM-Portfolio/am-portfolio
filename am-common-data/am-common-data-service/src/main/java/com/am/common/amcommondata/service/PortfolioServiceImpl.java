@@ -120,6 +120,15 @@ public class PortfolioServiceImpl implements PortfolioService {
                             if (incoming.getCurrentPrice() != null) {
                                 match.setCurrentPrice(incoming.getCurrentPrice());
                             }
+                            if (incoming.getSector() != null) {
+                                match.setSector(incoming.getSector());
+                            }
+                            if (incoming.getIndustry() != null) {
+                                match.setIndustry(incoming.getIndustry());
+                            }
+                            if (incoming.getMarketCap() != null) {
+                                match.setMarketCap(incoming.getMarketCap());
+                            }
                         } else {
                             existingEquities.add(incoming);
                         }
