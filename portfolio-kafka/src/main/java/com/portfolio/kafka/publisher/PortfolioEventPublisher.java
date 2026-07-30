@@ -28,6 +28,14 @@ public class PortfolioEventPublisher {
             return;
         }
 
+        Double computedTotalInvestment = 0.0;
+        if (savedPortfolio.getEquityModels() != null) {
+            computedTotalInvestment = savedPortfolio.getEquityModels().stream()
+                    .filter(e -> e != null && e.getInvestmentValue() != null)
+                    .mapToDouble(e -> e.getInvestmentValue())
+                    .sum();
+        }
+
         PortfolioUpdateEvent outboundEvent = PortfolioUpdateEvent.builder()
                 .id(savedPortfolio.getId() != null ? savedPortfolio.getId() : UUID.randomUUID())
                 .userId(savedPortfolio.getOwner())
@@ -37,6 +45,7 @@ public class PortfolioEventPublisher {
                 .source(source != null ? source : "PORTFOLIO_RESOLVED")
                 .equities(savedPortfolio.getEquityModels())
                 .totalValue(savedPortfolio.getTotalValue())
+                .totalInvestment(computedTotalInvestment)
                 .timestamp(LocalDateTime.now())
                 .build();
 
