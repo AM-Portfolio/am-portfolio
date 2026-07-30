@@ -56,9 +56,24 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
                 // Create a map of symbol to holding quantity
                 Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
                 
-                // Group stocks by sector and industry
-                Map<String, List<String>> sectorToStocks = securityDetailsService.groupSymbolsBySector(portfolioSymbols);
-                Map<String, List<String>> industryToStocks = securityDetailsService.groupSymbolsByIndustry(portfolioSymbols);
+                // Group stocks by sector and industry directly from portfolio data
+                Map<String, List<String>> sectorToStocks = new HashMap<>();
+                Map<String, List<String>> industryToStocks = new HashMap<>();
+                
+                if (portfolio.getEquityModels() != null) {
+                    for (EquityModel model : portfolio.getEquityModels()) {
+                        String symbol = model.getSymbol();
+                        if (symbol != null && !symbol.trim().isEmpty()) {
+                            String sector = (model.getSector() != null && !model.getSector().trim().isEmpty() && !model.getSector().trim().equals("-"))
+                                ? model.getSector().trim() : "Unknown";
+                            String industry = (model.getIndustry() != null && !model.getIndustry().trim().isEmpty() && !model.getIndustry().trim().equals("-"))
+                                ? model.getIndustry().trim() : "Unknown";
+                                
+                            sectorToStocks.computeIfAbsent(sector, k -> new ArrayList<>()).add(symbol);
+                            industryToStocks.computeIfAbsent(industry, k -> new ArrayList<>()).add(symbol);
+                        }
+                    }
+                }
                 
                 log.debug("Sector groups for portfolio {}: {}", portfolioId, sectorToStocks.keySet());
                 log.debug("Industry groups for portfolio {}: {}", portfolioId, industryToStocks.keySet());

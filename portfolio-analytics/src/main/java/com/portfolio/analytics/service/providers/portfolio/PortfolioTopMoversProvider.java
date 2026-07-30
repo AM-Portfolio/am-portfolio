@@ -54,8 +54,18 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
             request,
             this::createEmptyResponse,
             (portfolio, portfolioSymbols, marketData) -> {
-                // Get sector information for symbols
-                Map<String, String> symbolSectors = securityDetailsService.getSymbolMapSectors(portfolioSymbols);
+                // Get sector information for symbols directly from portfolio data
+                Map<String, String> symbolSectors = new HashMap<>();
+                if (portfolio.getEquityModels() != null) {
+                    for (com.am.common.amcommondata.model.asset.equity.EquityModel model : portfolio.getEquityModels()) {
+                        String symbol = model.getSymbol();
+                        if (symbol != null && !symbol.trim().isEmpty()) {
+                            String sector = (model.getSector() != null && !model.getSector().trim().isEmpty() && !model.getSector().trim().equals("-"))
+                                ? model.getSector().trim() : "Unknown";
+                            symbolSectors.put(symbol, sector);
+                        }
+                    }
+                }
                 
                 // Calculate top movers using the determined limit and include sector information
                 return TopMoverUtils.buildTopMoversResponse(portfolioSymbols, marketData, limit, portfolioId, true, symbolSectors);
