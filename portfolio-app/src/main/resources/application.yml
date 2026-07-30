@@ -41,12 +41,12 @@ spring:
       enable-auto-commit: false
       max-poll-records: 100
     properties:
-      security-protocol: ${PROJ_KAFKA_SECURITY_PROTOCOL}
-      sasl-mechanism: ${PROJ_KAFKA_SASL_MECHANISM}
-      sasl-jaas-config: ${PROJ_KAFKA_JAAS_CONFIG}
-      ssl-endpoint-identification-algorithm: ""
-      ssl-truststore-location: /etc/ssl/certs/java/cacerts
-      ssl-truststore-password: changeit
+      "[security.protocol]": ${PROJ_KAFKA_SECURITY_PROTOCOL}
+      "[sasl.mechanism]": ${PROJ_KAFKA_SASL_MECHANISM}
+      "[sasl.jaas.config]": ${PROJ_KAFKA_JAAS_CONFIG}
+      "[ssl.endpoint.identification.algorithm]": ""
+      "[ssl.truststore.location]": /etc/ssl/certs/java/cacerts
+      "[ssl.truststore.password]": changeit
   data:
     redis:
       host: ${PROJ_REDIS_HOSTNAME}
@@ -186,7 +186,7 @@ basket:
 market-data:
   client:
     connect-timeout-ms: ${MARKET_DATA_CONNECT_TIMEOUT_MS:3000}
-    read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:15000}
+    read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:90000}
   api:
     base-url: ${MARKET_DATA_API_URL:http://am-market-data:8080}
     ohlc-endpoint: /v1/market-data/ohlc
@@ -194,7 +194,7 @@ market-data:
     historical-charts-endpoint: /v1/analysis/historical-charts
     securities-endpoint: /v1/securities
     nse-indices-endpoint: /v1/indices
-    read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:15000}
+    read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:90000}
     connection-timeout: 3000
     max-retry-attempts: 0
 

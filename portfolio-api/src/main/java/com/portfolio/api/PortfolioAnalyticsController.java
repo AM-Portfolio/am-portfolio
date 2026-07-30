@@ -27,6 +27,7 @@ import org.springframework.web.bind.annotation.*;
 public class PortfolioAnalyticsController {
 
     private final PortfolioAnalyticsFacade portfolioAnalyticsFacade;
+    private final com.portfolio.service.PortfolioDashboardService portfolioDashboardService;
 
     /**
      * Advanced analytics endpoint that combines multiple analytics features with
@@ -58,18 +59,34 @@ public class PortfolioAnalyticsController {
             request.setCoreIdentifiers(new com.portfolio.model.analytics.request.CoreIdentifiers());
         }
 
-        try {
-            java.util.UUID.fromString(portfolioId);
-        } catch (IllegalArgumentException e) {
-            log.warn("REST request for advanced analytics with malformed UUID: {}", portfolioId);
-            return ResponseEntity.badRequest().build();
-        }
+        // portfolioId can be a MongoDB ObjectId or an external ID, so we don't enforce UUID parsing here.
 
         log.info("REST request for advanced analytics on portfolio: {} with timeframe: {} to {}",
                 portfolioId, request.getTimeFrame());
 
         request.getCoreIdentifiers().setPortfolioId(portfolioId);
 
-        return ResponseEntity.ok(portfolioAnalyticsFacade.calculateAdvancedAnalytics(request));
+        AdvancedAnalyticsResponse response = portfolioAnalyticsFacade.calculateAdvancedAnalytics(request);
+        
+        try {
+            String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+            com.portfolio.model.TimeInterval interval = com.portfolio.model.TimeInterval.ONE_DAY;
+            if (request.getTimeFrame() != null) {
+                interval = com.portfolio.model.TimeInterval.fromCode(request.getTimeFrame().name());
+            }
+            com.portfolio.model.portfolio.v1.PortfolioSummaryV1 summary = portfolioDashboardService.overviewPortfolio(userId, portfolioId, interval);
+            if (summary != null) {
+                // Clear heavy nested arrays to prevent frontend browser freezing
+                summary.setMarketCapHoldings(null);
+                summary.setSectorialHoldings(null);
+                summary.setBrokerPortfolios(null);
+                
+                response.setSummary(summary);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to attach portfolio summary to advanced analytics response", e);
+        }
+
+        return ResponseEntity.ok(response);
     }
 }

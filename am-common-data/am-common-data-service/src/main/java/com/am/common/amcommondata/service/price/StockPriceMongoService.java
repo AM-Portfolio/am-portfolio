@@ -58,4 +58,8 @@ public class StockPriceMongoService {
                 .stream()
                 .collect(Collectors.toMap(StockPriceDocument::getSymbol, doc -> doc));
     }
+
+    public List<StockPriceDocument> findAll() {
+        return stockPriceMongoRepository.findAll();
+    }
 }

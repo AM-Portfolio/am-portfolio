@@ -242,8 +242,12 @@ public class TopMoverUtils {
                             .limit(3) // Top 3 losers per sector
                             .collect(Collectors.toList());
                     
-                    // Create stock performance map with values rounded to 2 decimal places
-                    Map<String, Double> stockPerformance = sectorSymbols.stream()
+                    // Create stock performance map only for top gainers and losers to prevent massive JSON payload
+                    java.util.Set<String> topMovers = new java.util.HashSet<>();
+                    topMovers.addAll(topGainerSymbols);
+                    topMovers.addAll(topLoserSymbols);
+                    
+                    Map<String, Double> stockPerformance = topMovers.stream()
                             .filter(symbol -> symbolToPerformance.containsKey(symbol))
                             .collect(Collectors.toMap(
                                     Function.identity(),
@@ -347,8 +351,12 @@ public class TopMoverUtils {
                             .limit(3) // Top 3 losers per sector
                             .collect(Collectors.toList());
                     
-                    // Create stock performance map with values rounded to 2 decimal places
-                    Map<String, Double> stockPerformance = sectorSymbols.stream()
+                    // Create stock performance map only for top gainers and losers to prevent massive JSON payload
+                    java.util.Set<String> topMovers = new java.util.HashSet<>();
+                    topMovers.addAll(topGainerSymbols);
+                    topMovers.addAll(topLoserSymbols);
+                    
+                    Map<String, Double> stockPerformance = topMovers.stream()
                             .filter(symbol -> symbolToPerformance.containsKey(symbol))
                             .collect(Collectors.toMap(
                                     Function.identity(),

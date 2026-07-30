@@ -202,10 +202,12 @@ public class PortfolioCalculator {
                 if (prevClose != null && prevClose > 0) {
                     previousClosePrice = prevClose;
                 } else if (apiItem.getOhlc() != null && apiItem.getOhlc().getOpen() > 0) {
-                    log.debug("previousClose missing for {}. Falling back to OHLC open for intraday P&L.", symbol);
+                    // NSE open price = yesterday's close (adjusted). Valid proxy for 1D change.
                     previousClosePrice = apiItem.getOhlc().getOpen();
+                    log.info("[Holdings] Using OHLC open={} as previousClose for symbol={}", 
+                             previousClosePrice, symbol);
                 } else {
-                    log.warn("Missing previousClose and openPrice for symbol {}. Daily P&L will not be calculated.", symbol);
+                    log.warn("[Holdings] No previousClose or openPrice for {}. 1D P&L will be null.", symbol);
                 }
             }
         }

@@ -80,7 +80,7 @@ public class HeatmapUtils {
                     continue;
                 }
                 double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0) 
-                        ? stock.getPreviousClose() : (stock.getOhlc() != null ? stock.getOhlc().getClose() : 0.0);
+                        ? stock.getPreviousClose() : (stock.getOhlc() != null ? stock.getOhlc().getOpen() : 0.0);
                 
                 if (previousClose > 0) {
                     // Calculate change percentage relative to previous close (acts as baseline for timeframe)
@@ -140,28 +140,38 @@ public class HeatmapUtils {
         for (int i = 0; i < sectorStocks.size(); i++) {
             MarketData stock = sectorStocks.get(i);
             double quantity = quantities.get(i);
-            // Guard against missing lastPrice data BEFORE calculating weighted sums
-            if (stock == null || stock.getLastPrice() == null) {
-                log.warn("Skipping stock in weighted metrics - no lastPrice data. Symbol index: {}, lastPrice: {}",
-                        i, stock != null ? stock.getLastPrice() : "null");
+            if (stock == null) {
                 continue;
             }
             
-            double value = stock.getLastPrice() * quantity;
+            // Resolve price with full fallback chain
+            double resolvedLastPrice = 0.0;
+            if (stock.getLastPrice() != null && stock.getLastPrice() > 0) {
+                resolvedLastPrice = stock.getLastPrice();
+            } else if (stock.getOhlc() != null && stock.getOhlc().getClose() > 0) {
+                resolvedLastPrice = stock.getOhlc().getClose();
+            } else if (stock.getPreviousClose() != null && stock.getPreviousClose() > 0) {
+                resolvedLastPrice = stock.getPreviousClose();
+            } else {
+                log.warn("No resolvable price for stock at index {}; excluding from sector weight.", i);
+                continue;
+            }
+            
+            double value = resolvedLastPrice * quantity;
             
             // Only add to total value if the stock has valid data
             totalValue += value;
             
             double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0) 
-                    ? stock.getPreviousClose() : (stock.getOhlc() != null ? stock.getOhlc().getClose() : 0.0);
+                    ? stock.getPreviousClose() : (stock.getOhlc() != null ? stock.getOhlc().getOpen() : 0.0);
             
             if (previousClose > 0) {
                 // Calculate timeframe change percentage based on previous close
-                double changePercent = ((stock.getLastPrice() - previousClose) / previousClose) * 100;
+                double changePercent = ((resolvedLastPrice - previousClose) / previousClose) * 100;
                 totalChangePercent += changePercent * value; // Weight by value
                 
                 // Performance score based on price movement relative to previous close
-                double performanceScore = ((stock.getLastPrice() - previousClose) / previousClose) * 100;
+                double performanceScore = ((resolvedLastPrice - previousClose) / previousClose) * 100;
                 totalPerformance += performanceScore * value; // Weight by value
             }
         }
@@ -349,6 +359,12 @@ public class HeatmapUtils {
                         .calculateTotalReturnAmount()
                         .calculateStockWeights()
                         .sortStocksByValue();
+                        
+        // LIMIT THE NUMBER OF STOCKS RETURNED TO PREVENT UI FREEZE
+        // A heatmap widget cannot physically display thousands of microscopic boxes
+        if (sectorPerformance.getStocks() != null && sectorPerformance.getStocks().size() > 15) {
+            sectorPerformance.setStocks(new java.util.ArrayList<>(sectorPerformance.getStocks().subList(0, 15)));
+        }
         
         return sectorPerformance;
     }

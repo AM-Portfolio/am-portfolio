@@ -80,6 +80,9 @@ private final RedisTemplate<String, PortfolioHoldings> portfolioHoldingsRedisTem
                         log.debug("Found stale portfolio holdings in cache for key: {}, deleting", key);
                         portfolioHoldingsRedisTemplate.delete(key);
                     }
+                } else {
+                    log.debug("Found portfolio holdings in cache for key: {} (relying on TTL)", key);
+                    return Optional.of(holdings);
                 }
             }
         } catch (Exception e) {

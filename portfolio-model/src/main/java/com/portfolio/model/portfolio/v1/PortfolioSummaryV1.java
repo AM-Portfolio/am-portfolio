@@ -19,7 +19,7 @@ import lombok.experimental.SuperBuilder;
 @EqualsAndHashCode(callSuper = true)
 @JsonInclude(Include.NON_NULL)
 public class PortfolioSummaryV1 extends BasePortfolioSummay {
-    private Map<BrokerType, BrokerPortfolioSummary> brokerPortfolios;
+    private Map<String, BrokerPortfolioSummary> brokerPortfolios;
     private Map<String, List<EquityHoldings>> marketCapHoldings;
     private Map<String, List<EquityHoldings>> sectorialHoldings;
     

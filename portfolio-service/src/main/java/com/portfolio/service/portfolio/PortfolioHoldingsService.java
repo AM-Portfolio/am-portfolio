@@ -36,11 +36,7 @@ public class PortfolioHoldingsService {
     private final PortfolioHoldingsMongoService portfolioHoldingsMongoService;
     private final java.util.concurrent.Executor taskExecutor;
 
-    private final com.github.benmanes.caffeine.cache.Cache<String, PortfolioHoldings> holdingsL1 =
-            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
-            .expireAfterWrite(60, java.util.concurrent.TimeUnit.SECONDS)
-            .maximumSize(1000)
-            .build();
+
 
     public PortfolioHoldingsService(
             PortfolioService portfolioService,
@@ -195,23 +191,28 @@ public class PortfolioHoldingsService {
 
         log.debug("Completed building portfolio holdings for user: {} and {}", userId, context);
 
-        // Store in cache if enriched
+        // Store in cache if enriched and valid
         if (enrich) {
-            log.info("Caching portfolio holdings for user: {} and context: {}", userId, context);
-            String cacheKey = userId + ":" + (portfolioId != null ? portfolioId : "ALL") + ":" + (interval != null ? interval.getCode() : "null");
-            holdingsL1.put(cacheKey, portfolioHoldings);
+            boolean hasValidPrices = portfolioHoldings.getEquityHoldings().stream()
+                .anyMatch(h -> h.getCurrentPrice() != null && h.getCurrentPrice() > 0);
             
-            // Cache the enriched portfolio asynchronously
-            java.util.concurrent.CompletableFuture.runAsync(() -> {
-                try {
-                    if (isRedisEnabled && portfolioHoldingsRedisService != null) {
-                        portfolioHoldingsRedisService.cachePortfolioHoldings(portfolioHoldings, userId, interval, portfolioId);
+            if (hasValidPrices || portfolioHoldings.getEquityHoldings().isEmpty()) {
+                log.info("Caching portfolio holdings for user: {} and context: {}", userId, context);
+                
+                // Cache the enriched portfolio asynchronously
+                java.util.concurrent.CompletableFuture.runAsync(() -> {
+                    try {
+                        if (isRedisEnabled && portfolioHoldingsRedisService != null) {
+                            portfolioHoldingsRedisService.cachePortfolioHoldings(portfolioHoldings, userId, interval, portfolioId);
+                        }
+                        portfolioHoldingsMongoService.cachePortfolioHoldings(portfolioHoldings, userId, interval, portfolioId);
+                    } catch (Exception e) {
+                        log.error("Failed to update persistent cache", e);
                     }
-                    portfolioHoldingsMongoService.cachePortfolioHoldings(portfolioHoldings, userId, interval, portfolioId);
-                } catch (Exception e) {
-                    log.error("Failed to update persistent cache", e);
-                }
-            }, taskExecutor);
+                }, taskExecutor);
+            } else {
+                log.warn("Skipping cache update for user {} - Market data appears to be missing/failed", userId);
+            }
         }
 
         log.info("Completed getPortfolioHoldings for user: {}", userId);
@@ -234,14 +235,8 @@ public class PortfolioHoldingsService {
         log.debug("Checking cache for portfolio holdings - User: {}, Interval: {}, Portfolio: {}",
                 userId, interval != null ? interval.getCode() : "null", portfolioId);
                 
-        String cacheKey = userId + ":" + (portfolioId != null ? portfolioId : "ALL") + ":" + (interval != null ? interval.getCode() : "null");
-        PortfolioHoldings l1Cache = holdingsL1.getIfPresent(cacheKey);
-        if (l1Cache != null) {
-            log.info("Serving portfolio holdings from L1 cache - User: {}, Portfolio: {}", userId, portfolioId);
-            return Optional.of(l1Cache);
-        }
-
         Optional<PortfolioHoldings> cachedHoldings = Optional.empty();
+        
         if (isRedisEnabled && portfolioHoldingsRedisService != null) {
             if (portfolioId == null) {
                 cachedHoldings = portfolioHoldingsRedisService.getLatestHoldings(userId, interval);
@@ -255,14 +250,21 @@ public class PortfolioHoldingsService {
             }
         }
 
-        // Tier 2: Check MongoDB if Redis missed (especially when Redis is disabled)
-        if (!isRedisEnabled) {
-            cachedHoldings = portfolioHoldingsMongoService.getLatestFreshHoldings(userId, interval, portfolioId);
-            if (cachedHoldings.isPresent()) {
-                log.info("Serving portfolio holdings from MongoDB cache - User: {}, Interval: {}",
-                        userId, interval != null ? interval.getCode() : "null");
-                return cachedHoldings;
+        // Tier 2: Check MongoDB if Redis missed
+        cachedHoldings = portfolioHoldingsMongoService.getLatestFreshHoldings(userId, interval, portfolioId);
+        if (cachedHoldings.isPresent()) {
+            List<EquityHoldings> cachedList = cachedHoldings.get().getEquityHoldings();
+            boolean hasLivePrices = cachedList != null && !cachedList.isEmpty()
+                && cachedList.stream()
+                    .filter(h -> h.getCurrentPrice() != null && h.getCurrentPrice() > 0)
+                    .count() >= cachedList.size() * 0.5;
+            
+            if (hasLivePrices) {
+                log.info("Serving valid portfolio holdings from MongoDB cache - User: {}", userId);
+                return cachedHoldings;  // ✅ real data
             }
+            log.warn("MongoDB holdings cache has stale/zero prices for User: {} — rebuilding fresh", userId);
+            // fall through to rebuild fresh
         }
         
         return Optional.empty();
