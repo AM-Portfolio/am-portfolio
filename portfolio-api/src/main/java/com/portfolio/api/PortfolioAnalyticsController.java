@@ -76,6 +76,11 @@ public class PortfolioAnalyticsController {
             }
             com.portfolio.model.portfolio.v1.PortfolioSummaryV1 summary = portfolioDashboardService.overviewPortfolio(userId, portfolioId, interval);
             if (summary != null) {
+                // Clear heavy nested arrays to prevent frontend browser freezing
+                summary.setMarketCapHoldings(null);
+                summary.setSectorialHoldings(null);
+                summary.setBrokerPortfolios(null);
+                
                 response.setSummary(summary);
             }
         } catch (Exception e) {

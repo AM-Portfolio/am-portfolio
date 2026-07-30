@@ -60,6 +60,18 @@ public class MarketDataService {
     @org.springframework.lang.Nullable
     private final com.am.common.amcommondata.service.price.StockPriceHistoryMongoService stockPriceHistoryMongoService;
 
+    private final com.github.benmanes.caffeine.cache.Cache<String, MarketData> localCache = 
+            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+            .expireAfterWrite(5, java.util.concurrent.TimeUnit.MINUTES)
+            .maximumSize(20000)
+            .build();
+
+    private final com.github.benmanes.caffeine.cache.Cache<String, com.portfolio.marketdata.model.HistoricalData> chartCache = 
+            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+            .expireAfterWrite(3, java.util.concurrent.TimeUnit.MINUTES)
+            .maximumSize(5000)
+            .build();
+
     private final java.util.concurrent.Executor taskExecutor;
     private final java.util.concurrent.Executor externalApiExecutor;
     
