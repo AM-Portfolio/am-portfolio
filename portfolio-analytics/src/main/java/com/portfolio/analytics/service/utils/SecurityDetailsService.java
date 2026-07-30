@@ -44,24 +44,13 @@ public class SecurityDetailsService {
         log.debug("Symbols to fetch: {}", symbols);
         
         try {
-            // Map normalized symbols back to original raw symbols
-            Map<String, String> normalizedToRawMap = new HashMap<>();
-            List<String> normalizedSymbols = new ArrayList<>();
+            // Attempt to retrieve security details from the service using the raw symbols
+            List<SecurityModel> securityModels = securityService.findBySymbols(symbols);
             
-            for (String rawSymbol : symbols) {
-                String normalized = com.portfolio.model.util.SymbolResolver.normalize(rawSymbol);
-                normalizedToRawMap.put(normalized, rawSymbol);
-                normalizedSymbols.add(normalized);
-            }
-
-            // Attempt to retrieve security details from the service using normalized symbols
-            List<SecurityModel> securityModels = securityService.findBySymbols(normalizedSymbols);
-            
-            // Convert list to map using ORIGINAL raw symbol as key
+            // Convert list to map using the exact symbol as key
             Map<String, SecurityModel> resultMap = securityModels.stream()
-                    .filter(model -> model.getKey() != null && model.getKey().getSymbol() != null)
                     .collect(Collectors.toMap(
-                            model -> normalizedToRawMap.getOrDefault(model.getKey().getSymbol(), model.getKey().getSymbol()),
+                            model -> model.getKey().getSymbol(),
                             Function.identity(),    
                             (existing, replacement) -> {
                                 boolean existingValid = existing.getMetadata() != null
@@ -106,8 +95,7 @@ public class SecurityDetailsService {
         
         for (String rawSymbol : symbols) {
             try {
-                String normalized = com.portfolio.model.util.SymbolResolver.normalize(rawSymbol);
-                List<SecurityModel> models = securityService.findBySymbols(Collections.singletonList(normalized));
+                List<SecurityModel> models = securityService.findBySymbols(Collections.singletonList(rawSymbol));
                 if (!models.isEmpty()) {
                     resultMap.put(rawSymbol, models.get(0));
                 }
