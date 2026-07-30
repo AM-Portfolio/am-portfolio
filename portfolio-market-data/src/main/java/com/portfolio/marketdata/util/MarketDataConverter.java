@@ -117,9 +117,9 @@ public class MarketDataConverter {
                 builder.lastPrice(latestPoint.getOhlcData().getClose());
             }
             if (dataPoints.size() >= 2) {
-                MarketData.MarketDataPoint prevPoint = dataPoints.get(dataPoints.size() - 2);
-                if (prevPoint.getOhlcData() != null && latestPoint.getOhlcData() != null && latestPoint.getOhlcData().getClose() > 0) {
-                    builder.previousClose(prevPoint.getOhlcData().getClose());
+                if (firstPoint.getOhlcData() != null && latestPoint.getOhlcData() != null && latestPoint.getOhlcData().getClose() > 0) {
+                    // Set previousClose to the first point's open price to correctly reflect the timeframe
+                    builder.previousClose(firstPoint.getOhlcData().getOpen());
                 }
             }
         }

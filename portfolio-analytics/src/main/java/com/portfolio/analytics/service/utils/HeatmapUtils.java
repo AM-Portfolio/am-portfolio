@@ -359,6 +359,12 @@ public class HeatmapUtils {
                         .calculateTotalReturnAmount()
                         .calculateStockWeights()
                         .sortStocksByValue();
+                        
+        // LIMIT THE NUMBER OF STOCKS RETURNED TO PREVENT UI FREEZE
+        // A heatmap widget cannot physically display thousands of microscopic boxes
+        if (sectorPerformance.getStocks() != null && sectorPerformance.getStocks().size() > 15) {
+            sectorPerformance.setStocks(new java.util.ArrayList<>(sectorPerformance.getStocks().subList(0, 15)));
+        }
         
         return sectorPerformance;
     }
