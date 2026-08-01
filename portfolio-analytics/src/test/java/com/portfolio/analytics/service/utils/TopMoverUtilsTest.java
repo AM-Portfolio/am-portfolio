@@ -17,6 +17,43 @@ class TopMoverUtilsTest {
         return m;
     }
 
+    @Test void shouldExcludeStockFromGainersWhenPreviousCloseIsMissing() {
+        // Given: Stock with no previousClose, only ohlc.open
+        MarketData data = MarketData.builder()
+            .symbol("BROKEN")
+            .lastPrice(425.0)
+            .ohlc(OhlcData.builder().open(420.0).close(425.0).build())
+            // NO previousClose set
+            .build();
+        
+        Map<String, Double> symbolToPerformance = new HashMap<>();
+        Map<String, Double> symbolToChangePercent = new HashMap<>();
+        TopMoverUtils.calculatePerformanceMetrics(
+            List.of("BROKEN"), Map.of("BROKEN", data), symbolToPerformance, symbolToChangePercent);
+        
+        // Then: Stock must NOT appear in any performance map (excluded, not defaulted to 0)
+        assertFalse(symbolToPerformance.containsKey("BROKEN"));
+    }
+
+    @Test void shouldCorrectlyClassifyLoserWithGapDownOpenAndIntradayRecovery() {
+        // Given: Stock that gapped down but recovered intraday
+        MarketData data = MarketData.builder()
+            .symbol("LAURUSLABS")
+            .lastPrice(425.0)          // current price
+            .previousClose(450.0)      // yesterday's close <- correct reference
+            .ohlc(OhlcData.builder().open(420.0).close(425.0).build())
+            .build();
+        
+        Map<String, Double> symbolToPerformance = new HashMap<>();
+        Map<String, Double> symbolToChangePercent = new HashMap<>();
+        TopMoverUtils.calculatePerformanceMetrics(
+            List.of("LAURUSLABS"), Map.of("LAURUSLABS", data), symbolToPerformance, symbolToChangePercent);
+        
+        // Then: Must be classified as a LOSER (-5.56%), not a gainer
+        assertTrue(symbolToPerformance.get("LAURUSLABS") < 0);
+        assertEquals(-5.56, symbolToChangePercent.get("LAURUSLABS"), 0.01);
+    }
+
     @Test void performanceMetrics_calculates() {
         Map<String, Double> perf = new HashMap<>();
         Map<String, Double> change = new HashMap<>();

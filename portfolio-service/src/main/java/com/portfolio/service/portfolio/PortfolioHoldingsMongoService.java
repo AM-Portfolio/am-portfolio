@@ -64,6 +64,17 @@ public class PortfolioHoldingsMongoService {
         return Optional.empty();
     }
 
+    public void deleteCache(String userId, TimeInterval interval, String portfolioId) {
+        String key = buildKey(userId, interval, portfolioId);
+        try {
+            Query query = new Query(Criteria.where("_id").is(key));
+            mongoTemplate.remove(query, "portfolio_holdings_cache");
+            log.debug("Deleted stale portfolio holdings from Mongo for key: {}", key);
+        } catch (Exception e) {
+            log.error("Error deleting portfolio holdings from Mongo cache for key {}: {}", key, e.getMessage());
+        }
+    }
+
     private String buildKey(String userId, TimeInterval interval, String portfolioId) {
         String intervalCode = interval != null ? interval.getCode() : "default";
         String portPart = (portfolioId != null && !portfolioId.trim().isEmpty()) ? portfolioId : "all";

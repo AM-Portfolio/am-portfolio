@@ -22,6 +22,9 @@ public class StockHoldingUpdateEvent {
     private BigDecimal investmentAmount;
     private LocalDateTime timestamp;
     private String updateType; // ADD, REMOVE, UPDATE
+    private String sector;
+    private String industry;
+    private String marketCap;
 
     // Performance Metrics
     private Double overallGainLoss;

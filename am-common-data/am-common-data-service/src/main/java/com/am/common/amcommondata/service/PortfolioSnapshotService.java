@@ -91,6 +91,13 @@ public class PortfolioSnapshotService {
         return Optional.empty();
     }
 
+    @org.springframework.cache.annotation.CacheEvict(value = "portfolioHistory", allEntries = true)
+    public void deleteSnapshot(String userId, LocalDate snapshotDate) {
+        log.info("Deleting snapshot for user {} on date {}", userId, snapshotDate);
+        Optional<PortfolioSnapshotDocument> existing = portfolioSnapshotRepository.findByUserIdAndSnapshotDate(userId, snapshotDate);
+        existing.ifPresent(portfolioSnapshotRepository::delete);
+    }
+
     @org.springframework.cache.annotation.Cacheable(value = "portfolioHistory", key = "#userId + '_' + (#portfolioId != null ? #portfolioId : 'all') + '_' + #timeFrame")
     public List<PortfolioSnapshotModel> getHistory(String userId, String portfolioId, String timeFrame) {
         String frame = timeFrame != null ? timeFrame.toUpperCase() : "1M";

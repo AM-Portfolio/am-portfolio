@@ -52,8 +52,6 @@ public class TopMoverUtils {
                 double refPrice = 0;
                 if (data.getPreviousClose() != null && data.getPreviousClose() > 0) {
                     refPrice = data.getPreviousClose();
-                } else if (data.getOhlc() != null && data.getOhlc().getOpen() > 0) {
-                    refPrice = data.getOhlc().getOpen(); // intraday fallback
                 } else {
                     log.trace("No reference price for {}. Skipping from movers.", symbol);
                     continue;
@@ -88,17 +86,14 @@ public class TopMoverUtils {
         
         log.debug("Finding top {} gainers", limit);
         
-        // Get symbols with positive performance, sorted by performance (descending)
         List<String> topGainerSymbols = symbolToPerformance.entrySet().stream()
-                .filter(entry -> entry.getValue() > 0) // Only positive performers
-                .sorted(Map.Entry.<String, Double>comparingByValue().reversed()) // Sort by performance (descending)
-                .limit(limit) // Take top N
-                .map(Map.Entry::getKey) // Get symbols
+                .filter(entry -> entry.getValue() > 0)
+                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                .limit(limit)
+                .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
-        
+                
         log.debug("Found {} gainers", topGainerSymbols.size());
-        
-        // Create stock movement objects for top gainers
         return createStockMovements(topGainerSymbols, marketData, symbolToChangePercent);
     }
 
@@ -118,17 +113,14 @@ public class TopMoverUtils {
         
         log.debug("Finding top {} losers", limit);
         
-        // Get symbols with negative performance, sorted by performance (ascending)
         List<String> topLoserSymbols = symbolToPerformance.entrySet().stream()
-                .filter(entry -> entry.getValue() < 0) // Only negative performers
-                .sorted(Map.Entry.comparingByValue()) // Sort by performance (ascending)
-                .limit(limit) // Take top N
-                .map(Map.Entry::getKey) // Get symbols
+                .filter(entry -> entry.getValue() < 0)
+                .sorted(Map.Entry.comparingByValue())
+                .limit(limit)
+                .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
-        
+                
         log.debug("Found {} losers", topLoserSymbols.size());
-        
-        // Create stock movement objects for top losers
         return createStockMovements(topLoserSymbols, marketData, symbolToChangePercent);
     }
 
@@ -162,9 +154,14 @@ public class TopMoverUtils {
                         lastPrice = 0.0;
                     }
                     
-                    double changeAmount = 0.0;
+                    double refPrice = 0;
                     if (data.getPreviousClose() != null && data.getPreviousClose() > 0) {
-                        changeAmount = lastPrice - data.getPreviousClose();
+                        refPrice = data.getPreviousClose();
+                    }
+                    
+                    double changeAmount = 0.0;
+                    if (refPrice > 0) {
+                        changeAmount = lastPrice - refPrice;
                     }
                     double changePercent = symbolToChangePercent.getOrDefault(symbol, 0.0);
                     
@@ -180,6 +177,7 @@ public class TopMoverUtils {
                             .symbol(symbol)
                             .companyName(companyName)
                             .lastPrice(lastPrice)
+                            .previousClose(refPrice > 0 ? refPrice : null)
                             .ohlcData(data != null ? data.getOhlc() : null)
                             .changeAmount(changeAmount)
                             .changePercent(changePercent)
@@ -320,7 +318,7 @@ public class TopMoverUtils {
                         MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
                         if (data != null && symbolToQuantity.containsKey(symbol)) {
                             double quantity = symbolToQuantity.get(symbol);
-                            double value = data.getLastPrice() * quantity;
+                            double value = AllocationUtils.resolvePrice(data) * quantity;
                             sectorValue += value;
                             
                             if (symbolToChangePercent.containsKey(symbol)) {

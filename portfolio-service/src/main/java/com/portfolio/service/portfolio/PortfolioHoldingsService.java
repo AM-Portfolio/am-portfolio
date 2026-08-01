@@ -264,6 +264,11 @@ public class PortfolioHoldingsService {
                 return cachedHoldings;  // ✅ real data
             }
             log.warn("MongoDB holdings cache has stale/zero prices for User: {} — rebuilding fresh", userId);
+            try {
+                portfolioHoldingsMongoService.deleteCache(userId, interval, portfolioId);
+            } catch (Exception ex) {
+                log.warn("Failed to delete stale holdings cache: {}", ex.getMessage());
+            }
             // fall through to rebuild fresh
         }
         

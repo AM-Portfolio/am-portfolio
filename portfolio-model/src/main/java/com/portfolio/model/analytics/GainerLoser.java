@@ -53,10 +53,10 @@ public class GainerLoser {
         @JsonInclude(JsonInclude.Include.NON_NULL)
         private Double changePercent = 0.0;
 
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private Double previousClose;
+        
         private String sector;
-        private Double quantity; // Used for portfolio analytics (holding quantity)
-        private Double marketValue; // Used for portfolio analytics (price * quantity)
-        private Double weightPercentage; // Used for portfolio analytics (% of portfolio)
     }
     
     /**

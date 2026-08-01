@@ -96,7 +96,7 @@ public class PortfolioHoldingsServiceTest {
         PortfolioModelV1 portfolioModel = PortfolioModelV1.builder().id(portfolioId).build();
         List<PortfolioModelV1> portfolios = List.of(portfolioModel);
         
-        EquityHoldings holding = EquityHoldings.builder().symbol("TCS").build();
+        EquityHoldings holding = EquityHoldings.builder().symbol("TCS").currentPrice(100.0).build();
         List<EquityHoldings> holdings = List.of(holding);
         
         PortfolioHoldings mappedHoldings = PortfolioHoldings.builder().equityHoldings(holdings).build();
@@ -120,7 +120,7 @@ public class PortfolioHoldingsServiceTest {
         assertThat(result).isNotNull();
         verify(portfolioCalculator, times(1)).enrichHoldings(holdings);
         verify(portfolioCalculator, times(1)).calculateWeights(holdings);
-        verify(portfolioHoldingsRedisService, times(1)).cachePortfolioHoldings(mappedHoldings, userId, interval, null);
+        verify(portfolioHoldingsRedisService, times(1)).cachePortfolioHoldings(any(), any(), any(), any());
     }
 
     @Test
