@@ -254,10 +254,11 @@ public class PortfolioHoldingsService {
         cachedHoldings = portfolioHoldingsMongoService.getLatestFreshHoldings(userId, interval, portfolioId);
         if (cachedHoldings.isPresent()) {
             List<EquityHoldings> cachedList = cachedHoldings.get().getEquityHoldings();
-            boolean hasLivePrices = cachedList != null && !cachedList.isEmpty()
-                && cachedList.stream()
-                    .filter(h -> h.getCurrentPrice() != null && h.getCurrentPrice() > 0)
-                    .count() >= cachedList.size() * 0.5;
+            boolean hasLivePrices = cachedList != null
+                && (cachedList.isEmpty()
+                    || cachedList.stream()
+                        .filter(h -> h.getCurrentPrice() != null && h.getCurrentPrice() > 0)
+                        .count() >= cachedList.size() * 0.5);
             
             if (hasLivePrices) {
                 log.info("Serving valid portfolio holdings from MongoDB cache - User: {}", userId);

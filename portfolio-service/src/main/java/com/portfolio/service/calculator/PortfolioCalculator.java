@@ -237,6 +237,9 @@ public class PortfolioCalculator {
                     holding.setPercentageChange(round(priceChangePct));
                 } else {
                     log.warn("[Holdings] {} excluded from Today's P&L — no previousClosePrice.", holding.getSymbol());
+                    holding.setTodayGainLoss(null);
+                    holding.setTodayGainLossPercentage(null);
+                    holding.setPercentageChange(null);
                 }
             }
         }

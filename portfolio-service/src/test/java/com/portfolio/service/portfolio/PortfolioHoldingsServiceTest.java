@@ -5,6 +5,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -120,7 +122,38 @@ public class PortfolioHoldingsServiceTest {
         assertThat(result).isNotNull();
         verify(portfolioCalculator, times(1)).enrichHoldings(holdings);
         verify(portfolioCalculator, times(1)).calculateWeights(holdings);
-        verify(portfolioHoldingsRedisService, times(1)).cachePortfolioHoldings(any(), any(), any(), any());
+        verify(portfolioHoldingsRedisService, times(1)).cachePortfolioHoldings(
+                any(PortfolioHoldings.class), eq(userId), eq(interval), isNull());
+    }
+
+    @Test
+    @DisplayName("getCachedHoldings should delete Mongo cache when holdings have zero prices")
+    public void getCachedHoldings_withZeroPrices_shouldDeleteStaleMongoCache() {
+        // Given
+        String userId = "user123";
+        TimeInterval interval = TimeInterval.OVERALL;
+        
+        EquityHoldings zeroPriceHolding = new EquityHoldings();
+        zeroPriceHolding.setSymbol("TCS");
+        zeroPriceHolding.setCurrentPrice(0.0);
+        
+        PortfolioHoldings cachedHoldings = PortfolioHoldings.builder()
+                .equityHoldings(List.of(zeroPriceHolding))
+                .build();
+                
+        lenient().when(portfolioHoldingsRedisService.getLatestHoldings(userId, interval))
+                .thenReturn(Optional.empty());
+        lenient().when(portfolioHoldingsMongoService.getLatestFreshHoldings(userId, interval, (String) null))
+                .thenReturn(Optional.of(cachedHoldings));
+                
+        // Mock portfolios/holdings to allow rebuild to proceed
+        when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(Collections.emptyList());
+
+        // When
+        portfolioHoldingsService.getPortfolioHoldings(userId, interval, true);
+
+        // Then
+        verify(portfolioHoldingsMongoService, times(1)).deleteCache(userId, interval, (String) null);
     }
 
     @Test
