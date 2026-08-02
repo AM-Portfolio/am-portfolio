@@ -56,7 +56,7 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
                 // Create a map of symbol to holding quantity
                 Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
                 
-                // Group stocks by sector and industry
+                // Group stocks by sector and industry using central SecurityDetailsService
                 Map<String, List<String>> sectorToStocks = securityDetailsService.groupSymbolsBySector(portfolioSymbols);
                 Map<String, List<String>> industryToStocks = securityDetailsService.groupSymbolsByIndustry(portfolioSymbols);
                 

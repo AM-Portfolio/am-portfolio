@@ -109,6 +109,31 @@ class PortfolioCalculatorTest {
     }
 
     @Test
+    void enrichHolding_shouldNotCalculateDailyPnL_whenPreviousCloseIsMissing() {
+        // Given: Market data with no previousClose
+        MarketData data = MarketData.builder()
+            .symbol("TCS")
+            .lastPrice(3300.0)
+            .ohlc(OhlcData.builder().open(3200.0).close(3250.0).build())
+            // NO previousClose set
+            .build();
+        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", data));
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+        
+        // Seed holding with stale P&L metrics
+        holding.setTodayGainLoss(500.0);
+        holding.setTodayGainLossPercentage(5.0);
+        holding.setPercentageChange(1.5);
+
+        List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
+        
+        // Then: P&L fields must be cleared (not retained and not calculated)
+        assertNull(results.get(0).getTodayGainLoss());
+        assertNull(results.get(0).getTodayGainLossPercentage());
+        assertNull(results.get(0).getPercentageChange());
+    }
+
+    @Test
     void calculateSummary_Success() {
         holding.setCurrentValue(33000.0);
         holding.setTodayGainLoss(1000.0);

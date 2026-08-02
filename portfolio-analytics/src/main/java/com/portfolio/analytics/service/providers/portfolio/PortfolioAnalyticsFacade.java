@@ -141,7 +141,23 @@ public class PortfolioAnalyticsFacade {
                         if (!symbols.isEmpty()) {
                             log.info("[Optimization] Prefetching market data once for {} symbols", symbols.size());
                             request.setPrefetchAttempted(true);
-                            Map<String, MarketData> prefetched = marketDataService.getMarketData(symbols);
+                            Map<String, MarketData> prefetched = null;
+                            if (request.getTimeFrameRequest() != null) {
+                                // Historical timeframe selected — fetch period-start prices
+                                com.portfolio.marketdata.model.HistoricalDataRequest histReq = com.portfolio.marketdata.model.HistoricalDataRequest.builder()
+                                    .symbols(String.join(",", symbols))
+                                    .fromDate(request.getFromDate() != null ? request.getFromDate().toString() : null)
+                                    .toDate(request.getToDate() != null ? request.getToDate().toString() : null)
+                                    .filterType(com.portfolio.marketdata.model.FilterType.START_END.getValue())
+                                    .instrumentType(com.portfolio.marketdata.model.InstrumentType.EQ.getValue())
+                                    .continuous(false)
+                                    .interval(request.getTimeFrame() != null ? request.getTimeFrame().getValue() : com.portfolio.model.market.TimeFrame.DAY.getValue())
+                                    .build();
+                                prefetched = marketDataService.getHistoricalData(histReq);
+                            } else {
+                                // Live data (1D)
+                                prefetched = marketDataService.getMarketData(symbols);
+                            }
                             if (prefetched != null) {
                                 // Ensure normalized keys so analytics providers can look them up successfully
                                 Map<String, MarketData> normalizedPrefetch = new java.util.HashMap<>();

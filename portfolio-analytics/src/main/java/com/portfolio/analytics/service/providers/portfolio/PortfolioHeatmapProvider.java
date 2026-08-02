@@ -63,8 +63,18 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 // Create a map of symbol to holding quantity
                 Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
                 
-                // Group stocks by sector
-                Map<String, List<String>> sectorToStocks = securityDetailsService.groupSymbolsBySector(portfolioSymbols);
+                // Group stocks by sector directly from portfolio data
+                Map<String, List<String>> sectorToStocks = new HashMap<>();
+                if (portfolio.getEquityModels() != null) {
+                    for (EquityModel model : portfolio.getEquityModels()) {
+                        String symbol = model.getSymbol();
+                        if (symbol != null && !symbol.trim().isEmpty()) {
+                            String sector = (model.getSector() != null && !model.getSector().trim().isEmpty() && !model.getSector().trim().equals("-"))
+                                ? model.getSector().trim() : "Unknown";
+                            sectorToStocks.computeIfAbsent(sector, k -> new ArrayList<>()).add(symbol);
+                        }
+                    }
+                }
                 
                 // Process market data by sector and compute total portfolio value in one pass
                 Map<String, List<MarketData>> sectorMarketDataMap = new HashMap<>();

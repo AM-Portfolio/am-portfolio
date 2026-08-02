@@ -201,13 +201,8 @@ public class PortfolioCalculator {
                 Double prevClose = apiItem.getPreviousClose();
                 if (prevClose != null && prevClose > 0) {
                     previousClosePrice = prevClose;
-                } else if (apiItem.getOhlc() != null && apiItem.getOhlc().getOpen() > 0) {
-                    // NSE open price = yesterday's close (adjusted). Valid proxy for 1D change.
-                    previousClosePrice = apiItem.getOhlc().getOpen();
-                    log.info("[Holdings] Using OHLC open={} as previousClose for symbol={}", 
-                             previousClosePrice, symbol);
                 } else {
-                    log.warn("[Holdings] No previousClose or openPrice for {}. 1D P&L will be null.", symbol);
+                    log.warn("[Holdings] No previousClose for {}. 1D P&L will be null.", symbol);
                 }
             }
         }
@@ -240,6 +235,11 @@ public class PortfolioCalculator {
                     double priceChange = currentPrice - previousClosePrice;
                     double priceChangePct = (priceChange / previousClosePrice) * 100;
                     holding.setPercentageChange(round(priceChangePct));
+                } else {
+                    log.warn("[Holdings] {} excluded from Today's P&L — no previousClosePrice.", holding.getSymbol());
+                    holding.setTodayGainLoss(null);
+                    holding.setTodayGainLossPercentage(null);
+                    holding.setPercentageChange(null);
                 }
             }
         }

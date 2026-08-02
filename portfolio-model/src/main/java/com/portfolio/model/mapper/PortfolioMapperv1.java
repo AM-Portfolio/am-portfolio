@@ -45,6 +45,10 @@ public class PortfolioMapperv1 {
                 EquityModel em = new EquityModel();
                 em.setSymbol(e.getSymbol());
                 em.setIsin(e.getIsin());
+                // Map the sector, industry and market cap perfectly as received from kafka
+                em.setSector(e.getSector());
+                em.setIndustry(e.getIndustry());
+                em.setMarketCap(e.getMarketCap());
                 // In am-portfolio, the asset type might need mapping, but setting it safely
                 em.setAssetType(AssetType.EQUITY);
                 

@@ -114,6 +114,9 @@ public class StockHoldingUpdateConsumerService {
                 .isin(holding.getIsin())
                 .symbol(holding.getSymbol())
                 .name(holding.getName())
+                .sector(holding.getSector())
+                .industry(holding.getIndustry())
+                .marketCap(holding.getMarketCap())
                 .quantity(holding.getQuantity())
                 .avgBuyingPrice(holding.getAverageBuyingPrice())
                 .currentPrice(holding.getCurrentPrice()) // Using new field in AssetModel

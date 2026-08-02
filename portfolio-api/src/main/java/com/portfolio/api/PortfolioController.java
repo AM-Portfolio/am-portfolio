@@ -368,6 +368,25 @@ public class PortfolioController {
 
     /**
      * DEV/ADMIN ONLY — Hidden from Swagger.
+     * Safely deletes a snapshot for a specific user and date.
+     * Usage: DELETE /v1/portfolios/dev/snapshot?userId=sahim99&date=2026-07-30
+     */
+    @Hidden
+    @DeleteMapping("/dev/snapshot")
+    public ResponseEntity<String> deleteSnapshot(
+            @RequestParam String userId,
+            @RequestParam @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            return ResponseEntity.status(403).body("Forbidden");
+        }
+        log.info("[DEV] Delete snapshot trigger for userId={} date={}", userId, date);
+        portfolioSnapshotService.deleteSnapshot(userId, date);
+        return ResponseEntity.ok("Snapshot for userId=" + userId + " on date=" + date + " has been successfully deleted. You can now use the trigger-catchup endpoint to rebuild it.");
+    }
+
+    /**
+     * DEV/ADMIN ONLY — Hidden from Swagger.
      * Fixes broken "Grow" or "Auto-created GROW" portfolio names in MongoDB.
      */
     @Hidden

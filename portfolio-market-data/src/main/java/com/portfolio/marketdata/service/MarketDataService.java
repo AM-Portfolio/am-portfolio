@@ -491,15 +491,22 @@ public class MarketDataService {
                         com.am.common.amcommondata.document.price.StockPriceDocument doc = entry.getValue();
                         
                         // Reject stale MongoDB entries — force them through to OHLC API
+                        boolean isStale = doc.getUpdatedAt() != null
+                            && doc.getUpdatedAt().isBefore(java.time.LocalDateTime.now().minusHours(6));
+                        if (isStale) {
+                            log.info("[MarketData] Stale MongoDB entry for {} (updatedAt={}), forcing API refresh",
+                                doc.getSymbol(), doc.getUpdatedAt());
+                            continue;
+                        }
+
                         if (doc.getLastPrice() == null || doc.getLastPrice() <= 0) {
                             log.debug("[MarketData] Skipping stale MongoDB entry for {} (lastPrice={})",
                                       doc.getSymbol(), doc.getLastPrice());
                             continue;
                         }
-                        // Use lastPrice as same-day previousClose fallback (safe for live intraday data)
                         Double previousClose = (doc.getPreviousClose() != null && doc.getPreviousClose() > 0)
                             ? doc.getPreviousClose()
-                            : doc.getLastPrice();
+                            : null;
 
                         MarketData md = MarketData.builder()
                             .symbol(doc.getSymbol())
@@ -511,7 +518,7 @@ public class MarketDataService {
                                     .open(doc.getOpenPrice())
                                     .high(doc.getHighPrice())
                                     .low(doc.getLowPrice())
-                                    .close(doc.getPreviousClose() != null && doc.getPreviousClose() > 0 ? doc.getPreviousClose() : (doc.getOpenPrice() != null && doc.getOpenPrice() > 0 ? doc.getOpenPrice() : 0.0))
+                                    .close(doc.getLastPrice() != null && doc.getLastPrice() > 0 ? doc.getLastPrice() : 0.0)
                                     .build()
                                 : null)
                             .build();

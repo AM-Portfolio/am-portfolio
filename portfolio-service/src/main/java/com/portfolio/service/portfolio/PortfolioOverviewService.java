@@ -231,7 +231,7 @@ public class PortfolioOverviewService {
                 .sum();
 
         // Use calculator to generate the summary
-        PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(equityHoldings, totalValue);
+        PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(equityHoldings, investmentValue);
         summary.setInvestmentValue(investmentValue);
         return summary;
     }

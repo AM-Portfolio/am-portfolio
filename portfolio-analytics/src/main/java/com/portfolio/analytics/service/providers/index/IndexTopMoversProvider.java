@@ -51,8 +51,8 @@ public class IndexTopMoversProvider extends AbstractIndexAnalyticsProvider<Gaine
             return createEmptyResult();
         }
         
-        // Top Movers only requires live market data, ignoring global timeframe to prevent massive Market Data loads and circuit breaker timeouts
-        Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, indexStockSymbols, null);
+        // Fetch market data based on requested timeframe
+        Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, indexStockSymbols, request.getTimeFrameRequest());
         if (marketData.isEmpty()) {
             return createEmptyResult();
         }
