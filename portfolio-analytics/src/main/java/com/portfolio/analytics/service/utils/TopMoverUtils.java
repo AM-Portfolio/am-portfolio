@@ -92,6 +92,15 @@ public class TopMoverUtils {
                 .limit(limit)
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
+
+        if (topGainerSymbols.isEmpty() && !symbolToPerformance.isEmpty()) {
+            log.info("Zero daily gainers found. Falling back to ranking all {} available symbols", symbolToPerformance.size());
+            topGainerSymbols = symbolToPerformance.entrySet().stream()
+                    .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                    .limit(limit)
+                    .map(Map.Entry::getKey)
+                    .collect(Collectors.toList());
+        }
                 
         log.debug("Found {} gainers", topGainerSymbols.size());
         return createStockMovements(topGainerSymbols, marketData, symbolToChangePercent);
@@ -119,6 +128,15 @@ public class TopMoverUtils {
                 .limit(limit)
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
+
+        if (topLoserSymbols.isEmpty() && !symbolToPerformance.isEmpty()) {
+            log.info("Zero daily losers found. Falling back to ranking all {} available symbols", symbolToPerformance.size());
+            topLoserSymbols = symbolToPerformance.entrySet().stream()
+                    .sorted(Map.Entry.comparingByValue())
+                    .limit(limit)
+                    .map(Map.Entry::getKey)
+                    .collect(Collectors.toList());
+        }
                 
         log.debug("Found {} losers", topLoserSymbols.size());
         return createStockMovements(topLoserSymbols, marketData, symbolToChangePercent);
