@@ -354,6 +354,7 @@ public class PortfolioController {
      */
     @Hidden
     @PostMapping("/dev/backfill-snapshots")
+    @Deprecated
     public ResponseEntity<String> backfillSnapshots(
             @RequestParam String userId,
             @RequestParam(defaultValue = "30") int days,
@@ -361,9 +362,9 @@ public class PortfolioController {
         if (secret == null || !internalSecret.equals(secret)) {
             return ResponseEntity.status(403).body("Forbidden");
         }
-        log.info("[DEV] Backfill trigger for userId={} days={}", userId, days);
+        log.warn("[DEV] DEPRECATED: /dev/backfill-snapshots called for userId={}. Please use /dev/trigger-catchup instead.", userId);
         portfolioHistoryScheduler.backfillSnapshotsAsync(userId, days);
-        return ResponseEntity.ok("Backfill triggered for userId=" + userId + " for last " + days + " days.");
+        return ResponseEntity.ok("DEPRECATED: Use /dev/trigger-catchup. Backfill triggered for userId=" + userId + " for last " + days + " days.");
     }
 
     /**

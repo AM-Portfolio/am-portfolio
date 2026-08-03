@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.service.portfolio.PortfolioHoldingsService;
+import com.portfolio.service.portfolio.PortfolioIntradayService;
 
 import com.am.common.amcommondata.document.portfolio.HoldingSnapshotItem;
 import com.am.common.amcommondata.document.portfolio.PortfolioSnapshotEntry;
@@ -20,6 +21,16 @@ import com.am.common.amcommondata.service.PortfolioSnapshotService;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+
+import com.portfolio.marketdata.client.MarketDataApiClient;
+import com.portfolio.marketdata.model.HistoricalDataRequest;
+import com.portfolio.marketdata.model.HistoricalDataResponseWrapper;
+import com.portfolio.marketdata.model.HistoricalDataResponse;
+import com.am.common.investment.model.historical.OHLCVTPoint;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +45,13 @@ public class PortfolioHistoryScheduler {
     private final PortfolioSnapshotService portfolioSnapshotService;
     private final com.am.common.amcommondata.service.price.StockPriceMongoService stockPriceMongoService;
     private final com.am.common.amcommondata.service.price.StockPriceHistoryMongoService stockPriceHistoryMongoService;
+    private final MarketDataApiClient marketDataApiClient;
+    
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private PortfolioIntradayService portfolioIntradayService;
+    
+    private final com.am.common.amcommondata.repository.portfolio.PortfolioIntradaySessionRepository intradaySessionRepository;
 
     // Runs every day at 17:00 (5 PM) IST (Asia/Kolkata)
     // Cron: Second, Minute, Hour, Day of Month, Month, Day of Week
@@ -79,9 +97,59 @@ public class PortfolioHistoryScheduler {
             double totalWealth = 0.0;
             double totalInvestment = 0.0;
 
+            // Collect all symbols and holdings first
+            Set<String> allSymbols = new HashSet<>();
+            Map<String, PortfolioHoldings> userHoldings = new HashMap<>();
+
             for (PortfolioModelV1 portfolio : portfolios) {
                 String portfolioId = portfolio.getId().toString();
                 PortfolioHoldings enrichedHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, TimeInterval.ONE_DAY, true);
+                if (enrichedHoldings != null && enrichedHoldings.getEquityHoldings() != null) {
+                    userHoldings.put(portfolioId, enrichedHoldings);
+                    for (EquityHoldings h : enrichedHoldings.getEquityHoldings()) {
+                        if (h.getSymbol() != null) {
+                            allSymbols.add(h.getSymbol());
+                        }
+                    }
+                }
+            }
+
+            // Fetch historical closing price for 'date'
+            Map<String, Double> closingPrices = new HashMap<>();
+            if (!allSymbols.isEmpty()) {
+                String symbolsParam = String.join(",", allSymbols);
+                HistoricalDataRequest request = HistoricalDataRequest.builder()
+                        .symbols(symbolsParam)
+                        .fromDate(date.toString())
+                        .toDate(date.toString())
+                        .interval("day")
+                        .forceRefresh(false)
+                        .build();
+
+                try {
+                    HistoricalDataResponseWrapper histResponse = marketDataApiClient.getHistoricalData(request).block();
+                    if (histResponse != null && histResponse.getData() != null) {
+                        for (Map.Entry<String, HistoricalDataResponse> entry : histResponse.getData().entrySet()) {
+                            String symbol = entry.getKey();
+                            HistoricalDataResponse symbolData = entry.getValue();
+                            if (symbolData != null && symbolData.getData() != null && symbolData.getData().getDataPoints() != null) {
+                                for (OHLCVTPoint point : symbolData.getData().getDataPoints()) {
+                                    if (point != null && point.getClose() != null) {
+                                        closingPrices.put(symbol, point.getClose());
+                                        break; // Only need the one point for the requested date
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to fetch historical closing prices for date={} symbols={}", date, symbolsParam, e);
+                }
+            }
+
+            for (PortfolioModelV1 portfolio : portfolios) {
+                String portfolioId = portfolio.getId().toString();
+                PortfolioHoldings enrichedHoldings = userHoldings.get(portfolioId);
 
                 if (enrichedHoldings == null || enrichedHoldings.getEquityHoldings() == null) continue;
 
@@ -90,7 +158,8 @@ public class PortfolioHistoryScheduler {
                 List<HoldingSnapshotItem> snapshotHoldings = new ArrayList<>();
 
                 for (EquityHoldings h : enrichedHoldings.getEquityHoldings()) {
-                    double price = h.getCurrentPrice() != null ? h.getCurrentPrice() : h.getAverageBuyingPrice();
+                    double defaultPrice = h.getCurrentPrice() != null ? h.getCurrentPrice() : h.getAverageBuyingPrice();
+                    double price = closingPrices.getOrDefault(h.getSymbol(), defaultPrice);
                     double value = h.getQuantity() * price;
                     double cost = h.getQuantity() * h.getAverageBuyingPrice();
                     
@@ -132,8 +201,53 @@ public class PortfolioHistoryScheduler {
 
                 portfolioSnapshotService.saveUserSnapshot(userId, totalWealth, totalInvestment, totalGainLoss, totalGainLossPct, entries, date);
             }
+
+            // --- Persist Completed Intraday Sessions (ADR-001-D4) ---
+            if (date.equals(LocalDate.now())) {
+                persistIntradaySession(userId, null, date); // Aggregate portfolio
+                for (PortfolioModelV1 portfolio : portfolios) {
+                    persistIntradaySession(userId, portfolio.getId().toString(), date); // Individual portfolios
+                }
+            }
+
         } catch (Exception e) {
             log.error("Failed to generate history for user: {} on date: {}", userId, date, e);
+        }
+    }
+
+    private void persistIntradaySession(String userId, String portfolioId, LocalDate date) {
+        try {
+            var dataPoints = portfolioIntradayService.getIntraday(userId, portfolioId);
+            boolean hasRealVariation = dataPoints != null && dataPoints.stream()
+                    .mapToDouble(dp -> dp.getTotalWealth()).distinct().count() > 2;
+            if (dataPoints != null && dataPoints.size() > 10 && hasRealVariation) { // Only save if substantial real curve
+                List<com.am.common.amcommondata.document.portfolio.PortfolioIntradaySessionDocument.SessionDataPoint> sessionPoints = new ArrayList<>();
+                for (com.portfolio.model.portfolio.IntradayDataPoint dp : dataPoints) {
+                    sessionPoints.add(new com.am.common.amcommondata.document.portfolio.PortfolioIntradaySessionDocument.SessionDataPoint(
+                            dp.getTimestamp(), dp.getTotalWealth(), dp.getChangeFromOpen(), dp.getChangeFromOpenPct()
+                    ));
+                }
+                
+                String pId = portfolioId != null ? portfolioId : "";
+                var sessionDoc = com.am.common.amcommondata.document.portfolio.PortfolioIntradaySessionDocument.builder()
+                        .userId(userId)
+                        .portfolioId(pId)
+                        .sessionDate(date)
+                        .baselineWealth(dataPoints.get(0).getTotalWealth())
+                        .dataPoints(sessionPoints)
+                        .createdAt(LocalDateTime.now())
+                        .build();
+
+                // If already exists for this date, delete first or upsert
+                intradaySessionRepository.findFirstByUserIdAndPortfolioIdOrderBySessionDateDesc(userId, pId)
+                        .filter(doc -> doc.getSessionDate().equals(date))
+                        .ifPresent(doc -> sessionDoc.setId(doc.getId())); // Update existing
+
+                intradaySessionRepository.save(sessionDoc);
+                log.info("Persisted intraday session for user={} portfolioId={} date={} points={}", userId, pId, date, sessionPoints.size());
+            }
+        } catch (Exception e) {
+            log.warn("Failed to persist intraday session for user={} portfolioId={}: {}", userId, portfolioId, e.getMessage());
         }
     }
 
@@ -155,7 +269,9 @@ public class PortfolioHistoryScheduler {
     }
 
     @Async
+    @Deprecated
     public void backfillSnapshotsAsync(String userId, int daysBack) {
+        log.warn("[ASYNC] DEPRECATED: backfillSnapshotsAsync called for user={}. Use SnapshotCatchUpService instead.", userId);
         log.info("[ASYNC] Backfill snapshots trigger for user={} for last {} days starting", userId, daysBack);
         LocalDate today = LocalDate.now();
         for (int i = 1; i <= daysBack; i++) {
