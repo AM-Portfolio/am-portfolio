@@ -46,18 +46,21 @@ public class PortfolioIntradayService {
     private final PortfolioIntradayRedisService intradayRedisService;
     
     private final PortfolioDocumentRepository portfolioDocumentRepository;
+    private final com.am.common.amcommondata.repository.portfolio.PortfolioIntradaySessionRepository intradaySessionRepository;
 
     public PortfolioIntradayService(
             PortfolioSnapshotService snapshotService,
             PortfolioHoldingsService holdingsService,
             MarketDataService marketDataService,
             @org.springframework.lang.Nullable PortfolioIntradayRedisService intradayRedisService,
-            PortfolioDocumentRepository portfolioDocumentRepository) {
+            PortfolioDocumentRepository portfolioDocumentRepository,
+            com.am.common.amcommondata.repository.portfolio.PortfolioIntradaySessionRepository intradaySessionRepository) {
         this.snapshotService = snapshotService;
         this.holdingsService = holdingsService;
         this.marketDataService = marketDataService;
         this.intradayRedisService = intradayRedisService;
         this.portfolioDocumentRepository = portfolioDocumentRepository;
+        this.intradaySessionRepository = intradaySessionRepository;
     }
 
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
@@ -79,9 +82,48 @@ public class PortfolioIntradayService {
             }
         }
 
+        // ── PERSISTED SESSION CHECK (PRIMARY) ──────────────────────────────────
+        // Check MongoDB BEFORE any market data calls. The seed endpoint writes here,
+        // and the EOD scheduler persists here. This is the authoritative source for
+        // after-market, weekend, and seeded dev data.
+        {
+            String pId = (portfolioId != null) ? portfolioId : "";
+            Optional<com.am.common.amcommondata.document.portfolio.PortfolioIntradaySessionDocument> persistedSession =
+                    intradaySessionRepository.findFirstByUserIdAndPortfolioIdOrderBySessionDateDesc(userId, pId);
+
+            if (persistedSession.isPresent()
+                    && persistedSession.get().getDataPoints() != null
+                    && !persistedSession.get().getDataPoints().isEmpty()) {
+
+                com.am.common.amcommondata.document.portfolio.PortfolioIntradaySessionDocument session = persistedSession.get();
+                // Always serve today's session. For previous days, only serve if market is closed / weekend.
+                boolean isToday = today.equals(session.getSessionDate());
+                boolean isAfterMarket = nowIST.isAfter(MARKET_CLOSE);
+                java.time.DayOfWeek dow = today.getDayOfWeek();
+                boolean isWeekend = dow == java.time.DayOfWeek.SATURDAY || dow == java.time.DayOfWeek.SUNDAY;
+
+                if (isToday || isAfterMarket || isWeekend) {
+                    log.info("[Intraday] Serving from persisted MongoDB session date={} points={} for user={} portfolioId={}",
+                             session.getSessionDate(), session.getDataPoints().size(), userId, portfolioId);
+                    List<IntradayDataPoint> persistedResult = new ArrayList<>();
+                    for (com.am.common.amcommondata.document.portfolio.PortfolioIntradaySessionDocument.SessionDataPoint dp : session.getDataPoints()) {
+                        IntradayDataPoint pt = new IntradayDataPoint();
+                        pt.setTimestamp(dp.getTimestamp());
+                        pt.setTotalWealth(dp.getTotalWealth());
+                        pt.setChangeFromOpen(dp.getChangeFromOpen());
+                        pt.setChangeFromOpenPct(dp.getChangeFromOpenPct());
+                        pt.setLive(false);
+                        persistedResult.add(pt);
+                    }
+                    return persistedResult;
+                }
+            }
+        }
+
         // ── STEP 1: Get yesterday's EOD snapshot ──────────────────────────────
         // Fetch last 7 days to handle weekends & holidays gracefully
         List<PortfolioSnapshotModel> recentSnaps = snapshotService.getHistory(userId, portfolioId, "1W");
+
 
         // Find the MOST RECENT snapshot that is NOT today
         PortfolioSnapshotModel baselineSnap = recentSnaps.stream()
@@ -250,8 +292,31 @@ public class PortfolioIntradayService {
             boolean isWeekend = dayOfWeek == java.time.DayOfWeek.SATURDAY || dayOfWeek == java.time.DayOfWeek.SUNDAY;
             boolean noLivePrices = livePrices == null || livePrices.isEmpty();
 
-            if (isWeekend || noLivePrices || nowIST.isBefore(MARKET_OPEN)) {
-                log.info("[Intraday] priceSeries and livePrices are empty. Attempting 1W fallback for realistic chart.");
+            // Always attempt the 1W fallback if priceSeries is empty, to ensure we show a realistic chart in dev environments where live Kafka feeds are inactive.
+            boolean preMarket = nowIST.isBefore(MARKET_OPEN);
+            if (isWeekend || preMarket || nowIST.isAfter(MARKET_CLOSE)) {
+                log.info("[Intraday] priceSeries and livePrices are empty. Attempting to fetch persisted session...");
+                
+                String pId = (portfolioId != null) ? portfolioId : "";
+                Optional<com.am.common.amcommondata.document.portfolio.PortfolioIntradaySessionDocument> persistedSession = 
+                        intradaySessionRepository.findFirstByUserIdAndPortfolioIdOrderBySessionDateDesc(userId, pId);
+                        
+                if (persistedSession.isPresent() && persistedSession.get().getDataPoints() != null && !persistedSession.get().getDataPoints().isEmpty()) {
+                    log.info("[Intraday] Found persisted session for date: {}", persistedSession.get().getSessionDate());
+                    List<IntradayDataPoint> persistedResult = new ArrayList<>();
+                    for (com.am.common.amcommondata.document.portfolio.PortfolioIntradaySessionDocument.SessionDataPoint dp : persistedSession.get().getDataPoints()) {
+                        IntradayDataPoint pt = new IntradayDataPoint();
+                        pt.setTimestamp(dp.getTimestamp());
+                        pt.setTotalWealth(dp.getTotalWealth());
+                        pt.setChangeFromOpen(dp.getChangeFromOpen());
+                        pt.setChangeFromOpenPct(dp.getChangeFromOpenPct());
+                        pt.setLive(false);
+                        persistedResult.add(pt);
+                    }
+                    return persistedResult;
+                }
+
+                log.info("[Intraday] No persisted session found. Attempting 1W fallback for realistic chart.");
                 try {
                     com.portfolio.marketdata.model.HistoricalChartsResponse fallbackResponse = marketDataService.getHistoricalCharts(symbols, "1W");
                     if (fallbackResponse != null && fallbackResponse.getData() != null) {
@@ -328,7 +393,7 @@ public class PortfolioIntradayService {
         // Fallback: If STILL empty, generate a flat chart using the last known prices
         if (priceSeries.isEmpty()) {
             if (livePrices != null && !livePrices.isEmpty()) {
-                LocalTime t = MARKET_OPEN;
+                LocalTime t = MARKET_OPEN.plusMinutes(5); // avoid duplicate 09:15 row with forced anchor
                 
                 java.time.DayOfWeek dayOfWeek = today.getDayOfWeek();
                 boolean isWeekend = dayOfWeek == java.time.DayOfWeek.SATURDAY || dayOfWeek == java.time.DayOfWeek.SUNDAY;

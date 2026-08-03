@@ -25,7 +25,7 @@ public class PortfolioIntradayRedisService {
 private final RedisTemplate<String, IntradayDataPoint[]> portfolioIntradayRedisTemplate;
 
     private static final String KEY_PREFIX = "portfolio:intraday:v10:";
-    private static final int MARKET_HOURS_TTL_MINUTES = 2;
+    private static final int MARKET_HOURS_TTL_MINUTES = 5;
     private static final int OFF_MARKET_HOURS_TTL_MINUTES = 30;
 
     private String buildKey(String userId, String portfolioId) {
