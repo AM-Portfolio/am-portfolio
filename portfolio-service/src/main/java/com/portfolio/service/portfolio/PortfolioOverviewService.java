@@ -200,7 +200,7 @@ public class PortfolioOverviewService {
 
         // Create final summary
         log.debug("Creating final portfolio summary for user: {} and {}", userId, context);
-        PortfolioSummaryV1 finalSummary = getPortfolioSummary(portfolios);
+        PortfolioSummaryV1 finalSummary = getPortfolioSummary(portfolios, userId, portfolioId, interval);
         finalSummary.setBrokerPortfolios(brokerSummaryMap);
 
         log.info("Total portfolio value for user {} and {}: {}",
@@ -216,15 +216,24 @@ public class PortfolioOverviewService {
         return finalSummary;
     }
 
-    private PortfolioSummaryV1 getPortfolioSummary(List<PortfolioModelV1> portfolios) {
+    private PortfolioSummaryV1 getPortfolioSummary(List<PortfolioModelV1> portfolios, String userId,
+            String portfolioId, TimeInterval interval) {
         log.debug("Calculating total portfolio value from {} portfolios", portfolios.size());
 
-        var totalValue = portfolios.stream()
-                .mapToDouble(p -> p.getTotalValue() != null ? p.getTotalValue() : 0.0)
-                .sum();
-        log.debug("Calculated total value: {}", totalValue);
-
-        var equityHoldings = portfolioHoldingsService.getHoldings(portfolios);
+        List<com.portfolio.model.portfolio.EquityHoldings> equityHoldings = null;
+        if (userId != null) {
+            try {
+                com.portfolio.model.portfolio.PortfolioHoldings ph = portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, interval, true);
+                if (ph != null && ph.getEquityHoldings() != null) {
+                    equityHoldings = ph.getEquityHoldings();
+                }
+            } catch (Exception e) {
+                log.warn("Failed to get cached portfolio holdings in getPortfolioSummary: {}", e.getMessage());
+            }
+        }
+        if (equityHoldings == null) {
+            equityHoldings = portfolioHoldingsService.getHoldings(portfolios);
+        }
         
         var investmentValue = equityHoldings.stream()
                 .mapToDouble(h -> h.getInvestmentCost() != null ? h.getInvestmentCost() : 0.0)

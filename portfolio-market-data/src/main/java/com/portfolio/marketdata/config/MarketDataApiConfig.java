@@ -56,4 +56,25 @@ public class MarketDataApiConfig {
      * Maximum number of retry attempts.
      */
     private int maxRetryAttempts = 2;
+
+    /**
+     * Batch fetch configuration.
+     */
+    private BatchConfig batch = new BatchConfig();
+
+    @Data
+    public static class BatchConfig {
+        /**
+         * Maximum symbols per single API batch call.
+         * Default: 20 (parallel batching for fast concurrent queries).
+         */
+        private int chunkSize = 20;
+
+        /**
+         * When true: splits symbols into parallel CHUNK_SIZE batches.
+         * When false: sends all symbols in one single batch.
+         * Default: true (parallel batching).
+         */
+        private boolean parallelBatchingEnabled = true;
+    }
 }

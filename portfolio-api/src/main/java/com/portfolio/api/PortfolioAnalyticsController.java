@@ -68,23 +68,25 @@ public class PortfolioAnalyticsController {
 
         AdvancedAnalyticsResponse response = portfolioAnalyticsFacade.calculateAdvancedAnalytics(request);
         
-        try {
-            String userId = com.am.security.context.UserContext.getUserIdOrThrow();
-            com.portfolio.model.TimeInterval interval = com.portfolio.model.TimeInterval.ONE_DAY;
-            if (request.getTimeFrame() != null) {
-                interval = com.portfolio.model.TimeInterval.fromCode(request.getTimeFrame().name());
+        if (response.getSummary() == null) {
+            try {
+                String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+                com.portfolio.model.TimeInterval interval = com.portfolio.model.TimeInterval.ONE_DAY;
+                if (request.getTimeFrame() != null) {
+                    interval = com.portfolio.model.TimeInterval.fromCode(request.getTimeFrame().name());
+                }
+                com.portfolio.model.portfolio.v1.PortfolioSummaryV1 summary = portfolioDashboardService.overviewPortfolio(userId, portfolioId, interval);
+                if (summary != null) {
+                    // Clear heavy nested arrays to prevent frontend browser freezing
+                    summary.setMarketCapHoldings(null);
+                    summary.setSectorialHoldings(null);
+                    summary.setBrokerPortfolios(null);
+                    
+                    response.setSummary(summary);
+                }
+            } catch (Exception e) {
+                log.warn("Failed to attach portfolio summary to advanced analytics response", e);
             }
-            com.portfolio.model.portfolio.v1.PortfolioSummaryV1 summary = portfolioDashboardService.overviewPortfolio(userId, portfolioId, interval);
-            if (summary != null) {
-                // Clear heavy nested arrays to prevent frontend browser freezing
-                summary.setMarketCapHoldings(null);
-                summary.setSectorialHoldings(null);
-                summary.setBrokerPortfolios(null);
-                
-                response.setSummary(summary);
-            }
-        } catch (Exception e) {
-            log.warn("Failed to attach portfolio summary to advanced analytics response", e);
         }
 
         return ResponseEntity.ok(response);

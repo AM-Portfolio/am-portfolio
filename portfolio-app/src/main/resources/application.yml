@@ -197,6 +197,9 @@ market-data:
     read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:90000}
     connection-timeout: 3000
     max-retry-attempts: 0
+    batch:
+      chunk-size: ${MARKET_DATA_BATCH_CHUNK_SIZE:20}
+      parallel-batching-enabled: ${MARKET_DATA_PARALLEL_BATCHING:true}
 
 # OpenAPI Documentation
 springdoc:

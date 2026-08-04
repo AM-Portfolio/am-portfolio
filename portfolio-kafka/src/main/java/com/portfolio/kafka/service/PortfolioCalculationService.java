@@ -106,8 +106,12 @@ public class PortfolioCalculationService {
             event.setTotalInvestment(summary.getInvestmentValue());
             event.setTotalGainLoss(summary.getTotalGainLoss());
             event.setTotalGainLossPercentage(summary.getTotalGainLossPercentage());
-            event.setTodayGainLoss(summary.getTodayGainLoss());
-            event.setTodayGainLossPercentage(summary.getTodayGainLossPercentage());
+            if (summary.getTodayGainLoss() != null && summary.getTodayGainLoss() != 0.0) {
+                event.setTodayGainLoss(summary.getTodayGainLoss());
+                event.setTodayGainLossPercentage(summary.getTodayGainLossPercentage());
+            } else {
+                log.warn("[Kafka] Suppressing todayGainLoss broadcast (was null or 0.0) for portfolioId={}", portfolioId);
+            }
         }
 
         if (holdings.getEquityHoldings() != null) {

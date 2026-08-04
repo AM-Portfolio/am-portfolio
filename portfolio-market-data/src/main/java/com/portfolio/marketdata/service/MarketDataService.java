@@ -81,6 +81,9 @@ public class MarketDataService {
     // Tracks in-flight Historical Chart fetches to prevent cache stampedes
     private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalData>> inFlightChartRequests = new java.util.concurrent.ConcurrentHashMap<>();
 
+    @org.springframework.lang.Nullable
+    private final com.portfolio.marketdata.config.MarketDataApiConfig config;
+
     public MarketDataService(
             MarketDataApiClient marketDataApiClient,
             @org.springframework.lang.Nullable com.portfolio.redis.service.PortfolioMarketDataRedisService marketDataRedisService,
@@ -88,12 +91,25 @@ public class MarketDataService {
             @org.springframework.lang.Nullable com.am.common.amcommondata.service.price.StockPriceHistoryMongoService stockPriceHistoryMongoService,
             @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
             @org.springframework.beans.factory.annotation.Qualifier("externalApiExecutor") java.util.concurrent.Executor externalApiExecutor) {
+        this(marketDataApiClient, marketDataRedisService, stockPriceMongoService, stockPriceHistoryMongoService, taskExecutor, externalApiExecutor, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public MarketDataService(
+            MarketDataApiClient marketDataApiClient,
+            @org.springframework.lang.Nullable com.portfolio.redis.service.PortfolioMarketDataRedisService marketDataRedisService,
+            @org.springframework.lang.Nullable com.am.common.amcommondata.service.price.StockPriceMongoService stockPriceMongoService,
+            @org.springframework.lang.Nullable com.am.common.amcommondata.service.price.StockPriceHistoryMongoService stockPriceHistoryMongoService,
+            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
+            @org.springframework.beans.factory.annotation.Qualifier("externalApiExecutor") java.util.concurrent.Executor externalApiExecutor,
+            @org.springframework.lang.Nullable com.portfolio.marketdata.config.MarketDataApiConfig config) {
         this.marketDataApiClient = marketDataApiClient;
         this.marketDataRedisService = marketDataRedisService;
         this.stockPriceMongoService = stockPriceMongoService;
         this.stockPriceHistoryMongoService = stockPriceHistoryMongoService;
         this.taskExecutor = taskExecutor;
         this.externalApiExecutor = externalApiExecutor;
+        this.config = config;
     }
 
     // Constants
@@ -110,6 +126,26 @@ public class MarketDataService {
             now = now.minusDays(1);
         }
         return now.with(MARKET_OPEN).toInstant().toEpochMilli();
+    }
+
+    /**
+     * Partition symbols according to configurable batch settings (single vs parallel chunking).
+     */
+    private List<List<String>> partitionSymbols(List<String> symbols) {
+        int chunkSize = (config != null && config.getBatch() != null && config.getBatch().getChunkSize() > 0) ? config.getBatch().getChunkSize() : 20;
+        boolean parallel = (config != null && config.getBatch() != null) && config.getBatch().isParallelBatchingEnabled();
+
+        if (!parallel || symbols.size() <= chunkSize) {
+            log.debug("[MarketData] Single-batch mode: sending {} symbols in 1 request (chunkSize={})", symbols.size(), chunkSize);
+            return Collections.singletonList(symbols);
+        }
+
+        log.info("[MarketData] Parallel-batch mode: splitting {} symbols into chunks of {}", symbols.size(), chunkSize);
+        List<List<String>> chunks = new ArrayList<>();
+        for (int i = 0; i < symbols.size(); i += chunkSize) {
+            chunks.add(symbols.subList(i, Math.min(i + chunkSize, symbols.size())));
+        }
+        return chunks;
     }
 
     /**
@@ -161,11 +197,7 @@ public class MarketDataService {
                 validSymbols.size(), request.getFromDate(), request.getToDate(),
                 request.getInterval(), request.getFilterType());
 
-        final int CHUNK_SIZE = 20;
-        List<List<String>> chunks = new java.util.ArrayList<>();
-        for (int i = 0; i < validSymbols.size(); i += CHUNK_SIZE) {
-            chunks.add(validSymbols.subList(i, Math.min(i + CHUNK_SIZE, validSymbols.size())));
-        }
+        List<List<String>> chunks = partitionSymbols(validSymbols);
 
         List<java.util.concurrent.CompletableFuture<Map<String, MarketData>>> futures = chunks.stream()
             .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
@@ -290,11 +322,7 @@ public class MarketDataService {
 
         log.info("Getting OHLC data for {} symbols with timeFrame={} refresh={}", validSymbols.size(), timeFrame, refresh);
 
-        final int CHUNK_SIZE = 20;
-        List<List<String>> chunks = new java.util.ArrayList<>();
-        for (int i = 0; i < validSymbols.size(); i += CHUNK_SIZE) {
-            chunks.add(validSymbols.subList(i, Math.min(i + CHUNK_SIZE, validSymbols.size())));
-        }
+        List<List<String>> chunks = partitionSymbols(validSymbols);
 
         List<java.util.concurrent.CompletableFuture<Map<String, MarketData>>> futures = chunks.stream()
             .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
@@ -313,7 +341,7 @@ public class MarketDataService {
             .collect(Collectors.toList());
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-            .orTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+            .orTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
             .exceptionally(e -> null)
             .join();
 
@@ -592,7 +620,7 @@ public class MarketDataService {
                                         .map(md -> com.am.common.amcommondata.document.price.StockPriceDocument.builder()
                                             .symbol(md.getSymbol())
                                             .lastPrice(md.getLastPrice())
-                                            .previousClose(md.getPreviousClose())
+                                            .previousClose((md.getPreviousClose() != null && md.getPreviousClose() > 0) ? md.getPreviousClose() : null)
                                             .openPrice(md.getOhlc() != null ? md.getOhlc().getOpen() : null)
                                             .highPrice(md.getOhlc() != null ? md.getOhlc().getHigh() : null)
                                             .lowPrice(md.getOhlc() != null ? md.getOhlc().getLow() : null)
@@ -650,6 +678,25 @@ public class MarketDataService {
         }
 
 
+
+        // ─── Manager Audit: Log all resolution failures ───────────────────────────
+        java.util.Set<String> requested = new java.util.HashSet<>(symbols);
+        java.util.List<String> noPayload = requested.stream()
+            .filter(s -> !result.containsKey(cleanSymbol(s))).sorted().collect(Collectors.toList());
+        java.util.List<String> noLtp = result.entrySet().stream()
+            .filter(e -> e.getValue().getLastPrice() == null || e.getValue().getLastPrice() <= 0)
+            .map(Map.Entry::getKey).sorted().collect(Collectors.toList());
+        java.util.List<String> noPrevClose = result.entrySet().stream()
+            .filter(e -> e.getValue().getPreviousClose() == null || e.getValue().getPreviousClose() <= 0)
+            .map(Map.Entry::getKey).sorted().collect(Collectors.toList());
+
+        if (!noPayload.isEmpty())
+            log.warn("[MarketData Audit] No price payload ({}) → {}", noPayload.size(), String.join(",", noPayload));
+        if (!noLtp.isEmpty())
+            log.warn("[MarketData Audit] Returned but no LTP ({}) → {}", noLtp.size(), String.join(",", noLtp));
+        if (!noPrevClose.isEmpty())
+            log.warn("[MarketData Audit] Missing previousClose ({}) → {}", noPrevClose.size(), String.join(",", noPrevClose));
+        // ─────────────────────────────────────────────────────────────────────────────
 
         log.info("[MarketData] Result: {}/{} symbols returned.", result.size(), symbols.size());
         return result;
@@ -833,11 +880,7 @@ public class MarketDataService {
             com.portfolio.marketdata.model.HistoricalChartsResponse finalResp,
             Map<String, String> cleanToRaw) {
         try {
-            int CHUNK_SIZE = 20;
-            List<List<String>> chunks = new java.util.ArrayList<>();
-            for (int i = 0; i < missingSymbols.size(); i += CHUNK_SIZE) {
-                chunks.add(missingSymbols.subList(i, Math.min(missingSymbols.size(), i + CHUNK_SIZE)));
-            }
+            List<List<String>> chunks = partitionSymbols(missingSymbols);
 
             List<java.util.concurrent.CompletableFuture<com.portfolio.marketdata.model.HistoricalChartsResponse>> futures = chunks.stream()
                 .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
@@ -850,7 +893,7 @@ public class MarketDataService {
                         return resp;
                     }
                 }, taskExecutor)
-                .orTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                .orTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                 .exceptionally(e -> {
                     log.warn("[HistoricalCharts data] Fetch timed out or failed: {}", e.getMessage());
                     com.portfolio.marketdata.model.HistoricalChartsResponse resp = new com.portfolio.marketdata.model.HistoricalChartsResponse();

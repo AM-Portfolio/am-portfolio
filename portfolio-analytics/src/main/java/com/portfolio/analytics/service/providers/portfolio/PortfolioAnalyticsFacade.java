@@ -27,6 +27,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import org.springframework.beans.factory.annotation.Qualifier;
 
+import java.util.concurrent.ConcurrentHashMap;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+
 /**
  * Facade service for portfolio analytics that delegates to the appropriate providers
  * This service follows the same pattern as IndexAnalyticsFacade but for portfolio-specific analytics
@@ -39,8 +43,21 @@ public class PortfolioAnalyticsFacade {
     private final Executor taskExecutor;
     private final PortfolioService portfolioService;
     private final MarketDataService marketDataService;
+    private final Map<String, CachedResponse> fastCache = new ConcurrentHashMap<>();
 
+    private static class CachedResponse {
+        final AdvancedAnalyticsResponse response;
+        final long createdAt;
 
+        CachedResponse(AdvancedAnalyticsResponse response) {
+            this.response = response;
+            this.createdAt = System.currentTimeMillis();
+        }
+
+        boolean isExpired() {
+            return System.currentTimeMillis() - createdAt > 15_000; // 15s TTL
+        }
+    }
 
     public PortfolioAnalyticsFacade(AnalyticsFactory analyticsFactory, 
                                     @Qualifier("taskExecutor") Executor taskExecutor,
@@ -111,6 +128,11 @@ public class PortfolioAnalyticsFacade {
                 request.getFeatureToggles().isIncludeSectorAllocation(),
                 request.getFeatureToggles().isIncludeMarketCapAllocation());
         
+        CachedResponse cached = fastCache.get(cacheKey);
+        if (cached != null && !cached.isExpired()) {
+            log.info("[Optimization] Serving AdvancedAnalytics from fast in-memory cache for key: {}", cacheKey);
+            return cached.response;
+        }
 
         // Start building the response
         AdvancedAnalyticsResponse.AdvancedAnalyticsResponseBuilder responseBuilder = AdvancedAnalyticsResponse.builder()
@@ -125,59 +147,57 @@ public class PortfolioAnalyticsFacade {
         }
         
         // --- PREFETCH MARKET DATA ONCE ---
-        CompletableFuture<Void> prefetchFuture = CompletableFuture.runAsync(() -> {
-            try {
-                UUID portfolioUuid = UUID.fromString(request.getCoreIdentifiers().getPortfolioId());
-                PortfolioModelV1 portfolio = portfolioService.getPortfolioById(portfolioUuid);
-                if (portfolio != null) {
-                    request.setPrefetchedPortfolio(portfolio);
+        try {
+            UUID portfolioUuid = UUID.fromString(request.getCoreIdentifiers().getPortfolioId());
+            PortfolioModelV1 portfolio = portfolioService.getPortfolioById(portfolioUuid);
+            if (portfolio != null) {
+                request.setPrefetchedPortfolio(portfolio);
+                
+                if (portfolio.getEquityModels() != null && !portfolio.getEquityModels().isEmpty()) {
+                    List<String> symbols = portfolio.getEquityModels().stream()
+                            .map(EquityModel::getSymbol)
+                            .filter(s -> s != null && !s.isEmpty())
+                            .collect(Collectors.toList());
                     
-                    if (portfolio.getEquityModels() != null && !portfolio.getEquityModels().isEmpty()) {
-                        List<String> symbols = portfolio.getEquityModels().stream()
-                                .map(EquityModel::getSymbol)
-                                .filter(s -> s != null && !s.isEmpty())
-                                .collect(Collectors.toList());
-                        
-                        if (!symbols.isEmpty()) {
-                            log.info("[Optimization] Prefetching market data once for {} symbols", symbols.size());
-                            request.setPrefetchAttempted(true);
-                            Map<String, MarketData> prefetched = null;
-                            if (request.getTimeFrameRequest() != null) {
-                                // Historical timeframe selected — fetch period-start prices
-                                com.portfolio.marketdata.model.HistoricalDataRequest histReq = com.portfolio.marketdata.model.HistoricalDataRequest.builder()
-                                    .symbols(String.join(",", symbols))
-                                    .fromDate(request.getFromDate() != null ? request.getFromDate().toString() : null)
-                                    .toDate(request.getToDate() != null ? request.getToDate().toString() : null)
-                                    .filterType(com.portfolio.marketdata.model.FilterType.START_END.getValue())
-                                    .instrumentType(com.portfolio.marketdata.model.InstrumentType.EQ.getValue())
-                                    .continuous(false)
-                                    .interval(request.getTimeFrame() != null ? request.getTimeFrame().getValue() : com.portfolio.model.market.TimeFrame.DAY.getValue())
-                                    .build();
-                                prefetched = marketDataService.getHistoricalData(histReq);
-                            } else {
-                                // Live data (1D)
-                                prefetched = marketDataService.getMarketData(symbols);
-                            }
-                            if (prefetched != null) {
-                                // Ensure normalized keys so analytics providers can look them up successfully
-                                Map<String, MarketData> normalizedPrefetch = new java.util.HashMap<>();
-                                for (Map.Entry<String, MarketData> entry : prefetched.entrySet()) {
-                                    if (entry.getValue() != null) {
-                                        String cleaned = com.portfolio.model.util.SymbolResolver.normalize(
-                                                entry.getKey().contains(":") ? entry.getKey().substring(entry.getKey().indexOf(':') + 1) : entry.getKey()
-                                        );
-                                        normalizedPrefetch.put(cleaned, entry.getValue());
-                                    }
+                    if (!symbols.isEmpty()) {
+                        log.info("[Optimization] Prefetching market data once for {} symbols", symbols.size());
+                        request.setPrefetchAttempted(true);
+                        Map<String, MarketData> prefetched = null;
+                        if (request.getTimeFrameRequest() != null) {
+                            // Historical timeframe selected — fetch period-start prices
+                            com.portfolio.marketdata.model.HistoricalDataRequest histReq = com.portfolio.marketdata.model.HistoricalDataRequest.builder()
+                                .symbols(String.join(",", symbols))
+                                .fromDate(request.getFromDate() != null ? request.getFromDate().toString() : null)
+                                .toDate(request.getToDate() != null ? request.getToDate().toString() : null)
+                                .filterType(com.portfolio.marketdata.model.FilterType.START_END.getValue())
+                                .instrumentType(com.portfolio.marketdata.model.InstrumentType.EQ.getValue())
+                                .continuous(false)
+                                .interval(request.getTimeFrame() != null ? request.getTimeFrame().getValue() : com.portfolio.model.market.TimeFrame.DAY.getValue())
+                                .build();
+                            prefetched = marketDataService.getHistoricalData(histReq);
+                        } else {
+                            // Live data (1D)
+                            prefetched = marketDataService.getMarketData(symbols);
+                        }
+                        if (prefetched != null) {
+                            // Ensure normalized keys so analytics providers can look them up successfully
+                            Map<String, MarketData> normalizedPrefetch = new java.util.HashMap<>();
+                            for (Map.Entry<String, MarketData> entry : prefetched.entrySet()) {
+                                if (entry.getValue() != null) {
+                                    String cleaned = com.portfolio.model.util.SymbolResolver.normalize(
+                                            entry.getKey().contains(":") ? entry.getKey().substring(entry.getKey().indexOf(':') + 1) : entry.getKey()
+                                    );
+                                    normalizedPrefetch.put(cleaned, entry.getValue());
                                 }
-                                request.setPrefetchedMarketData(normalizedPrefetch);
                             }
+                            request.setPrefetchedMarketData(normalizedPrefetch);
                         }
                     }
                 }
-            } catch (Exception e) {
-                log.warn("Failed to prefetch market data in facade. Providers will fallback to fetching individually.", e);
             }
-        }, taskExecutor);
+        } catch (Exception e) {
+            log.warn("Failed to prefetch market data in facade. Providers will fallback to fetching individually.", e);
+        }
         // ---------------------------------
 
         // Build analytics component with requested features
@@ -188,7 +208,7 @@ public class PortfolioAnalyticsFacade {
         CompletableFuture<SectorAllocation> sectorAllocationFuture = null;
         CompletableFuture<MarketCapAllocation> marketCapAllocationFuture = null;
 
-        // Start futures
+        // Start futures with prefetched data in place
         final AdvancedAnalyticsRequest frozenRequest = request;
         if (request.getFeatureToggles().isIncludeHeatmap()) {
             heatmapFuture = CompletableFuture.supplyAsync(() -> generateSectorHeatmap(frozenRequest), taskExecutor);
@@ -208,17 +228,17 @@ public class PortfolioAnalyticsFacade {
         
         // Join futures and populate builder
         java.util.List<CompletableFuture<?>> allFutures = java.util.stream.Stream
-            .of(prefetchFuture, heatmapFuture, moversFuture, sectorAllocationFuture, marketCapAllocationFuture)
+            .of(heatmapFuture, moversFuture, sectorAllocationFuture, marketCapAllocationFuture)
             .filter(java.util.Objects::nonNull)
             .collect(java.util.stream.Collectors.toList());
             
         try {
             if (!allFutures.isEmpty()) {
                 CompletableFuture.allOf(allFutures.toArray(new CompletableFuture[0]))
-                    .get(5, java.util.concurrent.TimeUnit.SECONDS);
+                    .get(15, java.util.concurrent.TimeUnit.SECONDS);
             }
         } catch (java.util.concurrent.TimeoutException e) {
-            log.warn("[AdvancedAnalytics] Partial timeout after 5s — returning completed components only");
+            log.warn("[AdvancedAnalytics] Partial timeout after 15s — returning completed components only");
         } catch (Exception e) {
             log.error("[AdvancedAnalytics] Error joining futures", e);
         }
@@ -242,7 +262,82 @@ public class PortfolioAnalyticsFacade {
         // Add the analytics component to the response
         responseBuilder.analytics(analyticsBuilder.build());
         
+        // Compute lightweight summary if prefetched portfolio is available
+        if (request.getPrefetchedPortfolio() != null) {
+            try {
+                PortfolioModelV1 portfolio = request.getPrefetchedPortfolio();
+                Map<String, MarketData> mdMap = request.getPrefetchedMarketData();
+                double totalInvested = 0.0;
+                double totalCurrent = 0.0;
+                double todayGainLoss = 0.0;
+                int gainers = 0;
+                int losers = 0;
+                int todayGainers = 0;
+                int todayLosers = 0;
+                int activeCount = 0;
+
+                if (portfolio.getEquityModels() != null) {
+                    for (EquityModel eq : portfolio.getEquityModels()) {
+                        if (eq == null || eq.getQuantity() == null || eq.getQuantity() <= 0) continue;
+                        activeCount++;
+                        double qty = eq.getQuantity();
+                        double cost = (eq.getAvgBuyingPrice() != null ? eq.getAvgBuyingPrice() : 0.0) * qty;
+                        totalInvested += cost;
+
+                        String sym = com.portfolio.model.util.SymbolResolver.normalize(eq.getSymbol());
+                        MarketData md = mdMap != null ? mdMap.get(sym) : null;
+                        double ltp = (md != null && md.getLastPrice() != null && md.getLastPrice() > 0)
+                            ? md.getLastPrice()
+                            : (eq.getAvgBuyingPrice() != null ? eq.getAvgBuyingPrice() : 0.0);
+                        double val = ltp * qty;
+                        totalCurrent += val;
+
+                        double overallGL = val - cost;
+                        if (overallGL > 0) gainers++; else if (overallGL < 0) losers++;
+
+                        Double prevClose = (md != null && md.getPreviousClose() != null && md.getPreviousClose() > 0)
+                            ? md.getPreviousClose()
+                            : ((md != null && md.getOhlc() != null && md.getOhlc().getOpen() > 0) ? md.getOhlc().getOpen() : null);
+
+                        if (prevClose != null && prevClose > 0) {
+                            double dayGL = (ltp - prevClose) * qty;
+                            todayGainLoss += dayGL;
+                            if (dayGL > 0) todayGainers++; else if (dayGL < 0) todayLosers++;
+                        }
+                    }
+                }
+
+                if (totalCurrent == 0.0 && totalInvested > 0) {
+                    totalCurrent = totalInvested;
+                }
+                double totalGL = totalCurrent - totalInvested;
+                double totalGLPct = totalInvested > 0 ? (totalGL / totalInvested) * 100.0 : 0.0;
+                double prevVal = totalCurrent - todayGainLoss;
+                double todayGLPct = prevVal > 0 ? (todayGainLoss / prevVal) * 100.0 : 0.0;
+
+                com.portfolio.model.portfolio.v1.PortfolioSummaryV1 summary = com.portfolio.model.portfolio.v1.PortfolioSummaryV1.builder()
+                    .investmentValue(BigDecimal.valueOf(totalInvested).setScale(2, RoundingMode.HALF_UP).doubleValue())
+                    .currentValue(BigDecimal.valueOf(totalCurrent).setScale(2, RoundingMode.HALF_UP).doubleValue())
+                    .totalGainLoss(BigDecimal.valueOf(totalGL).setScale(2, RoundingMode.HALF_UP).doubleValue())
+                    .totalGainLossPercentage(BigDecimal.valueOf(totalGLPct).setScale(2, RoundingMode.HALF_UP).doubleValue())
+                    .todayGainLoss(BigDecimal.valueOf(todayGainLoss).setScale(2, RoundingMode.HALF_UP).doubleValue())
+                    .todayGainLossPercentage(BigDecimal.valueOf(todayGLPct).setScale(2, RoundingMode.HALF_UP).doubleValue())
+                    .totalAssets(activeCount)
+                    .gainersCount(gainers)
+                    .losersCount(losers)
+                    .todayGainersCount(todayGainers)
+                    .todayLosersCount(todayLosers)
+                    .lastUpdated(java.time.LocalDateTime.now())
+                    .build();
+
+                responseBuilder.summary(summary);
+            } catch (Exception e) {
+                log.warn("Failed to compute in-memory summary in facade", e);
+            }
+        }
+        
         AdvancedAnalyticsResponse finalResponse = responseBuilder.build();
+        fastCache.put(cacheKey, new CachedResponse(finalResponse));
         
         return finalResponse;
     }
