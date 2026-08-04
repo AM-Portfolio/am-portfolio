@@ -63,40 +63,43 @@ public class SnapshotCatchUpService {
             List<PortfolioSnapshotDocument> latest = portfolioSnapshotRepository
                     .findByUserIdOrderBySnapshotDateDesc(userId, PageRequest.of(0, 1));
 
+            LocalDate backfillStart;
+            PortfolioSnapshotDocument lastSnapshot = null;
+
             if (latest.isEmpty()) {
-                log.info("[CatchUp] No existing snapshots for userId={}. EOD scheduler will create the first one.", userId);
-                return;
-            }
+                log.info("[CatchUp] No existing snapshots for userId={}. Bootstrapping initial historical snapshots (up to 30 days).", userId);
+                backfillStart = today.minusDays(30);
+            } else {
+                lastSnapshot = latest.get(0);
+                LocalDate lastSnapshotDate = lastSnapshot.getSnapshotDate();
 
-            LocalDate lastSnapshotDate = latest.get(0).getSnapshotDate();
+                // Gap is from the day after the last snapshot up to (not including) today.
+                // If the last snapshot is yesterday or today, we're up to date.
+                if (!lastSnapshotDate.isBefore(today.minusDays(1))) {
+                    log.info("[CatchUp] Snapshots are up to date for userId={}. Last: {}", userId, lastSnapshotDate);
+                    return;
+                }
 
-            // Gap is from the day after the last snapshot up to (not including) today.
-            // If the last snapshot is yesterday or today, we're up to date.
-            if (!lastSnapshotDate.isBefore(today.minusDays(1))) {
-                log.info("[CatchUp] Snapshots are up to date for userId={}. Last: {}", userId, lastSnapshotDate);
-                return;
-            }
-
-            LocalDate backfillStart = lastSnapshotDate.plusDays(1);
-            // Enforce the max backfill window
-            LocalDate hardCap = today.minusDays(maxBackfillDays);
-            if (backfillStart.isBefore(hardCap)) {
-                log.info("[CatchUp] Gap is larger than {} days for userId={}. Capping backfill start to {}.",
-                        maxBackfillDays, userId, hardCap);
-                backfillStart = hardCap;
+                backfillStart = lastSnapshotDate.plusDays(1);
+                // Enforce the max backfill window
+                LocalDate hardCap = today.minusDays(maxBackfillDays);
+                if (backfillStart.isBefore(hardCap)) {
+                    log.info("[CatchUp] Gap is larger than {} days for userId={}. Capping backfill start to {}.",
+                            maxBackfillDays, userId, hardCap);
+                    backfillStart = hardCap;
+                }
             }
 
             log.info("[CatchUp] Gap detected for userId={}. Backfilling from {} to {} ({} days).",
                     userId, backfillStart, today.minusDays(1),
                     java.time.temporal.ChronoUnit.DAYS.between(backfillStart, today));
-            PortfolioSnapshotDocument lastSnapshot = latest.get(0);
 
             // --- STEP 2: Fetch user's raw holdings from the nested portfolio entries ---
             // Holdings are now embedded inside each PortfolioSnapshotEntry, not in a separate top-level array.
             Map<String, List<HoldingInfo>> portfolioHoldings = new HashMap<>();
             Set<String> allSymbols = new HashSet<>();
 
-            if (lastSnapshot.getPortfolios() != null && !lastSnapshot.getPortfolios().isEmpty()
+            if (lastSnapshot != null && lastSnapshot.getPortfolios() != null && !lastSnapshot.getPortfolios().isEmpty()
                     && lastSnapshot.getPortfolios().stream().anyMatch(e -> e.getHoldings() != null && !e.getHoldings().isEmpty())) {
 
                 // Primary path: read from nested holdings inside each portfolio entry

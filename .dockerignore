@@ -19,5 +19,3 @@ replay_*.log
 !src/
 !**/src/
 !**/pom.xml
-!portfolio-app/target/*.jar
-
