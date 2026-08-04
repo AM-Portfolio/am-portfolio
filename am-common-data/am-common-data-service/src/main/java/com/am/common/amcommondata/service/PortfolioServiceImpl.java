@@ -45,24 +45,27 @@ public class PortfolioServiceImpl implements PortfolioService {
 
         if (owner == null) return null;
 
-        // KEY FIX: Find the canonical portfolio by (owner, brokerType), NOT by trade ID
-        List<PortfolioDocument> existingList = portfolioDocumentRepository.findByOwnerAndBrokerType(owner, brokerType);
+        PortfolioDocument doc = null;
+        if (portfolioModel.getId() != null) {
+            doc = portfolioDocumentRepository.findById(portfolioModel.getId().toString()).orElse(null);
+        }
 
-        PortfolioDocument doc;
-        if (existingList != null && !existingList.isEmpty()) {
-            // Update the canonical portfolio — clean up any legacy duplicates
-            doc = existingList.get(0);
-            if (existingList.size() > 1) {
-                existingList.subList(1, existingList.size()).forEach(portfolioDocumentRepository::delete);
-                log.info("[TradeSync] Removed {} duplicate portfolios for owner={} broker={}", 
-                         existingList.size() - 1, owner, brokerType);
+        // Removed fallback to findByOwnerAndBrokerType to support multiple portfolios of the same broker type.
+
+        if (doc != null) {
+            // Update name if the incoming model has a valid name that isn't just the ID
+            if (portfolioModel.getName() != null && !portfolioModel.getName().equals(doc.getId())) {
+                doc.setName(portfolioModel.getName());
             }
         } else {
-            // Create new canonical portfolio for this broker
+            // Create new portfolio
             doc = new PortfolioDocument();
+            if (portfolioModel.getId() != null) {
+                doc.setId(portfolioModel.getId().toString());
+            }
             doc.setOwner(owner);
             doc.setBrokerType(brokerType);
-            doc.setName(brokerType != null ? brokerType.getCode() : "Other");
+            doc.setName(portfolioModel.getName() != null && !portfolioModel.getName().equals(portfolioModel.getId() != null ? portfolioModel.getId().toString() : "") ? portfolioModel.getName() : (brokerType != null ? brokerType.getCode() : "Other"));
             doc.setStatus(com.am.common.amcommondata.model.enums.DocumentStatus.ACTIVE);
             com.am.common.amcommondata.document.common.AuditMetadata audit = new com.am.common.amcommondata.document.common.AuditMetadata();
             audit.setCreatedBy(owner);
@@ -92,62 +95,65 @@ public class PortfolioServiceImpl implements PortfolioService {
             existingEquities = new java.util.ArrayList<>();
         }
 
-        if (incomingEquities != null && !incomingEquities.isEmpty()) {
-            if (tradeAction == null || tradeAction.isBlank() || "UPDATE".equalsIgnoreCase(tradeAction)) {
-                existingEquities = new java.util.ArrayList<>(incomingEquities);
-            } else {
-                for (com.am.common.amcommondata.document.asset.equity.EquityDocument incoming : incomingEquities) {
-                    String isin = incoming.getIsin();
-                    
-                    java.util.Optional<com.am.common.amcommondata.document.asset.equity.EquityDocument> matchOpt = existingEquities.stream()
-                        .filter(e -> (e.getIsin() != null && isin != null && e.getIsin().equals(isin)) 
-                                || (e.getSymbol() != null && incoming.getSymbol() != null && e.getSymbol().equals(incoming.getSymbol())))
-                        .findFirst();
+        if ("REPLACE_ALL".equalsIgnoreCase(tradeAction)) {
+            existingEquities = incomingEquities != null ? new java.util.ArrayList<>(incomingEquities) : new java.util.ArrayList<>();
+        } else if (incomingEquities != null && !incomingEquities.isEmpty()) {
+            for (com.am.common.amcommondata.document.asset.equity.EquityDocument incoming : incomingEquities) {
+                String isin = incoming.getIsin();
+                
+                java.util.Optional<com.am.common.amcommondata.document.asset.equity.EquityDocument> matchOpt = existingEquities.stream()
+                    .filter(e -> (e.getIsin() != null && isin != null && e.getIsin().equals(isin)) 
+                            || (e.getSymbol() != null && incoming.getSymbol() != null && e.getSymbol().equals(incoming.getSymbol())))
+                    .findFirst();
 
-                    if ("BUY".equalsIgnoreCase(tradeAction)) {
-                        if (matchOpt.isPresent()) {
-                            com.am.common.amcommondata.document.asset.equity.EquityDocument match = matchOpt.get();
-                            double existingQty = match.getQuantity() != null ? match.getQuantity() : 0.0;
-                            double incomingQty = incoming.getQuantity() != null ? incoming.getQuantity() : 0.0;
-                            double existingAvg = match.getAvgBuyingPrice() != null ? match.getAvgBuyingPrice() : 0.0;
-                            double incomingAvg = incoming.getAvgBuyingPrice() != null ? incoming.getAvgBuyingPrice() : 0.0;
-                            
-                            double newQty = existingQty + incomingQty;
-                            double newAvg = newQty > 0 ? ((existingQty * existingAvg) + (incomingQty * incomingAvg)) / newQty : 0.0;
-                            
+                if ("BUY".equalsIgnoreCase(tradeAction)) {
+                    if (matchOpt.isPresent()) {
+                        com.am.common.amcommondata.document.asset.equity.EquityDocument match = matchOpt.get();
+                        double existingQty = match.getQuantity() != null ? match.getQuantity() : 0.0;
+                        double incomingQty = incoming.getQuantity() != null ? incoming.getQuantity() : 0.0;
+                        double existingAvg = match.getAvgBuyingPrice() != null ? match.getAvgBuyingPrice() : 0.0;
+                        double incomingAvg = incoming.getAvgBuyingPrice() != null ? incoming.getAvgBuyingPrice() : 0.0;
+                        
+                        double newQty = existingQty + incomingQty;
+                        double newAvg = newQty > 0 ? ((existingQty * existingAvg) + (incomingQty * incomingAvg)) / newQty : 0.0;
+                        
+                        match.setQuantity(newQty);
+                        match.setAvgBuyingPrice(newAvg);
+                        if (incoming.getCurrentPrice() != null) {
+                            match.setCurrentPrice(incoming.getCurrentPrice());
+                        }
+                    } else {
+                        existingEquities.add(incoming);
+                    }
+                } else if ("SELL".equalsIgnoreCase(tradeAction) || "DELETE".equalsIgnoreCase(tradeAction)) {
+                    if (matchOpt.isPresent()) {
+                        com.am.common.amcommondata.document.asset.equity.EquityDocument match = matchOpt.get();
+                        double existingQty = match.getQuantity() != null ? match.getQuantity() : 0.0;
+                        double incomingQty = incoming.getQuantity() != null ? incoming.getQuantity() : 0.0;
+                        double newQty = existingQty - incomingQty;
+                        
+                        if (newQty <= 0) {
+                            existingEquities.remove(match);
+                        } else {
                             match.setQuantity(newQty);
-                            match.setAvgBuyingPrice(newAvg);
                             if (incoming.getCurrentPrice() != null) {
                                 match.setCurrentPrice(incoming.getCurrentPrice());
                             }
-                            if (incoming.getSector() != null) {
-                                match.setSector(incoming.getSector());
-                            }
-                            if (incoming.getIndustry() != null) {
-                                match.setIndustry(incoming.getIndustry());
-                            }
-                            if (incoming.getMarketCap() != null) {
-                                match.setMarketCap(incoming.getMarketCap());
-                            }
-                        } else {
-                            existingEquities.add(incoming);
                         }
-                    } else if ("SELL".equalsIgnoreCase(tradeAction)) {
-                        if (matchOpt.isPresent()) {
-                            com.am.common.amcommondata.document.asset.equity.EquityDocument match = matchOpt.get();
-                            double existingQty = match.getQuantity() != null ? match.getQuantity() : 0.0;
-                            double incomingQty = incoming.getQuantity() != null ? incoming.getQuantity() : 0.0;
-                            double newQty = existingQty - incomingQty;
-                            
-                            if (newQty <= 0) {
-                                existingEquities.remove(match);
-                            } else {
-                                match.setQuantity(newQty);
-                                if (incoming.getCurrentPrice() != null) {
-                                    match.setCurrentPrice(incoming.getCurrentPrice());
-                                }
-                            }
+                    }
+                } else if ("UPDATE".equalsIgnoreCase(tradeAction)) {
+                    if (matchOpt.isPresent()) {
+                        com.am.common.amcommondata.document.asset.equity.EquityDocument match = matchOpt.get();
+                        match.setQuantity(incoming.getQuantity());
+                        match.setAvgBuyingPrice(incoming.getAvgBuyingPrice());
+                        if (incoming.getCurrentPrice() != null) {
+                            match.setCurrentPrice(incoming.getCurrentPrice());
                         }
+                        if (incoming.getInvestmentValue() != null) {
+                            match.setInvestmentValue(incoming.getInvestmentValue());
+                        }
+                    } else {
+                        existingEquities.add(incoming);
                     }
                 }
             }
@@ -278,5 +284,23 @@ public class PortfolioServiceImpl implements PortfolioService {
             portfolioDocumentRepository.saveAll(portfolios);
             log.info("Updated lastLoginDate={} for {} portfolios of user={}", loginDate, portfolios.size(), userId);
         }
+    }
+
+    @Override
+    @Transactional
+    public void deletePortfolioByIdAndOwner(String id, String owner) {
+        if (id == null || owner == null) {
+            return;
+        }
+        
+        List<PortfolioDocument> portfolios = portfolioDocumentRepository.findByOwner(owner);
+        for (PortfolioDocument portfolio : portfolios) {
+            if (id.equals(portfolio.getName())) {
+                portfolioDocumentRepository.delete(portfolio);
+                log.info("Deleted portfolio with name: {} and owner: {}", id, owner);
+                return;
+            }
+        }
+        log.warn("Portfolio not found for deletion with name: {} and owner: {}", id, owner);
     }
 }

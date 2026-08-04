@@ -28,10 +28,13 @@ public class PortfolioEventPublisher {
             return;
         }
 
+        // portfolioId in the outbound event = the am-portfolio MongoDB document _id (UUID).
+        // am-trade-management uses this as the key to upsert the portfolio record in its DB.
+        // name = human-readable portfolio name shown in the UI.
         PortfolioUpdateEvent outboundEvent = PortfolioUpdateEvent.builder()
                 .id(savedPortfolio.getId() != null ? savedPortfolio.getId() : UUID.randomUUID())
                 .userId(savedPortfolio.getOwner())
-                .portfolioId(savedPortfolio.getId() != null ? savedPortfolio.getId().toString() : null)
+                .portfolioId(savedPortfolio.getId() != null ? savedPortfolio.getId().toString() : UUID.randomUUID().toString())
                 .name(savedPortfolio.getName())
                 .brokerType(savedPortfolio.getBrokerType())
                 .source(source != null ? source : "PORTFOLIO_RESOLVED")

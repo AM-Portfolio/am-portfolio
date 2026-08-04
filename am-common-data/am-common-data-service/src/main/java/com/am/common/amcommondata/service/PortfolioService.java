@@ -9,6 +9,7 @@ import java.util.UUID;
 public interface PortfolioService {
     List<PortfolioModelV1> getPortfoliosByUserId(String userId);
     PortfolioModelV1 getPortfolioById(UUID id);
+    void deletePortfolioByIdAndOwner(String id, String owner);
     PortfolioModelV1 createPortfolio(PortfolioModelV1 portfolio);
     PortfolioModelV1 upsertDocumentPortfolio(PortfolioModelV1 portfolioModel);
     List<String> getAllUserIds();

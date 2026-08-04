@@ -37,10 +37,13 @@ public class PortfolioMapperv1 {
     }
 
     public PortfolioModelV1 toPortfolioModelV1(com.portfolio.model.events.trade.TradePortfolioSyncEvent tradeEvent) {
-        String action = null;
+        String action = tradeEvent.getAction();
+        
         List<EquityModel> equityModels = new ArrayList<>();
         if (tradeEvent.getEquities() != null && !tradeEvent.getEquities().isEmpty()) {
-            action = tradeEvent.getEquities().get(0).getAction();
+            if (action == null) {
+                action = tradeEvent.getEquities().get(0).getAction();
+            }
             equityModels = tradeEvent.getEquities().stream().map(e -> {
                 EquityModel em = new EquityModel();
                 em.setSymbol(e.getSymbol());
@@ -64,10 +67,15 @@ public class PortfolioMapperv1 {
             }).collect(Collectors.toList());
         }
 
+        if (Boolean.TRUE.equals(tradeEvent.getDeleteAllTrades())) {
+            action = "DELETE_PORTFOLIO";
+        }
+
         BrokerType brokerType = resolveBrokerType(tradeEvent.getBrokerType());
 
         return PortfolioModelV1.builder()
-                .name(tradeEvent.getId()) // Name holds the portfolioId (which maps to Trade Event ID)
+                .id(tradeEvent.getId() != null ? java.util.UUID.fromString(tradeEvent.getId()) : null)
+                .name(tradeEvent.getPortfolioId() != null ? tradeEvent.getPortfolioId() : tradeEvent.getId())
                 .owner(tradeEvent.getUserId())
                 .brokerType(brokerType)
                 .fundType(FundType.DEFAULT)
