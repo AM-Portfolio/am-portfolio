@@ -296,5 +296,3 @@ portfolio:
 growthbook:
   api-host: ${GROWTHBOOK_API_HOST:https://growthbook.asrax.in/gbapi}
   client-key: ${GROWTHBOOK_CLIENT_KEY:sdk-8WmIFrhYLelAXr8}
-   
- 
