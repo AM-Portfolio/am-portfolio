@@ -17,6 +17,11 @@ import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.redis.service.PortfolioSummaryRedisService;
 import com.portfolio.service.calculator.PortfolioCalculator;
 import com.am.observability.flow.FlowLogger;
+import com.am.common.amcommondata.service.PortfolioSnapshotService;
+import com.am.common.amcommondata.model.PortfolioSnapshotModel;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.Comparator;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,7 +37,8 @@ public class PortfolioOverviewService {
     @org.springframework.lang.Nullable
     private final PortfolioSummaryRedisService portfolioSummaryRedisService;
     
-
+    private final PortfolioSnapshotService portfolioSnapshotService;
+    private final PortfolioSummaryMongoService portfolioSummaryMongoService;
 
     private final PortfolioCalculator portfolioCalculator;
     private final FlowLogger flowLogger;
@@ -42,12 +48,16 @@ public class PortfolioOverviewService {
             PortfolioHoldingsService portfolioHoldingsService,
             PortfolioMapperv1 portfolioMapper,
             @org.springframework.lang.Nullable PortfolioSummaryRedisService portfolioSummaryRedisService,
+            PortfolioSnapshotService portfolioSnapshotService,
+            PortfolioSummaryMongoService portfolioSummaryMongoService,
             PortfolioCalculator portfolioCalculator,
             FlowLogger flowLogger) {
         this.portfolioService = portfolioService;
         this.portfolioHoldingsService = portfolioHoldingsService;
         this.portfolioMapper = portfolioMapper;
         this.portfolioSummaryRedisService = portfolioSummaryRedisService;
+        this.portfolioSnapshotService = portfolioSnapshotService;
+        this.portfolioSummaryMongoService = portfolioSummaryMongoService;
         this.portfolioCalculator = portfolioCalculator;
         this.flowLogger = flowLogger;
     }
@@ -105,19 +115,16 @@ public class PortfolioOverviewService {
     public PortfolioSummaryV1 overviewPortfolio(String userId, String portfolioId, TimeInterval interval) {
         try (var span = flowLogger.start("overviewPortfolioSpecific", "user", userId, "portfolio", portfolioId, "interval", interval != null ? interval.getCode() : "null")) {
             if (portfolioId == null || portfolioId.trim().isEmpty()) {
-            log.warn("Blank portfolioId provided for specific portfolio overview - User: {}", userId);
-            throw new IllegalArgumentException("portfolioId cannot be blank");
-        }
-        Optional<PortfolioSummaryV1> cachedSummary = Optional.empty();
-        if (portfolioSummaryRedisService != null) {
-            cachedSummary = portfolioSummaryRedisService.getLatestSummary(userId, interval, portfolioId);
+                log.warn("Blank portfolioId provided for specific portfolio overview - User: {}", userId);
+                throw new IllegalArgumentException("portfolioId cannot be blank");
+            }
+            Optional<PortfolioSummaryV1> cachedSummary = getCachedSummary(userId, interval, portfolioId);
             if (cachedSummary.isPresent()) {
                 log.info("Returning cached portfolio summary for user: {} and portfolio: {}", userId, portfolioId);
                 return cachedSummary.get();
             }
-        }
-
-        log.info("Cache miss for specific portfolio summary - User: {}, Portfolio: {}, fetching from source", userId, portfolioId);
+            
+            log.info("Cache miss for specific portfolio summary - User: {}, Portfolio: {}, fetching from source", userId, portfolioId);
         var portfolios = portfolioService.getPortfoliosByUserId(userId);
         log.info("Retrieved {} portfolios for user: {}",
                 portfolios != null ? portfolios.size() : 0, userId);
@@ -206,11 +213,15 @@ public class PortfolioOverviewService {
         log.info("Total portfolio value for user {} and {}: {}",
                 userId, context, finalSummary.getInvestmentValue());
 
+        // Apply timeframe overrides before caching
+        applyTimeframeGainLoss(finalSummary, userId, portfolioId, interval);
+
         // Store in cache
         log.debug("Caching portfolio summary for user: {}", userId);
         if (portfolioSummaryRedisService != null) {
             portfolioSummaryRedisService.cachePortfolioSummary(finalSummary, userId, interval, portfolioId);
         }
+        portfolioSummaryMongoService.cachePortfolioSummary(finalSummary, userId, interval, portfolioId);
 
         log.info("Completed overviewPortfolio for user: {}", userId);
         return finalSummary;
@@ -246,20 +257,98 @@ public class PortfolioOverviewService {
     }
 
     private Optional<PortfolioSummaryV1> getCachedSummary(String userId, TimeInterval interval) {
-        log.debug("Checking cache for portfolio summary - User: {}, Interval: {}",
-                userId, interval != null ? interval.getCode() : "null");
+        return getCachedSummary(userId, interval, null);
+    }
+
+    private Optional<PortfolioSummaryV1> getCachedSummary(String userId, TimeInterval interval, String portfolioId) {
+        log.debug("Checking cache for portfolio summary - User: {}, Interval: {}, Portfolio: {}",
+                userId, interval != null ? interval.getCode() : "null", portfolioId);
 
         Optional<PortfolioSummaryV1> cachedSummary = Optional.empty();
+        
+        // Tier 1: Redis
         if (portfolioSummaryRedisService != null) {
-            cachedSummary = portfolioSummaryRedisService.getLatestSummary(userId, interval);
+            if (portfolioId == null) {
+                cachedSummary = portfolioSummaryRedisService.getLatestSummary(userId, interval);
+            } else {
+                cachedSummary = portfolioSummaryRedisService.getLatestSummary(userId, interval, portfolioId);
+            }
             if (cachedSummary.isPresent()) {
                 log.info("Serving portfolio summary from Redis cache - User: {}, Interval: {}",
                         userId, interval != null ? interval.getCode() : "null");
                 return cachedSummary;
             }
         }
-        log.debug("No cached summary found for user: {}", userId);
+        
+        // Tier 2: Mongo
+        cachedSummary = portfolioSummaryMongoService.getLatestFreshSummary(userId, interval, portfolioId);
+        if (cachedSummary.isPresent()) {
+            log.info("Serving portfolio summary from Mongo cache - User: {}, Interval: {}",
+                    userId, interval != null ? interval.getCode() : "null");
+            return cachedSummary;
+        }
 
+        log.debug("No cached summary found for user: {}", userId);
         return cachedSummary;
+    }
+
+    private void applyTimeframeGainLoss(PortfolioSummaryV1 summary, String userId, 
+                                          String portfolioId, TimeInterval interval) {
+        if (interval == null || interval == TimeInterval.OVERALL) return;
+
+        // Fetch snapshot history for the timeframe window
+        List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(
+            userId, portfolioId, interval.getCode()
+        );
+
+        if (history == null || history.isEmpty()) {
+            // For 1D: walk back up to 7 days to handle weekends/holidays
+            if (TimeInterval.ONE_DAY.equals(interval)) {
+                LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+                for (int i = 1; i <= 7; i++) {
+                    List<PortfolioSnapshotModel> fallback = portfolioSnapshotService.getHistory(
+                        userId, portfolioId, "1W" // broader window to find last trading day
+                    );
+                    if (fallback != null && !fallback.isEmpty()) {
+                        history = fallback; break;
+                    }
+                }
+            }
+            if (history == null || history.isEmpty()) return; // no snapshots at all
+        }
+
+        // For 1D: find the most recent snapshot NOT from today
+        // For other timeframes: find the oldest snapshot (period start)
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+        PortfolioSnapshotModel baselineSnap;
+
+        if (TimeInterval.ONE_DAY.equals(interval)) {
+            baselineSnap = history.stream()
+                .filter(s -> s.getSnapshotDate() != null && !today.equals(s.getSnapshotDate()))
+                .max(Comparator.comparing(PortfolioSnapshotModel::getSnapshotDate))
+                .orElse(null);
+        } else {
+            baselineSnap = history.stream()
+                .filter(s -> s.getSnapshotDate() != null)
+                .min(Comparator.comparing(PortfolioSnapshotModel::getSnapshotDate))
+                .orElse(null);
+        }
+
+        if (baselineSnap == null) return;
+
+        double baselineWealth = (portfolioId != null && !portfolioId.isEmpty())
+            ? (baselineSnap.getPortfolios().stream()
+                  .filter(p -> portfolioId.equals(p.getPortfolioId()))
+                  .mapToDouble(p -> p.getClose() != null ? p.getClose() : 0.0).sum())
+            : (baselineSnap.getTotalUserWealth() != null ? baselineSnap.getTotalUserWealth() : 0.0);
+
+        if (baselineWealth <= 0) return;
+
+        double currentValue = summary.getCurrentValue() != null ? summary.getCurrentValue() : 0.0;
+        double gainLoss = currentValue - baselineWealth;
+        double gainLossPct = (gainLoss / baselineWealth) * 100.0;
+
+        summary.setTotalGainLoss(gainLoss);
+        summary.setTotalGainLossPercentage(gainLossPct);
     }
 }
