@@ -67,6 +67,12 @@ public class PortfolioUpdateConsumerService {
 
     // ── Kafka listener ───────────────────────────────────────────────────────
 
+    @jakarta.annotation.PostConstruct
+    public void init() {
+        objectMapper.registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
+        objectMapper.configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    }
+
     @KafkaListener(
             topics          = "${app.kafka.portfolio.topic}",
             groupId         = "${app.kafka.portfolio.consumer.id}",
@@ -86,16 +92,18 @@ public class PortfolioUpdateConsumerService {
             com.fasterxml.jackson.databind.JsonNode rootNode = objectMapper.readTree(message);
 
             // ── Determine message type ────────────────────────────────────────
-            // PortfolioUpdateEvent (Document Parser) always carries a 'portfolioId' field.
-            // TradePortfolioSyncEvent (Trade Management) carries the portfolio id in 'id'.
-            if (rootNode.has("portfolioId")) {
+            // PortfolioUpdateEvent (Document Parser) carries 'portfolioId' or 'equities'.
+            // TradePortfolioSyncEvent (Trade Management) carries portfolio id in top-level 'id'.
+            if (rootNode.has("portfolioId") || rootNode.has("equities")) {
                 // ── Document-parser path ──────────────────────────────────────
                 PortfolioUpdateEvent event = objectMapper.treeToValue(rootNode, PortfolioUpdateEvent.class);
-                log.info("Parsed PortfolioUpdateEvent for portfolioId={}", event.getPortfolioId());
+                String pid = event.getPortfolioId() != null ? event.getPortfolioId()
+                        : (event.getId() != null ? event.getId().toString() : "doc-" + offset);
+                log.info("Parsed PortfolioUpdateEvent for portfolioId={} userId={}", pid, event.getUserId());
 
-                String dedupKey = buildDedupKey("DOC", event.getPortfolioId(), offset, partition);
+                String dedupKey = buildDedupKey("DOC", pid, offset, partition);
                 if (isDuplicate(dedupKey)) {
-                    log.warn("[DEDUP] Skipping already-processed Document message: portfolioId={} offset={}", event.getPortfolioId(), offset);
+                    log.warn("[DEDUP] Skipping already-processed Document message: portfolioId={} offset={}", pid, offset);
                     acknowledgment.acknowledge();
                     return;
                 }
