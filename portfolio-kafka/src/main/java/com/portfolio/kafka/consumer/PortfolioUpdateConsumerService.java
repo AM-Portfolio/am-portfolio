@@ -67,6 +67,12 @@ public class PortfolioUpdateConsumerService {
 
     // ── Kafka listener ───────────────────────────────────────────────────────
 
+    @jakarta.annotation.PostConstruct
+    public void init() {
+        objectMapper.registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
+        objectMapper.configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    }
+
     @KafkaListener(
             topics          = "${app.kafka.portfolio.topic}",
             groupId         = "${app.kafka.portfolio.consumer.id}",
@@ -116,12 +122,15 @@ public class PortfolioUpdateConsumerService {
 
             } else {
                 // ── Document-parser path ──────────────────────────────────────
+                // PortfolioUpdateEvent (Document Parser) carries 'portfolioId' or 'equities'.
                 PortfolioUpdateEvent event = objectMapper.treeToValue(rootNode, PortfolioUpdateEvent.class);
-                log.info("Parsed PortfolioUpdateEvent for portfolioId={}", event.getPortfolioId());
+                String pid = event.getPortfolioId() != null ? event.getPortfolioId()
+                        : (event.getId() != null ? event.getId().toString() : "doc-" + offset);
+                log.info("Parsed PortfolioUpdateEvent for portfolioId={} userId={}", pid, event.getUserId());
 
-                String dedupKey = buildDedupKey("DOC", event.getPortfolioId(), offset, partition);
+                String dedupKey = buildDedupKey("DOC", pid, offset, partition);
                 if (isDuplicate(dedupKey)) {
-                    log.warn("[DEDUP] Skipping already-processed Document message: portfolioId={} offset={}", event.getPortfolioId(), offset);
+                    log.warn("[DEDUP] Skipping already-processed Document message: portfolioId={} offset={}", pid, offset);
                     acknowledgment.acknowledge();
                     return;
                 }
