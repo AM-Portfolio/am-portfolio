@@ -31,16 +31,19 @@ public class PortfolioCalculator {
     private final MarketDataService marketDataService;
     private final MarketCapMongoService marketCapMongoService;
     private final StockPriceMongoService stockPriceMongoService;
+    private final com.portfolio.basket.client.EtfApiClient etfApiClient;
     private final java.util.concurrent.Executor taskExecutor;
 
     public PortfolioCalculator(
             MarketDataService marketDataService,
             MarketCapMongoService marketCapMongoService,
             StockPriceMongoService stockPriceMongoService,
+            com.portfolio.basket.client.EtfApiClient etfApiClient,
             @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
         this.marketDataService = marketDataService;
         this.marketCapMongoService = marketCapMongoService;
         this.stockPriceMongoService = stockPriceMongoService;
+        this.etfApiClient = etfApiClient;
         this.taskExecutor = taskExecutor;
     }
 
@@ -181,7 +184,7 @@ public class PortfolioCalculator {
 
         // Fallback for ETFs if sector is missing
         if (holding.getSector() == null || holding.getSector().trim().isEmpty() || holding.getSector().equalsIgnoreCase("Unknown")) {
-            if (isEtf(symbol)) {
+            if (etfApiClient.isEtf(symbol)) {
                 holding.setSector("Exchange Traded Funds (ETFs)");
                 if (holding.getIndustry() == null || holding.getIndustry().trim().isEmpty() || holding.getIndustry().equalsIgnoreCase("Unknown")) {
                     holding.setIndustry("ETFs & Index Funds");
@@ -386,16 +389,7 @@ public class PortfolioCalculator {
         return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).doubleValue();
     }
 
-    private static final java.util.regex.Pattern ETF_PATTERN = java.util.regex.Pattern.compile(
-        ".*(BEES|IETF|ETF|INDEX|INVIT|REIT)$|^(MON100|MAFANG|SMALLCAP|MID150|GOLDBEES|SILVERBEES|JUNIORBEES|LIQUIDBEES|NIFTYBEES|BANKBEES|AUTOBEES|PHARMABEES|CPSEETF|ITBEES|METALIETF|HDFCSML250|MOM100|MOM30|ALPHA50).*",
-        java.util.regex.Pattern.CASE_INSENSITIVE
-    );
-
-    public static boolean isEtf(String symbol) {
-        if (symbol == null) return false;
-        String clean = symbol.trim().toUpperCase();
-        return ETF_PATTERN.matcher(clean).matches();
-    }
+    // Removed static isEtf and ETF_PATTERN in favor of dynamic EtfApiClient checks
 
     private String cleanSymbol(String symbol) {
         if (symbol == null || symbol.isEmpty()) {

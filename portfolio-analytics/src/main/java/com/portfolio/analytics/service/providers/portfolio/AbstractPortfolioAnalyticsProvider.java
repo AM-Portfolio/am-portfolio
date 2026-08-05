@@ -158,6 +158,19 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
     }
     
     /**
+     * Retrieves security details, preferring the prefetched map in the request if available.
+     * @param symbols List of symbols
+     * @param request The advanced analytics request
+     * @return Map of symbol to SecurityModel
+     */
+    protected Map<String, com.am.common.amcommondata.model.security.SecurityModel> getSecurityDetails(List<String> symbols, AdvancedAnalyticsRequest request) {
+        if (request != null && request.getPrefetchedSecurityDetails() != null) {
+            return request.getPrefetchedSecurityDetails();
+        }
+        return securityDetailsService.getSecurityDetails(symbols);
+    }
+
+    /**
      * Functional interface for processing portfolio data
      * @param <R> The type of result to return
      */

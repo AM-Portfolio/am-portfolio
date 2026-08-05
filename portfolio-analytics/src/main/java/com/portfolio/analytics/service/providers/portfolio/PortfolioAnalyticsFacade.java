@@ -43,6 +43,7 @@ public class PortfolioAnalyticsFacade {
     private final Executor taskExecutor;
     private final PortfolioService portfolioService;
     private final MarketDataService marketDataService;
+    private final com.portfolio.analytics.service.utils.SecurityDetailsService securityDetailsService;
     private final Map<String, CachedResponse> fastCache = new ConcurrentHashMap<>();
 
     private static class CachedResponse {
@@ -55,18 +56,20 @@ public class PortfolioAnalyticsFacade {
         }
 
         boolean isExpired() {
-            return System.currentTimeMillis() - createdAt > 15_000; // 15s TTL
+            return System.currentTimeMillis() - createdAt > 60_000; // 60s TTL for L1 Cache
         }
     }
 
     public PortfolioAnalyticsFacade(AnalyticsFactory analyticsFactory, 
                                     @Qualifier("taskExecutor") Executor taskExecutor,
                                     PortfolioService portfolioService,
-                                    MarketDataService marketDataService) {
+                                    MarketDataService marketDataService,
+                                    com.portfolio.analytics.service.utils.SecurityDetailsService securityDetailsService) {
         this.analyticsFactory = analyticsFactory;
         this.taskExecutor = taskExecutor;
         this.portfolioService = portfolioService;
         this.marketDataService = marketDataService;
+        this.securityDetailsService = securityDetailsService;
     }
     
     /**
@@ -192,6 +195,12 @@ public class PortfolioAnalyticsFacade {
                             }
                             request.setPrefetchedMarketData(normalizedPrefetch);
                         }
+
+                        // --- PREFETCH SECURITY DETAILS ONCE ---
+                        log.info("[Optimization] Prefetching security details once for {} symbols", symbols.size());
+                        Map<String, com.am.common.amcommondata.model.security.SecurityModel> prefetchedSecurities = 
+                            securityDetailsService.getSecurityDetails(symbols);
+                        request.setPrefetchedSecurityDetails(prefetchedSecurities);
                     }
                 }
             }

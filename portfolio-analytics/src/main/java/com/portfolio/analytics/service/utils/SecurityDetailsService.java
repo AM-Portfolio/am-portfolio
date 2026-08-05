@@ -31,6 +31,7 @@ import java.util.stream.Collectors;
 public class SecurityDetailsService {
     private final SecurityService securityService;
     private final MarketCapMongoService marketCapMongoService;
+    private final com.portfolio.basket.client.EtfApiClient etfApiClient;
   
     /**
      * Retrieves security details for a list of symbols with caching and fallback mechanisms
@@ -190,32 +191,21 @@ public class SecurityDetailsService {
         return resultMap;
     }
     
-    private static final java.util.regex.Pattern ETF_PATTERN = java.util.regex.Pattern.compile(
-        ".*(BEES|IETF|ETF|INDEX|INVIT|REIT)$|^(MON100|MAFANG|SMALLCAP|MID150|GOLDBEES|SILVERBEES|JUNIORBEES|LIQUIDBEES|NIFTYBEES|BANKBEES|AUTOBEES|PHARMABEES|CPSEETF|ITBEES|METALIETF|HDFCSML250|MOM100|MOM30|ALPHA50).*",
-        java.util.regex.Pattern.CASE_INSENSITIVE
-    );
-
-    public static boolean isEtf(String symbol) {
-        if (symbol == null) return false;
-        String clean = symbol.trim().toUpperCase();
-        return ETF_PATTERN.matcher(clean).matches();
-    }
-
-    public static String resolveSector(String symbol, String rawSector) {
+    public String resolveSector(String symbol, String rawSector) {
         if (rawSector != null && !rawSector.trim().isEmpty() && !rawSector.trim().equals("-") && !rawSector.trim().equalsIgnoreCase("Unknown")) {
             return rawSector.trim();
         }
-        if (isEtf(symbol)) {
+        if (etfApiClient.isEtf(symbol)) {
             return "Exchange Traded Funds (ETFs)";
         }
         return "Unknown";
     }
 
-    public static String resolveIndustry(String symbol, String rawIndustry) {
+    public String resolveIndustry(String symbol, String rawIndustry) {
         if (rawIndustry != null && !rawIndustry.trim().isEmpty() && !rawIndustry.trim().equals("-") && !rawIndustry.trim().equalsIgnoreCase("Unknown")) {
             return rawIndustry.trim();
         }
-        if (isEtf(symbol)) {
+        if (etfApiClient.isEtf(symbol)) {
             return "ETFs & Index Funds";
         }
         return "Unknown";
@@ -258,6 +248,13 @@ public class SecurityDetailsService {
         
         log.info("Grouping {} symbols by sector", symbols.size());
         Map<String, SecurityModel> securityDetails = getSecurityDetails(symbols);
+        return groupSymbolsBySector(symbols, securityDetails);
+    }
+    
+    public Map<String, List<String>> groupSymbolsBySector(List<String> symbols, Map<String, SecurityModel> securityDetails) {
+        if (symbols == null || symbols.isEmpty()) {
+            return Collections.emptyMap();
+        }
         
         Map<String, List<String>> sectorToSymbols = new HashMap<>();
         
@@ -293,6 +290,13 @@ public class SecurityDetailsService {
         
         log.info("Grouping {} symbols by industry", symbols.size());
         Map<String, SecurityModel> securityDetails = getSecurityDetails(symbols);
+        return groupSymbolsByIndustry(symbols, securityDetails);
+    }
+    
+    public Map<String, List<String>> groupSymbolsByIndustry(List<String> symbols, Map<String, SecurityModel> securityDetails) {
+        if (symbols == null || symbols.isEmpty()) {
+            return Collections.emptyMap();
+        }
         
         Map<String, List<String>> industryToSymbols = new HashMap<>();
         
@@ -326,8 +330,15 @@ public class SecurityDetailsService {
             return Collections.emptyMap();
         }
         
-        log.info("Grouping {} symbols by market type", symbols.size());
+        log.info("Grouping {} symbols by market cap type", symbols.size());
         Map<String, SecurityModel> securityDetails = getSecurityDetails(symbols);
+        return groupSymbolsByMarketType(symbols, securityDetails);
+    }
+    
+    public Map<String, List<String>> groupSymbolsByMarketType(List<String> symbols, Map<String, SecurityModel> securityDetails) {
+        if (symbols == null || symbols.isEmpty()) {
+            return Collections.emptyMap();
+        }
         
         Map<String, List<String>> marketTypeToSymbols = new HashMap<>();
         

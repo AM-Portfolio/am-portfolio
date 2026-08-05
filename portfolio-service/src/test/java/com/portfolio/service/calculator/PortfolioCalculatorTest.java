@@ -38,6 +38,9 @@ class PortfolioCalculatorTest {
     @Mock
     private StockPriceMongoService stockPriceMongoService;
 
+    @Mock
+    private com.portfolio.basket.client.EtfApiClient etfApiClient;
+
     private PortfolioCalculator portfolioCalculator;
 
     private EquityHoldings holding;
@@ -45,7 +48,7 @@ class PortfolioCalculatorTest {
 
     @BeforeEach
     void setUp() {
-        portfolioCalculator = new PortfolioCalculator(marketDataService, marketCapMongoService, stockPriceMongoService, Runnable::run);
+        portfolioCalculator = new PortfolioCalculator(marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run);
         holding = new EquityHoldings();
         holding.setSymbol("TCS");
         holding.setQuantity(10.0);

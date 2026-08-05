@@ -59,9 +59,11 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             request,
             this::createEmptyResult,
             (portfolio, portfolioSymbols, marketData) -> {
-        
                 // Create a map of symbol to holding quantity
                 Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
+                
+                // Retrieve market cap and sector data using the new helper
+                Map<String, com.am.common.amcommondata.model.security.SecurityModel> securityDetails = getSecurityDetails(portfolioSymbols, request);
                 
                 // Group stocks by sector directly from portfolio data
                 Map<String, List<String>> sectorToStocks = new HashMap<>();

@@ -61,8 +61,9 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
                 // Create a map of symbol to holding quantity
                 Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
                 
-                // Use SecurityDetailsService to group symbols by market cap type
-                Map<String, List<String>> marketCapGroups = securityDetailsService.groupSymbolsByMarketType(portfolioSymbols);
+                // Use SecurityDetailsService to group symbols by market cap type using prefetched details
+                Map<String, com.am.common.amcommondata.model.security.SecurityModel> prefetchedSecurities = getSecurityDetails(portfolioSymbols, request);
+                Map<String, List<String>> marketCapGroups = securityDetailsService.groupSymbolsByMarketType(portfolioSymbols, prefetchedSecurities);
                 log.info("Market cap groups for portfolio {}: {}", portfolioId, marketCapGroups.keySet());
                 
                 // Create a mapping for market cap type enum to segment name
