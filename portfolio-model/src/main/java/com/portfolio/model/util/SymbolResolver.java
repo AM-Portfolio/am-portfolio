@@ -8,8 +8,8 @@ public class SymbolResolver {
         Set.of(
             // Groww, ICICI
             ".NS", ".BO", ".BSE", ".NFO", ".CDS",
-            // Zerodha, AngelOne, Dhan, Paytm
-            "-EQ", "-BE", "-SM", "-ST", "-BZ", "-RR", "-Z",
+            // Zerodha, AngelOne, Dhan, Paytm, ETF
+            "-EQ", "-BE", "-E", "-SM", "-ST", "-BZ", "-RR", "-Z",
             // ICICI Direct, AngelOne alternate
             " EQ", " BE", "_EQ", "_BE"
         );
@@ -20,6 +20,12 @@ public class SymbolResolver {
             "NSE_EQ|", "BSE_EQ|", "NSE_EQ:", "BSE_EQ:",
             "NSE_", "BSE_"
         );
+    private static final java.util.Map<String, String> RENAMED_TICKERS = java.util.Map.of(
+        "ZOMATO", "ETERNAL",
+        "HDFC", "HDFCBANK",
+        "MINDTREE", "LTIM",
+        "CADILAHC", "ZYDUSLIFE"
+    );
 
     /**
      * Normalizes a market data symbol to its base ticker by stripping known exchange prefixes and suffixes.
@@ -73,6 +79,6 @@ public class SymbolResolver {
             }
         } while (suffixStripped);
 
-        return cleaned;
+        return RENAMED_TICKERS.getOrDefault(cleaned, cleaned);
     }
 }

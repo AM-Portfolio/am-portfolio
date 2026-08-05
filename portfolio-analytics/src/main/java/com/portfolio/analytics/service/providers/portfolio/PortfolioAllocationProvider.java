@@ -57,8 +57,9 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
                 Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
                 
                 // Group stocks by sector and industry using central SecurityDetailsService
-                Map<String, List<String>> sectorToStocks = securityDetailsService.groupSymbolsBySector(portfolioSymbols);
-                Map<String, List<String>> industryToStocks = securityDetailsService.groupSymbolsByIndustry(portfolioSymbols);
+                Map<String, com.am.common.amcommondata.model.security.SecurityModel> prefetchedSecurities = getSecurityDetails(portfolioSymbols, request);
+                Map<String, List<String>> sectorToStocks = securityDetailsService.groupSymbolsBySector(portfolioSymbols, prefetchedSecurities);
+                Map<String, List<String>> industryToStocks = securityDetailsService.groupSymbolsByIndustry(portfolioSymbols, prefetchedSecurities);
                 
                 log.debug("Sector groups for portfolio {}: {}", portfolioId, sectorToStocks.keySet());
                 log.debug("Industry groups for portfolio {}: {}", portfolioId, industryToStocks.keySet());

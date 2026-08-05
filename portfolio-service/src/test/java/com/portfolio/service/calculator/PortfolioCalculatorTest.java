@@ -38,6 +38,9 @@ class PortfolioCalculatorTest {
     @Mock
     private StockPriceMongoService stockPriceMongoService;
 
+    @Mock
+    private com.portfolio.basket.client.EtfApiClient etfApiClient;
+
     private PortfolioCalculator portfolioCalculator;
 
     private EquityHoldings holding;
@@ -45,7 +48,7 @@ class PortfolioCalculatorTest {
 
     @BeforeEach
     void setUp() {
-        portfolioCalculator = new PortfolioCalculator(marketDataService, marketCapMongoService, stockPriceMongoService, Runnable::run);
+        portfolioCalculator = new PortfolioCalculator(marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run);
         holding = new EquityHoldings();
         holding.setSymbol("TCS");
         holding.setQuantity(10.0);
@@ -97,25 +100,27 @@ class PortfolioCalculatorTest {
     }
 
     @Test
-    void enrichHoldings_LocalDevFallback() {
+    void enrichHoldings_CostBasisFallback() {
         when(marketDataService.getMarketData(anyList())).thenReturn(Collections.emptyMap());
         when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
         lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
 
         List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
 
-        // Fallback was removed; currentPrice is null if missing from API
-        assertNull(results.get(0).getCurrentPrice());
+        // 3-Tier fallback: falls back to averageBuyingPrice (3000.0) to prevent -100% dip
+        assertEquals(3000.0, results.get(0).getCurrentPrice());
+        assertEquals(30000.0, results.get(0).getCurrentValue());
+        assertEquals(0.0, results.get(0).getGainLoss());
     }
 
     @Test
     void enrichHolding_shouldNotCalculateDailyPnL_whenPreviousCloseIsMissing() {
-        // Given: Market data with no previousClose
+        // Given: Market data with no previousClose and no open price
         MarketData data = MarketData.builder()
             .symbol("TCS")
             .lastPrice(3300.0)
-            .ohlc(OhlcData.builder().open(3200.0).close(3250.0).build())
-            // NO previousClose set
+            .ohlc(OhlcData.builder().close(3250.0).build())
+            // NO previousClose or open set
             .build();
         when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", data));
         lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
