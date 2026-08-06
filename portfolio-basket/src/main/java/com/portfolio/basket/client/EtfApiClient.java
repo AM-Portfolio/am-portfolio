@@ -54,6 +54,7 @@ public class EtfApiClient {
     private RestTemplate etfRestTemplate;
     private RestTemplate marketRestTemplate;
     private final Map<String, EtfData> etfCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, Boolean> etfSymbolCache = new java.util.concurrent.ConcurrentHashMap<>();
 
     @PostConstruct
     void initRestTemplates() {
@@ -110,6 +111,41 @@ public class EtfApiClient {
             log.debug("Stack Trace:", e);
         }
         return null;
+    }
+
+    /**
+     * Checks if a symbol is an ETF dynamically using am-parser search.
+     * Uses an in-memory cache to ensure O(1) lookups after initial fetch.
+     */
+    public boolean isEtf(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            return false;
+        }
+        String upperSymbol = symbol.toUpperCase(Locale.ROOT).trim();
+        if (etfSymbolCache.containsKey(upperSymbol)) {
+            return etfSymbolCache.get(upperSymbol);
+        }
+        
+        try {
+            String encoded = URLEncoder.encode(upperSymbol, StandardCharsets.UTF_8);
+            String searchUrl = apiUrl + "/v1/etf/search?query=" + encoded + "&limit=10";
+            EtfSearchResponse response = etfRestTemplate.getForObject(searchUrl, EtfSearchResponse.class);
+            
+            boolean isEtf = false;
+            if (response != null && response.getEtfs() != null) {
+                for (EtfInfo etf : response.getEtfs()) {
+                    if (upperSymbol.equalsIgnoreCase(etf.getSymbol())) {
+                        isEtf = true;
+                        break;
+                    }
+                }
+            }
+            etfSymbolCache.put(upperSymbol, isEtf);
+            return isEtf;
+        } catch (Exception e) {
+            log.warn("Failed to check if {} is an ETF via am-parser: {}. Falling back to naming conventions.", symbol, e.getMessage());
+            return upperSymbol.endsWith("BEES") || upperSymbol.endsWith("ETF");
+        }
     }
 
     /**

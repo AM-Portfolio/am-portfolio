@@ -1,8 +1,12 @@
 package com.portfolio.analytics.service.utils;
 
 import com.am.common.amcommondata.model.MarketCapType;
+import com.am.common.amcommondata.model.security.SecurityKeyModel;
+import com.am.common.amcommondata.model.security.SecurityMetadataModel;
 import com.am.common.amcommondata.model.security.SecurityModel;
 import com.am.common.amcommondata.service.SecurityService;
+import com.am.common.amcommondata.service.marketcap.MarketCapMongoService;
+import com.am.common.amcommondata.document.marketcap.MarketCapDocument;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
@@ -26,6 +30,8 @@ import java.util.stream.Collectors;
 @Slf4j
 public class SecurityDetailsService {
     private final SecurityService securityService;
+    private final MarketCapMongoService marketCapMongoService;
+    private final com.portfolio.basket.client.EtfApiClient etfApiClient;
   
     /**
      * Retrieves security details for a list of symbols with caching and fallback mechanisms
@@ -48,18 +54,83 @@ public class SecurityDetailsService {
             List<SecurityModel> securityModels = securityService.findBySymbols(symbols);
             
             // Convert list to map using the exact symbol as key
-            Map<String, SecurityModel> resultMap = securityModels.stream()
-                    .collect(Collectors.toMap(
-                            model -> model.getKey().getSymbol(),
-                            Function.identity(),    
-                            (existing, replacement) -> {
-                                boolean existingValid = existing.getMetadata() != null
-                                    && existing.getMetadata().getSector() != null
-                                    && !existing.getMetadata().getSector().trim().isEmpty()
-                                    && !existing.getMetadata().getSector().trim().equals("-");
-                                return existingValid ? existing : replacement;
+            Map<String, SecurityModel> resultMap = new HashMap<>();
+            if (securityModels != null) {
+                for (SecurityModel model : securityModels) {
+                    if (model != null && model.getKey() != null && model.getKey().getSymbol() != null) {
+                        String sym = model.getKey().getSymbol();
+                        boolean currentValid = model.getMetadata() != null
+                                && model.getMetadata().getSector() != null
+                                && !model.getMetadata().getSector().trim().isEmpty()
+                                && !model.getMetadata().getSector().trim().equals("-");
+                        if (!resultMap.containsKey(sym) || currentValid) {
+                            resultMap.put(sym, model);
+                        }
+                    }
+                }
+            }
+
+            // Identify symbols that are missing or have missing/invalid sector metadata
+            List<String> missingOrIncomplete = symbols.stream()
+                    .filter(s -> {
+                        SecurityModel sm = resultMap.get(s);
+                        return sm == null || sm.getMetadata() == null || sm.getMetadata().getSector() == null
+                                || sm.getMetadata().getSector().trim().isEmpty()
+                                || sm.getMetadata().getSector().trim().equals("-");
+                    })
+                    .collect(Collectors.toList());
+
+            if (!missingOrIncomplete.isEmpty() && marketCapMongoService != null) {
+                try {
+                    Map<String, MarketCapDocument> marketCapDocs = marketCapMongoService.getBySymbols(missingOrIncomplete);
+                    if (marketCapDocs != null && !marketCapDocs.isEmpty()) {
+                        for (Map.Entry<String, MarketCapDocument> entry : marketCapDocs.entrySet()) {
+                            String sym = entry.getKey();
+                            MarketCapDocument doc = entry.getValue();
+                            if (doc != null) {
+                                SecurityModel existing = resultMap.get(sym);
+                                if (existing == null) {
+                                    MarketCapType mcType = parseMarketCapType(doc.getMarketCapType());
+                                    SecurityMetadataModel meta = SecurityMetadataModel.builder()
+                                            .securityName(doc.getCompanyName())
+                                            .sector(doc.getSector())
+                                            .industry(doc.getIndustry())
+                                            .marketCapType(mcType)
+                                            .marketCapValue(doc.getMarketCapValue())
+                                            .build();
+                                    SecurityModel synthetic = SecurityModel.builder()
+                                            .key(SecurityKeyModel.builder().symbol(sym).build())
+                                            .metadata(meta)
+                                            .build();
+                                    resultMap.put(sym, synthetic);
+                                } else {
+                                    if (existing.getMetadata() == null) {
+                                        existing.setMetadata(SecurityMetadataModel.builder().build());
+                                    }
+                                    SecurityMetadataModel meta = existing.getMetadata();
+                                    if ((meta.getSector() == null || meta.getSector().trim().isEmpty() || meta.getSector().trim().equals("-")) && doc.getSector() != null) {
+                                        meta.setSector(doc.getSector());
+                                    }
+                                    if ((meta.getIndustry() == null || meta.getIndustry().trim().isEmpty() || meta.getIndustry().trim().equals("-")) && doc.getIndustry() != null) {
+                                        meta.setIndustry(doc.getIndustry());
+                                    }
+                                    if (meta.getMarketCapType() == null && doc.getMarketCapType() != null) {
+                                        meta.setMarketCapType(parseMarketCapType(doc.getMarketCapType()));
+                                    }
+                                    if (meta.getMarketCapValue() == null && doc.getMarketCapValue() != null) {
+                                        meta.setMarketCapValue(doc.getMarketCapValue());
+                                    }
+                                    if (meta.getSecurityName() == null && doc.getCompanyName() != null) {
+                                        meta.setSecurityName(doc.getCompanyName());
+                                    }
+                                }
                             }
-                    ));
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("Error fetching fallback market cap details for symbols: {}", missingOrIncomplete, e);
+                }
+            }
             
             log.info("Successfully retrieved {} security models out of {} requested symbols", 
                     resultMap.size(), symbols.size());
@@ -78,6 +149,18 @@ public class SecurityDetailsService {
             
             // Fallback: Try to retrieve symbols one by one to get partial results
             return retrieveWithFallback(symbols);
+        }
+    }
+
+    private MarketCapType parseMarketCapType(String typeStr) {
+        if (typeStr == null || typeStr.trim().isEmpty()) {
+            return MarketCapType.MICRO_CAP;
+        }
+        String normalized = typeStr.trim().toUpperCase().replace(" ", "_");
+        try {
+            return MarketCapType.valueOf(normalized);
+        } catch (Exception e) {
+            return MarketCapType.MICRO_CAP;
         }
     }
 
@@ -108,6 +191,26 @@ public class SecurityDetailsService {
         return resultMap;
     }
     
+    public String resolveSector(String symbol, String rawSector) {
+        if (rawSector != null && !rawSector.trim().isEmpty() && !rawSector.trim().equals("-") && !rawSector.trim().equalsIgnoreCase("Unknown")) {
+            return rawSector.trim();
+        }
+        if (etfApiClient.isEtf(symbol)) {
+            return "Exchange Traded Funds (ETFs)";
+        }
+        return "Unknown";
+    }
+
+    public String resolveIndustry(String symbol, String rawIndustry) {
+        if (rawIndustry != null && !rawIndustry.trim().isEmpty() && !rawIndustry.trim().equals("-") && !rawIndustry.trim().equalsIgnoreCase("Unknown")) {
+            return rawIndustry.trim();
+        }
+        if (etfApiClient.isEtf(symbol)) {
+            return "ETFs & Index Funds";
+        }
+        return "Unknown";
+    }
+
     /**
      * Gets a map of symbols to their sector names
      * 
@@ -121,8 +224,9 @@ public class SecurityDetailsService {
         
         for (String symbol : symbols) {
             SecurityModel security = securityDetails.get(symbol);
-            String sector = (security != null && security.getMetadata() != null && security.getMetadata().getSector() != null) ? 
-                    security.getMetadata().getSector() : "Unknown";
+            String rawSector = (security != null && security.getMetadata() != null && security.getMetadata().getSector() != null) ? 
+                    security.getMetadata().getSector() : null;
+            String sector = resolveSector(symbol, rawSector);
             sectorMap.put(symbol, sector);
         }
         
@@ -144,6 +248,13 @@ public class SecurityDetailsService {
         
         log.info("Grouping {} symbols by sector", symbols.size());
         Map<String, SecurityModel> securityDetails = getSecurityDetails(symbols);
+        return groupSymbolsBySector(symbols, securityDetails);
+    }
+    
+    public Map<String, List<String>> groupSymbolsBySector(List<String> symbols, Map<String, SecurityModel> securityDetails) {
+        if (symbols == null || symbols.isEmpty()) {
+            return Collections.emptyMap();
+        }
         
         Map<String, List<String>> sectorToSymbols = new HashMap<>();
         
@@ -151,8 +262,7 @@ public class SecurityDetailsService {
             SecurityModel securityModel = securityDetails.get(symbol);
             String rawSector = (securityModel != null && securityModel.getMetadata() != null)
                 ? securityModel.getMetadata().getSector() : null;
-            String sector = (rawSector != null && !rawSector.trim().isEmpty() && !rawSector.trim().equals("-"))
-                ? rawSector.trim() : "Unknown";
+            String sector = resolveSector(symbol, rawSector);
             
             sectorToSymbols.computeIfAbsent(sector, k -> new ArrayList<>()).add(symbol);
         }
@@ -180,6 +290,13 @@ public class SecurityDetailsService {
         
         log.info("Grouping {} symbols by industry", symbols.size());
         Map<String, SecurityModel> securityDetails = getSecurityDetails(symbols);
+        return groupSymbolsByIndustry(symbols, securityDetails);
+    }
+    
+    public Map<String, List<String>> groupSymbolsByIndustry(List<String> symbols, Map<String, SecurityModel> securityDetails) {
+        if (symbols == null || symbols.isEmpty()) {
+            return Collections.emptyMap();
+        }
         
         Map<String, List<String>> industryToSymbols = new HashMap<>();
         
@@ -187,8 +304,7 @@ public class SecurityDetailsService {
             SecurityModel securityModel = securityDetails.get(symbol);
             String rawIndustry = (securityModel != null && securityModel.getMetadata() != null)
                 ? securityModel.getMetadata().getIndustry() : null;
-            String industry = (rawIndustry != null && !rawIndustry.trim().isEmpty() && !rawIndustry.trim().equals("-"))
-                ? rawIndustry.trim() : "Unknown";
+            String industry = resolveIndustry(symbol, rawIndustry);
             
             industryToSymbols.computeIfAbsent(industry, k -> new ArrayList<>()).add(symbol);
         }
@@ -214,8 +330,15 @@ public class SecurityDetailsService {
             return Collections.emptyMap();
         }
         
-        log.info("Grouping {} symbols by market type", symbols.size());
+        log.info("Grouping {} symbols by market cap type", symbols.size());
         Map<String, SecurityModel> securityDetails = getSecurityDetails(symbols);
+        return groupSymbolsByMarketType(symbols, securityDetails);
+    }
+    
+    public Map<String, List<String>> groupSymbolsByMarketType(List<String> symbols, Map<String, SecurityModel> securityDetails) {
+        if (symbols == null || symbols.isEmpty()) {
+            return Collections.emptyMap();
+        }
         
         Map<String, List<String>> marketTypeToSymbols = new HashMap<>();
         

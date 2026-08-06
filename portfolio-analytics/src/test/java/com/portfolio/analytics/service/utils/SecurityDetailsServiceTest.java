@@ -5,6 +5,7 @@ import com.am.common.amcommondata.model.security.SecurityKeyModel;
 import com.am.common.amcommondata.model.security.SecurityMetadataModel;
 import com.am.common.amcommondata.model.security.SecurityModel;
 import com.am.common.amcommondata.service.SecurityService;
+import com.am.common.amcommondata.service.marketcap.MarketCapMongoService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -20,6 +21,7 @@ import static org.mockito.Mockito.*;
 class SecurityDetailsServiceTest {
 
     @Mock private SecurityService securityService;
+    @Mock private MarketCapMongoService marketCapMongoService;
     @InjectMocks private SecurityDetailsService service;
 
     private SecurityModel buildSecurity(String symbol, String sector, String industry, MarketCapType cap) {

@@ -107,7 +107,7 @@ public class PortfolioIntradayService {
         // ── STEP 2: Get holdings from the snapshot document (most reliable) ──
         Map<String, Double> symbolQty = new HashMap<>();
 
-        if (baselineSnap.getPortfolios() != null) {
+        if (baselineSnap != null && baselineSnap.getPortfolios() != null) {
             for (PortfolioSnapshotEntryModel entry : baselineSnap.getPortfolios()) {
                 // If specific portfolio filter, skip non-matching
                 if (portfolioId != null && !portfolioId.equals(entry.getPortfolioId())) {
@@ -126,7 +126,7 @@ public class PortfolioIntradayService {
             if (portfolioId != null) {
                 // For a single portfolio, recompute the baseline from its specific components
                 baselineWealth = 0.0;
-                if (baselineSnap.getPortfolios() != null) {
+                if (baselineSnap != null && baselineSnap.getPortfolios() != null) {
                     for (PortfolioSnapshotEntryModel entry : baselineSnap.getPortfolios()) {
                         if (portfolioId.equals(entry.getPortfolioId())) {
                             baselineWealth = entry.getClose() != null ? entry.getClose() : 0.0;
@@ -159,7 +159,7 @@ public class PortfolioIntradayService {
 
         // Compute missing asset value (Mutual Funds / Bonds) directly from yesterday's snapshot
         double baselineEquityWealth = 0.0;
-        if (baselineSnap.getPortfolios() != null) {
+        if (baselineSnap != null && baselineSnap.getPortfolios() != null) {
             for (PortfolioSnapshotEntryModel entry : baselineSnap.getPortfolios()) {
                 if (portfolioId == null || portfolioId.equals(entry.getPortfolioId())) {
                     baselineEquityWealth += entry.getClose() != null ? entry.getClose() : 0.0;

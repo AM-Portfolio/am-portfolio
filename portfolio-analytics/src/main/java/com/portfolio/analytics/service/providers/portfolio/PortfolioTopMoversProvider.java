@@ -63,6 +63,8 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
                 .prefetchAttempted(request.isPrefetchAttempted())
                 // Intentionally omit prefetchedMarketData
                 .prefetchedMarketData(null)
+                // Copy prefetched security details to avoid redundant lookups
+                .prefetchedSecurityDetails(request.getPrefetchedSecurityDetails())
                 // Copy timeframe data
                 .fromDate(request.getFromDate())
                 .toDate(request.getToDate())
