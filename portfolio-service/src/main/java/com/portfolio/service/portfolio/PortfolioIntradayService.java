@@ -79,110 +79,68 @@ public class PortfolioIntradayService {
             }
         }
 
-        // ── STEP 1: Get yesterday's EOD snapshot ──────────────────────────────
-        // Fetch last 7 days to handle weekends & holidays gracefully
-        List<PortfolioSnapshotModel> recentSnaps = snapshotService.getHistory(userId, portfolioId, "1W");
+        // ── STEP 1 & 2: Get LIVE Holdings and compute baseline ──────────────
+        // For Intraday (1D), the portfolio is exactly what the user holds right now.
+        PortfolioHoldings liveHoldings = (portfolioId == null || portfolioId.trim().isEmpty()) 
+            ? holdingsService.getPortfolioHoldings(userId, TimeInterval.ONE_DAY, true)
+            : holdingsService.getPortfolioHoldings(userId, portfolioId, TimeInterval.ONE_DAY, true);
 
-        // Find the MOST RECENT snapshot that is NOT today
-        PortfolioSnapshotModel baselineSnap = recentSnaps.stream()
-                .filter(s -> s.getSnapshotDate() != null && !today.equals(s.getSnapshotDate()))
-                .max(Comparator.comparing(PortfolioSnapshotModel::getSnapshotDate))
-                .orElse(null);
-
-        double baselineWealth;
-        if (baselineSnap == null) {
-            log.warn("[Intraday] No snapshot found for user={}, using portfolio totalValue as baseline", userId);
-            List<PortfolioDocument> portfolios = portfolioDocumentRepository.findByOwner(userId);
-            baselineWealth = portfolios.stream()
-                .filter(p -> portfolioId == null || (p.getId() != null && p.getId().equals(portfolioId)))
-                .mapToDouble(p -> p.getTotalValue() != null ? p.getTotalValue() : 0.0)
-                .sum();
-            if (baselineWealth <= 0) {
-                return List.of();
-            }
-        } else {
-            baselineWealth = baselineSnap.getTotalUserWealth() != null ? baselineSnap.getTotalUserWealth() : 0.0;
-        }
-
-        // ── STEP 2: Get holdings from the snapshot document (most reliable) ──
+        double liveTotalValue = 0.0;
+        double liveTodayGainLoss = 0.0;
         Map<String, Double> symbolQty = new HashMap<>();
 
-        if (baselineSnap != null && baselineSnap.getPortfolios() != null) {
-            for (PortfolioSnapshotEntryModel entry : baselineSnap.getPortfolios()) {
-                // If specific portfolio filter, skip non-matching
-                if (portfolioId != null && !portfolioId.equals(entry.getPortfolioId())) {
-                    continue;
+        if (liveHoldings != null && liveHoldings.getEquityHoldings() != null) {
+            for (com.portfolio.model.portfolio.EquityHoldings h : liveHoldings.getEquityHoldings()) {
+                if (h.getSymbol() != null) {
+                    double qty = h.getQuantity() != null ? h.getQuantity() : 0.0;
+                    symbolQty.merge(h.getSymbol(), qty, Double::sum);
                 }
-
-                if (entry.getHoldings() != null) {
-                    for (HoldingSnapshotItemModel h : entry.getHoldings()) {
-                        if (h.getSymbol() != null) {
-                            symbolQty.merge(h.getSymbol(), h.getQuantity() != null ? h.getQuantity() : 0.0,
-                                    Double::sum);
-                        }
-                    }
+                
+                if (h.getCurrentValue() != null) {
+                    liveTotalValue += h.getCurrentValue();
+                } else if (h.getInvestmentCost() != null && h.getInvestmentCost() > 0) {
+                    liveTotalValue += h.getInvestmentCost();
+                } else if (h.getCurrentPrice() != null && h.getQuantity() != null) {
+                    liveTotalValue += h.getCurrentPrice() * h.getQuantity();
                 }
-            }
-            if (portfolioId != null) {
-                // For a single portfolio, recompute the baseline from its specific components
-                baselineWealth = 0.0;
-                if (baselineSnap != null && baselineSnap.getPortfolios() != null) {
-                    for (PortfolioSnapshotEntryModel entry : baselineSnap.getPortfolios()) {
-                        if (portfolioId.equals(entry.getPortfolioId())) {
-                            baselineWealth = entry.getClose() != null ? entry.getClose() : 0.0;
-                            break;
-                        }
-                    }
+                
+                if (h.getTodayGainLoss() != null) {
+                    liveTodayGainLoss += h.getTodayGainLoss();
                 }
             }
         }
 
-        if (symbolQty.isEmpty()) {
-            // Fallback: fetch live holdings from broker
-            log.warn("[Intraday] No holdings in snapshot for user={}, falling back to live holdings", userId);
-            PortfolioHoldings live = (portfolioId == null || portfolioId.trim().isEmpty()) 
-                ? holdingsService.getPortfolioHoldings(userId, TimeInterval.ONE_DAY)
-                : holdingsService.getPortfolioHoldings(userId, portfolioId, TimeInterval.ONE_DAY);
-            if (live != null && live.getEquityHoldings() != null) {
-                live.getEquityHoldings().forEach(h -> {
-                    if (h.getSymbol() != null) {
-                        double qty = h.getQuantity() != null ? h.getQuantity() : 0.0;
-                        symbolQty.merge(h.getSymbol(), qty, Double::sum);
-                    }
-                });
-            }
-        }
+        // The opening wealth is simply the current wealth minus today's gain/loss
+        double baselineWealth = liveTotalValue - liveTodayGainLoss;
+        double missingAssetValue = 0.0;
 
         if (symbolQty.isEmpty()) {
             return List.of(makeGlobalPoint("09:15", baselineWealth, baselineWealth, false));
         }
 
-        // Compute missing asset value (Mutual Funds / Bonds) directly from yesterday's snapshot
-        double baselineEquityWealth = 0.0;
-        if (baselineSnap != null && baselineSnap.getPortfolios() != null) {
-            for (PortfolioSnapshotEntryModel entry : baselineSnap.getPortfolios()) {
-                if (portfolioId == null || portfolioId.equals(entry.getPortfolioId())) {
-                    baselineEquityWealth += entry.getClose() != null ? entry.getClose() : 0.0;
-                }
-            }
-        }
-        double missingAssetValue = Math.max(0.0, baselineWealth - baselineEquityWealth);
-
         // ── STEP 3: Fetch 1D OHLC candles for all symbols in batch ─────────────
         List<String> symbols = new ArrayList<>(symbolQty.keySet());
         com.portfolio.marketdata.model.HistoricalChartsResponse chartResponse = null;
 
-        try {
-            chartResponse = marketDataService.getHistoricalCharts(symbols, "1D");
-            if (chartResponse != null && chartResponse.getData() != null) {
-                int totalParsed = chartResponse.getData().values().stream()
-                        .filter(hd -> hd != null && hd.getDataPoints() != null)
-                        .mapToInt(hd -> hd.getDataPoints().size())
-                        .sum();
-                log.info("[Intraday] Fetched historical charts for {} symbols, total points parsed: {}", symbols.size(), totalParsed);
+        java.time.DayOfWeek dayOfWeek = today.getDayOfWeek();
+        boolean isWeekend = dayOfWeek == java.time.DayOfWeek.SATURDAY || dayOfWeek == java.time.DayOfWeek.SUNDAY;
+        boolean preMarket = nowIST.isBefore(MARKET_OPEN);
+
+        if (isWeekend || preMarket) {
+            log.info("[Intraday] Skipping 1D chart fetch because market is closed (weekend/pre-market).");
+        } else {
+            try {
+                chartResponse = marketDataService.getHistoricalCharts(symbols, "1D");
+                if (chartResponse != null && chartResponse.getData() != null) {
+                    int totalParsed = chartResponse.getData().values().stream()
+                            .filter(hd -> hd != null && hd.getDataPoints() != null)
+                            .mapToInt(hd -> hd.getDataPoints().size())
+                            .sum();
+                    log.info("[Intraday] Fetched historical charts for {} symbols, total points parsed: {}", symbols.size(), totalParsed);
+                }
+            } catch (Exception e) {
+                log.error("[Intraday] Failed to fetch historical charts: {}", e.getMessage());
             }
-        } catch (Exception e) {
-            log.error("[Intraday] Failed to fetch historical charts: {}", e.getMessage());
         }
 
         // ── STEP 4: Build time-series: candle time → {symbol → closePrice} ───
@@ -245,93 +203,16 @@ public class PortfolioIntradayService {
         }
 
         // ── STEP 4.5: Weekend/Non-Trading Day Real Lookback ───
-        if (priceSeries.isEmpty()) {
-            java.time.DayOfWeek dayOfWeek = today.getDayOfWeek();
-            boolean isWeekend = dayOfWeek == java.time.DayOfWeek.SATURDAY || dayOfWeek == java.time.DayOfWeek.SUNDAY;
-            boolean noLivePrices = livePrices == null || livePrices.isEmpty();
-
-            if (isWeekend || noLivePrices || nowIST.isBefore(MARKET_OPEN)) {
-                log.info("[Intraday] priceSeries and livePrices are empty. Attempting 1W fallback for realistic chart.");
-                try {
-                    com.portfolio.marketdata.model.HistoricalChartsResponse fallbackResponse = marketDataService.getHistoricalCharts(symbols, "1W");
-                    if (fallbackResponse != null && fallbackResponse.getData() != null) {
-                        // Find the maximum date in the 1W payload
-                        java.time.LocalDate maxDate = null;
-                        for (com.portfolio.marketdata.model.HistoricalData hd : fallbackResponse.getData().values()) {
-                            if (hd != null && hd.getDataPoints() != null) {
-                                for (com.am.common.investment.model.historical.OHLCVTPoint pt : hd.getDataPoints()) {
-                                    if (pt.getTime() != null) {
-                                        java.time.LocalDate ptDate = pt.getTime().toLocalDate();
-                                        if (maxDate == null || ptDate.isAfter(maxDate)) {
-                                            maxDate = ptDate;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        if (maxDate != null) {
-                            final java.time.LocalDate targetDate = maxDate;
-                            log.info("[Intraday] Extracted max date from 1W fallback: {}", targetDate);
-                            
-                            // Rebuild priceSeries using only data from targetDate
-                            for (Map.Entry<String, com.portfolio.marketdata.model.HistoricalData> entry : fallbackResponse.getData().entrySet()) {
-                                String sym = entry.getKey();
-                                com.portfolio.marketdata.model.HistoricalData hd = entry.getValue();
-                                if (hd == null || hd.getDataPoints() == null) continue;
-
-                                boolean isUtcPayload = false;
-                                if (!hd.getDataPoints().isEmpty()) {
-                                    com.am.common.investment.model.historical.OHLCVTPoint firstPt = hd.getDataPoints().get(0);
-                                    if (firstPt != null && firstPt.getTime() != null && firstPt.getTime().toLocalTime().getHour() < 9) {
-                                        isUtcPayload = true;
-                                    }
-                                }
-
-                                for (com.am.common.investment.model.historical.OHLCVTPoint pt : hd.getDataPoints()) {
-                                    if (pt.getTime() == null || pt.getClose() == null) continue;
-                                    
-                                    java.time.LocalDate ptDate = pt.getTime().toLocalDate();
-                                    LocalTime t = pt.getTime().toLocalTime().withSecond(0).withNano(0);
-                                    if (isUtcPayload) {
-                                        java.time.LocalDateTime adjusted = pt.getTime().plusHours(5).plusMinutes(30);
-                                        ptDate = adjusted.toLocalDate();
-                                        t = adjusted.toLocalTime().withSecond(0).withNano(0);
-                                    }
-
-                                    if (!ptDate.equals(targetDate)) continue;
-                                    if (t.isBefore(MARKET_OPEN) || t.isAfter(MARKET_CLOSE)) continue;
-                                    
-                                    priceSeries.computeIfAbsent(t, k -> new HashMap<>()).put(sym, pt.getClose());
-                                    
-                                    // Update livePrices with the latest known price for this day
-                                    livePrices.put(sym, pt.getClose());
-                                }
-                            }
-                            
-                            // Recalculate liveEquityWealth based on updated livePrices
-                            liveEquityWealth = 0.0;
-                            for (Map.Entry<String, Double> sq : symbolQty.entrySet()) {
-                                Double price = livePrices.get(sq.getKey());
-                                if (price != null) {
-                                    liveEquityWealth += price * sq.getValue();
-                                }
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    log.error("[Intraday] Failed to fetch or process 1W fallback charts", e);
-                }
-            }
-        }
+        // (The 1W fallback hack was removed to eliminate 30s timeouts.
+        // It seamlessly falls through to the native flat chart generator below.)
 
         // Fallback: If STILL empty, generate a flat chart using the last known prices
         if (priceSeries.isEmpty()) {
             if (livePrices != null && !livePrices.isEmpty()) {
                 LocalTime t = MARKET_OPEN;
                 
-                java.time.DayOfWeek dayOfWeek = today.getDayOfWeek();
-                boolean isWeekend = dayOfWeek == java.time.DayOfWeek.SATURDAY || dayOfWeek == java.time.DayOfWeek.SUNDAY;
+                dayOfWeek = today.getDayOfWeek();
+                isWeekend = dayOfWeek == java.time.DayOfWeek.SATURDAY || dayOfWeek == java.time.DayOfWeek.SUNDAY;
                 
                 LocalTime limit;
                 if (isWeekend || nowIST.isAfter(MARKET_CLOSE)) {
