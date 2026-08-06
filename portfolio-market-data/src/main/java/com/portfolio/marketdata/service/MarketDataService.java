@@ -988,37 +988,19 @@ public class MarketDataService {
                     stockPriceMongoService != null ? 
                     stockPriceMongoService.getPrices(fallbackSymbols) : Map.of();
 
-                // Call external API for the missing symbols
-                com.portfolio.marketdata.model.HistoricalChartsResponse apiResp = 
-                    callExternalApiForRange(fallbackSymbols, "1D", new com.portfolio.marketdata.model.HistoricalChartsResponse(), cleanToRaw);
-                
                 for (String cleanSymbol : fallbackSymbols) {
                     String rawSymbol = cleanToRaw.getOrDefault(cleanSymbol, cleanSymbol);
-                    com.portfolio.marketdata.model.HistoricalData apiData = (apiResp != null && apiResp.getData() != null)
-                        ? apiResp.getData().get(rawSymbol) : null;
                     
-                    boolean apiDataValid = apiData != null 
-                        && apiData.getDataPoints() != null 
-                        && !apiData.getDataPoints().isEmpty()
-                        && apiData.getDataPoints().stream().anyMatch(p -> p.getClose() != null && p.getClose() > 0);
-
-                    if (apiDataValid) {
-                        // API returned good data (callExternalApiForRange already put it in partial under rawSymbol if we passed partial, 
-                        // but here we passed a new response, so we extract and put it manually)
-                        partial.getData().put(rawSymbol, apiData);
-                        chartCache.put(cleanSymbol + ":1D", apiData);
+                    // Directly create a flat-line chart using live price to avoid slow API timeouts
+                    StockPriceDocument liveDoc = liveDocs.get(cleanSymbol);
+                    if (liveDoc != null && liveDoc.getLastPrice() != null && liveDoc.getLastPrice() > 0) {
+                        log.warn("[Intraday-Mongo] Symbol {} has no OHLC data in DB, skipping slow API and using flat live price: {}", 
+                            cleanSymbol, liveDoc.getLastPrice());
+                        com.portfolio.marketdata.model.HistoricalData flatLine = buildFlatLineChart(cleanSymbol, liveDoc.getLastPrice());
+                        partial.getData().put(rawSymbol, flatLine);
+                        chartCache.put(cleanSymbol + ":1D", flatLine);
                     } else {
-                        // API also returned null/0.0 → create a flat-line chart using live price
-                        StockPriceDocument liveDoc = liveDocs.get(cleanSymbol);
-                        if (liveDoc != null && liveDoc.getLastPrice() != null && liveDoc.getLastPrice() > 0) {
-                            log.warn("[Intraday-Mongo] Symbol {} has no OHLC data, using flat live price: {}", 
-                                cleanSymbol, liveDoc.getLastPrice());
-                            com.portfolio.marketdata.model.HistoricalData flatLine = buildFlatLineChart(cleanSymbol, liveDoc.getLastPrice());
-                            partial.getData().put(rawSymbol, flatLine);
-                            chartCache.put(cleanSymbol + ":1D", flatLine);
-                        } else {
-                            log.warn("[Intraday-Mongo] Symbol {} has no data at all, omitting from chart.", cleanSymbol);
-                        }
+                        log.warn("[Intraday-Mongo] Symbol {} has no data at all, omitting from chart.", cleanSymbol);
                     }
                 }
             } catch (Exception e) {
