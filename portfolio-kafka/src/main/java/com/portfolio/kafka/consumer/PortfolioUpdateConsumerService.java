@@ -92,10 +92,37 @@ public class PortfolioUpdateConsumerService {
             com.fasterxml.jackson.databind.JsonNode rootNode = objectMapper.readTree(message);
 
             // ── Determine message type ────────────────────────────────────────
-            // PortfolioUpdateEvent (Document Parser) carries 'portfolioId' or 'equities'.
-            // TradePortfolioSyncEvent (Trade Management) carries portfolio id in top-level 'id'.
-            if (rootNode.has("portfolioId") || rootNode.has("equities")) {
+            // TradePortfolioSyncEvent has eventType="TRADE_SYNC".
+            // PortfolioUpdateEvent (Document Parser) has no eventType field.
+            String eventType = rootNode.has("eventType") ? rootNode.get("eventType").asText() : null;
+
+            if ("TRADE_SYNC".equals(eventType)) {
+                // ── Trade-management path ─────────────────────────────────────
+                com.portfolio.model.events.trade.TradePortfolioSyncEvent event =
+                        objectMapper.treeToValue(rootNode, com.portfolio.model.events.trade.TradePortfolioSyncEvent.class);
+                log.info("Parsed TradePortfolioSyncEvent: eventId={} source={} dataVersion={} id={} portfolioId={} action={}",
+                        event.getEventId(), event.getSource(), event.getDataVersion(),
+                        event.getId(), event.getPortfolioId(), event.getAction());
+
+                // Use the producer-assigned eventId for stable deduplication (CloudEvents standard).
+                // Fall back to offset-based key for older messages that pre-date this field.
+                String dedupKey = (event.getEventId() != null)
+                        ? DEDUP_KEY_PREFIX + "eventId:" + event.getEventId()
+                        : buildDedupKey("TRADE", event.getId(), offset, partition);
+
+                if (isDuplicate(dedupKey)) {
+                    log.warn("[DEDUP] Skipping already-processed Trade message: eventId={} id={} offset={}",
+                            event.getEventId(), event.getId(), offset);
+                    acknowledgment.acknowledge();
+                    return;
+                }
+
+                processTradeMessage(event);
+                markProcessed(dedupKey);
+
+            } else {
                 // ── Document-parser path ──────────────────────────────────────
+                // PortfolioUpdateEvent (Document Parser) carries 'portfolioId' or 'equities'.
                 PortfolioUpdateEvent event = objectMapper.treeToValue(rootNode, PortfolioUpdateEvent.class);
                 String pid = event.getPortfolioId() != null ? event.getPortfolioId()
                         : (event.getId() != null ? event.getId().toString() : "doc-" + offset);
@@ -109,22 +136,6 @@ public class PortfolioUpdateConsumerService {
                 }
 
                 processDocumentMessage(event);
-                markProcessed(dedupKey);
-
-            } else {
-                // ── Trade-management path ─────────────────────────────────────
-                com.portfolio.model.events.trade.TradePortfolioSyncEvent event =
-                        objectMapper.treeToValue(rootNode, com.portfolio.model.events.trade.TradePortfolioSyncEvent.class);
-                log.info("Parsed TradePortfolioSyncEvent for portfolioId={}", event.getId());
-
-                String dedupKey = buildDedupKey("TRADE", event.getId(), offset, partition);
-                if (isDuplicate(dedupKey)) {
-                    log.warn("[DEDUP] Skipping already-processed Trade message: portfolioId={} offset={}", event.getId(), offset);
-                    acknowledgment.acknowledge();
-                    return;
-                }
-
-                processTradeMessage(event);
                 markProcessed(dedupKey);
             }
 
@@ -156,6 +167,35 @@ public class PortfolioUpdateConsumerService {
 
     private void processTradeMessage(com.portfolio.model.events.trade.TradePortfolioSyncEvent event) {
         PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
+        
+        if ("DELETE_PORTFOLIO".equals(portfolioModel.getLastTradeAction())) {
+            String owner = portfolioModel.getOwner();
+            // deletePortfolioByIdAndOwner matches against the portfolio NAME in MongoDB.
+            String portfolioName = event.getPortfolioId(); // e.g. "brand-new-portfolio-1"
+            String portfolioUuid = portfolioModel.getId() != null ? portfolioModel.getId().toString() : null;
+
+            if (owner != null) {
+                log.info("Deleting portfolio name={} uuid={} for user={} based on DELETE_PORTFOLIO action",
+                        portfolioName, portfolioUuid, owner);
+                portfolioService.deletePortfolioByIdAndOwner(portfolioName, owner);
+                // Evict all relevant caches for both the UUID and name variants
+                if (portfolioUuid != null) {
+                    portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioUuid);
+                    portfolioSummaryRedisService.evictPortfolioSummary(owner, portfolioUuid);
+                }
+                if (portfolioName != null) {
+                    portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioName);
+                    portfolioSummaryRedisService.evictPortfolioSummary(owner, portfolioName);
+                }
+                // NOTE: Do NOT publishUpdate here. Sending the deleted portfolio's data
+                // downstream would cause other consumers to re-create it.
+                log.info("Portfolio deletion complete for name={} owner={}", portfolioName, owner);
+            } else {
+                log.warn("Skipping DELETE_PORTFOLIO: owner is null for name={} uuid={}", portfolioName, portfolioUuid);
+            }
+            return;
+        }
+
         PortfolioModelV1 saved = portfolioService.updateTradePortfolio(portfolioModel);
         if (saved != null && saved.getOwner() != null) {
             String portfolioId = saved.getId() != null ? saved.getId().toString() : null;

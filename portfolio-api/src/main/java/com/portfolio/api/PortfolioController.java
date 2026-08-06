@@ -134,6 +134,39 @@ public class PortfolioController {
         return ResponseEntity.ok(basicInfoList);
     }
 
+    /**
+     * Internal sync endpoint — called by am-trade-management when a portfolio is created or updated in trade.
+     * This upserts the portfolio into am-portfolio's database so the user can see it in the Portfolio portal.
+     * Uses the internal JWT secret to authenticate (service-to-service call).
+     *
+     * <p>This provides a reliable, synchronous alternative to Kafka for the trade → portfolio direction.
+     */
+    @Hidden
+    @Operation(summary = "Sync portfolio from trade management (internal)", description = "Upserts a portfolio received from am-trade-management into the portfolio database. Service-to-service call.")
+    @PostMapping("/sync")
+    public ResponseEntity<PortfolioModelV1> syncPortfolioFromTrade(
+            @RequestBody PortfolioModelV1 portfolioModel,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            log.warn("Unauthorized sync attempt rejected");
+            return ResponseEntity.status(403).build();
+        }
+        if (portfolioModel == null || portfolioModel.getOwner() == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        log.info("PortfolioController - syncPortfolioFromTrade: portfolioId={} name={} owner={}",
+                portfolioModel.getId(), portfolioModel.getName(), portfolioModel.getOwner());
+
+        try {
+            PortfolioModelV1 saved = portfolioService.updateTradePortfolio(portfolioModel);
+            log.info("PortfolioController - syncPortfolioFromTrade: saved portfolioId={}", saved != null ? saved.getId() : "null");
+            return ResponseEntity.ok(saved);
+        } catch (Exception e) {
+            log.error("PortfolioController - syncPortfolioFromTrade failed: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
 
 
 

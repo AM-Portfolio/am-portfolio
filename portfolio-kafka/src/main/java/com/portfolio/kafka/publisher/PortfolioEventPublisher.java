@@ -28,6 +28,9 @@ public class PortfolioEventPublisher {
             return;
         }
 
+        // portfolioId in the outbound event = the am-portfolio MongoDB document _id (UUID).
+        // am-trade-management uses this as the key to upsert the portfolio record in its DB.
+        // name = human-readable portfolio name shown in the UI.
         Double computedTotalInvestment = 0.0;
         if (savedPortfolio.getEquityModels() != null) {
             computedTotalInvestment = savedPortfolio.getEquityModels().stream()
@@ -36,10 +39,12 @@ public class PortfolioEventPublisher {
                     .sum();
         }
 
+        UUID resolvedId = savedPortfolio.getId() != null ? savedPortfolio.getId() : UUID.randomUUID();
+
         PortfolioUpdateEvent outboundEvent = PortfolioUpdateEvent.builder()
-                .id(savedPortfolio.getId() != null ? savedPortfolio.getId() : UUID.randomUUID())
+                .id(resolvedId)
                 .userId(savedPortfolio.getOwner())
-                .portfolioId(savedPortfolio.getId() != null ? savedPortfolio.getId().toString() : null)
+                .portfolioId(resolvedId.toString())
                 .name(savedPortfolio.getName())
                 .brokerType(savedPortfolio.getBrokerType())
                 .source(source != null ? source : "PORTFOLIO_RESOLVED")
