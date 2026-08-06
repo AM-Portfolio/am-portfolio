@@ -84,8 +84,18 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 double[] totalPortfolioValue = {0.0};
                 groupMarketDataBySector(marketData, sectorToStocks, symbolToQuantity, sectorMarketDataMap, sectorQuantitiesMap, totalPortfolioValue);
                 
+                // Create map for change percent overrides from portfolio holdings
+                Map<String, Double> symbolToChangePercent = new HashMap<>();
+                if (portfolio.getEquityModels() != null) {
+                    for (EquityModel model : portfolio.getEquityModels()) {
+                        if (model.getSymbol() != null && model.getTodayProfitLossPercentage() != null) {
+                            symbolToChangePercent.put(model.getSymbol(), model.getTodayProfitLossPercentage());
+                        }
+                    }
+                }
+                
                 // Calculate performance for each sector
-                List<Heatmap.SectorPerformance> sectorPerformances = calculateSectorPerformances(sectorMarketDataMap, sectorQuantitiesMap, symbolToQuantity, totalPortfolioValue[0]);
+                List<Heatmap.SectorPerformance> sectorPerformances = calculateSectorPerformances(sectorMarketDataMap, sectorQuantitiesMap, symbolToQuantity, symbolToChangePercent, totalPortfolioValue[0]);
                 
                 // Create heatmap with domain-driven approach
                 Heatmap heatmap = Heatmap.builder()
@@ -187,6 +197,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             Map<String, List<MarketData>> sectorMarketDataMap,
             Map<String, List<Double>> sectorQuantitiesMap,
             Map<String, Double> symbolToQuantity,
+            Map<String, Double> symbolToChangePercent,
             double totalPortfolioValue) {
         
         log.debug("Calculating performance metrics for {} sectors", sectorMarketDataMap.size());
@@ -229,7 +240,8 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 sectorStocks,
                 quantities,
                 symbols,
-                totalPortfolioValue);
+                totalPortfolioValue,
+                symbolToChangePercent);
             
             sectorPerformances.add(sectorPerformance);
         }
