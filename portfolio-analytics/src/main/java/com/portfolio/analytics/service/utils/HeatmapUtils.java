@@ -8,6 +8,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Utility class for heatmap-related operations shared between
@@ -132,6 +133,20 @@ public class HeatmapUtils {
      * @return SectorMetrics containing weighted average performance, change percent, and weightage
      */
     public static SectorMetrics calculateWeightedSectorMetrics(List<MarketData> sectorStocks, List<Double> quantities, Double totalPortfolioValue) {
+        return calculateWeightedSectorMetrics(sectorStocks, quantities, totalPortfolioValue, null, null);
+    }
+    
+    /**
+     * Calculate weighted average metrics for a sector with weightage and overrides
+     * Used by PortfolioHeatmapProvider
+     */
+    public static SectorMetrics calculateWeightedSectorMetrics(
+            List<MarketData> sectorStocks, 
+            List<Double> quantities, 
+            Double totalPortfolioValue,
+            List<String> symbols,
+            Map<String, Double> symbolToChangePercentOverride) {
+
         log.debug("Calculating weighted metrics for sector with {} stocks", sectorStocks.size());
         double totalPerformance = 0.0;
         double totalChangePercent = 0.0;
@@ -168,10 +183,19 @@ public class HeatmapUtils {
             if (previousClose > 0) {
                 // Calculate timeframe change percentage based on previous close
                 double changePercent = ((resolvedLastPrice - previousClose) / previousClose) * 100;
+                
+                // Override if provided
+                if (symbolToChangePercentOverride != null && symbols != null && i < symbols.size()) {
+                    String sym = symbols.get(i);
+                    if (sym != null && symbolToChangePercentOverride.containsKey(sym)) {
+                        changePercent = symbolToChangePercentOverride.get(sym);
+                    }
+                }
+                
                 totalChangePercent += changePercent * value; // Weight by value
                 
-                // Performance score based on price movement relative to previous close
-                double performanceScore = ((resolvedLastPrice - previousClose) / previousClose) * 100;
+                // Performance score is just the change percent
+                double performanceScore = changePercent;
                 totalPerformance += performanceScore * value; // Weight by value
             }
         }
@@ -271,6 +295,13 @@ public class HeatmapUtils {
      * @return A StockDetail object
      */
     public static Heatmap.StockDetail convertToStockDetail(String symbol, MarketData data, double quantity) {
+        return convertToStockDetail(symbol, data, quantity, null);
+    }
+    
+    /**
+     * Convert market data to stock detail object with optional override
+     */
+    public static Heatmap.StockDetail convertToStockDetail(String symbol, MarketData data, double quantity, Double changePercentOverride) {
         if (data == null || data.getOhlc() == null) {
             return null;
         }
@@ -289,8 +320,13 @@ public class HeatmapUtils {
         BigDecimal previousPrice = BigDecimal.valueOf(previousCloseVal);
         stockDetail.calculateChange(previousPrice)
                   .calculateChangePercent(previousPrice)
-                  .calculateValue()
-                  .updateColor();
+                  .calculateValue();
+                  
+        if (changePercentOverride != null) {
+            stockDetail.setChangePercent(changePercentOverride);
+        }
+        
+        stockDetail.updateColor();
         
         return stockDetail;
     }
@@ -306,6 +342,17 @@ public class HeatmapUtils {
             List<MarketData> sectorStocks, 
             List<Double> quantities,
             List<String> symbols) {
+        return createStockDetails(sectorStocks, quantities, symbols, null);
+    }
+
+    /**
+     * Create stock details for a sector using domain-driven approach with overrides
+     */
+    public static List<Heatmap.StockDetail> createStockDetails(
+            List<MarketData> sectorStocks, 
+            List<Double> quantities,
+            List<String> symbols,
+            Map<String, Double> symbolToChangePercentOverride) {
         
         List<Heatmap.StockDetail> stockDetails = new ArrayList<>();
         
@@ -314,7 +361,8 @@ public class HeatmapUtils {
             double quantity = quantities.get(i);
             String symbol = symbols.get(i);
             
-            Heatmap.StockDetail stockDetail = convertToStockDetail(symbol, data, quantity);
+            Double override = (symbolToChangePercentOverride != null && symbol != null) ? symbolToChangePercentOverride.get(symbol) : null;
+            Heatmap.StockDetail stockDetail = convertToStockDetail(symbol, data, quantity, override);
             if (stockDetail != null) {
                 stockDetails.add(stockDetail);
             }
@@ -340,15 +388,29 @@ public class HeatmapUtils {
             List<Double> quantities,
             List<String> symbols,
             Double totalPortfolioValue) {
+        return createCompleteSectorPerformance(sectorName, sectorCode, sectorStocks, quantities, symbols, totalPortfolioValue, null);
+    }
+    
+    /**
+     * Create a complete sector performance object with stock details and overrides
+     */
+    public static Heatmap.SectorPerformance createCompleteSectorPerformance(
+            String sectorName,
+            String sectorCode,
+            List<MarketData> sectorStocks,
+            List<Double> quantities,
+            List<String> symbols,
+            Double totalPortfolioValue,
+            Map<String, Double> symbolToChangePercentOverride) {
         
         // Calculate metrics
-        SectorMetrics metrics = calculateWeightedSectorMetrics(sectorStocks, quantities, totalPortfolioValue);
+        SectorMetrics metrics = calculateWeightedSectorMetrics(sectorStocks, quantities, totalPortfolioValue, symbols, symbolToChangePercentOverride);
         
         // Create sector performance
         Heatmap.SectorPerformance sectorPerformance = createSectorPerformance(sectorName, sectorCode, metrics);
         
         // Create stock details
-        List<Heatmap.StockDetail> stockDetails = createStockDetails(sectorStocks, quantities, symbols);
+        List<Heatmap.StockDetail> stockDetails = createStockDetails(sectorStocks, quantities, symbols, symbolToChangePercentOverride);
         
         // Set stock details and use domain methods to calculate values
         sectorPerformance.setStocks(stockDetails);
