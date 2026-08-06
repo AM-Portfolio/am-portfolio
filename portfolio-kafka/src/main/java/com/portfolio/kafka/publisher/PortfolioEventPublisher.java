@@ -39,10 +39,12 @@ public class PortfolioEventPublisher {
                     .sum();
         }
 
+        UUID resolvedId = savedPortfolio.getId() != null ? savedPortfolio.getId() : UUID.randomUUID();
+
         PortfolioUpdateEvent outboundEvent = PortfolioUpdateEvent.builder()
-                .id(savedPortfolio.getId() != null ? savedPortfolio.getId() : UUID.randomUUID())
+                .id(resolvedId)
                 .userId(savedPortfolio.getOwner())
-                .portfolioId(savedPortfolio.getId() != null ? savedPortfolio.getId().toString() : UUID.randomUUID().toString())
+                .portfolioId(resolvedId.toString())
                 .name(savedPortfolio.getName())
                 .brokerType(savedPortfolio.getBrokerType())
                 .source(source != null ? source : "PORTFOLIO_RESOLVED")

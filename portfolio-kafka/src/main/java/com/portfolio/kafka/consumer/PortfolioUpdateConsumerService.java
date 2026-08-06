@@ -171,9 +171,6 @@ public class PortfolioUpdateConsumerService {
         if ("DELETE_PORTFOLIO".equals(portfolioModel.getLastTradeAction())) {
             String owner = portfolioModel.getOwner();
             // deletePortfolioByIdAndOwner matches against the portfolio NAME in MongoDB.
-            // event.getId()         = UUID from am-trade-management (stored as document _id)
-            // event.getPortfolioId() = portfolio name (stored as document name field)
-            // We try by name first; if not found, try by UUID for robustness.
             String portfolioName = event.getPortfolioId(); // e.g. "brand-new-portfolio-1"
             String portfolioUuid = portfolioModel.getId() != null ? portfolioModel.getId().toString() : null;
 
@@ -193,6 +190,8 @@ public class PortfolioUpdateConsumerService {
                 // NOTE: Do NOT publishUpdate here. Sending the deleted portfolio's data
                 // downstream would cause other consumers to re-create it.
                 log.info("Portfolio deletion complete for name={} owner={}", portfolioName, owner);
+            } else {
+                log.warn("Skipping DELETE_PORTFOLIO: owner is null for name={} uuid={}", portfolioName, portfolioUuid);
             }
             return;
         }

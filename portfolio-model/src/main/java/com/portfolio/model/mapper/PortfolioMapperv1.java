@@ -73,8 +73,18 @@ public class PortfolioMapperv1 {
 
         BrokerType brokerType = resolveBrokerType(tradeEvent.getBrokerType());
 
+        java.util.UUID portfolioUuid = null;
+        if (tradeEvent.getId() != null) {
+            try {
+                portfolioUuid = java.util.UUID.fromString(tradeEvent.getId());
+            } catch (IllegalArgumentException e) {
+                // Non-UUID identifiers are tolerated; the ID is resolved downstream by name.
+                portfolioUuid = null;
+            }
+        }
+
         return PortfolioModelV1.builder()
-                .id(tradeEvent.getId() != null ? java.util.UUID.fromString(tradeEvent.getId()) : null)
+                .id(portfolioUuid)
                 .name(tradeEvent.getPortfolioId() != null ? tradeEvent.getPortfolioId() : tradeEvent.getId())
                 .owner(tradeEvent.getUserId())
                 .brokerType(brokerType)
