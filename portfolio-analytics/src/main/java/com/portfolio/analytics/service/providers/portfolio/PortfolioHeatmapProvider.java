@@ -73,6 +73,15 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                         if (symbol != null && !symbol.trim().isEmpty()) {
                             String sector = (model.getSector() != null && !model.getSector().trim().isEmpty() && !model.getSector().trim().equals("-"))
                                 ? model.getSector().trim() : "Unknown";
+                                
+                            // Fallback to security details if sector is missing in portfolio holdings
+                            if ("Unknown".equals(sector) && securityDetails != null && securityDetails.containsKey(symbol)) {
+                                com.am.common.amcommondata.model.security.SecurityModel security = securityDetails.get(symbol);
+                                if (security != null && security.getMetadata() != null && security.getMetadata().getSector() != null && !security.getMetadata().getSector().trim().isEmpty() && !security.getMetadata().getSector().trim().equals("-")) {
+                                    sector = security.getMetadata().getSector().trim();
+                                }
+                            }
+                                
                             sectorToStocks.computeIfAbsent(sector, k -> new ArrayList<>()).add(symbol);
                         }
                     }
