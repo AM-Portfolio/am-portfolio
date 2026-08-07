@@ -257,7 +257,9 @@ management:
     kafka:
       enabled: ${KAFKA_ENABLED:true}
   tracing:
-    enabled: true
+    # Local laptop: set TRACING_ENABLED=false (no otel-collector on :4318).
+    # OTEL_SDK_DISABLED alone does not stop Spring Micrometer OTLP export.
+    enabled: ${TRACING_ENABLED:true}
     sampling:
       # 1.0 while validating flows in Tempo; dial helm back to 0.1 when comfortable
       probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
@@ -267,7 +269,7 @@ management:
   # OTLP exporter — sends spans to the shared otel-collector over HTTP (port 4318).
   # In k8s the collector is in the "monitoring" namespace (same as am-core-services-otel).
   # In Docker compose:  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
-  # Local dev: no override needed.
+  # Local without collector: TRACING_ENABLED=false
   otlp:
     tracing:
       endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}

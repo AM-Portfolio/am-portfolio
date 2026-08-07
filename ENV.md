@@ -16,7 +16,7 @@ Run **portfolio-app** on your laptop with secrets from Vault, without committing
 | `.env.preprod` | ignored | Preprod → `npm run run:preprod` |
 | `.env.dev` | ignored | Dev → `npm run run:dev` |
 
-There is **no** root `.env` file. `dotenv-cli` loads `.env.preprod` or `.env.dev` only.
+There is **no committed** root `.env`. Local npm scripts load `.env.preprod` or `.env.dev` via `dotenv-cli`. An optional gitignored root `.env` (often a copy of `.env.dev`) is only for `am run` / amctl.
 
 ## End-to-end workflow
 
@@ -64,31 +64,30 @@ After generation, edit overrides as needed (local ETF parser, local market-data,
 
 ### 3. Run locally
 
+Full docs for with-build vs start-only: [README.md](README.md).
+
 ```bash
 cd a:\InfraCode\AM-Portfolio-grp\am-portfolio
-npm run run:preprod   # compile reactor (-am) then spring-boot:run with .env.preprod
-npm run run:dev       # same with .env.dev
+npm run run:dev                        # WITH build: reactor compile + start (.env.dev)
+npm run run:dev -- --skip-build        # WITHOUT reactor compile
+npm run start:dev                      # WITHOUT reactor compile (alias)
+npm run dev:start                      # WITHOUT reactor compile (same as start:dev)
 ```
 
-Split steps (skip recompile if already built):
+Preprod equivalents: `run:preprod`, `run:preprod -- --skip-build`, `start:preprod`, `preprod:start`.
 
-```bash
-npm run preprod:compile && npm run preprod:start
-npm run dev:compile && npm run dev:start
-```
-
-App listens on `SERVER_PORT` (default **8072** in template/mapper — avoids Windows port 8080 conflicts). Swagger: `http://localhost:8072/swagger-ui.html`
+App listens on `SERVER_PORT` (default **8072**). Swagger: `http://localhost:8072/swagger-ui.html`
 
 ## npm scripts
 
-| Script | What it does |
-|--------|----------------|
-| `env:preprod` | Map Vault → `.env.preprod` |
-| `env:dev` | Map Vault → `.env.dev` |
-| `env:from-vault` | Same mapper; pass `-- --env preprod\|dev` and optional `--backup <path>` |
-| `preprod:compile` / `dev:compile` | `mvn -pl portfolio-app -am compile -DskipTests` (builds app + dependencies) |
-| `preprod:start` / `dev:start` | `dotenv-cli -e .env.* -- mvn -f portfolio-app/pom.xml spring-boot:run` |
-| `run:preprod` / `run:dev` | compile + start |
+| Script | Build? | What it does |
+|--------|--------|----------------|
+| `env:preprod` / `env:dev` | — | Map Vault → `.env.preprod` / `.env.dev` |
+| `env:from-vault` | — | Same mapper; pass `-- --env preprod\|dev` and optional `--backup <path>` |
+| `dev:compile` / `preprod:compile` | yes | Reactor compile: `mvn -pl portfolio-app -am compile -DskipTests` |
+| `dev:start` / `preprod:start` | no | Start only: `spring-boot:run` with `.env.*` |
+| `start:dev` / `start:preprod` | no | Aliases for `*:start` |
+| `run:dev` / `run:preprod` | yes by default | Compile + start; pass `-- --skip-build` or `--no-build` to start only |
 
 ## Vault → `.env` mapping
 

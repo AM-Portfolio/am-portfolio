@@ -41,10 +41,18 @@ def _mongo_portfolio_url(mongo: dict) -> str:
         port = mongo.get("port", "27017")
         base = f"mongodb://{user}:{password}@{host}:{port}"
 
+    # Vault stores in-cluster hosts; laptop needs the public VPS endpoint
+    base = base.replace(
+        "mongodb.infra.svc.cluster.local:27017",
+        "mongodb.asrax.in:8888",
+    )
+
     if "/portfolio" in base:
         if "authSource" not in base:
             sep = "&" if "?" in base else "?"
             base = f"{base}{sep}authSource=admin&directConnection=true"
+        elif "directConnection=" not in base:
+            base = f"{base}&directConnection=true"
         return base
 
     if "?" in base:
@@ -138,8 +146,9 @@ def build_env(env_name: str, data: dict) -> str:
         "MARKET_INDEX_TOPIC=nse-stock-indices-update",
         "MARKET_INDEX_CONSUMER_ID=am-market-index-group-1",
         "",
-        f"REDIS_HOSTNAME={redis.get('host', 'redis.asrax.in')}",
-        f"REDIS_PORT={redis.get('port', '8889')}",
+        "# Vault redis host is in-cluster; use redis.asrax.in for laptop",
+        "REDIS_HOSTNAME=redis.asrax.in",
+        "REDIS_PORT=8889",
         f"REDIS_PASSWORD={redis.get('password', '')}",
         "",
         f"JWT_SECRET={auth.get('JWT_SECRET', '')}",
@@ -147,6 +156,8 @@ def build_env(env_name: str, data: dict) -> str:
         "JWT_ALGORITHM=HS256",
         "",
         f"LOG_LEVEL={auth.get('LOG_LEVEL', 'INFO')}",
+        "# No local otel-collector; Spring Micrometer uses TRACING_ENABLED (not OTEL_SDK_DISABLED)",
+        "TRACING_ENABLED=false",
         "",
     ]
     return "\n".join(lines)
