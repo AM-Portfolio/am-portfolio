@@ -1,9 +1,9 @@
-# Prod Environment Overrides — am-portfolio
+# Prod Environment Overrides â€” am-portfolio
 # Service-level Ingress (same model as am-identity), not central am-infra ingress.
 environment: prod
 replicaCount: 1
 
-# Prod Vault secret paths — key mappings are in vault-mappings.yaml
+# Prod Vault secret paths â€” key mappings are in vault-mappings.yaml
 vault:
   secretPaths:
     otel:
@@ -55,3 +55,6 @@ resources:
     cpu: 100m
     memory: 256Mi
 
+global:
+  image:
+    tag: "31105657731"
