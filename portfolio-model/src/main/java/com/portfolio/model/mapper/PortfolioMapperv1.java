@@ -152,15 +152,21 @@ public class PortfolioMapperv1 {
             String isinToResolve = equityModel.getIsin() != null ? equityModel.getIsin() : resolvedSymbol;
             if (isinToResolve != null && !isinToResolve.isBlank()) {
                 try {
-                    org.springframework.data.mongodb.core.MongoTemplate mongoTemplate = 
-                            com.am.marketdata.common.util.ApplicationContextProvider.getBean(org.springframework.data.mongodb.core.MongoTemplate.class);
+                    org.springframework.data.mongodb.core.MongoTemplate mongoTemplate = null;
+                    try {
+                        org.springframework.context.ApplicationContext ctx = 
+                                org.springframework.web.context.ContextLoader.getCurrentWebApplicationContext();
+                        if (ctx != null) {
+                            mongoTemplate = ctx.getBean(org.springframework.data.mongodb.core.MongoTemplate.class);
+                        }
+                    } catch (Exception ignored) {}
+
                     if (mongoTemplate != null) {
-                        org.springframework.data.mongodb.core.query.Query q = new org.springframework.data.mongodb.core.query.Query(
-                                org.springframework.data.mongodb.core.query.Criteria.where("isin").is(isinToResolve.trim().toUpperCase())
-                        );
-                        com.am.marketdata.common.model.UpstoxInstrument inst = mongoTemplate.findOne(q, com.am.marketdata.common.model.UpstoxInstrument.class);
-                        if (inst != null && inst.getTradingSymbol() != null && !inst.getTradingSymbol().isBlank()) {
-                            resolvedSymbol = inst.getTradingSymbol().trim().toUpperCase();
+                        org.bson.Document inst = mongoTemplate.getCollection("upstock_instruments")
+                                .find(new org.bson.Document("isin", isinToResolve.trim().toUpperCase()))
+                                .first();
+                        if (inst != null && inst.getString("trading_symbol") != null && !inst.getString("trading_symbol").isBlank()) {
+                            resolvedSymbol = inst.getString("trading_symbol").trim().toUpperCase();
                         }
                     }
                 } catch (Exception ignored) {}
