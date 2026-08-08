@@ -43,6 +43,7 @@ public class PortfolioController {
     private final PortfolioSnapshotService portfolioSnapshotService;
     private final SnapshotCatchUpService snapshotCatchUpService;
     private final com.portfolio.service.portfolio.PortfolioIntradayService portfolioIntradayService;
+    private final com.portfolio.redis.service.ActiveMarketSymbolPublisher activeMarketSymbolPublisher;
 
     @org.springframework.beans.factory.annotation.Value("${app.jwt.internal-secret}")
     private String internalSecret;
@@ -159,6 +160,9 @@ public class PortfolioController {
 
         try {
             PortfolioModelV1 saved = portfolioService.updateTradePortfolio(portfolioModel);
+            if (saved != null) {
+                activeMarketSymbolPublisher.publishFromPortfolio(saved);
+            }
             log.info("PortfolioController - syncPortfolioFromTrade: saved portfolioId={}", saved != null ? saved.getId() : "null");
             return ResponseEntity.ok(saved);
         } catch (Exception e) {
