@@ -13,7 +13,7 @@ global:
     pullPolicy: Always
   # Global vault settings
   vault:
-    enabled: true
+    enabled: false
     role: "am-backend-role"
     serviceAccountName: "am-backend-sa"
 
@@ -32,7 +32,7 @@ config: {}
 
 # Vault Secret Injection Configuration
 vault:
-  enabled: true
+  enabled: false
   serviceAccountName: am-backend-sa
   role: am-backend-role
   csi:
