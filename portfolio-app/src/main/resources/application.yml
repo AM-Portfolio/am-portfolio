@@ -66,6 +66,15 @@ spring:
       portfolio-holdings:
         ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:holdings:"
+      basket-etf:
+        ttl: 86400 # 24 hours — enriched ETF constituents
+        key-prefix: "basket:etf:enriched:"
+      basket-secmatch:
+        ttl: 21600 # 6 hours — security name→ISIN matches
+        key-prefix: "basket:secmatch:"
+      basket-catalog:
+        ttl: 3600 # 1 hour — curated basket themes
+        key-prefix: "basket:catalog:"
       market-indices:
         ttl: 129600 # 30 Days in seconds
         key-prefix: "market-indices:indices:"
@@ -181,6 +190,15 @@ basket:
   holdings:
     enrichment:
       enabled: ${BASKET_HOLDINGS_ENRICHMENT:true}
+  enrichment:
+    connect-timeout-ms: ${BASKET_ENRICHMENT_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${BASKET_ENRICHMENT_READ_TIMEOUT_MS:15000}
+    chunk-size: ${BASKET_ENRICHMENT_CHUNK_SIZE:20}
+    parallel-workers: ${BASKET_ENRICHMENT_PARALLEL_WORKERS:4}
+  cache:
+    etf-ttl-seconds: ${BASKET_ETF_L1_TTL_SECONDS:86400}
+    secmatch-ttl-seconds: ${BASKET_SECMATCH_L1_TTL_SECONDS:21600}
+    catalog-ttl-seconds: ${BASKET_CATALOG_L1_TTL_SECONDS:3600}
 
 market-data:
   client:

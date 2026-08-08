@@ -31,6 +31,8 @@ import com.portfolio.model.market.IndexIndices;
 import com.portfolio.model.cache.StockIndicesEventDataCache;
 import com.portfolio.model.cache.StockPriceCache;
 import com.portfolio.model.analytics.Heatmap;
+import com.portfolio.model.basket.cache.CachedEtfData;
+import com.portfolio.model.basket.cache.CachedSecurityMatch;
 import com.portfolio.model.portfolio.PortfolioAnalysis;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
@@ -206,5 +208,21 @@ public class RedisConfig {
     @Bean
     public RedisTemplate<String, com.portfolio.model.market.MarketData> portfolioMarketDataRedisTemplate(RedisConnectionFactory connectionFactory) {
         return createRedisTemplate(connectionFactory, com.portfolio.model.market.MarketData.class);
+    }
+
+    @Bean
+    public RedisTemplate<String, CachedEtfData> basketEtfRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, CachedEtfData.class);
+    }
+
+    @Bean
+    public RedisTemplate<String, CachedSecurityMatch> basketSecurityMatchRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, CachedSecurityMatch.class);
+    }
+
+    @Bean
+    public RedisTemplate<String, com.portfolio.model.basket.cache.CachedBasketCatalog> basketCatalogRedisTemplate(
+            RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, com.portfolio.model.basket.cache.CachedBasketCatalog.class);
     }
 }

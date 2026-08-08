@@ -1,0 +1,68 @@
+defaultThemeIds:
+  - nifty-50
+  - bank
+  - it
+themes:
+  - id: nifty-50
+    label: Nifty 50
+    query: NIFTYBEES
+    featured: true
+    indexAliases:
+      - nifty 50
+      - NIFTY 50
+  - id: bank
+    label: Bank
+    query: BANKBEES
+    featured: true
+    indexAliases:
+      - nifty bank
+      - NIFTY BANK
+  - id: it
+    label: IT
+    query: ITBEES
+    featured: true
+    indexAliases:
+      - nifty it
+      - NIFTY IT
+  - id: auto
+    label: Auto
+    query: NIFTY AUTO
+    featured: true
+    indexAliases:
+      - nifty auto
+      - NIFTY AUTO
+  - id: metal
+    label: Metal
+    query: NIFTY METAL
+    featured: true
+    indexAliases:
+      - nifty metal
+      - NIFTY METAL
+  - id: fmcg
+    label: FMCG
+    query: NIFTY FMCG
+    featured: true
+    indexAliases:
+      - nifty fmcg
+      - NIFTY FMCG
+  - id: pharma
+    label: Pharma
+    query: NIFTY PHARMA
+    featured: true
+    indexAliases:
+      - nifty pharma
+      - NIFTY PHARMA
+  - id: gold
+    label: Gold
+    query: GOLDBEES
+    featured: true
+    indexAliases:
+      - gold
+      - GOLD
+  - id: psu-bank
+    label: PSU Bank
+    query: NIFTY PSU BANK
+    featured: true
+    indexAliases:
+      - nifty psu bank
+      - NIFTY PSU BANK
