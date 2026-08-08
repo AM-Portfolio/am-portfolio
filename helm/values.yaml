@@ -35,6 +35,8 @@ vault:
   enabled: true
   serviceAccountName: am-backend-sa
   role: am-backend-role
+  csi:
+    enabled: false
 
 env:
   SPRING_MAIN_ALLOW_BEAN_DEFINITION_OVERRIDING: "true"
