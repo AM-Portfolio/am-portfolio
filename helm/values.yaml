@@ -16,6 +16,8 @@ global:
     enabled: true
     role: "am-backend-role"
     serviceAccountName: "am-backend-sa"
+    csi:
+      enabled: false
 
 image:
   repository: am-portfolio
