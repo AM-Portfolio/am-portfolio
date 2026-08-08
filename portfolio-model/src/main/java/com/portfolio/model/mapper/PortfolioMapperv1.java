@@ -146,8 +146,27 @@ public class PortfolioMapperv1 {
     }
 
     private EquityModel mapEquityModelToAsset(EquityModel equityModel, BrokerType brokerType) {
-        // Fallback for symbol: symbol -> isin -> name
+        // Fallback for symbol: symbol -> upstock_instruments lookup -> isin -> name
         String resolvedSymbol = equityModel.getSymbol();
+        if (resolvedSymbol == null || resolvedSymbol.isBlank() || (resolvedSymbol.length() == 12 && resolvedSymbol.matches("[A-Z]{2}[A-Z0-9]{10}"))) {
+            String isinToResolve = equityModel.getIsin() != null ? equityModel.getIsin() : resolvedSymbol;
+            if (isinToResolve != null && !isinToResolve.isBlank()) {
+                try {
+                    org.springframework.data.mongodb.core.MongoTemplate mongoTemplate = 
+                            com.am.marketdata.common.util.ApplicationContextProvider.getBean(org.springframework.data.mongodb.core.MongoTemplate.class);
+                    if (mongoTemplate != null) {
+                        org.springframework.data.mongodb.core.query.Query q = new org.springframework.data.mongodb.core.query.Query(
+                                org.springframework.data.mongodb.core.query.Criteria.where("isin").is(isinToResolve.trim().toUpperCase())
+                        );
+                        com.am.marketdata.common.model.UpstoxInstrument inst = mongoTemplate.findOne(q, com.am.marketdata.common.model.UpstoxInstrument.class);
+                        if (inst != null && inst.getTradingSymbol() != null && !inst.getTradingSymbol().isBlank()) {
+                            resolvedSymbol = inst.getTradingSymbol().trim().toUpperCase();
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+
         if (resolvedSymbol == null || resolvedSymbol.isBlank()) {
             if (equityModel.getIsin() != null && !equityModel.getIsin().isBlank()) {
                 resolvedSymbol = equityModel.getIsin();
