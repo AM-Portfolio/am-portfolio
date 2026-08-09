@@ -24,6 +24,7 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @EqualsAndHashCode(callSuper = true)
 @Document(collection = "portfolios")
+@org.springframework.data.mongodb.core.index.CompoundIndex(name = "owner_broker_idx", def = "{'owner': 1, 'brokerType': 1}", unique = true, sparse = true)
 public class PortfolioDocument extends BaseDocument {
     @Field("name")
     private String name;

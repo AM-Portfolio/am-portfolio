@@ -94,7 +94,10 @@ spring:
           key-prefix: "stock-indices:historical-data:"
           ttl: 129600 # 30 Days in seconds
     mongodb:
-      uri: ${MONGODB_CONNECTION_URL}
+      # MONGODB_CONNECTION_URL is injected by Vault in all environments (dev/staging/prod).
+      # The localhost fallback is a safety net ONLY for local development runs without Vault.
+      # It will NEVER be used in production — Vault always overrides it.
+      uri: ${MONGODB_CONNECTION_URL:mongodb://localhost:27017/portfolio}
       database: ${MONGODB_DATABASE:portfolio}
       authentication-database: admin
   # Disable JDBC auto-configuration since we're using MongoDB
@@ -146,9 +149,9 @@ app:
         id: am-portfolio-trigger-calculation-group
     portfolio:
       consumer:
-        id: ${PORTFOLIO_CONSUMER_GROUP}
+        id: ${PORTFOLIO_CONSUMER_ID:am-portfolio-group-1}
         enabled: ${KAFKA_ENABLED:true}
-      topic: ${PORTFOLIO_TOPIC_NAME}
+      topic: ${PORTFOLIO_TOPIC:am-portfolio}
       publish-topic: ${PORTFOLIO_PUBLISH_TOPIC:am-portfolio-update}
       stream:
         topic: ${PORTFOLIO_STREAM_TOPIC:am-portfolio-stream}
