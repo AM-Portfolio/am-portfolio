@@ -3,6 +3,11 @@ package com.portfolio.basket.client;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.portfolio.basket.model.EtfData;
 import com.portfolio.basket.model.EtfHolding;
+import com.portfolio.model.basket.cache.CachedSecurityMatch;
+import com.portfolio.redis.service.BasketSecurityMatchRedisService;
+import com.portfolio.basket.service.BasketCatalogService;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -11,6 +16,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
@@ -22,19 +28,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Component
 @Slf4j
 public class EtfApiClient {
-
-    private static final int BATCH_SEARCH_CHUNK_SIZE = 50;
-
-    /** Canonical ETF per index query when multiple trackers match the same index name. */
-    private static final Map<String, String> PREFERRED_SYMBOL_BY_INDEX = Map.of(
-            "nifty 50", "NIFTYBEES",
-            "nifty bank", "BANKBEES",
-            "nifty it", "ITBEES");
 
     @Value("${etf.url:http://localhost:8022}")
     private String apiUrl;
@@ -45,21 +47,51 @@ public class EtfApiClient {
     @Value("${basket.holdings.enrichment.enabled:true}")
     private boolean holdingsEnrichmentEnabled;
 
-    @Value("${market-data.client.connect-timeout-ms:5000}")
-    private int marketConnectTimeoutMs;
+    @Value("${basket.enrichment.connect-timeout-ms:3000}")
+    private int enrichmentConnectTimeoutMs;
 
-    @Value("${market-data.client.read-timeout-ms:45000}")
-    private int marketReadTimeoutMs;
+    @Value("${basket.enrichment.read-timeout-ms:15000}")
+    private int enrichmentReadTimeoutMs;
+
+    @Value("${basket.enrichment.chunk-size:20}")
+    private int batchSearchChunkSize;
+
+    @Value("${basket.enrichment.parallel-workers:4}")
+    private int parallelWorkers;
+
+    @Value("${basket.cache.secmatch-ttl-seconds:21600}")
+    private long secmatchL1TtlSeconds;
 
     private RestTemplate etfRestTemplate;
     private RestTemplate marketRestTemplate;
     private final Map<String, EtfData> etfCache = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String, Boolean> etfSymbolCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private Cache<String, SecurityMatch> secmatchL1;
+    private ExecutorService enrichmentExecutor;
+    private final BasketSecurityMatchRedisService securityMatchRedisService;
+    private final BasketCatalogService basketCatalogService;
+
+    public EtfApiClient(
+            @Nullable BasketSecurityMatchRedisService securityMatchRedisService,
+            @Nullable BasketCatalogService basketCatalogService) {
+        this.securityMatchRedisService = securityMatchRedisService;
+        this.basketCatalogService = basketCatalogService;
+    }
 
     @PostConstruct
     void initRestTemplates() {
-        etfRestTemplate = new RestTemplate(clientFactory(60_000, 120_000));
-        marketRestTemplate = new RestTemplate(clientFactory(marketConnectTimeoutMs, marketReadTimeoutMs));
+        etfRestTemplate = new RestTemplate(clientFactory(15_000, 30_000));
+        marketRestTemplate = new RestTemplate(clientFactory(enrichmentConnectTimeoutMs, enrichmentReadTimeoutMs));
+        int workers = Math.max(1, parallelWorkers);
+        enrichmentExecutor = Executors.newFixedThreadPool(workers, r -> {
+            Thread t = new Thread(r, "basket-enrichment");
+            t.setDaemon(true);
+            return t;
+        });
+        secmatchL1 = Caffeine.newBuilder()
+                .expireAfterWrite(Math.max(60, secmatchL1TtlSeconds), TimeUnit.SECONDS)
+                .maximumSize(20_000)
+                .build();
     }
 
     private static SimpleClientHttpRequestFactory clientFactory(int connectMs, int readMs) {
@@ -238,7 +270,7 @@ public class EtfApiClient {
                     .filter(s -> s != null && !s.isBlank())
                     .collect(Collectors.toList());
             log.info("ETF search '{}' -> symbols {}", query, symbols);
-            String preferred = PREFERRED_SYMBOL_BY_INDEX.get(query.toLowerCase(Locale.ROOT).trim());
+            String preferred = preferredSymbolFor(query);
             if (preferred != null) {
                 for (EtfInfo etf : response.getEtfs()) {
                     if (preferred.equalsIgnoreCase(etf.getSymbol())) {
@@ -251,6 +283,13 @@ public class EtfApiClient {
             log.error("ETF search failed for '{}': {}", query, e.getMessage());
             return null;
         }
+    }
+
+    private String preferredSymbolFor(String query) {
+        if (basketCatalogService == null || query == null) {
+            return null;
+        }
+        return basketCatalogService.preferredSymbolByAlias().get(query.toLowerCase(Locale.ROOT).trim());
     }
 
     private Map<String, EtfData> indexHoldingsBySymbol(HoldingsLookupResponse response) {
@@ -319,7 +358,7 @@ public class EtfApiClient {
         if (candidates.size() == 1) {
             return candidates.get(0);
         }
-        String preferred = PREFERRED_SYMBOL_BY_INDEX.get(query.toLowerCase(Locale.ROOT).trim());
+        String preferred = preferredSymbolFor(query);
         if (preferred != null) {
             for (EtfApiResponse etf : candidates) {
                 if (etf.getSymbol() != null && preferred.equalsIgnoreCase(etf.getSymbol())) {
@@ -544,28 +583,134 @@ public class EtfApiClient {
             return Collections.emptyMap();
         }
 
-        String url = marketDataUrl + "/v1/securities/batch-search";
         Map<String, SecurityMatch> matchMap = new LinkedHashMap<>();
+        List<String> missing = new ArrayList<>();
 
-        for (int i = 0; i < names.size(); i += BATCH_SEARCH_CHUNK_SIZE) {
-            List<String> chunk = names.subList(i, Math.min(i + BATCH_SEARCH_CHUNK_SIZE, names.size()));
+        for (String name : names) {
+            SecurityMatch l1 = secmatchL1.getIfPresent(normalizeSecKey(name));
+            if (l1 != null) {
+                matchMap.put(name, l1);
+            } else {
+                missing.add(name);
+            }
+        }
+
+        if (!missing.isEmpty() && securityMatchRedisService != null) {
+            try {
+                Map<String, CachedSecurityMatch> l2Hits = securityMatchRedisService.getMatches(missing);
+                List<String> stillMissing = new ArrayList<>();
+                Map<String, CachedSecurityMatch> toKeep = new LinkedHashMap<>();
+                for (String name : missing) {
+                    CachedSecurityMatch cached = l2Hits.get(name);
+                    if (cached != null) {
+                        SecurityMatch match = fromCachedMatch(cached);
+                        matchMap.put(name, match);
+                        secmatchL1.put(normalizeSecKey(name), match);
+                        toKeep.put(name, cached);
+                    } else {
+                        stillMissing.add(name);
+                    }
+                }
+                missing = stillMissing;
+            } catch (Exception e) {
+                log.warn("Secmatch L2 read failed — fail-open: {}", e.getMessage());
+            }
+        }
+
+        if (missing.isEmpty()) {
+            log.info("batch_search.chunks=0 allFromCache names={}", names.size());
+            return matchMap;
+        }
+
+        String url = marketDataUrl + "/v1/securities/batch-search";
+        int chunkSize = Math.max(1, batchSearchChunkSize);
+        List<List<String>> chunks = new ArrayList<>();
+        for (int i = 0; i < missing.size(); i += chunkSize) {
+            chunks.add(missing.subList(i, Math.min(i + chunkSize, missing.size())));
+        }
+
+        log.info("batch_search.chunks={} namesMissing={} chunkSize={} workers={}",
+                chunks.size(), missing.size(), chunkSize, parallelWorkers);
+
+        List<CompletableFuture<Map<String, SecurityMatch>>> futures = new ArrayList<>();
+        for (List<String> chunk : chunks) {
+            futures.add(CompletableFuture.supplyAsync(() -> fetchChunk(url, chunk), enrichmentExecutor));
+        }
+
+        Map<String, CachedSecurityMatch> newlyCached = new LinkedHashMap<>();
+        for (CompletableFuture<Map<String, SecurityMatch>> future : futures) {
+            try {
+                Map<String, SecurityMatch> chunkResult = future.get(enrichmentReadTimeoutMs + 5_000L, TimeUnit.MILLISECONDS);
+                for (Map.Entry<String, SecurityMatch> entry : chunkResult.entrySet()) {
+                    matchMap.put(entry.getKey(), entry.getValue());
+                    secmatchL1.put(normalizeSecKey(entry.getKey()), entry.getValue());
+                    newlyCached.put(entry.getKey(), toCachedMatch(entry.getKey(), entry.getValue()));
+                }
+            } catch (Exception e) {
+                log.warn("batch_search chunk failed — continuing: {}", e.getMessage());
+            }
+        }
+
+        if (!newlyCached.isEmpty() && securityMatchRedisService != null) {
+            try {
+                securityMatchRedisService.cacheMatchesAsync(newlyCached);
+            } catch (Exception e) {
+                log.warn("Secmatch L2 write failed — fail-open: {}", e.getMessage());
+            }
+        }
+
+        return matchMap;
+    }
+
+    private Map<String, SecurityMatch> fetchChunk(String url, List<String> chunk) {
+        Map<String, SecurityMatch> matchMap = new LinkedHashMap<>();
+        try {
             BatchSearchRequest request = new BatchSearchRequest();
-            request.setQueries(chunk);
+            request.setQueries(new ArrayList<>(chunk));
             request.setLimit(1);
             request.setMinMatchScore(0.7);
 
             log.info("Enriching {} holdings via {}", chunk.size(), url);
             BatchSearchResponse response = marketRestTemplate.postForObject(url, request, BatchSearchResponse.class);
             if (response == null || response.getResults() == null) {
-                continue;
+                return matchMap;
             }
             for (BatchSearchResult result : response.getResults()) {
                 if (result.getMatches() != null && !result.getMatches().isEmpty()) {
                     matchMap.put(result.getQuery(), result.getMatches().get(0));
                 }
             }
+        } catch (Exception e) {
+            log.warn("batch_search POST failed size={}: {}", chunk.size(), e.getMessage());
         }
         return matchMap;
+    }
+
+    private static String normalizeSecKey(String name) {
+        return name.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static CachedSecurityMatch toCachedMatch(String query, SecurityMatch match) {
+        CachedSecurityMatch cached = new CachedSecurityMatch();
+        cached.setQuery(query);
+        cached.setSymbol(match.getSymbol());
+        cached.setIsin(match.getIsin());
+        cached.setSector(match.getSector());
+        cached.setIndustry(match.getIndustry());
+        cached.setMarketCapType(match.getMarketCapType());
+        cached.setMarketCapValue(match.getMarketCapValue());
+        return cached;
+    }
+
+    private static SecurityMatch fromCachedMatch(CachedSecurityMatch cached) {
+        SecurityMatch match = new SecurityMatch();
+        match.setSymbol(cached.getSymbol());
+        match.setIsin(cached.getIsin());
+        match.setSector(cached.getSector());
+        match.setIndustry(cached.getIndustry());
+        match.setMarketCapType(cached.getMarketCapType());
+        match.setMarketCapValue(cached.getMarketCapValue());
+        return match;
     }
 
     private void applySecurityMatch(EtfHolding h, SecurityMatch match) {
@@ -640,7 +785,7 @@ public class EtfApiClient {
     }
 
     @Data
-    private static class SecurityMatch {
+    public static class SecurityMatch {
         private String symbol;
         private String isin;
         private String sector;

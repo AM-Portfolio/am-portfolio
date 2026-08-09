@@ -1,6 +1,5 @@
 package com.portfolio.basket.service;
 
-import com.portfolio.basket.client.EtfApiClient;
 import com.portfolio.basket.model.EtfData;
 import com.portfolio.basket.model.EtfHolding;
 import com.portfolio.basket.util.BasketUtils;
@@ -21,7 +20,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class BasketAllocationService {
 
-    private final EtfApiClient etfApiClient;
+    private final EnrichedEtfService enrichedEtfService;
 
     /**
      * Feature 1: Cumulative Look-Through Exposure
@@ -323,17 +322,7 @@ public class BasketAllocationService {
                 .build();
     }
 
-    // Fetch Data from Live API Only (Shared with Engine Service but can be reused
-    // here)
-    // Ideally this should be in EtfApiClient or a DataService, but keeping here for
-    // now as private helper
     private EtfData getEtfData(String isin) {
-        // log.info("Fetching live ETF data for ISIN: {}", isin); // Use TRACE log if
-        // needed
-        EtfData data = etfApiClient.fetchEtfHoldings(isin);
-        if (data != null) {
-            etfApiClient.enrichHoldings(data.getHoldings());
-        }
-        return data;
+        return enrichedEtfService.getEnrichedEtf(isin);
     }
 }

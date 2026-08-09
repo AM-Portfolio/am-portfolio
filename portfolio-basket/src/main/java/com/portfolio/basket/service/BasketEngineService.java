@@ -21,6 +21,8 @@ import java.util.stream.Collectors;
 public class BasketEngineService {
 
     private final EtfApiClient etfApiClient;
+    private final EnrichedEtfService enrichedEtfService;
+    private final BasketCatalogService basketCatalogService;
     private final com.portfolio.marketdata.service.MarketDataService marketDataService;
 
     public BasketOpportunity calculateBasketQuantities(Double investmentAmount, BasketOpportunity opportunity,
@@ -122,33 +124,34 @@ public class BasketEngineService {
                 .sum();
 
         // 1. Discover ETFs
-        Set<String> allIsins = new LinkedHashSet<>();
+        Set<String> allQueries = new LinkedHashSet<>();
 
-        if (etfQuery != null && !etfQuery.trim().isEmpty()) {
-            if (etfQuery.contains(",")) {
-                log.info("Processing explicit ISIN list: {}", etfQuery);
-                Arrays.stream(etfQuery.split(","))
-                        .map(String::trim)
-                        .filter(s -> !s.isEmpty())
-                        .forEach(allIsins::add);
+        String effectiveQuery = (etfQuery == null || etfQuery.trim().isEmpty())
+                ? basketCatalogService.resolveDefaultQuery()
+                : etfQuery;
+        if (effectiveQuery != null && !effectiveQuery.trim().isEmpty()) {
+            if (effectiveQuery.contains(",")) {
+                log.info("Processing query list: {}", effectiveQuery);
+                for (String token : effectiveQuery.split(",")) {
+                    String trimmed = token.trim();
+                    if (trimmed.isEmpty()) {
+                        continue;
+                    }
+                    resolveDiscoveryToken(trimmed, allQueries);
+                }
             } else {
-                log.info("Discovering ETFs via search query: {}", etfQuery);
-                allIsins.addAll(etfApiClient.searchEtfs(etfQuery));
+                log.info("Discovering ETFs via search query: {}", effectiveQuery);
+                resolveDiscoveryToken(effectiveQuery.trim(), allQueries);
             }
         }
 
-        // No fallback - require valid search query or discovery mechanism
-        if (allIsins.isEmpty()) {
-            log.warn("No ETFs discovered. Query is required for ETF discovery.");
-        }
-
-        if (allIsins.isEmpty()) {
+        if (allQueries.isEmpty()) {
             log.warn("No ETFs discovered for matching.");
             return Collections.emptyList();
         }
 
-        log.info("Processing {} ETFs for matching", allIsins.size());
-        List<BasketOpportunity> opportunities = findOpportunitiesInternal(userHoldings, allIsins);
+        log.info("Processing {} ETFs for matching", allQueries.size());
+        List<BasketOpportunity> opportunities = findOpportunitiesInternal(userHoldings, allQueries);
 
         // Set total portfolio value on each opportunity
         opportunities.forEach(op -> op.setTotalPortfolioValue(totalValue));
@@ -159,8 +162,32 @@ public class BasketEngineService {
         return opportunities;
     }
 
-    // Helper to calculate opportunities for specific ETF ISINs
-    private List<BasketOpportunity> findOpportunitiesInternal(List<EquityHoldings> userHoldings, Set<String> etfIsins) {
+    private void resolveDiscoveryToken(String token, Set<String> out) {
+        if (isLikelyIsinOrSymbol(token)) {
+            out.add(token);
+            return;
+        }
+        List<String> found = etfApiClient.searchEtfs(token);
+        if (found.isEmpty()) {
+            // Still try resolve via batch holdings (index name with spaces)
+            out.add(token);
+        } else {
+            out.addAll(found);
+        }
+    }
+
+    private boolean isLikelyIsinOrSymbol(String value) {
+        if (value.contains(" ")) {
+            return false;
+        }
+        if (value.matches("(?i)^INF[A-Z0-9]{10}$") || value.matches("(?i)^[A-Z]{2}[A-Z0-9]{10}$")) {
+            return true;
+        }
+        return value.matches("^[A-Za-z0-9._-]+$") && value.length() <= 24;
+    }
+
+    // Helper to calculate opportunities for specific ETF queries (symbol / ISIN / name)
+    private List<BasketOpportunity> findOpportunitiesInternal(List<EquityHoldings> userHoldings, Set<String> etfQueries) {
         Map<String, EquityHoldings> userMap = userHoldings.stream()
                 .collect(Collectors.toMap(EquityHoldings::getIsin, h -> h, (a, b) -> a));
 
@@ -169,36 +196,28 @@ public class BasketEngineService {
                 .collect(Collectors.groupingBy(EquityHoldings::getSector));
 
         List<BasketOpportunity> opportunities = new ArrayList<>();
-        Map<String, EtfData> etfDataByInput = etfApiClient.fetchEtfHoldingsBatch(new ArrayList<>(etfIsins));
+        Map<String, EtfData> etfDataByInput = enrichedEtfService.getEnrichedEtfsBatch(new ArrayList<>(etfQueries));
 
-        for (String etfIsin : etfIsins) {
-            EtfData etf = etfDataByInput.get(etfIsin);
-            if (etf != null && etf.getHoldings() != null) {
-                etfApiClient.enrichHoldings(etf.getHoldings());
-            }
+        for (String etfQuery : etfQueries) {
+            EtfData etf = etfDataByInput.get(etfQuery);
             if (etf == null) {
-                log.warn("No ETF resolved for query '{}' after batch lookup", etfIsin);
+                log.warn("No ETF resolved for query '{}' after batch lookup", etfQuery);
                 continue;
             }
 
-            BasketOpportunity opportunity = calculateOverlap(etfIsin, etf, userMap, userSectorMap);
-            // Add all opportunities, sorting happens at top level
+            BasketOpportunity opportunity = calculateOverlap(etfQuery, etf, userMap, userSectorMap);
             opportunities.add(opportunity);
         }
 
         return opportunities;
     }
 
-    // Fetch Data from Live API Only
+    // Fetch Data from Live API Only (shared cache facade)
     public EtfData getEtfData(String isin) {
-        log.info("Fetching live ETF data for ISIN: {}", isin);
-        EtfData data = etfApiClient.fetchEtfHoldings(isin);
+        log.info("Fetching enriched ETF data for ISIN/symbol: {}", isin);
+        EtfData data = enrichedEtfService.getEnrichedEtf(isin);
         if (data == null) {
             log.warn("⚠️ No ETF data available from API for ISIN: {}", isin);
-        } else {
-            // Enrich with market data if possible
-            log.info("Enriching ETF data for {}", isin);
-            etfApiClient.enrichHoldings(data.getHoldings());
         }
         return data;
     }

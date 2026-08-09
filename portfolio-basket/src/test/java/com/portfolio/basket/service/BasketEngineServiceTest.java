@@ -29,6 +29,12 @@ public class BasketEngineServiceTest {
     private EtfApiClient etfApiClient;
 
     @Mock
+    private EnrichedEtfService enrichedEtfService;
+
+    @Mock
+    private BasketCatalogService basketCatalogService;
+
+    @Mock
     private MarketDataService marketDataService;
 
     @InjectMocks
@@ -146,8 +152,7 @@ public class BasketEngineServiceTest {
         etfHoldings.add(etfHolding);
         etfData.setHoldings(etfHoldings);
 
-        when(etfApiClient.fetchEtfHoldingsBatch(anyList())).thenReturn(Map.of("IE00B53SZB19", etfData));
-        doNothing().when(etfApiClient).enrichHoldings(anyList());
+        when(enrichedEtfService.getEnrichedEtfsBatch(anyList())).thenReturn(Map.of("IE00B53SZB19", etfData));
 
         List<BasketOpportunity> result = basketEngineService.findOpportunities(userHoldings, "IE00B53SZB19,");
 
@@ -155,11 +160,42 @@ public class BasketEngineServiceTest {
         assertEquals(1, result.size());
         assertEquals("Tech ETF", result.get(0).getEtfName());
         assertEquals(100.0, result.get(0).getMatchScore());
+        verify(enrichedEtfService, times(1)).getEnrichedEtfsBatch(anyList());
+        verify(etfApiClient, never()).enrichHoldings(anyList());
+    }
+
+    @Test
+    void testFindOpportunities_KeywordTokenUsesSearch() {
+        List<EquityHoldings> userHoldings = new ArrayList<>();
+        EquityHoldings holding = new EquityHoldings();
+        holding.setIsin("US0378331005");
+        holding.setSymbol("AAPL");
+        holding.setQuantity(10.0);
+        holding.setCurrentValue(1500.0);
+        userHoldings.add(holding);
+
+        EtfData etfData = new EtfData();
+        etfData.setName("Nifty Bees");
+        etfData.setSymbol("NIFTYBEES");
+        EtfHolding etfHolding = new EtfHolding();
+        etfHolding.setSymbol("AAPL");
+        etfHolding.setIsin("US0378331005");
+        etfHolding.setWeight(100.0);
+        etfData.setHoldings(List.of(etfHolding));
+
+        when(etfApiClient.searchEtfs("Nifty 50")).thenReturn(List.of("NIFTYBEES"));
+        when(enrichedEtfService.getEnrichedEtfsBatch(anyList())).thenReturn(Map.of("NIFTYBEES", etfData));
+
+        List<BasketOpportunity> result = basketEngineService.findOpportunities(userHoldings, "Nifty 50");
+
+        assertEquals(1, result.size());
+        assertEquals("Nifty Bees", result.get(0).getEtfName());
+        verify(etfApiClient).searchEtfs("Nifty 50");
     }
 
     @Test
     void testGetEtfData_FallbackWarn() {
-        when(etfApiClient.fetchEtfHoldings("INVALID")).thenReturn(null);
+        when(enrichedEtfService.getEnrichedEtf("INVALID")).thenReturn(null);
         
         EtfData result = basketEngineService.getEtfData("INVALID");
         

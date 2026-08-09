@@ -2,6 +2,7 @@ package com.portfolio.api;
 
 import com.portfolio.basket.model.BasketOpportunity;
 import com.portfolio.basket.service.BasketAllocationService;
+import com.portfolio.basket.service.BasketCatalogService;
 import com.portfolio.basket.service.BasketEngineService;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.service.portfolio.PortfolioHoldingsService;
@@ -23,7 +24,19 @@ public class BasketController {
 
     private final BasketEngineService basketService;
     private final BasketAllocationService basketAllocationService;
+    private final BasketCatalogService basketCatalogService;
     private final PortfolioHoldingsService portfolioHoldingsService;
+
+    @GetMapping("/catalog")
+    public com.portfolio.basket.model.BasketCatalogResponse getCatalog() {
+        return basketCatalogService.getCatalog();
+    }
+
+    @PutMapping("/catalog")
+    public com.portfolio.basket.model.BasketCatalogResponse upsertCatalog(
+            @RequestBody com.portfolio.model.basket.cache.CachedBasketCatalog body) {
+        return basketCatalogService.upsertCatalog(body);
+    }
 
     @PostMapping("/opportunities")
     public List<BasketOpportunity> getOpportunities(@RequestBody OpportunityRequest request) {
