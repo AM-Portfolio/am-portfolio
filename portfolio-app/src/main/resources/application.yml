@@ -94,6 +94,9 @@ spring:
           key-prefix: "stock-indices:historical-data:"
           ttl: 129600 # 30 Days in seconds
     mongodb:
+      # MONGODB_CONNECTION_URL is injected by Vault in all environments (dev/staging/prod).
+      # The localhost fallback is a safety net ONLY for local development runs without Vault.
+      # It will NEVER be used in production — Vault always overrides it.
       uri: ${MONGODB_CONNECTION_URL:mongodb://localhost:27017/portfolio}
       database: ${MONGODB_DATABASE:portfolio}
       authentication-database: admin
