@@ -16,6 +16,9 @@ global:
     enabled: true
     role: "am-backend-role"
     serviceAccountName: "am-backend-sa"
+    # Prod cluster has Vault Agent Injector sidecar, not secrets-store CSI driver CRDs.
+    csi:
+      enabled: false
 
 image:
   repository: am-portfolio
