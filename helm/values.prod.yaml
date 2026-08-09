@@ -3,6 +3,14 @@
 environment: prod
 replicaCount: 1
 
+global:
+  vault:
+    # The cluster uses Vault Agent Injector (sidecar), NOT the Secrets Store CSI Driver.
+    # Explicitly disable CSI here to override the universal-chart default (which is true).
+    # Without this, Helm tries to create a SecretProviderClass — a CRD that isn't installed.
+    csi:
+      enabled: false
+
 # Prod Vault secret paths — key mappings are in vault-mappings.yaml
 vault:
   secretPaths:
