@@ -38,7 +38,7 @@ public class PortfolioMapperv1 {
 
     public PortfolioModelV1 toPortfolioModelV1(com.portfolio.model.events.trade.TradePortfolioSyncEvent tradeEvent) {
         String action = tradeEvent.getAction();
-        
+
         List<EquityModel> equityModels = new ArrayList<>();
         if (tradeEvent.getEquities() != null && !tradeEvent.getEquities().isEmpty()) {
             if (action == null) {
@@ -54,7 +54,7 @@ public class PortfolioMapperv1 {
                 em.setMarketCap(e.getMarketCap());
                 // In am-portfolio, the asset type might need mapping, but setting it safely
                 em.setAssetType(AssetType.EQUITY);
-                
+
                 // Map quantities based on BUY/SELL
                 if ("SELL".equalsIgnoreCase(e.getAction())) {
                     em.setQuantity(e.getSellQuantity() != null ? e.getSellQuantity().doubleValue() : 0.0);
@@ -148,28 +148,34 @@ public class PortfolioMapperv1 {
     private EquityModel mapEquityModelToAsset(EquityModel equityModel, BrokerType brokerType) {
         // Fallback for symbol: symbol -> upstock_instruments lookup -> isin -> name
         String resolvedSymbol = equityModel.getSymbol();
-        if (resolvedSymbol == null || resolvedSymbol.isBlank() || (resolvedSymbol.length() == 12 && resolvedSymbol.matches("[A-Z]{2}[A-Z0-9]{10}"))) {
+        if (resolvedSymbol == null || resolvedSymbol.isBlank()
+                || (resolvedSymbol.length() == 12 && resolvedSymbol.matches("[A-Z]{2}[A-Z0-9]{10}"))) {
             String isinToResolve = equityModel.getIsin() != null ? equityModel.getIsin() : resolvedSymbol;
             if (isinToResolve != null && !isinToResolve.isBlank()) {
                 try {
                     org.springframework.data.mongodb.core.MongoTemplate mongoTemplate = null;
                     try {
-                        org.springframework.context.ApplicationContext ctx = 
-                                org.springframework.web.context.ContextLoader.getCurrentWebApplicationContext();
+                        org.springframework.context.ApplicationContext ctx = org.springframework.web.context.ContextLoader
+                                .getCurrentWebApplicationContext();
                         if (ctx != null) {
                             mongoTemplate = ctx.getBean(org.springframework.data.mongodb.core.MongoTemplate.class);
                         }
-                    } catch (Exception ignored) {}
+                    } catch (Exception ignored) {
+                    }
 
                     if (mongoTemplate != null) {
-                        org.bson.Document inst = mongoTemplate.getCollection("upstock_instruments")
+                        org.bson.Document inst = mongoTemplate.getMongoDatabaseFactory()
+                                .getMongoDatabase("market_data")
+                                .getCollection("upstock_instruments")
                                 .find(new org.bson.Document("isin", isinToResolve.trim().toUpperCase()))
                                 .first();
-                        if (inst != null && inst.getString("trading_symbol") != null && !inst.getString("trading_symbol").isBlank()) {
+                        if (inst != null && inst.getString("trading_symbol") != null
+                                && !inst.getString("trading_symbol").isBlank()) {
                             resolvedSymbol = inst.getString("trading_symbol").trim().toUpperCase();
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                }
             }
         }
 
@@ -184,7 +190,7 @@ public class PortfolioMapperv1 {
         // Fallback for avgBuyingPrice: avgBuyingPrice -> investmentValue / quantity
         Double resolvedAvgPrice = equityModel.getAvgBuyingPrice();
         if ((resolvedAvgPrice == null || resolvedAvgPrice == 0.0)
-                && equityModel.getInvestmentValue() != null 
+                && equityModel.getInvestmentValue() != null
                 && equityModel.getQuantity() != null && equityModel.getQuantity() > 0) {
             resolvedAvgPrice = equityModel.getInvestmentValue() / equityModel.getQuantity();
         }
@@ -199,7 +205,8 @@ public class PortfolioMapperv1 {
                 .brokerType(brokerType)
                 .symbol(resolvedSymbol)
                 .name(equityModel.getName())
-                .companyName(equityModel.getCompanyName() != null ? equityModel.getCompanyName() : equityModel.getName())
+                .companyName(
+                        equityModel.getCompanyName() != null ? equityModel.getCompanyName() : equityModel.getName())
                 .isin(equityModel.getIsin())
                 .avgBuyingPrice(resolvedAvgPrice)
                 .currentPrice(equityModel.getCurrentPrice())
@@ -228,8 +235,10 @@ public class PortfolioMapperv1 {
     }
 
     /**
-     * Trade publishes enum names (ZERODHA, GROW, UNKNOWN, …). Portfolio enum is a subset
-     * (GROWW not GROW). Fall back via display code, then ZERODHA-safe null avoidance for create.
+     * Trade publishes enum names (ZERODHA, GROW, UNKNOWN, …). Portfolio enum is a
+     * subset
+     * (GROWW not GROW). Fall back via display code, then ZERODHA-safe null
+     * avoidance for create.
      */
     private BrokerType resolveBrokerType(String raw) {
         if (raw == null || raw.isBlank() || "UNKNOWN".equalsIgnoreCase(raw) || "OTHER".equalsIgnoreCase(raw)) {
