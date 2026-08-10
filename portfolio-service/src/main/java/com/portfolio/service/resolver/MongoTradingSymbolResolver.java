@@ -35,7 +35,7 @@ public class MongoTradingSymbolResolver implements TradingSymbolResolver {
 
         // Already a normal ticker — no DB lookup needed.
         if (normalizedSymbol != null && !normalizedSymbol.isBlank()
-                && !looksLikeIsin(normalizedSymbol)) {
+                && !TradingSymbolResolver.looksLikeIsin(normalizedSymbol)) {
             return normalizedSymbol.trim().toUpperCase();
         }
 
@@ -56,7 +56,7 @@ public class MongoTradingSymbolResolver implements TradingSymbolResolver {
         if (isin != null && !isin.isBlank()) {
             return isin.trim().toUpperCase();
         }
-        if (looksLikeIsin(normalizedSymbol)) {
+        if (TradingSymbolResolver.looksLikeIsin(normalizedSymbol)) {
             return normalizedSymbol.trim().toUpperCase();
         }
         return null;
