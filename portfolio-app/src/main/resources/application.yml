@@ -204,7 +204,7 @@ market-data:
   client:
     connect-timeout-ms: ${MARKET_DATA_CONNECT_TIMEOUT_MS:3000}
     # Fail-open: never block advanced/intraday UI on a 90s Upstox stall
-    read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:8000}
+    read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:32000}
   api:
     base-url: ${MARKET_DATA_API_URL:http://am-market-data:8080}
     ohlc-endpoint: /v1/market-data/ohlc
@@ -212,7 +212,7 @@ market-data:
     historical-charts-endpoint: /v1/analysis/historical-charts
     securities-endpoint: /v1/securities
     nse-indices-endpoint: /v1/indices
-    read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:8000}
+    read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:32000}
     connection-timeout: 3000
     max-retry-attempts: 0
     batch:

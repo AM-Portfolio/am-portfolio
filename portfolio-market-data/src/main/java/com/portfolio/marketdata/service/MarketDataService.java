@@ -234,8 +234,8 @@ public class MarketDataService {
             .collect(Collectors.toList());
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-            // Fail-open: do not wait 90s for historical chunks under load
-            .orTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            // Align with OHLC client timeout (32s) + small buffer
+            .orTimeout(35, java.util.concurrent.TimeUnit.SECONDS)
             .exceptionally(e -> null)
             .join();
         Map<String, MarketData> merged = new java.util.HashMap<>();
@@ -336,7 +336,7 @@ public class MarketDataService {
             return merged;
         }
 
-        int readTimeoutMs = (config != null && config.getReadTimeout() > 0) ? config.getReadTimeout() : 8000;
+        int readTimeoutMs = (config != null && config.getReadTimeout() > 0) ? config.getReadTimeout() : 32000;
         int maxParallel = 2;
         if (config != null && config.getBatch() != null && config.getBatch().getMaxParallelChunks() > 0) {
             maxParallel = config.getBatch().getMaxParallelChunks();
