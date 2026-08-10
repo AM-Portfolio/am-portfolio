@@ -43,6 +43,8 @@ public class PortfolioController {
     private final PortfolioSnapshotService portfolioSnapshotService;
     private final SnapshotCatchUpService snapshotCatchUpService;
     private final com.portfolio.service.portfolio.PortfolioIntradayService portfolioIntradayService;
+    private final com.portfolio.redis.service.ActiveMarketSymbolPublisher activeMarketSymbolPublisher;
+    private final com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer;
 
     @org.springframework.beans.factory.annotation.Value("${app.jwt.internal-secret}")
     private String internalSecret;
@@ -158,7 +160,12 @@ public class PortfolioController {
                 portfolioModel.getId(), portfolioModel.getName(), portfolioModel.getOwner());
 
         try {
+            // HTTP sync bypasses Kafka mapper — normalize symbols here before Mongo write.
+            portfolioEquitySymbolNormalizer.normalizePortfolio(portfolioModel);
             PortfolioModelV1 saved = portfolioService.updateTradePortfolio(portfolioModel);
+            if (saved != null) {
+                activeMarketSymbolPublisher.publishFromPortfolio(saved);
+            }
             log.info("PortfolioController - syncPortfolioFromTrade: saved portfolioId={}", saved != null ? saved.getId() : "null");
             return ResponseEntity.ok(saved);
         } catch (Exception e) {

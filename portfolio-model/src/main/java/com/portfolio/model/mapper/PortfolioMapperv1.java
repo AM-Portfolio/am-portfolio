@@ -2,6 +2,7 @@ package com.portfolio.model.mapper;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
@@ -13,9 +14,15 @@ import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.FundType;
 import com.portfolio.model.events.PortfolioUpdateEvent;
 import com.portfolio.model.portfolio.v1.BrokerPortfolioSummary;
+import com.portfolio.model.resolver.TradingSymbolResolver;
+
+import lombok.RequiredArgsConstructor;
 
 @Component
+@RequiredArgsConstructor
 public class PortfolioMapperv1 {
+
+  private final Optional<TradingSymbolResolver> tradingSymbolResolver;
 
     public PortfolioModelV1 toPortfolioModelV1(PortfolioUpdateEvent portfolioEvent) {
         List<EquityModel> mappedEquities = mapToEquityModels(portfolioEvent, portfolioEvent.getBrokerType());
@@ -38,33 +45,16 @@ public class PortfolioMapperv1 {
 
     public PortfolioModelV1 toPortfolioModelV1(com.portfolio.model.events.trade.TradePortfolioSyncEvent tradeEvent) {
         String action = tradeEvent.getAction();
-        
+
         List<EquityModel> equityModels = new ArrayList<>();
         if (tradeEvent.getEquities() != null && !tradeEvent.getEquities().isEmpty()) {
             if (action == null) {
                 action = tradeEvent.getEquities().get(0).getAction();
             }
-            equityModels = tradeEvent.getEquities().stream().map(e -> {
-                EquityModel em = new EquityModel();
-                em.setSymbol(e.getSymbol());
-                em.setIsin(e.getIsin());
-                // Map the sector, industry and market cap perfectly as received from kafka
-                em.setSector(e.getSector());
-                em.setIndustry(e.getIndustry());
-                em.setMarketCap(e.getMarketCap());
-                // In am-portfolio, the asset type might need mapping, but setting it safely
-                em.setAssetType(AssetType.EQUITY);
-                
-                // Map quantities based on BUY/SELL
-                if ("SELL".equalsIgnoreCase(e.getAction())) {
-                    em.setQuantity(e.getSellQuantity() != null ? e.getSellQuantity().doubleValue() : 0.0);
-                    em.setAvgBuyingPrice(e.getSellPrice() != null ? e.getSellPrice().doubleValue() : 0.0);
-                } else {
-                    em.setQuantity(e.getQuantity() != null ? e.getQuantity().doubleValue() : 0.0);
-                    em.setAvgBuyingPrice(e.getAvgBuyingPrice() != null ? e.getAvgBuyingPrice().doubleValue() : 0.0);
-                }
-                return em;
-            }).collect(Collectors.toList());
+            // Trade Kafka path: map each row then resolve symbol (same as document upload path).
+            equityModels = tradeEvent.getEquities().stream()
+                    .map(e -> mapTradeEquityToModel(e, resolveBrokerType(tradeEvent.getBrokerType())))
+                    .collect(Collectors.toList());
         }
 
         if (Boolean.TRUE.equals(tradeEvent.getDeleteAllTrades())) {
@@ -124,6 +114,27 @@ public class PortfolioMapperv1 {
         return assets;
     }
 
+    private EquityModel mapTradeEquityToModel(
+            com.portfolio.model.events.trade.TradeEquityPosition e, BrokerType brokerType) {
+        EquityModel em = new EquityModel();
+        em.setSymbol(e.getSymbol());
+        em.setIsin(e.getIsin());
+        em.setSector(e.getSector());
+        em.setIndustry(e.getIndustry());
+        em.setMarketCap(e.getMarketCap());
+        em.setAssetType(AssetType.EQUITY);
+
+        if ("SELL".equalsIgnoreCase(e.getAction())) {
+            em.setQuantity(e.getSellQuantity() != null ? e.getSellQuantity().doubleValue() : 0.0);
+            em.setAvgBuyingPrice(e.getSellPrice() != null ? e.getSellPrice().doubleValue() : 0.0);
+        } else {
+            em.setQuantity(e.getQuantity() != null ? e.getQuantity().doubleValue() : 0.0);
+            em.setAvgBuyingPrice(e.getAvgBuyingPrice() != null ? e.getAvgBuyingPrice().doubleValue() : 0.0);
+        }
+
+        return mapEquityModelToAsset(em, brokerType);
+    }
+
     private Double calculateTotalValue(List<EquityModel> equityModels) {
         if (equityModels == null || equityModels.isEmpty()) {
             return 0.0;
@@ -146,8 +157,8 @@ public class PortfolioMapperv1 {
     }
 
     private EquityModel mapEquityModelToAsset(EquityModel equityModel, BrokerType brokerType) {
-        // Fallback for symbol: symbol -> isin -> name
-        String resolvedSymbol = equityModel.getSymbol();
+        String resolvedSymbol = resolveSymbolForStorage(equityModel.getSymbol(), equityModel.getIsin());
+
         if (resolvedSymbol == null || resolvedSymbol.isBlank()) {
             if (equityModel.getIsin() != null && !equityModel.getIsin().isBlank()) {
                 resolvedSymbol = equityModel.getIsin();
@@ -156,10 +167,17 @@ public class PortfolioMapperv1 {
             }
         }
 
+        String resolvedIsin = equityModel.getIsin();
+        if (resolvedIsin == null || resolvedIsin.isBlank()) {
+            if (TradingSymbolResolver.looksLikeIsin(equityModel.getSymbol())) {
+                resolvedIsin = equityModel.getSymbol().trim().toUpperCase();
+            }
+        }
+
         // Fallback for avgBuyingPrice: avgBuyingPrice -> investmentValue / quantity
         Double resolvedAvgPrice = equityModel.getAvgBuyingPrice();
         if ((resolvedAvgPrice == null || resolvedAvgPrice == 0.0)
-                && equityModel.getInvestmentValue() != null 
+                && equityModel.getInvestmentValue() != null
                 && equityModel.getQuantity() != null && equityModel.getQuantity() > 0) {
             resolvedAvgPrice = equityModel.getInvestmentValue() / equityModel.getQuantity();
         }
@@ -174,8 +192,9 @@ public class PortfolioMapperv1 {
                 .brokerType(brokerType)
                 .symbol(resolvedSymbol)
                 .name(equityModel.getName())
-                .companyName(equityModel.getCompanyName() != null ? equityModel.getCompanyName() : equityModel.getName())
-                .isin(equityModel.getIsin())
+                .companyName(
+                        equityModel.getCompanyName() != null ? equityModel.getCompanyName() : equityModel.getName())
+                .isin(resolvedIsin)
                 .avgBuyingPrice(resolvedAvgPrice)
                 .currentPrice(equityModel.getCurrentPrice())
                 .quantity(equityModel.getQuantity())
@@ -191,6 +210,16 @@ public class PortfolioMapperv1 {
                 .build();
     }
 
+    /**
+     * Uses injected {@link TradingSymbolResolver} (works in Kafka threads — no servlet context).
+     * Falls back to raw symbol when resolver bean is absent (e.g. unit tests).
+     */
+    private String resolveSymbolForStorage(String symbol, String isin) {
+        return tradingSymbolResolver
+                .map(resolver -> resolver.resolveTradingSymbol(symbol, isin))
+                .orElse(symbol);
+    }
+
     private MutualFundModel mapToAsset(MutualFundModel fundModel, BrokerType brokerType) {
         return MutualFundModel.builder()
                 .assetType(AssetType.MUTUAL_FUND)
@@ -203,8 +232,10 @@ public class PortfolioMapperv1 {
     }
 
     /**
-     * Trade publishes enum names (ZERODHA, GROW, UNKNOWN, …). Portfolio enum is a subset
-     * (GROWW not GROW). Fall back via display code, then ZERODHA-safe null avoidance for create.
+     * Trade publishes enum names (ZERODHA, GROW, UNKNOWN, …). Portfolio enum is a
+     * subset
+     * (GROWW not GROW). Fall back via display code, then ZERODHA-safe null
+     * avoidance for create.
      */
     private BrokerType resolveBrokerType(String raw) {
         if (raw == null || raw.isBlank() || "UNKNOWN".equalsIgnoreCase(raw) || "OTHER".equalsIgnoreCase(raw)) {
