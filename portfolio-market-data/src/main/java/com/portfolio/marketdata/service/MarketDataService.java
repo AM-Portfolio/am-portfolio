@@ -234,7 +234,8 @@ public class MarketDataService {
             .collect(Collectors.toList());
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-            .orTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+            // Fail-open: do not wait 90s for historical chunks under load
+            .orTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
             .exceptionally(e -> null)
             .join();
         Map<String, MarketData> merged = new java.util.HashMap<>();
@@ -303,8 +304,7 @@ public class MarketDataService {
 
     /**
      * Get OHLC data for the specified symbols with a specific time frame.
-     * Splits large symbol lists into parallel chunks of max 20 symbols to prevent
-     * downstream API timeouts.
+     * Splits large symbol lists into bounded parallel chunks to avoid Upstox stampedes.
      *
      * @param symbols   List of symbols to fetch data for
      * @param timeFrame The time frame for the OHLC data
@@ -323,33 +323,66 @@ public class MarketDataService {
         log.info("Getting OHLC data for {} symbols with timeFrame={} refresh={}", validSymbols.size(), timeFrame, refresh);
 
         List<List<String>> chunks = partitionSymbols(validSymbols);
+        return fetchOhlcChunks(chunks, timeFrame, refresh);
+    }
 
-        List<java.util.concurrent.CompletableFuture<Map<String, MarketData>>> futures = chunks.stream()
-            .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-                try {
-                    MarketDataResponseWrapper w = marketDataApiClient
-                            .getOhlcData(chunk, timeFrame, refresh).block();
-                    if (w != null) {
-                        return convertToMarketDataMap(w, true);
-                    }
-                    return Collections.<String, MarketData>emptyMap();
-                } catch (Exception e) {
-                    log.warn("[OHLC data] API call failed for chunk of {}: {}", chunk.size(), e.getMessage());
-                    return Collections.<String, MarketData>emptyMap();
+    /**
+     * Fetch OHLC chunks with a bounded concurrency wave so one 100+ symbol portfolio
+     * cannot open unlimited parallel Upstox-backed calls.
+     */
+    private Map<String, MarketData> fetchOhlcChunks(List<List<String>> chunks, String timeFrame, boolean refresh) {
+        Map<String, MarketData> merged = new HashMap<>();
+        if (chunks.isEmpty()) {
+            return merged;
+        }
+
+        int readTimeoutMs = (config != null && config.getReadTimeout() > 0) ? config.getReadTimeout() : 8000;
+        int maxParallel = 2;
+        if (config != null && config.getBatch() != null && config.getBatch().getMaxParallelChunks() > 0) {
+            maxParallel = config.getBatch().getMaxParallelChunks();
+        }
+        // Wave timeout = client timeout + small buffer; never the old 60s/90s hang.
+        long waveTimeoutMs = Math.max(readTimeoutMs + 1500L, 5000L);
+
+        for (int i = 0; i < chunks.size(); i += maxParallel) {
+            List<List<String>> wave = chunks.subList(i, Math.min(i + maxParallel, chunks.size()));
+            List<CompletableFuture<Map<String, MarketData>>> futures = wave.stream()
+                    .map(chunk -> CompletableFuture.supplyAsync(() -> {
+                        try {
+                            MarketDataResponseWrapper w = marketDataApiClient
+                                    .getOhlcData(chunk, timeFrame, refresh).block();
+                            if (w != null) {
+                                return convertToMarketDataMap(w, true);
+                            }
+                            return Collections.<String, MarketData>emptyMap();
+                        } catch (Exception e) {
+                            log.warn("[OHLC data] API call failed for chunk of {}: {}", chunk.size(), e.getMessage());
+                            return Collections.<String, MarketData>emptyMap();
+                        }
+                    }, externalApiExecutor))
+                    .collect(Collectors.toList());
+
+            try {
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                        .orTimeout(waveTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                        .exceptionally(e -> null)
+                        .join();
+            } catch (Exception e) {
+                log.warn("[OHLC data] Wave join failed after {}ms: {}", waveTimeoutMs, e.getMessage());
+            }
+
+            for (CompletableFuture<Map<String, MarketData>> future : futures) {
+                if (!future.isCompletedExceptionally()) {
+                    merged.putAll(future.getNow(Collections.emptyMap()));
                 }
-            }, externalApiExecutor))
-            .collect(Collectors.toList());
+            }
+        }
 
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-            .orTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-            .exceptionally(e -> null)
-            .join();
-
-        Map<String, MarketData> merged = new java.util.HashMap<>();
-        futures.stream()
-            .filter(f -> !f.isCompletedExceptionally())
-            .forEach(f -> merged.putAll(f.getNow(Collections.emptyMap())));
-        
+        log.info("[OHLC data] Merged {}/{} symbols across {} chunk(s) (maxParallel={})",
+                merged.size(),
+                chunks.stream().mapToInt(List::size).sum(),
+                chunks.size(),
+                maxParallel);
         return merged;
     }
 
