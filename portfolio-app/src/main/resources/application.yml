@@ -321,3 +321,10 @@ portfolio:
 growthbook:
   api-host: ${GROWTHBOOK_API_HOST:https://growthbook.asrax.in/gbapi}
   client-key: ${GROWTHBOOK_CLIENT_KEY:sdk-8WmIFrhYLelAXr8}
+
+# Shared with am-market-data SymbolOrchestratorService (previous-close / streamer universe)
+market:
+  active-symbols:
+    enabled: ${MARKET_ACTIVE_SYMBOLS_ENABLED:true}
+    redis-key: ${MARKET_ACTIVE_SYMBOLS_REDIS_KEY:market:active-symbols}
+    bootstrap-on-startup: ${MARKET_ACTIVE_SYMBOLS_BOOTSTRAP_ON_STARTUP:true}

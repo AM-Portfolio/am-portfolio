@@ -184,6 +184,12 @@ public class RedisConfig {
      * @return a configured RedisTemplate instance for generic Object values
      */
     @Bean
+    public org.springframework.data.redis.core.StringRedisTemplate stringRedisTemplate(
+            RedisConnectionFactory connectionFactory) {
+        return new org.springframework.data.redis.core.StringRedisTemplate(connectionFactory);
+    }
+
+    @Bean
     @Primary
     public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {
         RedisTemplate<String, Object> template = growthBookService != null 

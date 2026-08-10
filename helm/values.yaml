@@ -16,6 +16,9 @@ global:
     enabled: true
     role: "am-backend-role"
     serviceAccountName: "am-backend-sa"
+    # Prod cluster has Vault Agent Injector sidecar, not secrets-store CSI driver CRDs.
+    csi:
+      enabled: false
 
 image:
   repository: am-portfolio
@@ -55,17 +58,20 @@ env:
 probes:
   port: 8080
   startup:
-    path: "/actuator/health/liveness"
-    failureThreshold: 60
+    path: "/actuator/health"
+    failureThreshold: 90
     periodSeconds: 10
+    timeoutSeconds: 5
   liveness:
-    path: /actuator/health/liveness
-    initialDelaySeconds: 150
+    path: /actuator/health
+    initialDelaySeconds: 90
     periodSeconds: 15
+    timeoutSeconds: 5
   readiness:
-    path: /actuator/health/readiness
-    initialDelaySeconds: 150
+    path: /actuator/health
+    initialDelaySeconds: 60
     periodSeconds: 15
+    timeoutSeconds: 5
 
 # Scraped by am-infra Prometheus kubernetes-pods job
 podAnnotations:
