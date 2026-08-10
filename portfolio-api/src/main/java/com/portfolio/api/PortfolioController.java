@@ -450,6 +450,66 @@ public class PortfolioController {
         }
         return ResponseEntity.ok("Migration complete. Updated " + updated + " portfolios.");
     }
+
+    /**
+     * DEV/ADMIN ONLY — Re-normalize equity symbols (ISIN → ticker) for stored portfolios.
+     * Usage: POST /v1/portfolios/dev/normalize-symbols?userId=optional-user-id
+     */
+    @Hidden
+    @PostMapping("/dev/normalize-symbols")
+    public ResponseEntity<java.util.Map<String, Object>> normalizeStoredSymbols(
+            @RequestParam(required = false) String userId,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            return ResponseEntity.status(403).body(java.util.Map.of("error", "Forbidden"));
+        }
+
+        java.util.List<PortfolioModelV1> portfolios;
+        if (userId != null && !userId.isBlank()) {
+            portfolios = portfolioService.getPortfoliosByUserId(userId);
+        } else {
+            portfolios = new java.util.ArrayList<>();
+            for (String uid : portfolioService.getAllUserIds()) {
+                portfolios.addAll(portfolioService.getPortfoliosByUserId(uid));
+            }
+        }
+
+        int updatedPortfolios = 0;
+        int normalizedEquities = 0;
+        for (PortfolioModelV1 portfolio : portfolios) {
+            if (portfolio == null || portfolio.getEquityModels() == null) {
+                continue;
+            }
+            int before = countIsinSymbols(portfolio);
+            portfolioEquitySymbolNormalizer.normalizePortfolio(portfolio);
+            int after = countIsinSymbols(portfolio);
+            if (before != after) {
+                portfolioService.upsertDocumentPortfolio(portfolio);
+                updatedPortfolios++;
+                normalizedEquities += (before - after);
+            }
+        }
+
+        log.info("[DEV] Symbol normalization complete: portfoliosUpdated={}, equitiesNormalized={}",
+                updatedPortfolios, normalizedEquities);
+        return ResponseEntity.ok(java.util.Map.of(
+                "portfoliosUpdated", updatedPortfolios,
+                "equitiesNormalized", normalizedEquities));
+    }
+
+    private int countIsinSymbols(PortfolioModelV1 portfolio) {
+        if (portfolio.getEquityModels() == null) {
+            return 0;
+        }
+        int count = 0;
+        for (com.am.common.amcommondata.model.asset.equity.EquityModel equity : portfolio.getEquityModels()) {
+            if (equity != null && equity.getSymbol() != null
+                    && com.portfolio.model.resolver.TradingSymbolResolver.looksLikeIsin(equity.getSymbol())) {
+                count++;
+            }
+        }
+        return count;
+    }
 }
 
 // Trigger workflow
