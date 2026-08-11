@@ -6,8 +6,10 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
+import com.am.common.amcommondata.model.HoldingAllocation;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.EquityBrokerHolding;
@@ -65,6 +67,7 @@ public class PortfolioHoldingsMapper {
                     // Enrich with portfolio context
                     holdings.setPortfolioId(portfolio.getId() != null ? portfolio.getId().toString() : null);
                     holdings.setPortfolioName(portfolio.getName());
+                    applyAllocationFields(holdings, portfolio, equity);
 
                     equityHoldingsMap.put(symbol, holdings);
                 } else {
@@ -79,6 +82,19 @@ public class PortfolioHoldingsMapper {
                     if (mergedQty > 0) {
                         existing.setAverageBuyingPrice(mergedCost / mergedQty);
                     }
+                    // Re-apply allocation against merged raw for BROKER books
+                    if (PortfolioKind.isBroker(portfolio.getPortfolioKind())) {
+                        double alloc = allocatedForIsin(portfolio, equity.getIsin());
+                        double raw = mergedQty;
+                        existing.setRawQuantity(raw);
+                        existing.setAllocatedQuantity(
+                                (existing.getAllocatedQuantity() != null ? existing.getAllocatedQuantity() : 0) + alloc);
+                        double available = Math.max(0.0, raw - (existing.getAllocatedQuantity() != null
+                                ? existing.getAllocatedQuantity() : 0));
+                        existing.setAvailableQuantity(available);
+                        existing.setQuantity(available);
+                        existing.setAllocationNote(buildAllocationNote(portfolio, equity.getIsin()));
+                    }
                 }
 
                 // Add broker holding to the aggregated holding object
@@ -90,5 +106,49 @@ public class PortfolioHoldingsMapper {
         }
 
         return equityHoldingsMap;
+    }
+
+    private void applyAllocationFields(EquityHoldings holdings, PortfolioModelV1 portfolio, EquityModel equity) {
+        double raw = equity.getQuantity() != null ? equity.getQuantity() : 0.0;
+        holdings.setRawQuantity(raw);
+        if (PortfolioKind.isBroker(portfolio.getPortfolioKind())) {
+            double alloc = allocatedForIsin(portfolio, equity.getIsin());
+            holdings.setAllocatedQuantity(alloc);
+            double available = Math.max(0.0, raw - alloc);
+            holdings.setAvailableQuantity(available);
+            // Free capital uses available qty
+            holdings.setQuantity(available);
+            holdings.setAllocationNote(buildAllocationNote(portfolio, equity.getIsin()));
+            if (available > 0 && equity.getAvgBuyingPrice() != null) {
+                holdings.setInvestmentCost(equity.getAvgBuyingPrice() * available);
+            }
+        } else {
+            holdings.setAllocatedQuantity(0.0);
+            holdings.setAvailableQuantity(raw);
+        }
+    }
+
+    private double allocatedForIsin(PortfolioModelV1 portfolio, String isin) {
+        if (portfolio.getAllocations() == null || isin == null) {
+            return 0.0;
+        }
+        return portfolio.getAllocations().stream()
+                .filter(a -> isin.equals(a.getIsin()))
+                .mapToDouble(a -> a.getQuantity() != null ? a.getQuantity() : 0.0)
+                .sum();
+    }
+
+    private String buildAllocationNote(PortfolioModelV1 portfolio, String isin) {
+        if (portfolio.getAllocations() == null || isin == null) {
+            return null;
+        }
+        List<HoldingAllocation> matches = portfolio.getAllocations().stream()
+                .filter(a -> isin.equals(a.getIsin()) && a.getQuantity() != null && a.getQuantity() > 0)
+                .collect(Collectors.toList());
+        if (matches.isEmpty()) {
+            return null;
+        }
+        double total = matches.stream().mapToDouble(HoldingAllocation::getQuantity).sum();
+        return String.format("%.0f allocated to baskets", total);
     }
 }

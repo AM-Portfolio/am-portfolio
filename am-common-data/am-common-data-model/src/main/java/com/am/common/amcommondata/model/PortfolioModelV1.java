@@ -11,6 +11,7 @@ import java.util.UUID;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.FundType;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
 
@@ -32,6 +33,13 @@ public class PortfolioModelV1 {
     private List<EquityModel> equityModels;
     private Double totalValue;
     private BrokerType brokerType;
+    private PortfolioKind portfolioKind;
+    private String sourcePortfolioId;
+    private String etfIsin;
+    private String etfName;
+    private LocalDateTime createdFromBasketAt;
+    private Integer gapMissingCount;
+    private List<HoldingAllocation> allocations;
     private Integer assetCount;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

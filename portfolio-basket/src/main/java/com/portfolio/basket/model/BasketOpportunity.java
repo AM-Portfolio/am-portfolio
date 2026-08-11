@@ -48,6 +48,7 @@ public class BasketOpportunity {
 
         private Double heldQuantity; // Actual quantity held in main portfolio
         private Double heldAveragePrice; // Average buying price of held stock
+        private String userHoldingIsin; // ISIN of held/substitute share moved
 
         private List<Alternative> alternatives; // Possible substitutes
     }
@@ -60,6 +61,7 @@ public class BasketOpportunity {
         private String symbol;
         private String isin;
         private Double userWeight;
+        private Double quantity;
     }
 
     public enum ItemStatus {

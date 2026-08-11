@@ -83,7 +83,11 @@ public class PortfolioHoldingsService {
             emptyHoldings.setEquityHoldings(java.util.Collections.emptyList());
             return emptyHoldings;
         }
-        log.info("Found {} portfolios for user: {}", portfolios.size(), userId);
+        // All view = BROKER only (exclude BASKET to avoid double-count)
+        portfolios = portfolios.stream()
+                .filter(p -> com.am.common.amcommondata.model.enums.PortfolioKind.isBroker(p.getPortfolioKind()))
+                .collect(java.util.stream.Collectors.toList());
+        log.info("Found {} BROKER portfolios for user All-view: {}", portfolios.size(), userId);
 
         var portfolioHoldings = buildPortfolioHoldings(portfolios, userId, null, interval, enrich);
 
