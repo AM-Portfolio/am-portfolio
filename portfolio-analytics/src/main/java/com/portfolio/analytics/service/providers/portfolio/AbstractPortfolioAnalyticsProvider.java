@@ -139,11 +139,16 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
             return emptyResultSupplier.get();
         }
         
-        // Use prefetched market data if available, otherwise fetch it
+        // Use prefetched market data if available, otherwise fetch it.
+        // If the facade already attempted prefetch and got nothing, do NOT fan out
+        // another full-symbol OHLC storm (that caused 30–90s advanced latency).
         Map<String, MarketData> marketData = (request != null) ? request.getPrefetchedMarketData() : null;
         if (marketData == null || marketData.isEmpty()) {
-            // Always attempt an individual fetch — the facade-level prefetch may have failed transiently
-            // (e.g. transient Redis miss, OHLC API timeout). Never permanently abort because of a failed prefetch.
+            if (request != null && request.isPrefetchAttempted()) {
+                log.warn("Prefetch already attempted with empty result — skipping individual OHLC fan-out for {}",
+                        this.getClass().getSimpleName());
+                return emptyResultSupplier.get();
+            }
             log.info("Market data not in prefetch cache. Fetching individually for provider {}", this.getClass().getSimpleName());
             marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, request != null ? request.getTimeFrameRequest() : null);
         }

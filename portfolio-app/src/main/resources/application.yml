@@ -206,7 +206,8 @@ basket:
 market-data:
   client:
     connect-timeout-ms: ${MARKET_DATA_CONNECT_TIMEOUT_MS:3000}
-    read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:90000}
+    # Fail-open: never block advanced/intraday UI on a 90s Upstox stall
+    read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:32000}
   api:
     base-url: ${MARKET_DATA_API_URL:http://am-market-data:8080}
     ohlc-endpoint: /v1/market-data/ohlc
@@ -214,12 +215,14 @@ market-data:
     historical-charts-endpoint: /v1/analysis/historical-charts
     securities-endpoint: /v1/securities
     nse-indices-endpoint: /v1/indices
-    read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:90000}
+    read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:32000}
     connection-timeout: 3000
     max-retry-attempts: 0
     batch:
       chunk-size: ${MARKET_DATA_BATCH_CHUNK_SIZE:20}
       parallel-batching-enabled: ${MARKET_DATA_PARALLEL_BATCHING:true}
+      # Cap concurrent OHLC chunks so one advanced page cannot stampede Upstox
+      max-parallel-chunks: ${MARKET_DATA_MAX_PARALLEL_CHUNKS:2}
 
 # OpenAPI Documentation
 springdoc:

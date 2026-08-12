@@ -76,5 +76,11 @@ public class MarketDataApiConfig {
          * Default: true (parallel batching).
          */
         private boolean parallelBatchingEnabled = true;
+
+        /**
+         * Max OHLC/historical chunks in flight at once.
+         * Keeps Upstox fan-out bounded when a portfolio has 100+ holdings.
+         */
+        private int maxParallelChunks = 2;
     }
 }
