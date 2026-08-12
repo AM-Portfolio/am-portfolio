@@ -199,4 +199,22 @@ public class MarketDataApiClient extends AbstractApiClient {
                                 .doOnError(e -> log.error("Failed to resolve ticker symbol for ISIN {}: {}", 
                                                 isin, e.getMessage()));
         }
+
+        /**
+         * Resolves multiple trading symbols from Market Data service dynamically in a single batch query.
+         * Used to optimize bulk lookups during portfolio import/sync.
+         *
+         * @param isins list of ISIN codes to resolve
+         * @return a Mono containing a map of ISIN to resolved symbol
+         */
+        @SuppressWarnings("rawtypes")
+        public Mono<Map> resolveTickersByIsins(List<String> isins) {
+                String path = "/v1/market-data/instruments/isin";
+                log.info("Resolving batch of {} ticker symbols by ISINs via POST API", isins.size());
+                return post(path, isins, Map.class)
+                                .doOnSuccess(data -> log.debug("Successfully resolved batch of {} ISINs", 
+                                                data != null ? data.size() : 0))
+                                .doOnError(e -> log.error("Failed to resolve batch of ISINs: {}", e.getMessage()));
+        }
 }
+
