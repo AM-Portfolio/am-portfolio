@@ -54,7 +54,9 @@ public class BasketEngineService {
         for (BasketItem item : opportunity.getComposition()) {
             Double price = prices.get(item.getStockSymbol());
             if (price == null || price <= 0) {
-                log.warn("Price not found for {}, skipping calculation", item.getStockSymbol());
+                log.warn("Price not found for {}, defaulting quantity to 0", item.getStockSymbol());
+                item.setBuyQuantity(0.0);
+                item.setLastPrice(null);
                 continue;
             }
 
@@ -443,19 +445,11 @@ public class BasketEngineService {
                 .filter(h -> h.getIsin() != null)
                 .collect(Collectors.toMap(EquityHoldings::getIsin, h -> h, (a, b) -> a));
 
-        Set<String> used = new HashSet<>();
+        Map<String, Double> consumedWeightByIsin = new HashMap<>();
         for (BasketItem item : base.getComposition()) {
-            if (item.getStatus() == ItemStatus.HELD && item.getIsin() != null) {
-                used.add(item.getIsin());
-            }
-            if (item.getStatus() == ItemStatus.SUBSTITUTE) {
-                EquityHoldings h = byIsin.values().stream()
-                        .filter(u -> u.getSymbol() != null && u.getSymbol().equals(item.getUserHoldingSymbol()))
-                        .findFirst()
-                        .orElse(null);
-                if (h != null && h.getIsin() != null) {
-                    used.add(h.getIsin());
-                }
+            if ((item.getStatus() == ItemStatus.HELD || item.getStatus() == ItemStatus.SUBSTITUTE)
+                    && item.getUserHoldingIsin() != null) {
+                consumedWeightByIsin.merge(item.getUserHoldingIsin(), item.getReplicaWeight() != null ? item.getReplicaWeight() : 0.0, Double::sum);
             }
         }
 
@@ -481,29 +475,26 @@ public class BasketEngineService {
                 warnings.add("Substitute not in holdings: " + assignment.getSubstituteIsin());
                 continue;
             }
-            if (used.contains(assignment.getSubstituteIsin())) {
-                throw new IllegalStateException(
-                        "Substitute ISIN already assigned: " + assignment.getSubstituteIsin());
-            }
-            String itemSector = SectorNormalizer.normalize(item.getSector());
-            String subSector = SectorNormalizer.normalize(sub.getSector());
-            if (!itemSector.equals(subSector) && !"unknown".equals(itemSector) && !"unknown".equals(subSector)) {
-                warnings.add("Sector mismatch for " + item.getStockSymbol() + " vs " + sub.getSymbol());
-            }
+            double subWeight = sub.getWeightInPortfolio() != null ? sub.getWeightInPortfolio() : 0.0;
 
             // Free previous auto-sub if flipping from SUBSTITUTE
-            if (item.getStatus() == ItemStatus.SUBSTITUTE && item.getUserHoldingSymbol() != null) {
-                byIsin.values().stream()
-                        .filter(u -> item.getUserHoldingSymbol().equals(u.getSymbol()))
-                        .findFirst()
-                        .ifPresent(u -> {
-                            if (u.getIsin() != null) {
-                                used.remove(u.getIsin());
-                            }
-                        });
+            if (item.getStatus() == ItemStatus.SUBSTITUTE && item.getUserHoldingIsin() != null) {
+                consumedWeightByIsin.computeIfPresent(item.getUserHoldingIsin(), 
+                    (k, v) -> v - (item.getReplicaWeight() != null ? item.getReplicaWeight() : 0.0));
             }
 
-            used.add(assignment.getSubstituteIsin());
+            double consumed = consumedWeightByIsin.getOrDefault(assignment.getSubstituteIsin(), 0.0);
+            if ((subWeight - consumed) < 0.01) {
+                throw new IllegalStateException(
+                        "Substitute ISIN fully consumed: " + assignment.getSubstituteIsin());
+            }
+            
+            double matchWeight = Math.min(
+                    item.getEtfWeight() != null ? item.getEtfWeight() : 0.0,
+                    subWeight - consumed);
+                    
+            consumedWeightByIsin.merge(assignment.getSubstituteIsin(), matchWeight, Double::sum);
+
             item.setStatus(ItemStatus.SUBSTITUTE);
             item.setUserHoldingSymbol(sub.getSymbol());
             item.setUserHoldingIsin(sub.getIsin());
@@ -511,9 +502,6 @@ public class BasketEngineService {
             item.setHeldQuantity(sub.getQuantity());
             item.setHeldAveragePrice(sub.getAverageBuyingPrice());
             item.setReason("User swap: " + sub.getSymbol());
-            double matchWeight = Math.min(
-                    item.getEtfWeight() != null ? item.getEtfWeight() : 0.0,
-                    sub.getWeightInPortfolio() != null ? sub.getWeightInPortfolio() : 0.0);
             item.setReplicaWeight(BasketUtils.round(matchWeight));
         }
 

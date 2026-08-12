@@ -21,18 +21,18 @@ public class BasketCacheWarmupJob {
     public void warmUpTopEtfs() {
         try {
             var catalog = catalogService.getCatalog();
-            log.info("Cache warm-up: catalog loaded ({} ETFs)", catalog.getItems() != null ? catalog.getItems().size() : 0);
+            log.info("Cache warm-up: catalog loaded ({} ETFs)", catalog.getThemes() != null ? catalog.getThemes().size() : 0);
 
-            if (catalog.getItems() != null) {
-                catalog.getItems().stream()
-                    .filter(item -> item.getEtfIsin() != null)
+            if (catalog.getThemes() != null) {
+                catalog.getThemes().stream()
+                    .filter(theme -> theme.getQuery() != null && !theme.getQuery().isBlank())
                     .limit(10)
-                    .forEach(item -> {
+                    .forEach(theme -> {
                         try {
-                            enrichedEtfService.getEnrichedEtf(item.getEtfIsin());
-                            log.info("Cache warm-up: loaded ETF {}", item.getEtfIsin());
+                            enrichedEtfService.getEnrichedEtf(theme.getQuery());
+                            log.info("Cache warm-up: loaded ETF {}", theme.getQuery());
                         } catch (Exception e) {
-                            log.warn("Cache warm-up failed for ETF {}: {}", item.getEtfIsin(), e.getMessage());
+                            log.warn("Cache warm-up failed for ETF {}: {}", theme.getQuery(), e.getMessage());
                         }
                     });
             }

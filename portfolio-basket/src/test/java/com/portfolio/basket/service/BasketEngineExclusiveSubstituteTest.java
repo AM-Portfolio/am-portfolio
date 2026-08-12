@@ -93,8 +93,10 @@ class BasketEngineExclusiveSubstituteTest {
                 .isin("INEWIPRO").symbol("WIPRO").sector("Information Technology")
                 .quantity(50.0).weightInPortfolio(10.0).averageBuyingPrice(1.0).build();
 
+        BasketOpportunity opp = engine.getPreview("ETF1", List.of(infy, wipro));
+
         assertThrows(IllegalStateException.class, () ->
-                engine.applySubstitutes("ETF1", List.of(infy, wipro), List.of(
+                engine.applySubstitutesOnExisting(opp, List.of(infy, wipro), List.of(
                         new BasketEngineService.SubstituteAssignment("INE001", "INEINFY"),
                         new BasketEngineService.SubstituteAssignment("INE002", "INEINFY")
                 )));

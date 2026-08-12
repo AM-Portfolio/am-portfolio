@@ -99,8 +99,13 @@ public class BasketPortfolioCreateService {
                 throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
                         "Cannot allocate MISSING line: " + line.getHoldingSymbol());
             }
-            if (line.getHoldingIsin() == null || line.getQuantity() == null || line.getQuantity() <= 0) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Each line needs holdingIsin and quantity > 0");
+            if (line.getHoldingIsin() == null) {
+                log.warn("Skipping line {} — holdingIsin is null", line.getHoldingSymbol());
+                continue;
+            }
+            if (line.getQuantity() == null || line.getQuantity() <= 0) {
+                log.warn("Skipping line {} — quantity is null or <= 0", line.getHoldingSymbol());
+                continue;
             }
             EquityModel sourceEq = equityByIsin.get(line.getHoldingIsin());
             if (sourceEq == null) {
