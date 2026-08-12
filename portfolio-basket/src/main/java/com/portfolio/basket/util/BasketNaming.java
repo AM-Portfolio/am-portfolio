@@ -11,6 +11,9 @@ public final class BasketNaming {
     private static final Pattern PREFIX = Pattern.compile(
             "(?i)^(nippon india etf|uti|hdfc|icici prudential|sbi|kotak|mirae asset|motilal oswal|axis|aditya birla sun life|dsp|invesco|tata|edelweiss|navi|groww)\\s+");
 
+    private static final Pattern SUFFIX = Pattern.compile(
+            "(?i)\\s*(bees|etf|fund|scheme|plan|growth|direct|regular|idcw)\\s*$");
+
     private BasketNaming() {
     }
 
@@ -20,6 +23,7 @@ public final class BasketNaming {
         }
         String name = etfName.trim();
         name = PREFIX.matcher(name).replaceFirst("");
+        name = SUFFIX.matcher(name).replaceFirst("");
         name = name.replaceAll("(?i)\\s*ETF\\s*", " ").trim();
         name = name.replaceAll("\\s+", " ").trim();
         if (name.isBlank()) {

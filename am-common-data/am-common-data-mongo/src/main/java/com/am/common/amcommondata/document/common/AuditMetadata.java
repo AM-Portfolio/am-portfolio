@@ -52,4 +52,8 @@ public class AuditMetadata {
     
     @Field("source_reference")
     private String sourceReference; // Reference ID in the source system
+    
+    public Long getVersion() {
+        return this.version != null ? this.version : 1L;
+    }
 }

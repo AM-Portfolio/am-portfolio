@@ -35,7 +35,7 @@ public class VersionIncrementEventListener extends AbstractMongoEventListener<Ba
                         audit.setCreatedAt(LocalDateTime.now());
                     }
                 } else if (audit.getCreatedAt() != null) {
-                    audit.setVersion(audit.getVersion() + 1);
+                    audit.setVersion((audit.getVersion() != null ? audit.getVersion() : 1L) + 1);
                     audit.setUpdatedAt(LocalDateTime.now());
                     if (audit.getLastAction() == null) {
                         audit.setLastAction("UPDATE");

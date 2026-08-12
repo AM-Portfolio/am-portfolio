@@ -111,12 +111,15 @@ public class PortfolioMapper {
         //document.setPortfolioStatus(model.getStatus() != null ? PortfolioStatus.valueOf(model.getStatus()) : null);
         //document.setBaseStatus(DocumentStatus.ACTIVE); // Default status for new documents
 
+        boolean isNew = (model.getVersion() == null || model.getId() == null);
+        long existingVersion = model.getVersion() != null ? model.getVersion() : 0L;
         document.setAudit(AuditMetadata.builder()
-                .createdAt(model.getCreatedAt())
+                .createdAt(model.getCreatedAt() != null ? model.getCreatedAt() : java.time.LocalDateTime.now())
                 .createdBy(model.getCreatedBy())
                 .updatedAt(model.getUpdatedAt())
                 .updatedBy(model.getUpdatedBy())
-                .version(model.getVersion() != null ? model.getVersion() : 1L)
+                .version(existingVersion)
+                .lastAction(isNew ? "CREATE" : "UPDATE")
                 .build());
 
         return document;

@@ -26,7 +26,6 @@ public class BasketCacheWarmupJob {
             if (catalog.getThemes() != null) {
                 catalog.getThemes().stream()
                     .filter(theme -> theme.getQuery() != null && !theme.getQuery().isBlank())
-                    .limit(10)
                     .forEach(theme -> {
                         try {
                             enrichedEtfService.getEnrichedEtf(theme.getQuery());

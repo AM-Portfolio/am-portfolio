@@ -62,6 +62,7 @@ public class BasketOpportunity {
         private String isin;
         private Double userWeight;
         private Double quantity;
+        private Double lastPrice;
     }
 
     public enum ItemStatus {
