@@ -127,7 +127,12 @@ public class BasketController {
                             .map(a -> new BasketEngineService.SubstituteAssignment(
                                     a.getMissingIsin(), a.getSubstituteIsin()))
                             .toList();
-            return basketService.applySubstitutes(request.getEtfIsin(), userHoldings, assignments);
+            
+            BasketOpportunity base = request.getCurrentOpportunity() != null
+                    ? request.getCurrentOpportunity()
+                    : basketService.getPreview(request.getEtfIsin(), userHoldings);
+                    
+            return basketService.applySubstitutesOnExisting(base, userHoldings, assignments);
         } catch (IllegalStateException conflict) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, conflict.getMessage());
         }
@@ -221,6 +226,7 @@ public class BasketController {
         private String portfolioId;
         private List<EquityHoldings> userHoldings;
         private List<AssignmentDto> assignments;
+        private BasketOpportunity currentOpportunity;
     }
 
     @Data

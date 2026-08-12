@@ -13,11 +13,16 @@ public final class SectorNormalizer {
 
     static {
         ALIASES.put("it", "information technology");
+        ALIASES.put("it services", "information technology");
         ALIASES.put("information technology", "information technology");
         ALIASES.put("computers - software & consulting", "information technology");
         ALIASES.put("computers - software and consulting", "information technology");
+        ALIASES.put("computers software", "information technology");
         ALIASES.put("software", "information technology");
+        ALIASES.put("software products", "information technology");
+        ALIASES.put("software product", "information technology");
         ALIASES.put("technology", "information technology");
+        ALIASES.put("tech", "information technology");
         ALIASES.put("banks", "financial services");
         ALIASES.put("bank", "financial services");
         ALIASES.put("finance", "financial services");

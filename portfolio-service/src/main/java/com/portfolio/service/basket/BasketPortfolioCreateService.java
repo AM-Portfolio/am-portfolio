@@ -113,10 +113,10 @@ public class BasketPortfolioCreateService {
                     .mapToDouble(a -> a.getQuantity() != null ? a.getQuantity() : 0)
                     .sum();
             double available = Math.max(0.0, raw - alreadyAllocated);
-            if (line.getQuantity() > available + 1e-6) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "Insufficient available qty for " + line.getHoldingSymbol()
-                                + " available=" + available + " requested=" + line.getQuantity());
+            double allocatedQty = Math.min(line.getQuantity(), available);
+            if (allocatedQty < 1e-6) {
+                log.warn("Skipping line {} — zero available (fully allocated to another basket)", line.getHoldingIsin());
+                continue;
             }
 
             double avg = line.getAverageBuyingPrice() != null
@@ -126,7 +126,7 @@ public class BasketPortfolioCreateService {
             EquityModel basketEq = EquityModel.builder()
                     .symbol(line.getHoldingSymbol() != null ? line.getHoldingSymbol() : sourceEq.getSymbol())
                     .isin(line.getHoldingIsin())
-                    .quantity(line.getQuantity())
+                    .quantity(allocatedQty)
                     .avgBuyingPrice(avg)
                     .currentPrice(sourceEq.getCurrentPrice())
                     .sector(sourceEq.getSector())
@@ -138,13 +138,13 @@ public class BasketPortfolioCreateService {
                     .basketPortfolioId("PENDING")
                     .isin(line.getHoldingIsin())
                     .symbol(basketEq.getSymbol())
-                    .quantity(line.getQuantity())
+                    .quantity(allocatedQty)
                     .build());
 
             moved.add(MovedLine.builder()
                     .isin(line.getHoldingIsin())
                     .symbol(basketEq.getSymbol())
-                    .quantity(line.getQuantity())
+                    .quantity(allocatedQty)
                     .coversEtfSymbol(line.getEtfSymbol())
                     .build());
         }

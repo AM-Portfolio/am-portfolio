@@ -116,7 +116,7 @@ public class PortfolioMapper {
                 .createdBy(model.getCreatedBy())
                 .updatedAt(model.getUpdatedAt())
                 .updatedBy(model.getUpdatedBy())
-                .version(model.getVersion())
+                .version(model.getVersion() != null ? model.getVersion() : 1L)
                 .build());
 
         return document;
