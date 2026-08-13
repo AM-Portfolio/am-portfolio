@@ -2,38 +2,37 @@ package com.portfolio.service.resolver;
 
 import com.portfolio.model.resolver.TradingSymbolResolver;
 import com.portfolio.model.util.SymbolResolver;
+import com.portfolio.marketdata.client.MarketDataApiClient;
 import lombok.extern.slf4j.Slf4j;
-import org.bson.Document;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
+import java.util.Map;
+import java.util.List;
+
 
 /**
- * Resolves ISIN → NSE/BSE trading symbol using {@code market_data.upstock_instruments}.
+ * Resolves ISIN → NSE/BSE trading symbol using Market Data API instead of direct MongoDB queries.
+ * This respects microservice database isolation and credentials restriction.
  *
- * <p>Fail-open: if Mongo is unavailable or the instrument is missing, returns the normalized
+ * <p>Fail-open: if API is unavailable or the instrument is missing, returns the normalized
  * input so holdings are never dropped during save.
  */
 @Service
 @Slf4j
 public class MongoTradingSymbolResolver implements TradingSymbolResolver {
 
-    private static final String MARKET_DB = "market_data";
-    private static final String INSTRUMENTS_COLLECTION = "upstock_instruments";
-
-    private final MongoTemplate mongoTemplate;
+    private final MarketDataApiClient marketDataApiClient;
 
     @Autowired
-    public MongoTradingSymbolResolver(@Nullable MongoTemplate mongoTemplate) {
-        this.mongoTemplate = mongoTemplate;
+    public MongoTradingSymbolResolver(MarketDataApiClient marketDataApiClient) {
+        this.marketDataApiClient = marketDataApiClient;
     }
 
     @Override
     public String resolveTradingSymbol(String symbol, String isin) {
         String normalizedSymbol = symbol != null ? SymbolResolver.normalize(symbol) : null;
 
-        // Already a normal ticker — no DB lookup needed.
+        // Already a normal ticker — no DB/API lookup needed.
         if (normalizedSymbol != null && !normalizedSymbol.isBlank()
                 && !TradingSymbolResolver.looksLikeIsin(normalizedSymbol)) {
             return normalizedSymbol.trim().toUpperCase();
@@ -44,9 +43,9 @@ public class MongoTradingSymbolResolver implements TradingSymbolResolver {
             return fallbackIdentifier(normalizedSymbol, isin);
         }
 
-        String fromMongo = lookupTradingSymbolByIsin(isinToResolve);
-        if (fromMongo != null) {
-            return fromMongo;
+        String resolved = lookupTradingSymbolByIsin(isinToResolve);
+        if (resolved != null) {
+            return resolved;
         }
 
         return fallbackIdentifier(normalizedSymbol, isin);
@@ -62,26 +61,68 @@ public class MongoTradingSymbolResolver implements TradingSymbolResolver {
         return null;
     }
 
+    @SuppressWarnings("rawtypes")
     private String lookupTradingSymbolByIsin(String isin) {
-        if (mongoTemplate == null) {
-            log.debug("MongoTemplate not available — skipping ISIN lookup for {}", isin);
+        if (marketDataApiClient == null) {
+            log.warn("MarketDataApiClient not available — skipping ISIN lookup for {}", isin);
             return null;
         }
         try {
-            Document inst = mongoTemplate.getMongoDatabaseFactory()
-                    .getMongoDatabase(MARKET_DB)
-                    .getCollection(INSTRUMENTS_COLLECTION)
-                    .find(new Document("isin", isin))
-                    .first();
-            if (inst != null && inst.getString("trading_symbol") != null
-                    && !inst.getString("trading_symbol").isBlank()) {
-                return inst.getString("trading_symbol").trim().toUpperCase();
+            // Block synchronously since the TradingSymbolResolver interface is synchronous.
+            // This is called inside parsing threads.
+            Map response = marketDataApiClient.resolveTickerByIsin(isin).block();
+            if (response != null && response.containsKey("symbol")) {
+                String symbol = String.valueOf(response.get("symbol"));
+                if (symbol != null && !symbol.isBlank()) {
+                    return symbol.trim().toUpperCase();
+                }
             }
         } catch (Exception ex) {
-            // Fail-open: save must continue even if instrument master is down.
-            log.warn("ISIN lookup failed for {}: {}", isin, ex.getMessage());
+            // Fail-open: save must continue even if API resolver is down.
+            log.warn("ISIN lookup API call failed for {}: {}", isin, ex.getMessage());
         }
         return null;
+    }
+
+    /**
+     * Resolves multiple ISIN codes to NSE/BSE symbols dynamically in a single batch API call.
+     * Respects database isolation boundaries and optimizes network latency.
+     *
+     * @param isins List of ISIN codes of securities
+     * @return Map mapping ISIN to resolved symbol
+     */
+    @Override
+    @SuppressWarnings({ "rawtypes", "unchecked" })
+    public Map<String, String> resolveTradingSymbols(List<String> isins) {
+        if (marketDataApiClient == null || isins == null || isins.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            List<String> cleanedIsins = isins.stream()
+                    .filter(i -> i != null && !i.isBlank())
+                    .map(i -> i.trim().toUpperCase())
+                    .distinct()
+                    .collect(java.util.stream.Collectors.toList());
+
+            if (cleanedIsins.isEmpty()) {
+                return Map.of();
+            }
+
+            // Execute the bulk request synchronously since the pipeline needs immediate resolving
+            Map response = marketDataApiClient.resolveTickersByIsins(cleanedIsins).block();
+            if (response != null) {
+                Map<String, String> result = new java.util.HashMap<>();
+                response.forEach((k, v) -> {
+                    if (k != null && v != null) {
+                        result.put(String.valueOf(k).trim().toUpperCase(), String.valueOf(v).trim().toUpperCase());
+                    }
+                });
+                return result;
+            }
+        } catch (Exception ex) {
+            log.warn("Batch ISIN lookup API call failed: {}", ex.getMessage());
+        }
+        return Map.of();
     }
 
     private String fallbackIdentifier(String normalizedSymbol, String isin) {
@@ -94,3 +135,4 @@ public class MongoTradingSymbolResolver implements TradingSymbolResolver {
         return null;
     }
 }
+

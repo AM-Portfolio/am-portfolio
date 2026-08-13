@@ -16,6 +16,17 @@ public interface TradingSymbolResolver {
     String resolveTradingSymbol(String symbol, String isin);
 
     /**
+     * Resolves a batch list of broker/document identifiers (often ISIN) to exchange trading symbols.
+     * Overridden by active resolvers to optimize network calls.
+     *
+     * @param isins List of ISIN codes of securities
+     * @return Map mapping ISIN to resolved trading symbol
+     */
+    default java.util.Map<String, String> resolveTradingSymbols(java.util.List<String> isins) {
+        return java.util.Map.of();
+    }
+
+    /**
      * Indian equity ISIN: 12 chars, starts with two letters (e.g. INE002A01018).
      */
     static boolean looksLikeIsin(String value) {
@@ -26,3 +37,4 @@ public interface TradingSymbolResolver {
         return trimmed.length() == 12 && trimmed.matches("[A-Z]{2}[A-Z0-9]{10}");
     }
 }
+
