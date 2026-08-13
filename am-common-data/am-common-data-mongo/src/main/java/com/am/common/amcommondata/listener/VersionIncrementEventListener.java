@@ -24,9 +24,18 @@ public class VersionIncrementEventListener extends AbstractMongoEventListener<Ba
                 audit.setLastAction("CREATE");
                 document.setAudit(audit);
             } else {
-                // Only increment version if this is an update
-                if (audit.getCreatedAt() != null) {
-                    audit.setVersion(audit.getVersion() + 1);
+                // Create path often builds AuditMetadata with createdAt but null version
+                // (Lombok builder skips field defaults) — never unbox null.
+                if (audit.getVersion() == null) {
+                    audit.setVersion(1L);
+                    if (audit.getLastAction() == null) {
+                        audit.setLastAction("CREATE");
+                    }
+                    if (audit.getCreatedAt() == null) {
+                        audit.setCreatedAt(LocalDateTime.now());
+                    }
+                } else if (audit.getCreatedAt() != null) {
+                    audit.setVersion((audit.getVersion() != null ? audit.getVersion() : 1L) + 1);
                     audit.setUpdatedAt(LocalDateTime.now());
                     if (audit.getLastAction() == null) {
                         audit.setLastAction("UPDATE");

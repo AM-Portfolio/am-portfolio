@@ -1,5 +1,6 @@
 package com.portfolio.basket.client;
 
+import com.portfolio.basket.util.SectorNormalizer;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.portfolio.basket.model.EtfData;
 import com.portfolio.basket.model.EtfHolding;
@@ -536,10 +537,10 @@ public class EtfApiClient {
         }
 
         List<EtfHolding> needsIsin = holdings.stream()
-                .filter(h -> !hasValidIsin(h))
+                .filter(h -> !hasValidIsin(h) || SectorNormalizer.isUnknown(h.getSector()) || h.getMarketCapCategory() == null)
                 .collect(Collectors.toList());
         if (needsIsin.isEmpty()) {
-            log.debug("All {} ETF constituents already have ISINs", holdings.size());
+            log.debug("All {} ETF constituents are fully enriched", holdings.size());
             return;
         }
 
@@ -553,7 +554,7 @@ public class EtfApiClient {
             }
 
             for (EtfHolding h : needsIsin) {
-                String query = h.getSymbol();
+                String query = hasValidIsin(h) ? h.getIsin() : h.getSymbol();
                 if (query == null || query.isBlank()) {
                     continue;
                 }
@@ -575,7 +576,7 @@ public class EtfApiClient {
 
     private Map<String, SecurityMatch> batchSearchByStockNames(List<EtfHolding> holdings) {
         List<String> names = holdings.stream()
-                .map(EtfHolding::getSymbol)
+                .map(h -> hasValidIsin(h) ? h.getIsin() : h.getSymbol())
                 .filter(s -> s != null && !s.isBlank())
                 .distinct()
                 .collect(Collectors.toList());
@@ -720,9 +721,7 @@ public class EtfApiClient {
         if (match.getIsin() != null) {
             h.setIsin(match.getIsin());
         }
-        if (match.getIndustry() != null) {
-            h.setSector(match.getIndustry());
-        } else if (match.getSector() != null) {
+        if (match.getSector() != null) {
             h.setSector(match.getSector());
         }
         if (match.getMarketCapType() != null) {

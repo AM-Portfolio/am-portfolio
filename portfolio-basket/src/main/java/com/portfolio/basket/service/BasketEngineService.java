@@ -7,6 +7,7 @@ import com.portfolio.basket.model.BasketOpportunity.ItemStatus;
 import com.portfolio.basket.model.EtfData;
 import com.portfolio.basket.model.EtfHolding;
 import com.portfolio.basket.util.BasketUtils;
+import com.portfolio.basket.util.SectorNormalizer;
 import com.portfolio.model.portfolio.EquityHoldings;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,6 +39,9 @@ public class BasketEngineService {
                 if (item.getStockSymbol() != null) {
                     symbols.add(item.getStockSymbol());
                 }
+                if (item.getUserHoldingSymbol() != null) {
+                    symbols.add(item.getUserHoldingSymbol());
+                }
             }
         }
 
@@ -52,8 +56,13 @@ public class BasketEngineService {
         // 3. Calculate Quantities
         for (BasketItem item : opportunity.getComposition()) {
             Double price = prices.get(item.getStockSymbol());
+            if ((price == null || price <= 0) && item.getUserHoldingSymbol() != null) {
+                price = prices.get(item.getUserHoldingSymbol());
+            }
             if (price == null || price <= 0) {
-                log.warn("Price not found for {}, skipping calculation", item.getStockSymbol());
+                log.warn("Price not found for {} (or holding {}), defaulting quantity to 0", item.getStockSymbol(), item.getUserHoldingSymbol());
+                item.setBuyQuantity(0.0);
+                item.setLastPrice(null);
                 continue;
             }
 
@@ -104,6 +113,33 @@ public class BasketEngineService {
             item.setBuyQuantity((double) quantity);
             item.setLastPrice(price);
         }
+        // Recalculate basket-level scores from updated composition
+        if (opportunity.getComposition() != null) {
+            int total = opportunity.getComposition().size();
+            int matchCount = 0;
+            double replicaTotal = 0.0;
+            for (BasketItem item : opportunity.getComposition()) {
+                if (item.getStatus() == ItemStatus.HELD || item.getStatus() == ItemStatus.SUBSTITUTE) {
+                    matchCount++;
+                    replicaTotal += item.getReplicaWeight() != null ? item.getReplicaWeight() : 0.0;
+                } else if (item.getBuyQuantity() != null && item.getBuyQuantity() > 0 
+                           && item.getLastPrice() != null) {
+                    // Recalculate replicaWeight based on actual purchased value
+                    double purchasedValue = item.getBuyQuantity() * item.getLastPrice();
+                    double replicaWeight = investmentAmount > 0 ? (purchasedValue / investmentAmount) * 100.0 : 0.0;
+                    item.setReplicaWeight(BasketUtils.round(replicaWeight));
+                    replicaTotal += item.getReplicaWeight();
+                } else {
+                    item.setReplicaWeight(0.0);
+                }
+            }
+            opportunity.setMatchScore(BasketUtils.round(total == 0 ? 0 : (double) matchCount / total * 100.0));
+            opportunity.setReplicaScore(BasketUtils.round(replicaTotal));
+            opportunity.setReadyToReplicate(replicaTotal >= 70.0);
+            opportunity.setHeldCount(matchCount);
+            opportunity.setMissingCount(total - matchCount);
+        }
+        opportunity.setInvestmentAmount(investmentAmount);
 
         return opportunity;
     }
@@ -192,8 +228,9 @@ public class BasketEngineService {
                 .collect(Collectors.toMap(EquityHoldings::getIsin, h -> h, (a, b) -> a));
 
         Map<String, List<EquityHoldings>> userSectorMap = userHoldings.stream()
-                .filter(h -> h.getSector() != null)
-                .collect(Collectors.groupingBy(EquityHoldings::getSector));
+                .filter(h -> h.getSector() != null && !SectorNormalizer.isUnknown(h.getSector()))
+                .filter(h -> h.getQuantity() == null || h.getQuantity() > 0)
+                .collect(Collectors.groupingBy(h -> SectorNormalizer.normalize(h.getSector())));
 
         List<BasketOpportunity> opportunities = new ArrayList<>();
         Map<String, EtfData> etfDataByInput = enrichedEtfService.getEnrichedEtfsBatch(new ArrayList<>(etfQueries));
@@ -205,7 +242,7 @@ public class BasketEngineService {
                 continue;
             }
 
-            BasketOpportunity opportunity = calculateOverlap(etfQuery, etf, userMap, userSectorMap);
+            BasketOpportunity opportunity = calculateOverlap(etfQuery, etf, userMap, userSectorMap, userHoldings);
             opportunities.add(opportunity);
         }
 
@@ -237,23 +274,47 @@ public class BasketEngineService {
                 .collect(Collectors.toMap(EquityHoldings::getIsin, h -> h, (a, b) -> a));
 
         Map<String, List<EquityHoldings>> userSectorMap = userHoldings.stream()
-                .filter(h -> h.getSector() != null)
-                .collect(Collectors.groupingBy(EquityHoldings::getSector));
+                .filter(h -> h.getSector() != null && !SectorNormalizer.isUnknown(h.getSector()))
+                .filter(h -> h.getQuantity() == null || h.getQuantity() > 0)
+                .collect(Collectors.groupingBy(h -> SectorNormalizer.normalize(h.getSector())));
 
-        return calculateOverlap(etfIsin, etf, userMap, userSectorMap);
+        return calculateOverlap(etfIsin, etf, userMap, userSectorMap, userHoldings);
     }
 
     private BasketOpportunity calculateOverlap(String etfIsin, EtfData etf,
             Map<String, EquityHoldings> userMap,
-            Map<String, List<EquityHoldings>> userSectorMap) {
+            Map<String, List<EquityHoldings>> userSectorMap,
+            List<EquityHoldings> allUserHoldings) {
 
         List<BasketItem> composition = new ArrayList<>();
         List<BasketItem> buyList = new ArrayList<>();
         double replicaScoreTotal = 0;
         int matchCount = 0;
         int total = etf.getHoldings() != null ? etf.getHoldings().size() : 0;
+        Map<String, Double> consumedWeightByIsin = new HashMap<>();
+
+        // --- Fetch live prices for all constituents and user holdings in a single batch ---
+        Set<String> symbolsForPrice = new HashSet<>();
+        if (etf.getHoldings() != null) {
+            for (EtfHolding req : etf.getHoldings()) {
+                if (req.getSymbol() != null) symbolsForPrice.add(req.getSymbol());
+            }
+        }
+        for (EquityHoldings h : allUserHoldings) {
+            if (h.getSymbol() != null) symbolsForPrice.add(h.getSymbol());
+        }
+        Map<String, Double> prices = symbolsForPrice.isEmpty() ? Collections.emptyMap() 
+                : marketDataService.getCurrentPrices(new ArrayList<>(symbolsForPrice));
+        // -------------------------------------------------------------------------------
 
         if (etf.getHoldings() != null) {
+            class ItemReqPair {
+                BasketItem item;
+                EtfHolding req;
+                ItemReqPair(BasketItem i, EtfHolding r) { this.item = i; this.req = r; }
+            }
+            List<ItemReqPair> pairs = new ArrayList<>();
+
             for (EtfHolding req : etf.getHoldings()) {
                 BasketItem item = BasketItem.builder()
                         .stockSymbol(req.getSymbol())
@@ -264,33 +325,41 @@ public class BasketEngineService {
                         .replicaWeight(0.0)
                         .marketCapCategory(req.getMarketCapCategory())
                         .marketCapValue(req.getMarketCapValue())
+                        .lastPrice(prices.get(req.getSymbol()))
                         .build();
+                pairs.add(new ItemReqPair(item, req));
+                composition.add(item);
+            }
 
-                boolean isMatch = false;
-
-                // A. Direct Match
-                if (req.getIsin() != null && userMap.containsKey(req.getIsin())) {
-                    isMatch = processDirectMatch(item, req, userMap.get(req.getIsin()));
-                }
-                // B. Sector Substitution (Enhanced with Market Cap)
-                else {
-                    isMatch = processSectorSubstitute(item, req, userSectorMap);
-                    if (!isMatch) {
-                        buyList.add(item); // Add to buy list only if no match/substitute found
+            // Pass 1: Direct Matches
+            for (ItemReqPair pair : pairs) {
+                if (pair.req.getIsin() != null && userMap.containsKey(pair.req.getIsin())) {
+                    boolean isMatch = processDirectMatch(pair.item, pair.req, userMap.get(pair.req.getIsin()), consumedWeightByIsin);
+                    if (isMatch) {
+                        replicaScoreTotal += pair.item.getReplicaWeight();
+                        matchCount++;
                     }
                 }
+            }
 
-                if (isMatch) {
-                    replicaScoreTotal += item.getReplicaWeight();
-                    matchCount++;
+            // Pass 2: Sector Substitution
+            for (ItemReqPair pair : pairs) {
+                if (pair.item.getStatus() == ItemStatus.HELD) {
+                    continue; // Already matched
                 }
-
-                composition.add(item);
+                
+                boolean handled = processSectorSubstitute(pair.item, pair.req, userSectorMap, consumedWeightByIsin, allUserHoldings, prices);
+                if (handled) {
+                    replicaScoreTotal += pair.item.getReplicaWeight();
+                    matchCount++;
+                } else {
+                    buyList.add(pair.item);
+                }
             }
         }
 
         double matchScore = (total == 0) ? 0 : (double) matchCount / total * 100.0;
-        double replicaScore = replicaScoreTotal; // Aggregated weight match
+        double replicaScore = replicaScoreTotal;
 
         return BasketOpportunity.builder()
                 .etfIsin(etfIsin)
@@ -306,71 +375,269 @@ public class BasketEngineService {
                 .build();
     }
 
-    private boolean processDirectMatch(BasketItem item, EtfHolding req, EquityHoldings userHolding) {
+    private boolean processDirectMatch(BasketItem item, EtfHolding req, EquityHoldings userHolding, Map<String, Double> consumedWeightByIsin) {
         log.info("Checking Held Item: {} | Qty: {} | AvgPrice: {}",
                 userHolding.getSymbol(), userHolding.getQuantity(), userHolding.getAverageBuyingPrice());
 
+        double consumed = consumedWeightByIsin.getOrDefault(userHolding.getIsin(), 0.0);
+        double totalWeight = userHolding.getWeightInPortfolio() != null ? userHolding.getWeightInPortfolio() : 0.0;
+        double available = totalWeight - consumed;
+
+        if (available < 0.01) {
+            return false; // fully consumed
+        }
+
         item.setStatus(ItemStatus.HELD);
         item.setUserHoldingSymbol(userHolding.getSymbol());
-        item.setUserWeight(BasketUtils.round(userHolding.getWeightInPortfolio()));
+        item.setUserHoldingIsin(userHolding.getIsin());
+        item.setUserWeight(BasketUtils.round(totalWeight));
         item.setHeldQuantity(userHolding.getQuantity());
         item.setHeldAveragePrice(userHolding.getAverageBuyingPrice());
 
-        // Match weight = min(etfWeight, userWeight)
-        double matchWeight = Math.min(req.getWeight(), userHolding.getWeightInPortfolio());
+        double matchWeight = Math.min(req.getWeight(), available);
         item.setReplicaWeight(BasketUtils.round(matchWeight));
+
+        consumedWeightByIsin.merge(userHolding.getIsin(), matchWeight, Double::sum);
 
         return true;
     }
 
     private boolean processSectorSubstitute(BasketItem item, EtfHolding req,
-            Map<String, List<EquityHoldings>> userSectorMap) {
-        List<EquityHoldings> sectorPeers = userSectorMap.getOrDefault(req.getSector(), Collections.emptyList());
+            Map<String, List<EquityHoldings>> userSectorMap,
+            Map<String, Double> consumedWeightByIsin,
+            List<EquityHoldings> allUserHoldings,
+            Map<String, Double> prices) {
+        String sectorKey = SectorNormalizer.normalize(req.getSector());
+        boolean unknownSector = SectorNormalizer.isUnknown(req.getSector());
+        List<EquityHoldings> sectorPeers = unknownSector
+                ? Collections.emptyList()
+                : new ArrayList<>(userSectorMap.getOrDefault(sectorKey, Collections.emptyList()));
 
-        // Filter peer candidates by Market Cap Category if available
         if (req.getMarketCapCategory() != null && !sectorPeers.isEmpty()) {
             List<EquityHoldings> mcapPeers = sectorPeers.stream()
                     .filter(p -> req.getMarketCapCategory().equalsIgnoreCase(p.getMarketCapCategory()))
                     .collect(Collectors.toList());
             if (!mcapPeers.isEmpty()) {
-                sectorPeers = mcapPeers; // Refine candidates to those matching both Sector AND MCap
+                sectorPeers = mcapPeers;
             }
         }
 
-        if (!sectorPeers.isEmpty()) {
-            // Populate alternatives list of substitutes
-            List<BasketOpportunity.Alternative> alts = sectorPeers.stream()
-                    .map(h -> BasketOpportunity.Alternative.builder()
-                            .symbol(h.getSymbol())
-                            .isin(h.getIsin())
-                            .userWeight(BasketUtils.round(h.getWeightInPortfolio()))
-                            .build())
-                    .collect(Collectors.toList());
-            item.setAlternatives(alts);
+        // Alternatives = unused peers (for UI swap)
+        List<EquityHoldings> unusedPeers = sectorPeers.stream()
+                .filter(p -> p.getIsin() != null && ((p.getWeightInPortfolio() != null ? p.getWeightInPortfolio() : 0.0) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0)) > 0.01)
+                .filter(p -> p.getQuantity() == null || p.getQuantity() > 0)
+                .collect(Collectors.toList());
 
-            // Pick best substitute (simplistic: highest user weight in that sector)
-            EquityHoldings substitute = sectorPeers.stream()
-                    .max(Comparator.comparingDouble(EquityHoldings::getWeightInPortfolio))
-                    .orElse(sectorPeers.get(0));
+        List<BasketOpportunity.Alternative> alts = unusedPeers.stream()
+                .map(p -> toAlternative(p, (p.getWeightInPortfolio() != null ? p.getWeightInPortfolio() : 0.0) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices))
+                .collect(Collectors.toList());
+        item.setAlternatives(alts);
+
+        // Auto-SUBSTITUTE stays same-sector only (never auto-pick cross-sector / unknown)
+        if (!unusedPeers.isEmpty()) {
+            EquityHoldings substitute = unusedPeers.stream()
+                    .max(Comparator.comparingDouble(
+                            h -> (h.getWeightInPortfolio() != null ? h.getWeightInPortfolio() : 0.0) - consumedWeightByIsin.getOrDefault(h.getIsin(), 0.0)))
+                    .orElse(unusedPeers.get(0));
+
+            double consumed = consumedWeightByIsin.getOrDefault(substitute.getIsin(), 0.0);
+            double totalWeight = substitute.getWeightInPortfolio() != null ? substitute.getWeightInPortfolio() : 0.0;
+            double available = totalWeight - consumed;
+
+            if (available < 0.01) {
+                // theoretically should not happen due to unusedPeers filter
+                return false; 
+            }
 
             item.setStatus(ItemStatus.SUBSTITUTE);
             item.setUserHoldingSymbol(substitute.getSymbol());
-            item.setUserWeight(BasketUtils.round(substitute.getWeightInPortfolio()));
+            item.setUserHoldingIsin(substitute.getIsin());
+            item.setUserWeight(BasketUtils.round(totalWeight));
             item.setHeldQuantity(substitute.getQuantity());
             item.setHeldAveragePrice(substitute.getAverageBuyingPrice());
             item.setReason("Substitute: " + req.getSector()
                     + (req.getMarketCapCategory() != null ? "/" + req.getMarketCapCategory() : ""));
 
-            // For substitute, we assume it fills the weight requirement of the ETF stock
-            double matchWeight = Math.min(req.getWeight(), substitute.getWeightInPortfolio());
+            double matchWeight = Math.min(req.getWeight(), available);
             item.setReplicaWeight(BasketUtils.round(matchWeight));
 
+            consumedWeightByIsin.merge(substitute.getIsin(), matchWeight, Double::sum);
+
             return true;
-        } else {
-            item.setStatus(ItemStatus.MISSING);
-            item.setUserWeight(0.0);
-            item.setBuyQuantity(1.0); // Placeholder for quantity
-            return false;
         }
+
+        // MISSING: fallback alternatives so UI Suggest swap stays actionable when unused holdings remain
+        List<EquityHoldings> fallback = (allUserHoldings == null ? List.<EquityHoldings>of() : allUserHoldings)
+                .stream()
+                .filter(p -> p.getIsin() != null && ((p.getWeightInPortfolio() != null ? p.getWeightInPortfolio() : 0.0) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0)) > 0.01)
+                .filter(p -> p.getQuantity() == null || p.getQuantity() > 0)
+                .sorted(Comparator
+                        .comparing((EquityHoldings h) -> {
+                            if (unknownSector || SectorNormalizer.isUnknown(h.getSector())) {
+                                return 1;
+                            }
+                            return SectorNormalizer.normalize(h.getSector()).equals(sectorKey) ? 0 : 1;
+                        })
+                        .thenComparing(Comparator.comparingDouble(
+                                (EquityHoldings h) -> h.getWeightInPortfolio() != null
+                                        ? h.getWeightInPortfolio() : 0.0).reversed()))
+                .collect(Collectors.toList());
+
+        if (!fallback.isEmpty()) {
+            item.setAlternatives(fallback.stream()
+                    .map(p -> toAlternative(p, (p.getWeightInPortfolio() != null ? p.getWeightInPortfolio() : 0.0) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices))
+                    .collect(Collectors.toList()));
+        } else if (alts.isEmpty() && !sectorPeers.isEmpty()) {
+            item.setAlternatives(sectorPeers.stream()
+                    .filter(p -> p.getIsin() != null && ((p.getWeightInPortfolio() != null ? p.getWeightInPortfolio() : 0.0) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0)) > 0.01)
+                    .map(p -> toAlternative(p, (p.getWeightInPortfolio() != null ? p.getWeightInPortfolio() : 0.0) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices))
+                    .collect(Collectors.toList()));
+        }
+
+        item.setStatus(ItemStatus.MISSING);
+        item.setUserWeight(0.0);
+        item.setBuyQuantity(1.0);
+        return false;
+    }
+
+    private BasketOpportunity.Alternative toAlternative(EquityHoldings h, double availableWeight, Map<String, Double> prices) {
+        return BasketOpportunity.Alternative.builder()
+                .symbol(h.getSymbol())
+                .isin(h.getIsin())
+                .userWeight(BasketUtils.round(availableWeight))
+                .quantity(h.getQuantity())
+                .lastPrice(prices != null && h.getSymbol() != null ? prices.get(h.getSymbol()) : null)
+                .build();
+    }
+
+    /**
+     * Apply user-chosen substitute assignments on top of a fresh or existing preview.
+     */
+    public BasketOpportunity applySubstitutesOnExisting(BasketOpportunity base, List<EquityHoldings> userHoldings,
+            List<SubstituteAssignment> assignments) {
+        if (assignments == null || assignments.isEmpty() || base.getComposition() == null) {
+            return base;
+        }
+
+        Map<String, EquityHoldings> byIsin = userHoldings.stream()
+                .filter(h -> h.getIsin() != null)
+                .collect(Collectors.toMap(EquityHoldings::getIsin, h -> h, (a, b) -> a));
+
+        Map<String, EquityHoldings> bySymbol = userHoldings.stream()
+                .filter(h -> h.getSymbol() != null)
+                .collect(Collectors.toMap(h -> h.getSymbol().toUpperCase(Locale.ROOT), h -> h, (a, b) -> a));
+
+        Map<String, Double> consumedWeightByIsin = new HashMap<>();
+        for (BasketItem item : base.getComposition()) {
+            if ((item.getStatus() == ItemStatus.HELD || item.getStatus() == ItemStatus.SUBSTITUTE)
+                    && item.getUserHoldingIsin() != null) {
+                consumedWeightByIsin.merge(item.getUserHoldingIsin(), item.getReplicaWeight() != null ? item.getReplicaWeight() : 0.0, Double::sum);
+            }
+        }
+
+        // --- Fetch live prices for substitutes being applied ---
+        Set<String> subSymbols = new HashSet<>();
+        for (SubstituteAssignment assignment : assignments) {
+            if (assignment.getSubstituteIsin() != null) {
+                EquityHoldings sub = byIsin.get(assignment.getSubstituteIsin());
+                if (sub == null) sub = bySymbol.get(assignment.getSubstituteIsin().toUpperCase(Locale.ROOT));
+                if (sub != null && sub.getSymbol() != null) subSymbols.add(sub.getSymbol());
+            }
+        }
+        Map<String, Double> prices = subSymbols.isEmpty() ? Collections.emptyMap() 
+                : marketDataService.getCurrentPrices(new ArrayList<>(subSymbols));
+        // --------------------------------------------------------
+
+        List<String> warnings = new ArrayList<>();
+        for (SubstituteAssignment assignment : assignments) {
+            if (assignment.getMissingIsin() == null || assignment.getSubstituteIsin() == null) {
+                continue;
+            }
+            BasketItem item = base.getComposition().stream()
+                    .filter(i -> assignment.getMissingIsin().equals(i.getIsin()))
+                    .findFirst()
+                    .orElse(null);
+            if (item == null) {
+                warnings.add("Unknown missing ISIN: " + assignment.getMissingIsin());
+                continue;
+            }
+            if (item.getStatus() == ItemStatus.HELD) {
+                warnings.add("Cannot substitute HELD row: " + assignment.getMissingIsin());
+                continue;
+            }
+            EquityHoldings sub = byIsin.get(assignment.getSubstituteIsin());
+            if (sub == null) {
+                sub = bySymbol.get(assignment.getSubstituteIsin().toUpperCase(Locale.ROOT));
+            }
+            if (sub == null) {
+                warnings.add("Substitute not in holdings: " + assignment.getSubstituteIsin());
+                continue;
+            }
+            // Use ISIN from the resolved holding to ensure consistency
+            String resolvedIsin = sub.getIsin() != null ? sub.getIsin() : assignment.getSubstituteIsin();
+
+            double subWeight = sub.getWeightInPortfolio() != null ? sub.getWeightInPortfolio() : 0.0;
+
+            // Free previous auto-sub if flipping from SUBSTITUTE
+            if (item.getStatus() == ItemStatus.SUBSTITUTE && item.getUserHoldingIsin() != null) {
+                consumedWeightByIsin.computeIfPresent(item.getUserHoldingIsin(), 
+                    (k, v) -> v - (item.getReplicaWeight() != null ? item.getReplicaWeight() : 0.0));
+            }
+
+            double consumed = consumedWeightByIsin.getOrDefault(resolvedIsin, 0.0);
+            if ((subWeight - consumed) < 0.01) {
+                throw new IllegalStateException(
+                        "Substitute ISIN fully consumed: " + resolvedIsin);
+            }
+            
+            double matchWeight = Math.min(
+                    item.getEtfWeight() != null ? item.getEtfWeight() : 0.0,
+                    subWeight - consumed);
+                    
+            consumedWeightByIsin.merge(resolvedIsin, matchWeight, Double::sum);
+
+            item.setStatus(ItemStatus.SUBSTITUTE);
+            item.setUserHoldingSymbol(sub.getSymbol());
+            item.setUserHoldingIsin(sub.getIsin());
+            item.setUserWeight(BasketUtils.round(sub.getWeightInPortfolio()));
+            item.setHeldQuantity(sub.getQuantity());
+            item.setHeldAveragePrice(sub.getAverageBuyingPrice());
+            item.setReason("User swap: " + sub.getSymbol());
+            item.setReplicaWeight(BasketUtils.round(matchWeight));
+            
+            Double subPrice = prices.get(sub.getSymbol());
+            if (subPrice != null) {
+                item.setLastPrice(subPrice);
+            }
+        }
+
+        // Recalc scores
+        int total = base.getComposition().size();
+        int matchCount = 0;
+        double replica = 0;
+        List<BasketItem> buyList = new ArrayList<>();
+        for (BasketItem item : base.getComposition()) {
+            if (item.getStatus() == ItemStatus.HELD || item.getStatus() == ItemStatus.SUBSTITUTE) {
+                matchCount++;
+                replica += item.getReplicaWeight() != null ? item.getReplicaWeight() : 0;
+            } else {
+                buyList.add(item);
+            }
+        }
+        base.setHeldCount(matchCount);
+        base.setMissingCount(total - matchCount);
+        base.setMatchScore(BasketUtils.round(total == 0 ? 0 : (double) matchCount / total * 100.0));
+        base.setReplicaScore(BasketUtils.round(replica));
+        base.setReadyToReplicate(replica >= 70.0);
+        base.setBuyList(buyList);
+        return base;
+    }
+
+    @lombok.Data
+    @lombok.AllArgsConstructor
+    @lombok.NoArgsConstructor
+    public static class SubstituteAssignment {
+        private String missingIsin;
+        private String substituteIsin;
     }
 }

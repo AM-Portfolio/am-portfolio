@@ -19,4 +19,16 @@ public class PortfolioBasicInfo {
     
     @Schema(description = "Portfolio name", example = "My Investment Portfolio")
     private String portfolioName;
+
+    @Schema(description = "BROKER or BASKET", example = "BROKER")
+    private String kind;
+
+    @Schema(description = "ETF constituents still missing after basket create")
+    private Integer gapMissingCount;
+
+    public PortfolioBasicInfo(String portfolioId, String portfolioName) {
+        this.portfolioId = portfolioId;
+        this.portfolioName = portfolioName;
+        this.kind = "BROKER";
+    }
 }

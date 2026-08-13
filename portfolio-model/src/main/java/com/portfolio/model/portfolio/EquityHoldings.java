@@ -48,6 +48,15 @@ public class EquityHoldings {
    private Double currentPrice;
    private Double percentageChange; // Stock price percentage change
 
+   /** Raw broker quantity (Kafka truth). */
+   private Double rawQuantity;
+   /** Sum of qty reserved into baskets. */
+   private Double allocatedQuantity;
+   /** Free qty = raw - allocated (used for basket create availability). */
+   private Double availableQuantity;
+   /** Short note e.g. "40 in Nifty IT · Zerodha". */
+   private String allocationNote;
+
    @Builder.Default
    private List<EquityBrokerHolding> brokerPortfolios = new ArrayList<>();
 }

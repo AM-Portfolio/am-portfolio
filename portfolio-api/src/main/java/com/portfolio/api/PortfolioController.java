@@ -127,7 +127,9 @@ public class PortfolioController {
         List<PortfolioBasicInfo> basicInfoList = portfolios.stream()
                 .map(portfolio -> new PortfolioBasicInfo(
                         portfolio.getId() != null ? portfolio.getId().toString() : null,
-                        portfolio.getName()))
+                        portfolio.getName(),
+                        portfolio.getPortfolioKind() != null ? portfolio.getPortfolioKind().name() : "BROKER",
+                        portfolio.getGapMissingCount()))
                 .collect(java.util.stream.Collectors.toList());
 
         log.info("PortfolioController - getPortfolioBasicDetails - Found {} portfolio basic details for user: {}",

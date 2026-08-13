@@ -12,6 +12,7 @@ import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.Currency;
 import com.am.common.amcommondata.model.enums.DocumentStatus;
 import com.am.common.amcommondata.model.enums.FundType;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.model.enums.PortfolioStatus;
 
 import lombok.Data;
@@ -24,7 +25,12 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @EqualsAndHashCode(callSuper = true)
 @Document(collection = "portfolios")
-@org.springframework.data.mongodb.core.index.CompoundIndex(name = "owner_broker_idx", def = "{'owner': 1, 'brokerType': 1}", unique = true, sparse = true)
+// Unique one BROKER portfolio per owner+brokerType. Baskets are excluded via partial filter.
+@org.springframework.data.mongodb.core.index.CompoundIndex(
+        name = "owner_broker_broker_only_idx",
+        def = "{'owner': 1, 'brokerType': 1}",
+        unique = true,
+        partialFilter = "{'$or':[{'portfolioKind':'BROKER'},{'portfolioKind':{'$exists':false}},{'portfolioKind':null}]}")
 public class PortfolioDocument extends BaseDocument {
     @Field("name")
     private String name;
@@ -58,6 +64,29 @@ public class PortfolioDocument extends BaseDocument {
     
     @Field("brokerType")
     private BrokerType brokerType;
+
+    /** BROKER (default/null) or BASKET carve-out. */
+    @Field("portfolioKind")
+    private PortfolioKind portfolioKind;
+
+    @Field("sourcePortfolioId")
+    private String sourcePortfolioId;
+
+    @Field("etfIsin")
+    private String etfIsin;
+
+    @Field("etfName")
+    private String etfName;
+
+    @Field("createdFromBasketAt")
+    private java.time.LocalDateTime createdFromBasketAt;
+
+    @Field("gapMissingCount")
+    private Integer gapMissingCount;
+
+    /** Quantity reserved from this BROKER book into baskets. */
+    @Field("allocations")
+    private List<HoldingAllocationDocument> allocations;
 
     @Field("lastLoginDate")
     private LocalDate lastLoginDate; // Updated on each user login — used for active-user filtering

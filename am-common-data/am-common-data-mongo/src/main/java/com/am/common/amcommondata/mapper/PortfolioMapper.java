@@ -7,10 +7,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import com.am.common.amcommondata.document.common.AuditMetadata;
+import com.am.common.amcommondata.document.portfolio.HoldingAllocationDocument;
 import com.am.common.amcommondata.document.portfolio.PortfolioDocument;
 import com.am.common.amcommondata.mapper.asset.EquityMapper;
+import com.am.common.amcommondata.model.HoldingAllocation;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.enums.Currency;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 
 @Component
 public class PortfolioMapper {
@@ -49,6 +52,15 @@ public class PortfolioMapper {
                     : null)
                 .totalValue(document.getTotalValue())
                 .brokerType(document.getBrokerType())
+                .portfolioKind(PortfolioKind.orBroker(document.getPortfolioKind()))
+                .sourcePortfolioId(document.getSourcePortfolioId())
+                .etfIsin(document.getEtfIsin())
+                .etfName(document.getEtfName())
+                .createdFromBasketAt(document.getCreatedFromBasketAt())
+                .gapMissingCount(document.getGapMissingCount())
+                .allocations(document.getAllocations() != null
+                        ? document.getAllocations().stream().map(this::toAllocationModel).collect(Collectors.toList())
+                        : null)
                 .assetCount(document.getEquities() != null ? document.getEquities().size() : 0)
                 .build();
 
@@ -83,6 +95,15 @@ public class PortfolioMapper {
                     : null)
                 .totalValue(model.getTotalValue())
                 .brokerType(model.getBrokerType())
+                .portfolioKind(PortfolioKind.orBroker(model.getPortfolioKind()))
+                .sourcePortfolioId(model.getSourcePortfolioId())
+                .etfIsin(model.getEtfIsin())
+                .etfName(model.getEtfName())
+                .createdFromBasketAt(model.getCreatedFromBasketAt())
+                .gapMissingCount(model.getGapMissingCount())
+                .allocations(model.getAllocations() != null
+                        ? model.getAllocations().stream().map(this::toAllocationDocument).collect(Collectors.toList())
+                        : null)
                 .build();
 
         // Set enums using helper methods
@@ -90,14 +111,41 @@ public class PortfolioMapper {
         //document.setPortfolioStatus(model.getStatus() != null ? PortfolioStatus.valueOf(model.getStatus()) : null);
         //document.setBaseStatus(DocumentStatus.ACTIVE); // Default status for new documents
 
+        boolean isNew = (model.getVersion() == null || model.getId() == null);
+        long existingVersion = model.getVersion() != null ? model.getVersion() : 0L;
         document.setAudit(AuditMetadata.builder()
-                .createdAt(model.getCreatedAt())
+                .createdAt(model.getCreatedAt() != null ? model.getCreatedAt() : java.time.LocalDateTime.now())
                 .createdBy(model.getCreatedBy())
                 .updatedAt(model.getUpdatedAt())
                 .updatedBy(model.getUpdatedBy())
-                .version(model.getVersion())
+                .version(existingVersion)
+                .lastAction(isNew ? "CREATE" : "UPDATE")
                 .build());
 
         return document;
+    }
+
+    private HoldingAllocation toAllocationModel(HoldingAllocationDocument doc) {
+        if (doc == null) {
+            return null;
+        }
+        return HoldingAllocation.builder()
+                .basketPortfolioId(doc.getBasketPortfolioId())
+                .isin(doc.getIsin())
+                .symbol(doc.getSymbol())
+                .quantity(doc.getQuantity())
+                .build();
+    }
+
+    private HoldingAllocationDocument toAllocationDocument(HoldingAllocation model) {
+        if (model == null) {
+            return null;
+        }
+        return HoldingAllocationDocument.builder()
+                .basketPortfolioId(model.getBasketPortfolioId())
+                .isin(model.getIsin())
+                .symbol(model.getSymbol())
+                .quantity(model.getQuantity())
+                .build();
     }
 }

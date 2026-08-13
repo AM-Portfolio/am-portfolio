@@ -4,6 +4,8 @@ import com.portfolio.basket.model.BasketOpportunity;
 import com.portfolio.basket.service.BasketAllocationService;
 import com.portfolio.basket.service.BasketCatalogService;
 import com.portfolio.basket.service.BasketEngineService;
+import com.portfolio.service.basket.BasketPortfolioCreateService;
+import com.portfolio.basket.service.HoldingSectorEnricher;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.service.portfolio.PortfolioHoldingsService;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -26,6 +28,8 @@ public class BasketController {
     private final BasketAllocationService basketAllocationService;
     private final BasketCatalogService basketCatalogService;
     private final PortfolioHoldingsService portfolioHoldingsService;
+    private final HoldingSectorEnricher holdingSectorEnricher;
+    private final BasketPortfolioCreateService basketPortfolioCreateService;
 
     @GetMapping("/catalog")
     public com.portfolio.basket.model.BasketCatalogResponse getCatalog() {
@@ -63,7 +67,6 @@ public class BasketController {
         com.portfolio.model.basket.ExposureResponse response = basketAllocationService
                 .calculateCumulativeExposure(userHoldings);
 
-        // Enrich response with request context
         response.setUserId(request.getUserId());
         response.setPortfolioId(request.getPortfolioId());
 
@@ -84,7 +87,6 @@ public class BasketController {
         com.portfolio.model.basket.PortfolioAllocationResponse allocation = basketAllocationService
                 .calculatePortfolioAllocation(userHoldings);
 
-        // Enrich with request context
         allocation.setUserId(request.getUserId());
         allocation.setPortfolioId(request.getPortfolioId());
 
@@ -109,6 +111,37 @@ public class BasketController {
             log.error("Error generating Basket Preview for ETF: " + request.getEtfIsin(), e);
             throw e;
         }
+    }
+
+    @PostMapping("/apply-substitutes")
+    public BasketOpportunity applySubstitutes(@RequestBody ApplySubstitutesRequest request) {
+        if (request == null || request.getEtfIsin() == null || request.getEtfIsin().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "etfIsin is required");
+        }
+        List<EquityHoldings> userHoldings = resolveUserHoldings(request.getUserId(),
+                request.getPortfolioId(), request.getUserHoldings());
+        try {
+            List<BasketEngineService.SubstituteAssignment> assignments = request.getAssignments() == null
+                    ? List.of()
+                    : request.getAssignments().stream()
+                            .map(a -> new BasketEngineService.SubstituteAssignment(
+                                    a.getMissingIsin(), a.getSubstituteIsin()))
+                            .toList();
+            
+            BasketOpportunity base = request.getCurrentOpportunity() != null
+                    ? request.getCurrentOpportunity()
+                    : basketService.getPreview(request.getEtfIsin(), userHoldings);
+                    
+            return basketService.applySubstitutesOnExisting(base, userHoldings, assignments);
+        } catch (IllegalStateException conflict) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, conflict.getMessage());
+        }
+    }
+
+    @PostMapping("/create-portfolio")
+    public BasketPortfolioCreateService.CreateBasketResponse createPortfolio(
+            @RequestBody BasketPortfolioCreateService.CreateBasketRequest request) {
+        return basketPortfolioCreateService.create(request);
     }
 
     @PostMapping("/calculate-quantities")
@@ -137,31 +170,33 @@ public class BasketController {
 
     private List<EquityHoldings> resolveUserHoldings(String userId, String portfolioId,
             List<EquityHoldings> manualHoldings) {
-        // If manual holdings are provided, use them directly
+        List<EquityHoldings> holdings;
         if (manualHoldings != null && !manualHoldings.isEmpty()) {
             log.info("Using manual holdings provided in request. Count: {}", manualHoldings.size());
-            return manualHoldings;
-        }
-
-        // If no userId, return empty
-        if (userId == null || userId.isEmpty()) {
+            holdings = manualHoldings;
+        } else if (userId == null || userId.isEmpty()) {
             log.warn("No userId or manual holdings provided in request.");
             return java.util.Collections.emptyList();
-        }
-
-        // Fetch from Portfolio Service
-        com.portfolio.model.portfolio.PortfolioHoldings portfolioHoldings;
-        if (portfolioId != null && !portfolioId.isEmpty()) {
-            portfolioHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, null, false);
         } else {
-            portfolioHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, null, false);
+            com.portfolio.model.portfolio.PortfolioHoldings portfolioHoldings;
+            if (portfolioId != null && !portfolioId.isEmpty()) {
+                portfolioHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, null, true);
+            } else {
+                portfolioHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, null, true);
+            }
+
+            if (portfolioHoldings != null && portfolioHoldings.getEquityHoldings() != null) {
+                holdings = portfolioHoldings.getEquityHoldings();
+            } else {
+                holdings = java.util.Collections.emptyList();
+            }
         }
 
-        if (portfolioHoldings != null && portfolioHoldings.getEquityHoldings() != null) {
-            return portfolioHoldings.getEquityHoldings();
-        }
-
-        return java.util.Collections.emptyList();
+        // Filter zero-available and enrich sectors
+        holdings = holdings.stream()
+                .filter(h -> h.getQuantity() == null || h.getQuantity() > 0)
+                .collect(java.util.stream.Collectors.toList());
+        return holdingSectorEnricher.enrich(holdings);
     }
 
     @Data
@@ -179,7 +214,25 @@ public class BasketController {
         private String userId;
         private String portfolioId;
         private String etfQuery;
-        private String etfIsin; // Added to handle requests with specific ETF ISINs
+        private String etfIsin;
         private List<EquityHoldings> userHoldings;
+    }
+
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class ApplySubstitutesRequest {
+        private String userId;
+        private String etfIsin;
+        private String portfolioId;
+        private List<EquityHoldings> userHoldings;
+        private List<AssignmentDto> assignments;
+        private BasketOpportunity currentOpportunity;
+    }
+
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class AssignmentDto {
+        private String missingIsin;
+        private String substituteIsin;
     }
 }
