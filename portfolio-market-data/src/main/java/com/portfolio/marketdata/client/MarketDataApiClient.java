@@ -180,4 +180,41 @@ public class MarketDataApiClient extends AbstractApiClient {
                                 .doOnSuccess(data -> log.debug("Successfully fetched historical charts, traceId={}", traceId))
                                 .doOnError(e -> log.error("Failed to fetch historical charts: {}, traceId={}", e.getMessage(), traceId));
         }
+
+        /**
+         * Resolves the trading symbol from Market Data service dynamically for a given ISIN code.
+         * Used to map uploaded ISIN codes (like INF666M01IO8) to NSE/BSE tickers (like GROWWDEFNC)
+         * without hardcoding and respecting microservice database isolation.
+         *
+         * @param isin the ISIN code to resolve
+         * @return a Mono containing a map of isin and resolved symbol
+         */
+        @SuppressWarnings("rawtypes")
+        public Mono<Map> resolveTickerByIsin(String isin) {
+                String path = "/v1/market-data/instruments/isin/" + isin.trim().toUpperCase();
+                log.info("Resolving ticker symbol by ISIN via API: {}", path);
+                return get(path, Map.class)
+                                .doOnSuccess(data -> log.debug("Successfully resolved ISIN {} to symbol {}", 
+                                                isin, data != null ? data.get("symbol") : "null"))
+                                .doOnError(e -> log.error("Failed to resolve ticker symbol for ISIN {}: {}", 
+                                                isin, e.getMessage()));
+        }
+
+        /**
+         * Resolves multiple trading symbols from Market Data service dynamically in a single batch query.
+         * Used to optimize bulk lookups during portfolio import/sync.
+         *
+         * @param isins list of ISIN codes to resolve
+         * @return a Mono containing a map of ISIN to resolved symbol
+         */
+        @SuppressWarnings("rawtypes")
+        public Mono<Map> resolveTickersByIsins(List<String> isins) {
+                String path = "/v1/market-data/instruments/isin";
+                log.info("Resolving batch of {} ticker symbols by ISINs via POST API", isins.size());
+                return post(path, isins, Map.class)
+                                .doOnSuccess(data -> log.debug("Successfully resolved batch of {} ISINs", 
+                                                data != null ? data.size() : 0))
+                                .doOnError(e -> log.error("Failed to resolve batch of ISINs: {}", e.getMessage()));
+        }
 }
+
