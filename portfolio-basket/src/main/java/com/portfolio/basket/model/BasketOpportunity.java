@@ -22,6 +22,7 @@ public class BasketOpportunity {
     private int heldCount;
     private int missingCount;
     private Double totalPortfolioValue;
+    private Double investmentAmount;
 
     private List<BasketItem> composition;
     private List<BasketItem> buyList; // Stocks to buy to reach 100% or bridge gap

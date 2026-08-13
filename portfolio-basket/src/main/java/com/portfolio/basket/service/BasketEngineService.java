@@ -113,6 +113,33 @@ public class BasketEngineService {
             item.setBuyQuantity((double) quantity);
             item.setLastPrice(price);
         }
+        // Recalculate basket-level scores from updated composition
+        if (opportunity.getComposition() != null) {
+            int total = opportunity.getComposition().size();
+            int matchCount = 0;
+            double replicaTotal = 0.0;
+            for (BasketItem item : opportunity.getComposition()) {
+                if (item.getStatus() == ItemStatus.HELD || item.getStatus() == ItemStatus.SUBSTITUTE) {
+                    matchCount++;
+                    replicaTotal += item.getReplicaWeight() != null ? item.getReplicaWeight() : 0.0;
+                } else if (item.getBuyQuantity() != null && item.getBuyQuantity() > 0 
+                           && item.getLastPrice() != null) {
+                    // Recalculate replicaWeight based on actual purchased value
+                    double purchasedValue = item.getBuyQuantity() * item.getLastPrice();
+                    double replicaWeight = investmentAmount > 0 ? (purchasedValue / investmentAmount) * 100.0 : 0.0;
+                    item.setReplicaWeight(BasketUtils.round(replicaWeight));
+                    replicaTotal += item.getReplicaWeight();
+                } else {
+                    item.setReplicaWeight(0.0);
+                }
+            }
+            opportunity.setMatchScore(BasketUtils.round(total == 0 ? 0 : (double) matchCount / total * 100.0));
+            opportunity.setReplicaScore(BasketUtils.round(replicaTotal));
+            opportunity.setReadyToReplicate(replicaTotal >= 70.0);
+            opportunity.setHeldCount(matchCount);
+            opportunity.setMissingCount(total - matchCount);
+        }
+        opportunity.setInvestmentAmount(investmentAmount);
 
         return opportunity;
     }

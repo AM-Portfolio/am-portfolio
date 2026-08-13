@@ -180,9 +180,9 @@ public class BasketController {
         } else {
             com.portfolio.model.portfolio.PortfolioHoldings portfolioHoldings;
             if (portfolioId != null && !portfolioId.isEmpty()) {
-                portfolioHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, null, false);
+                portfolioHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, null, true);
             } else {
-                portfolioHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, null, false);
+                portfolioHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, null, true);
             }
 
             if (portfolioHoldings != null && portfolioHoldings.getEquityHoldings() != null) {
