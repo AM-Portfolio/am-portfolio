@@ -192,6 +192,8 @@ public class PortfolioCalculator {
             }
         }
 
+
+
         Double currentPrice = null;
         Double previousClosePrice = null;
 
@@ -373,14 +375,18 @@ public class PortfolioCalculator {
 
     private Map<String, List<EquityHoldings>> groupSector(List<EquityHoldings> holdings) {
         return holdings.stream()
-                .filter(e -> e.getSector() != null)
-                .collect(Collectors.groupingBy(EquityHoldings::getSector));
+                .collect(Collectors.groupingBy(e -> {
+                    String sector = e.getSector();
+                    return (sector != null && !sector.trim().isEmpty()) ? sector : "-";
+                }));
     }
 
     private Map<String, List<EquityHoldings>> groupMarketCap(List<EquityHoldings> holdings) {
         return holdings.stream()
-                .filter(e -> e.getMarketCap() != null)
-                .collect(Collectors.groupingBy(EquityHoldings::getMarketCap));
+                .collect(Collectors.groupingBy(e -> {
+                    String mc = e.getMarketCap();
+                    return (mc != null && !mc.trim().isEmpty()) ? mc : "UNKNOWN";
+                }));
     }
 
     private Double round(Double value) {
