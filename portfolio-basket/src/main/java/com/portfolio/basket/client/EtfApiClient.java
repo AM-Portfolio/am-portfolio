@@ -565,6 +565,29 @@ public class EtfApiClient {
                 applySecurityMatch(h, match);
             }
             log.info("Enriched {}/{} ETF constituents with ISINs via market batch-search", matchMap.size(), needsIsin.size());
+
+            // Second pass: query by symbol for any constituents that STILL have Unknown sector
+            List<EtfHolding> stillUnknown = needsIsin.stream()
+                    .filter(h -> SectorNormalizer.isUnknown(h.getSector()))
+                    .filter(h -> h.getSymbol() != null && !h.getSymbol().isBlank())
+                    .collect(Collectors.toList());
+
+            if (!stillUnknown.isEmpty()) {
+                List<String> fallbackSymbols = stillUnknown.stream()
+                        .map(EtfHolding::getSymbol)
+                        .distinct()
+                        .collect(Collectors.toList());
+
+                Map<String, SecurityMatch> symbolMatchMap = batchSearchByQueries(fallbackSymbols);
+                for (EtfHolding h : stillUnknown) {
+                    SecurityMatch match = symbolMatchMap.get(h.getSymbol());
+                    if (match != null && match.getSector() != null) {
+                        applySecurityMatch(h, match);
+                    }
+                }
+                log.info("Enriched {}/{} ETF constituents with fallback symbols", symbolMatchMap.size(), stillUnknown.size());
+            }
+
         } catch (Exception e) {
             log.warn("Market batch-search failed ({}). Basket overlap may be weaker without constituent ISINs.", e.getMessage());
         }
@@ -580,6 +603,10 @@ public class EtfApiClient {
                 .filter(s -> s != null && !s.isBlank())
                 .distinct()
                 .collect(Collectors.toList());
+        return batchSearchByQueries(names);
+    }
+
+    private Map<String, SecurityMatch> batchSearchByQueries(List<String> names) {
         if (names.isEmpty()) {
             return Collections.emptyMap();
         }

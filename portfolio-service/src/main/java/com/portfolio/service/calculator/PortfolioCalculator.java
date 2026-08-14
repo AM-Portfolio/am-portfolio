@@ -273,7 +273,7 @@ public class PortfolioCalculator {
                 if (previousClosePrice != null && previousClosePrice > 0) {
                     double previousValue = previousClosePrice * holding.getQuantity();
                     double dayGainLoss = currentValue - previousValue;
-                    double dayGainLossPct = (dayGainLoss / previousValue) * 100;
+                    double dayGainLossPct = previousValue > 0 ? (dayGainLoss / previousValue) * 100 : 0.0;
                     holding.setTodayGainLoss(round(dayGainLoss));
                     holding.setTodayGainLossPercentage(round(dayGainLossPct));
 
@@ -384,8 +384,9 @@ public class PortfolioCalculator {
     }
 
     private Double round(Double value) {
-        if (value == null)
+        if (value == null || Double.isNaN(value) || Double.isInfinite(value)) {
             return null;
+        }
         return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).doubleValue();
     }
 

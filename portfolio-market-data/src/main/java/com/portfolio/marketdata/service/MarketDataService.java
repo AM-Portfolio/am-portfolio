@@ -764,7 +764,7 @@ public class MarketDataService {
                             .builder()
                             .queries(cleanedSymbols)
                             .limit(1)
-                            .minMatchScore(0.9)
+                            .minMatchScore(0.7)
                             .build();
 
                     com.portfolio.marketdata.model.BatchSearchResponse response = marketDataApiClient.batchSearch(request)
