@@ -514,8 +514,17 @@ public class MarketDataService {
             return result;
         }
 
+        // Last-trade Redis/Mongo is only valid while cash is open. After 15:30 / weekend
+        // skip them so holdings call the same am-market OHLC path as the dashboard (official close).
+        boolean useLiveTickCaches = marketDataRedisService != null
+                && marketDataRedisService.isCashMarketHours();
+        if (!useLiveTickCaches) {
+            log.info("[MarketData] Cash session closed — skipping last-trade Redis/Mongo for {} symbols",
+                    missing.size());
+        }
+
         // 2. Try market data cache next (populated by am-market service or last live fetch)
-        if (marketDataRedisService != null) {
+        if (useLiveTickCaches && marketDataRedisService != null) {
             try {
                 Map<String, MarketData> cached = marketDataRedisService.getMarketData(missing);
                 if (cached != null) {
@@ -544,7 +553,7 @@ public class MarketDataService {
         }
 
         // 3. Try MongoDB cache next (populated by Kafka live stream)
-        if (stockPriceMongoService != null) {
+        if (useLiveTickCaches && stockPriceMongoService != null) {
             try {
                 java.util.Map<String, com.am.common.amcommondata.document.price.StockPriceDocument> mongoPrices = stockPriceMongoService.getPrices(missing);
                 if (mongoPrices != null && !mongoPrices.isEmpty()) {

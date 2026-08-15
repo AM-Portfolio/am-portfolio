@@ -12,11 +12,10 @@ import com.portfolio.model.events.StockPriceUpdateEvent;
 import com.am.common.amcommondata.document.price.StockPriceDocument;
 import com.am.common.amcommondata.service.price.StockPriceMongoService;
 import com.portfolio.model.util.SymbolResolver;
+import com.portfolio.redis.service.PortfolioMarketDataRedisService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import java.time.DayOfWeek;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.Collections;
@@ -39,16 +38,9 @@ public class StockPriceUpdateConsumerService {
     @Qualifier("historyWriterExecutor")
     private final Executor historyWriterExecutor;
 
-    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
-    private static final LocalTime MARKET_OPEN = LocalTime.of(9, 15);
-    private static final LocalTime MARKET_CLOSE = LocalTime.of(15, 30);
-
     private boolean isMarketHours() {
-        ZonedDateTime now = ZonedDateTime.now(IST);
-        DayOfWeek day = now.getDayOfWeek();
-        if (day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY) return false;
-        LocalTime t = now.toLocalTime();
-        return !t.isBefore(MARKET_OPEN) && !t.isAfter(MARKET_CLOSE);
+        return PortfolioMarketDataRedisService.isCashMarketHours(
+                ZonedDateTime.now(ZoneId.of("Asia/Kolkata")));
     }
 
     @KafkaListener(topics = "${app.kafka.stock.topic}", 

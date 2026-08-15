@@ -89,6 +89,26 @@ private final RedisTemplate<String, MarketData> portfolioMarketDataRedisTemplate
     }
 
     /**
+     * NSE cash session: weekday 09:15–15:30 IST. Same clock {@link #computeSmartTtl()} already used.
+     * Last-trade Redis/Mongo is only valid in this window.
+     */
+    public boolean isCashMarketHours() {
+        return isCashMarketHours(ZonedDateTime.now(IST));
+    }
+
+    public static boolean isCashMarketHours(ZonedDateTime nowIst) {
+        if (nowIst == null) {
+            return false;
+        }
+        DayOfWeek day = nowIst.getDayOfWeek();
+        if (day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY) {
+            return false;
+        }
+        LocalTime time = nowIst.toLocalTime();
+        return !time.isBefore(MARKET_OPEN) && time.isBefore(MARKET_CLOSE);
+    }
+
+    /**
      * Compute TTL based on IST day-of-week and current time.
      */
     public Duration computeSmartTtl() {
@@ -99,16 +119,13 @@ private final RedisTemplate<String, MarketData> portfolioMarketDataRedisTemplate
         ZonedDateTime nextMarketOpen = resolveNextMarketOpen(nowIst, day, time);
         Duration ttl = Duration.between(nowIst, nextMarketOpen);
 
-        boolean isWeekday = !(day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY);
-        boolean isMarketHours = isWeekday
-            && !time.isBefore(MARKET_OPEN)
-            && time.isBefore(MARKET_CLOSE);
-
-        if (isMarketHours) {
-            ttl = Duration.ofMinutes(15);
+        // Short TTL while cash is open so holdings stay near dashboard quotes.
+        // After close, keep until next open — caller must skip last-trade cache first.
+        if (isCashMarketHours(nowIst)) {
+            ttl = Duration.ofMinutes(2);
+        } else if (ttl.toMinutes() < 5) {
+            ttl = Duration.ofMinutes(5);
         }
-
-        if (ttl.toMinutes() < 5)  ttl = Duration.ofMinutes(5);
         if (ttl.toHours()   > 80) ttl = Duration.ofHours(80);
 
         log.debug("[MktDataCache] SmartTTL={} (IST={}, day={})", ttl, nowIst.toLocalTime(), day);
