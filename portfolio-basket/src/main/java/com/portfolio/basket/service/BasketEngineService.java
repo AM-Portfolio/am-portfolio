@@ -229,7 +229,7 @@ public class BasketEngineService {
 
         Map<String, List<EquityHoldings>> userSectorMap = userHoldings.stream()
                 .filter(h -> h.getSector() != null && !SectorNormalizer.isUnknown(h.getSector()))
-                .filter(h -> h.getQuantity() == null || h.getQuantity() > 0)
+                .filter(h -> h.getAvailableQuantity() == null || h.getAvailableQuantity() > 0)
                 .collect(Collectors.groupingBy(h -> SectorNormalizer.normalize(h.getSector())));
 
         List<BasketOpportunity> opportunities = new ArrayList<>();
@@ -275,7 +275,7 @@ public class BasketEngineService {
 
         Map<String, List<EquityHoldings>> userSectorMap = userHoldings.stream()
                 .filter(h -> h.getSector() != null && !SectorNormalizer.isUnknown(h.getSector()))
-                .filter(h -> h.getQuantity() == null || h.getQuantity() > 0)
+                .filter(h -> h.getAvailableQuantity() == null || h.getAvailableQuantity() > 0)
                 .collect(Collectors.groupingBy(h -> SectorNormalizer.normalize(h.getSector())));
 
         return calculateOverlap(etfIsin, etf, userMap, userSectorMap, userHoldings);
@@ -375,12 +375,24 @@ public class BasketEngineService {
                 .build();
     }
 
+
+    private double getAvailableWeight(EquityHoldings h) {
+        if (h == null) return 0.0;
+        double physicalWeight = h.getWeightInPortfolio() != null ? h.getWeightInPortfolio() : 0.0;
+        double physicalQty = h.getQuantity() != null ? h.getQuantity() : 0.0;
+        double availableQty = h.getAvailableQuantity() != null ? h.getAvailableQuantity() : 0.0;
+        if (physicalQty > 0) {
+            return (availableQty / physicalQty) * physicalWeight;
+        }
+        return 0.0;
+    }
+
     private boolean processDirectMatch(BasketItem item, EtfHolding req, EquityHoldings userHolding, Map<String, Double> consumedWeightByIsin) {
         log.info("Checking Held Item: {} | Qty: {} | AvgPrice: {}",
                 userHolding.getSymbol(), userHolding.getQuantity(), userHolding.getAverageBuyingPrice());
 
         double consumed = consumedWeightByIsin.getOrDefault(userHolding.getIsin(), 0.0);
-        double totalWeight = userHolding.getWeightInPortfolio() != null ? userHolding.getWeightInPortfolio() : 0.0;
+        double totalWeight = getAvailableWeight(userHolding);
         double available = totalWeight - consumed;
 
         if (available < 0.01) {
@@ -391,7 +403,7 @@ public class BasketEngineService {
         item.setUserHoldingSymbol(userHolding.getSymbol());
         item.setUserHoldingIsin(userHolding.getIsin());
         item.setUserWeight(BasketUtils.round(totalWeight));
-        item.setHeldQuantity(userHolding.getQuantity());
+        item.setHeldQuantity(userHolding.getAvailableQuantity());
         item.setHeldAveragePrice(userHolding.getAverageBuyingPrice());
 
         double matchWeight = Math.min(req.getWeight(), available);
@@ -424,12 +436,12 @@ public class BasketEngineService {
 
         // Alternatives = unused peers (for UI swap)
         List<EquityHoldings> unusedPeers = sectorPeers.stream()
-                .filter(p -> p.getIsin() != null && ((p.getWeightInPortfolio() != null ? p.getWeightInPortfolio() : 0.0) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0)) > 0.01)
-                .filter(p -> p.getQuantity() == null || p.getQuantity() > 0)
+                .filter(p -> p.getIsin() != null && (getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0)) > 0.01)
+                .filter(p -> p.getAvailableQuantity() == null || p.getAvailableQuantity() > 0)
                 .collect(Collectors.toList());
 
         List<BasketOpportunity.Alternative> alts = unusedPeers.stream()
-                .map(p -> toAlternative(p, (p.getWeightInPortfolio() != null ? p.getWeightInPortfolio() : 0.0) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices))
+                .map(p -> toAlternative(p, getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices))
                 .collect(Collectors.toList());
         item.setAlternatives(alts);
 
@@ -437,11 +449,11 @@ public class BasketEngineService {
         if (!unusedPeers.isEmpty()) {
             EquityHoldings substitute = unusedPeers.stream()
                     .max(Comparator.comparingDouble(
-                            h -> (h.getWeightInPortfolio() != null ? h.getWeightInPortfolio() : 0.0) - consumedWeightByIsin.getOrDefault(h.getIsin(), 0.0)))
+                            h -> getAvailableWeight(h) - consumedWeightByIsin.getOrDefault(h.getIsin(), 0.0)))
                     .orElse(unusedPeers.get(0));
 
             double consumed = consumedWeightByIsin.getOrDefault(substitute.getIsin(), 0.0);
-            double totalWeight = substitute.getWeightInPortfolio() != null ? substitute.getWeightInPortfolio() : 0.0;
+            double totalWeight = getAvailableWeight(substitute);
             double available = totalWeight - consumed;
 
             if (available < 0.01) {
@@ -453,7 +465,7 @@ public class BasketEngineService {
             item.setUserHoldingSymbol(substitute.getSymbol());
             item.setUserHoldingIsin(substitute.getIsin());
             item.setUserWeight(BasketUtils.round(totalWeight));
-            item.setHeldQuantity(substitute.getQuantity());
+            item.setHeldQuantity(substitute.getAvailableQuantity());
             item.setHeldAveragePrice(substitute.getAverageBuyingPrice());
             item.setReason("Substitute: " + req.getSector()
                     + (req.getMarketCapCategory() != null ? "/" + req.getMarketCapCategory() : ""));
@@ -469,8 +481,8 @@ public class BasketEngineService {
         // MISSING: fallback alternatives so UI Suggest swap stays actionable when unused holdings remain
         List<EquityHoldings> fallback = (allUserHoldings == null ? List.<EquityHoldings>of() : allUserHoldings)
                 .stream()
-                .filter(p -> p.getIsin() != null && ((p.getWeightInPortfolio() != null ? p.getWeightInPortfolio() : 0.0) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0)) > 0.01)
-                .filter(p -> p.getQuantity() == null || p.getQuantity() > 0)
+                .filter(p -> p.getIsin() != null && (getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0)) > 0.01)
+                .filter(p -> p.getAvailableQuantity() == null || p.getAvailableQuantity() > 0)
                 .sorted(Comparator
                         .comparing((EquityHoldings h) -> {
                             if (unknownSector || SectorNormalizer.isUnknown(h.getSector())) {
@@ -479,18 +491,17 @@ public class BasketEngineService {
                             return SectorNormalizer.normalize(h.getSector()).equals(sectorKey) ? 0 : 1;
                         })
                         .thenComparing(Comparator.comparingDouble(
-                                (EquityHoldings h) -> h.getWeightInPortfolio() != null
-                                        ? h.getWeightInPortfolio() : 0.0).reversed()))
+                                (EquityHoldings h) -> getAvailableWeight(h)).reversed()))
                 .collect(Collectors.toList());
 
         if (!fallback.isEmpty()) {
             item.setAlternatives(fallback.stream()
-                    .map(p -> toAlternative(p, (p.getWeightInPortfolio() != null ? p.getWeightInPortfolio() : 0.0) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices))
+                    .map(p -> toAlternative(p, getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices))
                     .collect(Collectors.toList()));
         } else if (alts.isEmpty() && !sectorPeers.isEmpty()) {
             item.setAlternatives(sectorPeers.stream()
-                    .filter(p -> p.getIsin() != null && ((p.getWeightInPortfolio() != null ? p.getWeightInPortfolio() : 0.0) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0)) > 0.01)
-                    .map(p -> toAlternative(p, (p.getWeightInPortfolio() != null ? p.getWeightInPortfolio() : 0.0) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices))
+                    .filter(p -> p.getIsin() != null && (getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0)) > 0.01)
+                    .map(p -> toAlternative(p, getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices))
                     .collect(Collectors.toList()));
         }
 
@@ -505,7 +516,7 @@ public class BasketEngineService {
                 .symbol(h.getSymbol())
                 .isin(h.getIsin())
                 .userWeight(BasketUtils.round(availableWeight))
-                .quantity(h.getQuantity())
+                .quantity(h.getAvailableQuantity())
                 .lastPrice(prices != null && h.getSymbol() != null ? prices.get(h.getSymbol()) : null)
                 .build();
     }
@@ -576,7 +587,7 @@ public class BasketEngineService {
             // Use ISIN from the resolved holding to ensure consistency
             String resolvedIsin = sub.getIsin() != null ? sub.getIsin() : assignment.getSubstituteIsin();
 
-            double subWeight = sub.getWeightInPortfolio() != null ? sub.getWeightInPortfolio() : 0.0;
+            double subWeight = getAvailableWeight(sub);
 
             // Free previous auto-sub if flipping from SUBSTITUTE
             if (item.getStatus() == ItemStatus.SUBSTITUTE && item.getUserHoldingIsin() != null) {
@@ -599,8 +610,8 @@ public class BasketEngineService {
             item.setStatus(ItemStatus.SUBSTITUTE);
             item.setUserHoldingSymbol(sub.getSymbol());
             item.setUserHoldingIsin(sub.getIsin());
-            item.setUserWeight(BasketUtils.round(sub.getWeightInPortfolio()));
-            item.setHeldQuantity(sub.getQuantity());
+            item.setUserWeight(BasketUtils.round(getAvailableWeight(sub)));
+            item.setHeldQuantity(sub.getAvailableQuantity());
             item.setHeldAveragePrice(sub.getAverageBuyingPrice());
             item.setReason("User swap: " + sub.getSymbol());
             item.setReplicaWeight(BasketUtils.round(matchWeight));

@@ -92,7 +92,6 @@ public class PortfolioHoldingsMapper {
                         double available = Math.max(0.0, raw - (existing.getAllocatedQuantity() != null
                                 ? existing.getAllocatedQuantity() : 0));
                         existing.setAvailableQuantity(available);
-                        existing.setQuantity(available);
                         existing.setAllocationNote(buildAllocationNote(portfolio, equity.getIsin()));
                     }
                 }
@@ -116,8 +115,6 @@ public class PortfolioHoldingsMapper {
             holdings.setAllocatedQuantity(alloc);
             double available = Math.max(0.0, raw - alloc);
             holdings.setAvailableQuantity(available);
-            // Free capital uses available qty
-            holdings.setQuantity(available);
             holdings.setAllocationNote(buildAllocationNote(portfolio, equity.getIsin()));
             if (available > 0 && equity.getAvgBuyingPrice() != null) {
                 holdings.setInvestmentCost(equity.getAvgBuyingPrice() * available);

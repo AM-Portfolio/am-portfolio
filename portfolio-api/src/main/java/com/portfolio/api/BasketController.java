@@ -194,7 +194,7 @@ public class BasketController {
 
         // Filter zero-available and enrich sectors
         holdings = holdings.stream()
-                .filter(h -> h.getQuantity() == null || h.getQuantity() > 0)
+                .filter(h -> h.getAvailableQuantity() == null || h.getAvailableQuantity() > 0)
                 .collect(java.util.stream.Collectors.toList());
         return holdingSectorEnricher.enrich(holdings);
     }

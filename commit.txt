@@ -1,0 +1,15 @@
+﻿fix(basket): stop overwriting quantity with availableQuantity; migrate basket matching to available-aware quantity/weight
+
+- PortfolioHoldingsMapper: remove setQuantity(available) overwrites (2 sites).
+  `quantity` now correctly represents total physical shares in All Portfolio
+  and broker views (Rule Book Invariant 1).
+
+- BasketController, BasketEngineService: migrate zero-holding filters,
+  match-weight calculation, held/alternative quantity display, and swap
+  suggestions from getQuantity() to getAvailableQuantity() /
+  getAvailableWeight(). Without this, basket matching would have scored
+  against total owned shares rather than allocatable shares, letting a
+  user see a 100% match offer the system couldn't actually fulfill at
+  creation time.
+
+No schema changes. Local build: PASS.
