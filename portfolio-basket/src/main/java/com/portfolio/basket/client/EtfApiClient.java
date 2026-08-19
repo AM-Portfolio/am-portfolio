@@ -68,6 +68,7 @@ public class EtfApiClient {
     private final Map<String, EtfData> etfCache = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String, Boolean> etfSymbolCache = new java.util.concurrent.ConcurrentHashMap<>();
     private Cache<String, SecurityMatch> secmatchL1;
+    private Cache<String, String> isinToSymbolCache;
     private ExecutorService enrichmentExecutor;
     private final BasketSecurityMatchRedisService securityMatchRedisService;
     private final BasketCatalogService basketCatalogService;
@@ -92,6 +93,10 @@ public class EtfApiClient {
         secmatchL1 = Caffeine.newBuilder()
                 .expireAfterWrite(Math.max(60, secmatchL1TtlSeconds), TimeUnit.SECONDS)
                 .maximumSize(20_000)
+                .build();
+        isinToSymbolCache = Caffeine.newBuilder()
+                .expireAfterWrite(86400, TimeUnit.SECONDS)
+                .maximumSize(10_000)
                 .build();
     }
 
@@ -234,12 +239,28 @@ public class EtfApiClient {
         return out;
     }
 
+    private String resolveIsinToSymbol(String isin) {
+        String cached = isinToSymbolCache.getIfPresent(isin.toUpperCase());
+        if (cached != null) return cached;
+        // Use the existing search API to resolve ISIN → symbol
+        String symbol = resolveQueryToSymbol(isin);
+        if (symbol != null) {
+            isinToSymbolCache.put(isin.toUpperCase(), symbol);
+        }
+        return symbol;
+    }
+
     /** Resolve index name via parser search, or pass through symbol/ISIN. */
     public String resolveToSymbol(String query) {
         if (query == null || query.isBlank()) {
             return null;
         }
         String trimmed = query.trim();
+        // If it's an ISIN (12 chars, starts with IN/INF), resolve to symbol first
+        if (trimmed.matches("(?i)^INF[A-Z0-9]{10}$") || trimmed.matches("(?i)^[A-Z]{2}[A-Z0-9]{10}$")) {
+            String symbol = resolveIsinToSymbol(trimmed);
+            return symbol != null ? symbol : trimmed;
+        }
         if (isDirectHoldingsKey(trimmed)) {
             return trimmed.toUpperCase(Locale.ROOT);
         }

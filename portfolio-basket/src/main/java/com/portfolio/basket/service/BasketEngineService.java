@@ -12,6 +12,7 @@ import com.portfolio.model.portfolio.EquityHoldings;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import com.portfolio.basket.exception.EtfNotFoundException;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -266,7 +267,10 @@ public class BasketEngineService {
 
         EtfData etf = getEtfData(etfIsin);
         if (etf == null) {
-            throw new RuntimeException("ETF not found for ISIN: " + etfIsin);
+            throw new EtfNotFoundException(
+                "ETF data not found for '" + etfIsin + "'. " +
+                "Use the ETF symbol (e.g. BANKBEES) or verify the ETF exists in the catalog."
+            );
         }
 
         // Convert into singleton list logic

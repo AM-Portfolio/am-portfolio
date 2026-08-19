@@ -147,9 +147,17 @@ public class BasketController {
                                     a.getMissingIsin(), a.getSubstituteIsin()))
                             .toList();
             
-            BasketOpportunity base = request.getCurrentOpportunity() != null
-                    ? request.getCurrentOpportunity()
-                    : basketService.getPreview(request.getEtfIsin(), userHoldings);
+            BasketOpportunity base;
+            if (request.getCurrentOpportunity() != null &&
+                request.getCurrentOpportunity().getComposition() != null &&
+                !request.getCurrentOpportunity().getComposition().isEmpty()) {
+                log.info("apply-substitutes: using client-provided opportunity");
+                base = request.getCurrentOpportunity();
+            } else {
+                log.warn("apply-substitutes: currentOpportunity not provided — falling back to getPreview for: {}",
+                    request.getEtfIsin());
+                base = basketService.getPreview(request.getEtfIsin(), userHoldings);
+            }
                     
             return basketService.applySubstitutesOnExisting(base, userHoldings, assignments);
         } catch (IllegalStateException conflict) {
