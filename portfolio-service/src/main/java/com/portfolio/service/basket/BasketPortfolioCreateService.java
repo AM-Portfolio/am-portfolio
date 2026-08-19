@@ -9,6 +9,7 @@ import com.portfolio.basket.util.BasketNaming;
 import com.portfolio.redis.service.ActiveMarketSymbolPublisher;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
 import com.portfolio.redis.service.PortfolioSummaryRedisService;
+import com.portfolio.service.basket.AllocationLedgerService.AllocationLine;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +43,8 @@ public class BasketPortfolioCreateService {
 
     @Autowired(required = false)
     private ActiveMarketSymbolPublisher activeMarketSymbolPublisher;
+
+    private final AllocationLedgerService allocationLedgerService;
 
     /** In-process idempotency (Redis optional). */
     private final ConcurrentHashMap<String, CreateBasketResponse> idempotencyCache = new ConcurrentHashMap<>();
@@ -89,10 +92,9 @@ public class BasketPortfolioCreateService {
         }
 
         List<EquityModel> basketEquities = new ArrayList<>();
-        List<HoldingAllocation> newAllocations = source.getAllocations() != null
-                ? new ArrayList<>(source.getAllocations())
-                : new ArrayList<>();
+        List<HoldingAllocation> newAllocations = new ArrayList<>();
         List<MovedLine> moved = new ArrayList<>();
+        List<AllocationLine> ledgerLines = new ArrayList<>();
 
         for (CreateBasketLine line : request.getLines()) {
             if (line.getStatus() != null && "MISSING".equalsIgnoreCase(line.getStatus())) {
@@ -113,10 +115,12 @@ public class BasketPortfolioCreateService {
                         "Holding not on source: " + line.getHoldingIsin());
             }
             double raw = sourceEq.getQuantity() != null ? sourceEq.getQuantity() : 0.0;
-            double alreadyAllocated = newAllocations.stream()
+            double dbAllocated = allocationLedgerService.sumActiveQuantityByBrokerPortfolioIdAndIsin(source.getId().toString(), line.getHoldingIsin());
+            double inFlightAllocated = ledgerLines.stream()
                     .filter(a -> line.getHoldingIsin().equals(a.getIsin()))
                     .mapToDouble(a -> a.getQuantity() != null ? a.getQuantity() : 0)
                     .sum();
+            double alreadyAllocated = dbAllocated + inFlightAllocated;
             double available = Math.max(0.0, raw - alreadyAllocated);
             double allocatedQty = Math.min(line.getQuantity(), available);
             if (allocatedQty < 1e-6) {
@@ -141,6 +145,12 @@ public class BasketPortfolioCreateService {
 
             newAllocations.add(HoldingAllocation.builder()
                     .basketPortfolioId("PENDING")
+                    .isin(line.getHoldingIsin())
+                    .symbol(basketEq.getSymbol())
+                    .quantity(allocatedQty)
+                    .build());
+
+            ledgerLines.add(AllocationLine.builder()
                     .isin(line.getHoldingIsin())
                     .symbol(basketEq.getSymbol())
                     .quantity(allocatedQty)
@@ -184,21 +194,10 @@ public class BasketPortfolioCreateService {
         PortfolioModelV1 savedBasket = portfolioService.createBasketPortfolio(basket);
         String basketId = savedBasket.getId().toString();
 
-        // Finalize allocations with real basket id
-        List<HoldingAllocation> finalized = new ArrayList<>();
-        if (source.getAllocations() != null) {
-            finalized.addAll(source.getAllocations());
+        // Write ledger entries via compensating write pattern (PENDING -> ACTIVE)
+        if (!ledgerLines.isEmpty()) {
+            allocationLedgerService.reserveAllocations(basketId, source.getId().toString(), ledgerLines);
         }
-        for (MovedLine m : moved) {
-            finalized.add(HoldingAllocation.builder()
-                    .basketPortfolioId(basketId)
-                    .isin(m.getIsin())
-                    .symbol(m.getSymbol())
-                    .quantity(m.getQuantity())
-                    .build());
-        }
-        source.setAllocations(finalized);
-        portfolioService.savePortfolioDocument(source);
 
         evictCaches(request.getUserId(), source.getId().toString(), basketId);
         publishSymbols(basketEquities);

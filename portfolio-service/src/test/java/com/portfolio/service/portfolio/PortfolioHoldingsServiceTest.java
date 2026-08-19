@@ -127,8 +127,8 @@ public class PortfolioHoldingsServiceTest {
     }
 
     @Test
-    @DisplayName("getCachedHoldings should delete Mongo cache when holdings have zero prices")
-    public void getCachedHoldings_withZeroPrices_shouldDeleteStaleMongoCache() {
+    @DisplayName("getCachedHoldings should trigger async rebuild when holdings have zero prices but still return stale data")
+    public void getCachedHoldings_withZeroPrices_shouldTriggerAsyncRebuild() {
         // Given
         String userId = "user123";
         TimeInterval interval = TimeInterval.OVERALL;
@@ -143,17 +143,24 @@ public class PortfolioHoldingsServiceTest {
                 
         lenient().when(portfolioHoldingsRedisService.getLatestHoldings(userId, interval))
                 .thenReturn(Optional.empty());
-        lenient().when(portfolioHoldingsMongoService.getLatestFreshHoldings(userId, interval, (String) null))
+        lenient().when(portfolioHoldingsMongoService.getLatestHoldings(userId, interval, (String) null))
                 .thenReturn(Optional.of(cachedHoldings));
                 
         // Mock portfolios/holdings to allow rebuild to proceed
         when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(Collections.emptyList());
 
+        doAnswer(invocation -> {
+            Runnable runnable = invocation.getArgument(0);
+            runnable.run();
+            return null;
+        }).when(taskExecutor).execute(any(Runnable.class));
+
         // When
         portfolioHoldingsService.getPortfolioHoldings(userId, interval, true);
 
         // Then
-        verify(portfolioHoldingsMongoService, times(1)).deleteCache(userId, interval, (String) null);
+        // Verify that async rebuild was executed (it fetches portfolios)
+        verify(portfolioService, times(1)).getPortfoliosByUserId(userId);
     }
 
     @Test

@@ -255,7 +255,7 @@ public class PortfolioHoldingsService {
         }
 
         // Tier 2: Check MongoDB if Redis missed
-        cachedHoldings = portfolioHoldingsMongoService.getLatestFreshHoldings(userId, interval, portfolioId);
+        cachedHoldings = portfolioHoldingsMongoService.getLatestHoldings(userId, interval, portfolioId);
         if (cachedHoldings.isPresent()) {
             List<EquityHoldings> cachedList = cachedHoldings.get().getEquityHoldings();
             boolean hasLivePrices = cachedList != null
@@ -264,17 +264,42 @@ public class PortfolioHoldingsService {
                         .filter(h -> h.getCurrentPrice() != null && h.getCurrentPrice() > 0)
                         .count() >= cachedList.size() * 0.5);
             
-            if (hasLivePrices) {
-                log.info("Serving valid portfolio holdings from MongoDB cache - User: {}", userId);
+            LocalDateTime cutoff = LocalDateTime.now().minusMinutes(15);
+            boolean isStale = cachedHoldings.get().getLastUpdated() == null || cachedHoldings.get().getLastUpdated().isBefore(cutoff);
+
+            if (hasLivePrices && !isStale) {
+                log.info("Serving valid and fresh portfolio holdings from MongoDB cache - User: {}", userId);
                 return cachedHoldings;  // ✅ real data
             }
-            log.warn("MongoDB holdings cache has stale/zero prices for User: {} — rebuilding fresh", userId);
-            try {
-                portfolioHoldingsMongoService.deleteCache(userId, interval, portfolioId);
-            } catch (Exception ex) {
-                log.warn("Failed to delete stale holdings cache: {}", ex.getMessage());
-            }
-            // fall through to rebuild fresh
+            
+            log.warn("MongoDB holdings cache has stale prices or is older than 15 mins for User: {} — triggering async rebuild", userId);
+            
+            // Stale-While-Revalidate: Trigger an async refresh but return the stale data immediately
+            java.util.concurrent.CompletableFuture.runAsync(() -> {
+                try {
+                    log.info("Async cache rebuild started for user: {}", userId);
+                    var portfolios = portfolioService.getPortfoliosByUserId(userId);
+                    if (portfolios != null && !portfolios.isEmpty()) {
+                        if (portfolioId != null) {
+                            portfolios = portfolios.stream()
+                                    .filter(p -> p.getId() != null && p.getId().toString().equals(portfolioId))
+                                    .collect(java.util.stream.Collectors.toList());
+                        } else {
+                            portfolios = portfolios.stream()
+                                    .filter(p -> com.am.common.amcommondata.model.enums.PortfolioKind.isBroker(p.getPortfolioKind()))
+                                    .collect(java.util.stream.Collectors.toList());
+                        }
+                        if (!portfolios.isEmpty()) {
+                            buildPortfolioHoldings(portfolios, userId, portfolioId, interval, true);
+                        }
+                    }
+                } catch (Exception ex) {
+                    log.error("Async rebuild failed for user: {}", userId, ex);
+                }
+            }, taskExecutor);
+            
+            // Return stale data for immediate UI rendering
+            return cachedHoldings;
         }
         
         return Optional.empty();

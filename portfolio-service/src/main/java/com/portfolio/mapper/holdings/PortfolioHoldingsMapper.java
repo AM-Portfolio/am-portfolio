@@ -13,10 +13,14 @@ import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.EquityBrokerHolding;
+import com.portfolio.service.basket.AllocationLedgerService;
+import lombok.RequiredArgsConstructor;
 
 @Component
+@RequiredArgsConstructor
 public class PortfolioHoldingsMapper {
     private final EquityHoldingsMapper equityHoldingsMapper = new EquityHoldingsMapper();
+    private final AllocationLedgerService allocationLedgerService;
 
     public PortfolioHoldings toPortfolioHoldingsV1(List<PortfolioModelV1> portfolios) {
         Map<String, EquityHoldings> equityHoldingsMap = processPortfolios(portfolios);
@@ -126,26 +130,20 @@ public class PortfolioHoldingsMapper {
     }
 
     private double allocatedForIsin(PortfolioModelV1 portfolio, String isin) {
-        if (portfolio.getAllocations() == null || isin == null) {
+        if (portfolio.getId() == null || isin == null) {
             return 0.0;
         }
-        return portfolio.getAllocations().stream()
-                .filter(a -> isin.equals(a.getIsin()))
-                .mapToDouble(a -> a.getQuantity() != null ? a.getQuantity() : 0.0)
-                .sum();
+        return allocationLedgerService.sumActiveQuantityByBrokerPortfolioIdAndIsin(portfolio.getId().toString(), isin);
     }
 
     private String buildAllocationNote(PortfolioModelV1 portfolio, String isin) {
-        if (portfolio.getAllocations() == null || isin == null) {
+        if (portfolio.getId() == null || isin == null) {
             return null;
         }
-        List<HoldingAllocation> matches = portfolio.getAllocations().stream()
-                .filter(a -> isin.equals(a.getIsin()) && a.getQuantity() != null && a.getQuantity() > 0)
-                .collect(Collectors.toList());
-        if (matches.isEmpty()) {
-            return null;
+        double total = allocatedForIsin(portfolio, isin);
+        if (total > 0) {
+            return String.format("%.0f allocated to baskets", total);
         }
-        double total = matches.stream().mapToDouble(HoldingAllocation::getQuantity).sum();
-        return String.format("%.0f allocated to baskets", total);
+        return null;
     }
 }

@@ -5,7 +5,8 @@ package com.am.common.amcommondata.model.enums;
  */
 public enum PortfolioKind {
     BROKER,
-    BASKET;
+    BASKET,
+    DELETED;
 
     public static PortfolioKind orBroker(PortfolioKind kind) {
         return kind == null ? BROKER : kind;

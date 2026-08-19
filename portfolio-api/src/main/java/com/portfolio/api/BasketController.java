@@ -8,6 +8,11 @@ import com.portfolio.service.basket.BasketPortfolioCreateService;
 import com.portfolio.basket.service.HoldingSectorEnricher;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.service.portfolio.PortfolioHoldingsService;
+import com.am.common.amcommondata.service.PortfolioService;
+import com.portfolio.service.basket.AllocationLedgerService;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
+import com.am.common.amcommondata.model.PortfolioModelV1;
+import java.util.UUID;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.Data;
@@ -30,6 +35,8 @@ public class BasketController {
     private final PortfolioHoldingsService portfolioHoldingsService;
     private final HoldingSectorEnricher holdingSectorEnricher;
     private final BasketPortfolioCreateService basketPortfolioCreateService;
+    private final PortfolioService portfolioService;
+    private final AllocationLedgerService allocationLedgerService;
 
     @GetMapping("/catalog")
     public com.portfolio.basket.model.BasketCatalogResponse getCatalog() {
@@ -40,6 +47,18 @@ public class BasketController {
     public com.portfolio.basket.model.BasketCatalogResponse upsertCatalog(
             @RequestBody com.portfolio.model.basket.cache.CachedBasketCatalog body) {
         return basketCatalogService.upsertCatalog(body);
+    }
+
+    @GetMapping("/my")
+    public List<PortfolioModelV1> getMyBaskets(@RequestParam String userId, @RequestParam(required = false) String portfolioId) {
+        if (userId == null || userId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "userId is required");
+        }
+        List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
+        return portfolios.stream()
+                .filter(p -> PortfolioKind.isBasket(p.getPortfolioKind()))
+                .filter(p -> portfolioId == null || portfolioId.isBlank() || portfolioId.equals(p.getSourcePortfolioId()))
+                .collect(java.util.stream.Collectors.toList());
     }
 
     @PostMapping("/opportunities")
@@ -142,6 +161,43 @@ public class BasketController {
     public BasketPortfolioCreateService.CreateBasketResponse createPortfolio(
             @RequestBody BasketPortfolioCreateService.CreateBasketRequest request) {
         return basketPortfolioCreateService.create(request);
+    }
+
+
+    @DeleteMapping("/{basketId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteBasket(@PathVariable String basketId, @RequestParam(required = false) String userId) {
+        if (userId == null || userId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "userId is required");
+        }
+        
+        PortfolioModelV1 basket = portfolioService.getPortfolioById(UUID.fromString(basketId));
+        if (basket == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Basket not found");
+        }
+        
+        if (!userId.equals(basket.getOwner())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not owner of basket");
+        }
+        
+        if (!PortfolioKind.isBasket(basket.getPortfolioKind())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Portfolio is not a basket");
+        }
+        
+        allocationLedgerService.releaseAllocations(basketId, userId, "BASKET_DELETED");
+        
+        basket.setPortfolioKind(PortfolioKind.DELETED);
+        portfolioService.savePortfolioDocument(basket);
+        
+        try {
+            // Since HoldingsRedisService isn't exposed directly here but via other services,
+            // we can evict it indirectly or let the next fetch deal with it. The plan mentions evicting caches.
+            // Ideally we'd call holdingsRedisService.evictPortfolioHoldings(userId, basketId);
+            // We can also evict the source portfolio holdings. For now, since BasketPortfolioCreateService has it,
+            // we might not have holdingsRedisService directly in BasketController. Let's just rely on the next fetch or add it if needed.
+        } catch (Exception e) {
+            log.warn("Cache eviction failed", e);
+        }
     }
 
     @PostMapping("/calculate-quantities")

@@ -561,15 +561,18 @@ public class BasketEngineService {
 
         List<String> warnings = new ArrayList<>();
         for (SubstituteAssignment assignment : assignments) {
-            if (assignment.getMissingIsin() == null || assignment.getSubstituteIsin() == null) {
+            String missingKey = assignment.getMissingIsin();
+            String substituteKey = assignment.getSubstituteIsin();
+
+            if (missingKey == null || missingKey.isBlank() || substituteKey == null || substituteKey.isBlank()) {
                 continue;
             }
             BasketItem item = base.getComposition().stream()
-                    .filter(i -> assignment.getMissingIsin().equals(i.getIsin()))
+                    .filter(i -> missingKey.equalsIgnoreCase(i.getIsin()) || missingKey.equalsIgnoreCase(i.getStockSymbol()))
                     .findFirst()
                     .orElse(null);
             if (item == null) {
-                warnings.add("Unknown missing ISIN: " + assignment.getMissingIsin());
+                warnings.add("Unknown missing item (tried ISIN+Symbol): " + missingKey);
                 continue;
             }
             if (item.getStatus() == ItemStatus.HELD) {

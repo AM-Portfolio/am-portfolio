@@ -2,6 +2,18 @@ version: '3.8'
 
 
 services:
+
+  mongodb:
+    image: mongo:6.0
+    container_name: am-portfolio-mongo
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_DATABASE: portfolio
+    networks:
+      - am-net
   am-portfolio-service:
     container_name: am-portfolio-service
     build:
@@ -23,7 +35,8 @@ services:
       SPRING_PROFILES_ACTIVE: docker
 
       # MongoDB Configuration
-      MONGODB_URL: ${MONGODB_URL}
+      MONGODB_CONNECTION_URL: ${MONGODB_URL}
+      SPRING_DATA_MONGODB_URI: 
       MONGODB_DATABASE: ${MONGODB_DATABASE}
       MONGODB_USERNAME: ${MONGODB_USERNAME}
       MONGODB_PASSWORD: ${MONGODB_PASSWORD}
@@ -57,13 +70,13 @@ services:
         echo "Kafka Group: $${SPRING_KAFKA_CONSUMER_GROUP_ID}"
         echo "Max Retries: $${AM_PORTFOLIO_MAX_RETRIES}"
         echo "=== Starting AM Portfolio Service ==="
-        java -jar app.jar
+        java -Djava.net.preferIPv4Stack=true -jar app.jar
     ports:
-      - "8072:8080"
+      - "8081:8080"
     networks:
       - am-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/actuator/health"]
       interval: 30s
       timeout: 3s
       retries: 3
