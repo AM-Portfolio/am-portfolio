@@ -50,7 +50,7 @@ public class BasketController {
     }
 
     @GetMapping("/my")
-    public List<PortfolioModelV1> getMyBaskets(@RequestParam String userId, @RequestParam(required = false) String portfolioId) {
+    public List<BasketSummaryDto> getMyBaskets(@RequestParam String userId, @RequestParam(required = false) String portfolioId) {
         if (userId == null || userId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "userId is required");
         }
@@ -58,6 +58,16 @@ public class BasketController {
         return portfolios.stream()
                 .filter(p -> PortfolioKind.isBasket(p.getPortfolioKind()))
                 .filter(p -> portfolioId == null || portfolioId.isBlank() || portfolioId.equals(p.getSourcePortfolioId()))
+                .map(p -> BasketSummaryDto.builder()
+                        .id(p.getId().toString())
+                        .etfName(p.getEtfName())
+                        .etfIsin(p.getEtfIsin())
+                        .status(p.getStatus())
+                        .assetCount(p.getEquityModels() != null ? p.getEquityModels().size() : 0)
+                        .gapMissingCount(p.getGapMissingCount())
+                        .totalValue(p.getTotalValue())
+                        .createdAt(p.getCreatedAt())
+                        .build())
                 .collect(java.util.stream.Collectors.toList());
     }
 
@@ -298,5 +308,18 @@ public class BasketController {
     public static class AssignmentDto {
         private String missingIsin;
         private String substituteIsin;
+    }
+
+    @Data
+    @lombok.Builder
+    public static class BasketSummaryDto {
+        private String id;
+        private String etfName;
+        private String etfIsin;
+        private String status;
+        private Integer assetCount;
+        private Integer gapMissingCount;
+        private Double totalValue;
+        private java.time.LocalDateTime createdAt;
     }
 }

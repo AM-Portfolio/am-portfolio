@@ -297,19 +297,14 @@ public class BasketEngineService {
         int total = etf.getHoldings() != null ? etf.getHoldings().size() : 0;
         Map<String, Double> consumedWeightByIsin = new HashMap<>();
 
-        // --- Fetch live prices for all constituents and user holdings in a single batch ---
-        Set<String> symbolsForPrice = new HashSet<>();
-        if (etf.getHoldings() != null) {
-            for (EtfHolding req : etf.getHoldings()) {
-                if (req.getSymbol() != null) symbolsForPrice.add(req.getSymbol());
+        // PERFORMANCE FIX: For preview, we use cached prices from allUserHoldings instead of live fetch
+        // Live prices will be explicitly fetched during calculateQuantities
+        Map<String, Double> prices = new HashMap<>();
+        for (EquityHoldings h : allUserHoldings) {
+            if (h.getSymbol() != null && h.getCurrentPrice() != null) {
+                prices.put(h.getSymbol(), h.getCurrentPrice());
             }
         }
-        for (EquityHoldings h : allUserHoldings) {
-            if (h.getSymbol() != null) symbolsForPrice.add(h.getSymbol());
-        }
-        Map<String, Double> prices = symbolsForPrice.isEmpty() ? Collections.emptyMap() 
-                : marketDataService.getCurrentPrices(new ArrayList<>(symbolsForPrice));
-        // -------------------------------------------------------------------------------
 
         if (etf.getHoldings() != null) {
             class ItemReqPair {
@@ -425,89 +420,95 @@ public class BasketEngineService {
             Map<String, Double> prices) {
         String sectorKey = SectorNormalizer.normalize(req.getSector());
         boolean unknownSector = SectorNormalizer.isUnknown(req.getSector());
-        List<EquityHoldings> sectorPeers = unknownSector
-                ? Collections.emptyList()
-                : new ArrayList<>(userSectorMap.getOrDefault(sectorKey, Collections.emptyList()));
+        
+        List<EquityHoldings> tier1 = new ArrayList<>();
+        List<EquityHoldings> tier2 = new ArrayList<>();
+        List<EquityHoldings> tier3 = new ArrayList<>();
 
-        if (req.getMarketCapCategory() != null && !sectorPeers.isEmpty()) {
-            List<EquityHoldings> mcapPeers = sectorPeers.stream()
-                    .filter(p -> req.getMarketCapCategory().equalsIgnoreCase(p.getMarketCapCategory()))
-                    .collect(Collectors.toList());
-            if (!mcapPeers.isEmpty()) {
-                sectorPeers = mcapPeers;
+        if (!unknownSector) {
+            List<EquityHoldings> sectorPeers = userSectorMap.getOrDefault(sectorKey, Collections.emptyList());
+            for (EquityHoldings peer : sectorPeers) {
+                if (req.getMarketCapCategory() != null && req.getMarketCapCategory().equalsIgnoreCase(peer.getMarketCapCategory())) {
+                    tier1.add(peer);
+                } else {
+                    tier2.add(peer);
+                }
             }
         }
 
-        // Alternatives = unused peers (for UI swap)
-        List<EquityHoldings> unusedPeers = sectorPeers.stream()
-                .filter(p -> p.getIsin() != null && (getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0)) > 0.01)
-                .filter(p -> p.getAvailableQuantity() == null || p.getAvailableQuantity() > 0)
-                .collect(Collectors.toList());
-
-        List<BasketOpportunity.Alternative> alts = unusedPeers.stream()
-                .map(p -> toAlternative(p, getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices))
-                .collect(Collectors.toList());
-        item.setAlternatives(alts);
-
-        // Auto-SUBSTITUTE stays same-sector only (never auto-pick cross-sector / unknown)
-        if (!unusedPeers.isEmpty()) {
-            EquityHoldings substitute = unusedPeers.stream()
+        // Auto-SUBSTITUTE stays same-sector only (never auto-pick cross-sector)
+        if (!tier1.isEmpty() || !tier2.isEmpty()) {
+            List<EquityHoldings> autoPeers = !tier1.isEmpty() ? tier1 : tier2;
+            EquityHoldings substitute = autoPeers.stream()
+                    .filter(p -> p.getIsin() != null && (getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0)) > 0.01)
+                    .filter(p -> p.getAvailableQuantity() == null || p.getAvailableQuantity() > 0)
                     .max(Comparator.comparingDouble(
                             h -> getAvailableWeight(h) - consumedWeightByIsin.getOrDefault(h.getIsin(), 0.0)))
-                    .orElse(unusedPeers.get(0));
+                    .orElse(null);
 
-            double consumed = consumedWeightByIsin.getOrDefault(substitute.getIsin(), 0.0);
-            double totalWeight = getAvailableWeight(substitute);
-            double available = totalWeight - consumed;
+            if (substitute != null) {
+                double consumed = consumedWeightByIsin.getOrDefault(substitute.getIsin(), 0.0);
+                double totalWeight = getAvailableWeight(substitute);
+                double available = totalWeight - consumed;
 
-            if (available < 0.01) {
-                // theoretically should not happen due to unusedPeers filter
-                return false; 
+                if (available >= 0.01) {
+                    item.setStatus(ItemStatus.SUBSTITUTE);
+                    item.setUserHoldingSymbol(substitute.getSymbol());
+                    item.setUserHoldingIsin(substitute.getIsin());
+                    item.setUserWeight(BasketUtils.round(totalWeight));
+                    item.setHeldQuantity(substitute.getAvailableQuantity());
+                    item.setHeldAveragePrice(substitute.getAverageBuyingPrice());
+                    item.setReason("Substitute: " + req.getSector()
+                            + (req.getMarketCapCategory() != null ? "/" + req.getMarketCapCategory() : ""));
+
+                    double matchWeight = Math.min(req.getWeight(), available);
+                    item.setReplicaWeight(BasketUtils.round(matchWeight));
+
+                    consumedWeightByIsin.merge(substitute.getIsin(), matchWeight, Double::sum);
+
+                    return true;
+                }
             }
-
-            item.setStatus(ItemStatus.SUBSTITUTE);
-            item.setUserHoldingSymbol(substitute.getSymbol());
-            item.setUserHoldingIsin(substitute.getIsin());
-            item.setUserWeight(BasketUtils.round(totalWeight));
-            item.setHeldQuantity(substitute.getAvailableQuantity());
-            item.setHeldAveragePrice(substitute.getAverageBuyingPrice());
-            item.setReason("Substitute: " + req.getSector()
-                    + (req.getMarketCapCategory() != null ? "/" + req.getMarketCapCategory() : ""));
-
-            double matchWeight = Math.min(req.getWeight(), available);
-            item.setReplicaWeight(BasketUtils.round(matchWeight));
-
-            consumedWeightByIsin.merge(substitute.getIsin(), matchWeight, Double::sum);
-
-            return true;
         }
 
-        // MISSING: fallback alternatives so UI Suggest swap stays actionable when unused holdings remain
-        List<EquityHoldings> fallback = (allUserHoldings == null ? List.<EquityHoldings>of() : allUserHoldings)
-                .stream()
+        // MISSING: Tiered alternatives for UI
+        List<BasketOpportunity.Alternative> alts = new ArrayList<>();
+        
+        // Add Tier 1 (Same Sector + Same Market Cap)
+        alts.addAll(tier1.stream()
                 .filter(p -> p.getIsin() != null && (getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0)) > 0.01)
                 .filter(p -> p.getAvailableQuantity() == null || p.getAvailableQuantity() > 0)
-                .sorted(Comparator
-                        .comparing((EquityHoldings h) -> {
-                            if (unknownSector || SectorNormalizer.isUnknown(h.getSector())) {
-                                return 1;
-                            }
-                            return SectorNormalizer.normalize(h.getSector()).equals(sectorKey) ? 0 : 1;
-                        })
-                        .thenComparing(Comparator.comparingDouble(
-                                (EquityHoldings h) -> getAvailableWeight(h)).reversed()))
+                .sorted(Comparator.comparingDouble((EquityHoldings h) -> getAvailableWeight(h) - consumedWeightByIsin.getOrDefault(h.getIsin(), 0.0)).reversed())
+                .map(p -> toAlternative(p, req.getWeight(), getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices, true))
+                .collect(Collectors.toList()));
+                
+        // Add Tier 2 (Same Sector)
+        alts.addAll(tier2.stream()
+                .filter(p -> p.getIsin() != null && (getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0)) > 0.01)
+                .filter(p -> p.getAvailableQuantity() == null || p.getAvailableQuantity() > 0)
+                .sorted(Comparator.comparingDouble((EquityHoldings h) -> getAvailableWeight(h) - consumedWeightByIsin.getOrDefault(h.getIsin(), 0.0)).reversed())
+                .map(p -> toAlternative(p, req.getWeight(), getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices, true))
+                .collect(Collectors.toList()));
+                
+        // Add Tier 3 (Cross Sector) only if Tiers 1 and 2 are empty or very sparse
+        if (alts.isEmpty() && allUserHoldings != null) {
+            tier3 = allUserHoldings.stream()
+                .filter(p -> p.getIsin() != null && (getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0)) > 0.01)
+                .filter(p -> p.getAvailableQuantity() == null || p.getAvailableQuantity() > 0)
+                .filter(p -> !tier1.contains(p) && !tier2.contains(p))
+                .sorted(Comparator.comparingDouble((EquityHoldings h) -> getAvailableWeight(h) - consumedWeightByIsin.getOrDefault(h.getIsin(), 0.0)).reversed())
                 .collect(Collectors.toList());
-
-        if (!fallback.isEmpty()) {
-            item.setAlternatives(fallback.stream()
-                    .map(p -> toAlternative(p, getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices))
-                    .collect(Collectors.toList()));
-        } else if (alts.isEmpty() && !sectorPeers.isEmpty()) {
-            item.setAlternatives(sectorPeers.stream()
-                    .filter(p -> p.getIsin() != null && (getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0)) > 0.01)
-                    .map(p -> toAlternative(p, getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices))
-                    .collect(Collectors.toList()));
+                
+            alts.addAll(tier3.stream()
+                .map(p -> toAlternative(p, req.getWeight(), getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices, false))
+                .collect(Collectors.toList()));
         }
+
+        // Limit to top 3 alternatives total
+        if (alts.size() > 3) {
+            alts = alts.subList(0, 3);
+        }
+        item.setAlternatives(alts);
 
         item.setStatus(ItemStatus.MISSING);
         item.setUserWeight(0.0);
@@ -515,13 +516,22 @@ public class BasketEngineService {
         return false;
     }
 
-    private BasketOpportunity.Alternative toAlternative(EquityHoldings h, double availableWeight, Map<String, Double> prices) {
+    private BasketOpportunity.Alternative toAlternative(EquityHoldings h, double reqWeight, double availableWeight, Map<String, Double> prices, boolean isSameSector) {
+        boolean canFullyCover = availableWeight >= reqWeight;
+        String coverageLabel = canFullyCover 
+                ? String.format("Covers %.1f%% gap fully", reqWeight) 
+                : String.format("Covers %.1f%% of %.1f%% gap", availableWeight, reqWeight);
+                
         return BasketOpportunity.Alternative.builder()
                 .symbol(h.getSymbol())
                 .isin(h.getIsin())
                 .userWeight(BasketUtils.round(availableWeight))
                 .quantity(h.getAvailableQuantity())
                 .lastPrice(prices != null && h.getSymbol() != null ? prices.get(h.getSymbol()) : null)
+                .sector(h.getSector())
+                .isSameSector(isSameSector)
+                .canFullyCover(canFullyCover)
+                .coverageLabel(coverageLabel)
                 .build();
     }
 

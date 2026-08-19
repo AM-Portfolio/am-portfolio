@@ -174,6 +174,7 @@ public class BasketPortfolioCreateService {
                 .name(basketName)
                 .brokerType(source.getBrokerType())
                 .portfolioKind(PortfolioKind.BASKET)
+                .status("ACTIVE")
                 .sourcePortfolioId(source.getId().toString())
                 .etfIsin(request.getEtfIsin())
                 .etfName(request.getEtfName())

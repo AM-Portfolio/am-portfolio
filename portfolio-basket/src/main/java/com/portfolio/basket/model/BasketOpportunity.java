@@ -64,6 +64,10 @@ public class BasketOpportunity {
         private Double userWeight;
         private Double quantity;
         private Double lastPrice;
+        private String sector;
+        private boolean isSameSector;
+        private boolean canFullyCover;
+        private String coverageLabel;
     }
 
     public enum ItemStatus {
