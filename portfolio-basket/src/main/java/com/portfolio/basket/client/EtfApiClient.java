@@ -769,9 +769,19 @@ public class EtfApiClient {
         if (match.getIsin() != null) {
             h.setIsin(match.getIsin());
         }
-        if (match.getSector() != null) {
-            h.setSector(match.getSector());
+        
+        String bestSector = match.getSector();
+        if (bestSector != null && "Financial Services".equalsIgnoreCase(bestSector.trim()) 
+                && match.getIndustry() != null && !match.getIndustry().isBlank()) {
+            bestSector = match.getIndustry();
+        } else if (bestSector == null && match.getIndustry() != null) {
+            bestSector = match.getIndustry();
         }
+        
+        if (bestSector != null) {
+            h.setSector(bestSector);
+        }
+        
         if (match.getMarketCapType() != null) {
             h.setMarketCapCategory(match.getMarketCapType());
         }
