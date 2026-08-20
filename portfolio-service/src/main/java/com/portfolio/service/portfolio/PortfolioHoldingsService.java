@@ -20,6 +20,8 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
 
+import com.portfolio.service.basket.AllocationLedgerService;
+
 import io.micrometer.observation.annotation.Observed;
 
 @Service
@@ -35,6 +37,7 @@ public class PortfolioHoldingsService {
     private final PortfolioCalculator portfolioCalculator;
     private final PortfolioHoldingsMongoService portfolioHoldingsMongoService;
     private final java.util.concurrent.Executor taskExecutor;
+    private final AllocationLedgerService allocationLedgerService;
 
 
 
@@ -44,13 +47,15 @@ public class PortfolioHoldingsService {
             @org.springframework.lang.Nullable PortfolioHoldingsRedisService portfolioHoldingsRedisService,
             PortfolioCalculator portfolioCalculator,
             PortfolioHoldingsMongoService portfolioHoldingsMongoService,
-            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
+            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
+            AllocationLedgerService allocationLedgerService) {
         this.portfolioService = portfolioService;
         this.portfolioHoldingsMapper = portfolioHoldingsMapper;
         this.portfolioHoldingsRedisService = portfolioHoldingsRedisService;
         this.portfolioCalculator = portfolioCalculator;
         this.portfolioHoldingsMongoService = portfolioHoldingsMongoService;
         this.taskExecutor = taskExecutor;
+        this.allocationLedgerService = allocationLedgerService;
     }
     
     @org.springframework.beans.factory.annotation.Value("${portfolio.redis.enabled:true}")
@@ -178,6 +183,20 @@ public class PortfolioHoldingsService {
         log.debug("Building portfolio holdings for user: {} and {}", userId, context);
 
         var portfolioHoldings = portfolioHoldingsMapper.toPortfolioHoldingsV1(portfolios);
+
+        if (portfolioHoldings.getEquityHoldings() != null) {
+            for (EquityHoldings h : portfolioHoldings.getEquityHoldings()) {
+                if (h.getIsin() != null) {
+                    double activeAllocated = 0.0;
+                    for (PortfolioModelV1 p : portfolios) {
+                        activeAllocated += allocationLedgerService.sumActiveQuantityByBrokerPortfolioIdAndIsin(
+                                p.getId().toString(), h.getIsin());
+                    }
+                    double rawQty = h.getQuantity() != null ? h.getQuantity() : 0.0;
+                    h.setAvailableQuantity(Math.max(0.0, rawQty - activeAllocated));
+                }
+            }
+        }
 
         if (enrich) {
             log.info("Enriching stock prices and performance data for {} equity holdings for {}",

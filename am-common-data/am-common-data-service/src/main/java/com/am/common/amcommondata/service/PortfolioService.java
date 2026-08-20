@@ -20,4 +20,5 @@ public interface PortfolioService {
     List<String> getActiveUserIds(LocalDate cutoffDate); // Returns only users active since cutoffDate
     PortfolioModelV1 updateTradePortfolio(PortfolioModelV1 portfolioModel);
     void updateLastLoginDate(String userId, LocalDate loginDate);
+    void markBasketLineUnderfunded(String basketId, String isin, double gapQuantity);
 }

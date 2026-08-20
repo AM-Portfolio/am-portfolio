@@ -37,6 +37,7 @@ public class BasketController {
     private final BasketPortfolioCreateService basketPortfolioCreateService;
     private final PortfolioService portfolioService;
     private final AllocationLedgerService allocationLedgerService;
+    private final com.portfolio.marketdata.service.MarketDataService marketDataService;
 
     @GetMapping("/catalog")
     public com.portfolio.basket.model.BasketCatalogResponse getCatalog() {
@@ -181,6 +182,91 @@ public class BasketController {
         return basketPortfolioCreateService.create(request);
     }
 
+    @GetMapping("/{basketId}")
+    public BasketDetailDto getBasketDetail(@PathVariable String basketId, @RequestParam String userId) {
+        if (userId == null || userId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "userId is required");
+        }
+        PortfolioModelV1 basket = portfolioService.getPortfolioById(UUID.fromString(basketId));
+        if (basket == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Basket not found");
+        }
+        if (!userId.equals(basket.getOwner())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not owner of basket");
+        }
+        if (!PortfolioKind.isBasket(basket.getPortfolioKind()) && basket.getPortfolioKind() != PortfolioKind.DELETED) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Portfolio is not a basket");
+        }
+
+        List<BasketLineDetail> lines = new java.util.ArrayList<>();
+        double totalInvested = 0;
+        double totalCurrent = 0;
+        int heldCount = 0;
+        int missingCount = 0;
+        int underfundedCount = 0;
+
+        if (basket.getEquityModels() != null) {
+            List<String> symbols = basket.getEquityModels().stream()
+                .map(com.am.common.amcommondata.model.asset.equity.EquityModel::getSymbol)
+                .filter(s -> s != null && !s.isBlank())
+                .distinct()
+                .toList();
+            java.util.Map<String, Double> prices = marketDataService.getCurrentPrices(new java.util.ArrayList<>(symbols));
+
+            for (com.am.common.amcommondata.model.asset.equity.EquityModel eq : basket.getEquityModels()) {
+                double qty = eq.getQuantity() != null ? eq.getQuantity() : 0.0;
+                double avgPrice = eq.getAvgBuyingPrice() != null ? eq.getAvgBuyingPrice() : 0.0;
+                double currentPrice = prices.getOrDefault(eq.getSymbol(), eq.getCurrentPrice() != null ? eq.getCurrentPrice() : avgPrice);
+                double invested = qty * avgPrice;
+                double current = qty * currentPrice;
+                double pnl = current - invested;
+
+                totalInvested += invested;
+                totalCurrent += current;
+
+                String status = eq.getStatus() != null ? eq.getStatus() : "HELD";
+                if ("MISSING".equalsIgnoreCase(status) || "MISSING_GAP".equalsIgnoreCase(status)) {
+                    missingCount++;
+                } else {
+                    heldCount++;
+                }
+
+                lines.add(BasketLineDetail.builder()
+                        .symbol(eq.getSymbol())
+                        .isin(eq.getIsin())
+                        .sector(eq.getSector())
+                        .status(status)
+                        .quantity(qty)
+                        .avgPrice(avgPrice)
+                        .currentPrice(currentPrice)
+                        .pnl(pnl)
+                        .build());
+            }
+        }
+        missingCount = basket.getGapMissingCount() != null ? basket.getGapMissingCount() : missingCount;
+        
+        double totalPnl = totalCurrent - totalInvested;
+        double pnlPct = totalInvested > 0 ? (totalPnl / totalInvested) * 100.0 : 0.0;
+
+        return BasketDetailDto.builder()
+                .id(basket.getId().toString())
+                .name(basket.getName() != null ? basket.getName() : (basket.getEtfName() != null ? basket.getEtfName() : "Basket"))
+                .etfName(basket.getEtfName() != null ? basket.getEtfName() : "")
+                .etfIsin(basket.getEtfIsin() != null ? basket.getEtfIsin() : "")
+                .status(basket.getStatus() != null ? basket.getStatus() : "ACTIVE")
+                .createdAt(basket.getCreatedAt())
+                .totalInvestedValue(totalInvested)
+                .totalCurrentValue(totalCurrent)
+                .totalPnL(totalPnl)
+                .pnlPercent(pnlPct)
+                .totalItems(heldCount + missingCount)
+                .heldCount(heldCount)
+                .missingCount(missingCount)
+                .underfundedCount(underfundedCount)
+                .lines(lines)
+                .build();
+    }
+
 
     @DeleteMapping("/{basketId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -321,5 +407,41 @@ public class BasketController {
         private Integer gapMissingCount;
         private Double totalValue;
         private java.time.LocalDateTime createdAt;
+    }
+
+    @Data
+    @lombok.Builder
+    public static class BasketDetailDto {
+        private String id;
+        private String name;
+        private String etfName;
+        private String etfIsin;
+        private String status;
+        private Double totalInvestedValue;
+        private Double totalCurrentValue;
+        private Double totalPnL;
+        private Double pnlPercent;
+        private Double coveragePercent;
+        private Integer totalItems;
+        private Integer heldCount;
+        private Integer missingCount;
+        private Integer underfundedCount;
+        private java.time.LocalDateTime createdAt;
+        private List<BasketLineDetail> lines;
+    }
+
+    @Data
+    @lombok.Builder
+    public static class BasketLineDetail {
+        private String symbol;
+        private String isin;
+        private String sector;
+        private String status;
+        private Double quantity;
+        private Double avgPrice;
+        private Double currentPrice;
+        private Double pnl;
+        private Double etfWeight;
+        private Double rebalancedWeight;
     }
 }

@@ -75,7 +75,8 @@ public class BasketEngineService {
             }
 
             // Target Amount for this stock based on ETF weight and total investment amount
-            double targetAmount = (item.getEtfWeight() / 100.0) * investmentAmount;
+            double weight = item.getRebalancedWeight() != null ? item.getRebalancedWeight() : item.getEtfWeight();
+            double targetAmount = (weight / 100.0) * investmentAmount;
 
             // If we are including held items, we must subtract the value of what we already
             // hold
@@ -231,7 +232,7 @@ public class BasketEngineService {
         Map<String, List<EquityHoldings>> userSectorMap = userHoldings.stream()
                 .filter(h -> h.getSector() != null && !SectorNormalizer.isUnknown(h.getSector()))
                 .filter(h -> h.getAvailableQuantity() == null || h.getAvailableQuantity() > 0)
-                .collect(Collectors.groupingBy(h -> SectorNormalizer.normalize(h.getSector())));
+                .collect(Collectors.groupingBy(h -> SectorNormalizer.normalizeFine(h.getSector())));
 
         List<BasketOpportunity> opportunities = new ArrayList<>();
         Map<String, EtfData> etfDataByInput = enrichedEtfService.getEnrichedEtfsBatch(new ArrayList<>(etfQueries));
@@ -280,7 +281,7 @@ public class BasketEngineService {
         Map<String, List<EquityHoldings>> userSectorMap = userHoldings.stream()
                 .filter(h -> h.getSector() != null && !SectorNormalizer.isUnknown(h.getSector()))
                 .filter(h -> h.getAvailableQuantity() == null || h.getAvailableQuantity() > 0)
-                .collect(Collectors.groupingBy(h -> SectorNormalizer.normalize(h.getSector())));
+                .collect(Collectors.groupingBy(h -> SectorNormalizer.normalizeFine(h.getSector())));
 
         return calculateOverlap(etfIsin, etf, userMap, userSectorMap, userHoldings);
     }
@@ -357,6 +358,14 @@ public class BasketEngineService {
             }
         }
 
+        double maxPrice = 0.0;
+        for (BasketItem item : composition) {
+            if (item.getLastPrice() != null && item.getLastPrice() > maxPrice) {
+                maxPrice = item.getLastPrice();
+            }
+        }
+        double minimumInvestmentAmount = Math.max(maxPrice * 100.0, 50000.0);
+
         double matchScore = (total == 0) ? 0 : (double) matchCount / total * 100.0;
         double replicaScore = replicaScoreTotal;
 
@@ -371,6 +380,7 @@ public class BasketEngineService {
                 .missingCount(total - matchCount)
                 .composition(composition)
                 .buyList(buyList)
+                .minimumInvestmentAmount(minimumInvestmentAmount)
                 .build();
     }
 
@@ -418,7 +428,7 @@ public class BasketEngineService {
             Map<String, Double> consumedWeightByIsin,
             List<EquityHoldings> allUserHoldings,
             Map<String, Double> prices) {
-        String sectorKey = SectorNormalizer.normalize(req.getSector());
+        String sectorKey = SectorNormalizer.normalizeFine(req.getSector());
         boolean unknownSector = SectorNormalizer.isUnknown(req.getSector());
         
         List<EquityHoldings> tier1 = new ArrayList<>();
@@ -512,7 +522,7 @@ public class BasketEngineService {
 
         item.setStatus(ItemStatus.MISSING);
         item.setUserWeight(0.0);
-        item.setBuyQuantity(1.0);
+        item.setBuyQuantity(null);
         return false;
     }
 

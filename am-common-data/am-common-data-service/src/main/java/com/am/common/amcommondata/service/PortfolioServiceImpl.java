@@ -412,4 +412,22 @@ public class PortfolioServiceImpl implements PortfolioService {
         }
         log.warn("Portfolio not found for deletion with name: {} and owner: {}", id, owner);
     }
+
+    @Override
+    @Transactional
+    public void markBasketLineUnderfunded(String basketId, String isin, double gapQuantity) {
+        portfolioDocumentRepository.findById(basketId).ifPresent(basket -> {
+            if (basket.getEquities() != null) {
+                for (var eq : basket.getEquities()) {
+                    if (isin.equals(eq.getIsin())) {
+                        eq.setHoldingStatus("UNDERFUNDED");
+                        eq.setGapQuantity(gapQuantity);
+                        portfolioDocumentRepository.save(basket);
+                        log.info("Marked basket line UNDERFUNDED: basketId={}, isin={}, gap={}", basketId, isin, gapQuantity);
+                        break;
+                    }
+                }
+            }
+        });
+    }
 }

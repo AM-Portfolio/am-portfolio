@@ -23,6 +23,7 @@ public class BasketOpportunity {
     private int missingCount;
     private Double totalPortfolioValue;
     private Double investmentAmount;
+    private Double minimumInvestmentAmount;
 
     private List<BasketItem> composition;
     private List<BasketItem> buyList; // Stocks to buy to reach 100% or bridge gap
@@ -42,6 +43,7 @@ public class BasketOpportunity {
         private Double etfWeight; // Target Weight in ETF
         private Double userWeight; // Actual Weight in User Portfolio
         private Double replicaWeight; // Weight contributed to the replica
+        private Double rebalancedWeight; // Pro-rata redistributed weight
         private Double buyQuantity; // Suggested if MISSING
         private Double lastPrice; // Current market price
         private String marketCapCategory;

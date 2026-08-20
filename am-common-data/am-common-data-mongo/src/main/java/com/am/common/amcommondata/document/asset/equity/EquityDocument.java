@@ -44,4 +44,6 @@ public class EquityDocument extends AssetDocument {
     private Integer sharesOutstanding;
     private String stockType;
     private String countryOfIncorporation;
+    private String holdingStatus;
+    private Double gapQuantity;
 }
