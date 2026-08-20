@@ -514,9 +514,9 @@ public class BasketEngineService {
                 .collect(Collectors.toList()));
         }
 
-        // Limit to top 3 alternatives total
-        if (alts.size() > 3) {
-            alts = alts.subList(0, 3);
+        // Limit to top 10 alternatives total
+        if (alts.size() > 10) {
+            alts = alts.subList(0, 10);
         }
         item.setAlternatives(alts);
 
