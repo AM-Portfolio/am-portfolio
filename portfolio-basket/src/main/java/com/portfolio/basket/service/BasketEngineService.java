@@ -364,7 +364,7 @@ public class BasketEngineService {
                 maxPrice = item.getLastPrice();
             }
         }
-        double minimumInvestmentAmount = Math.max(maxPrice * 100.0, 50000.0);
+        double minimumInvestmentAmount = Math.max(maxPrice, 50000.0);
 
         double matchScore = (total == 0) ? 0 : (double) matchCount / total * 100.0;
         double replicaScore = replicaScoreTotal;
@@ -412,7 +412,7 @@ public class BasketEngineService {
         item.setUserHoldingSymbol(userHolding.getSymbol());
         item.setUserHoldingIsin(userHolding.getIsin());
         item.setUserWeight(BasketUtils.round(totalWeight));
-        item.setHeldQuantity(userHolding.getAvailableQuantity());
+        item.setHeldQuantity(userHolding.getQuantity());
         item.setHeldAveragePrice(userHolding.getAverageBuyingPrice());
 
         double matchWeight = Math.min(req.getWeight(), available);
@@ -435,7 +435,33 @@ public class BasketEngineService {
         List<EquityHoldings> tier2 = new ArrayList<>();
         List<EquityHoldings> tier3 = new ArrayList<>();
 
-        if (!unknownSector) {
+        if (sectorKey.startsWith("bank:")) {
+            for (String key : userSectorMap.keySet()) {
+                if (key.startsWith("bank:")) {
+                    List<EquityHoldings> peers = userSectorMap.get(key);
+                    for (EquityHoldings peer : peers) {
+                        if (req.getMarketCapCategory() != null && req.getMarketCapCategory().equalsIgnoreCase(peer.getMarketCapCategory())) {
+                            tier1.add(peer);
+                        } else {
+                            tier2.add(peer);
+                        }
+                    }
+                }
+            }
+        } else if (sectorKey.startsWith("financial:")) {
+            for (String key : userSectorMap.keySet()) {
+                if (key.startsWith("financial:") || key.startsWith("bank:")) {
+                    List<EquityHoldings> peers = userSectorMap.get(key);
+                    for (EquityHoldings peer : peers) {
+                        if (req.getMarketCapCategory() != null && req.getMarketCapCategory().equalsIgnoreCase(peer.getMarketCapCategory())) {
+                            tier1.add(peer);
+                        } else {
+                            tier2.add(peer);
+                        }
+                    }
+                }
+            }
+        } else if (!unknownSector) {
             List<EquityHoldings> sectorPeers = userSectorMap.getOrDefault(sectorKey, Collections.emptyList());
             for (EquityHoldings peer : sectorPeers) {
                 if (req.getMarketCapCategory() != null && req.getMarketCapCategory().equalsIgnoreCase(peer.getMarketCapCategory())) {
@@ -624,8 +650,13 @@ public class BasketEngineService {
 
             double consumed = consumedWeightByIsin.getOrDefault(resolvedIsin, 0.0);
             if ((subWeight - consumed) < 0.01) {
-                throw new IllegalStateException(
-                        "Substitute ISIN fully consumed: " + resolvedIsin);
+                log.warn("Substitute ISIN fully consumed: {}. Assigning 0% coverage to {}", resolvedIsin, item.getStockSymbol());
+                item.setStatus(ItemStatus.SUBSTITUTE);
+                item.setUserHoldingSymbol(sub.getSymbol());
+                item.setUserHoldingIsin(sub.getIsin());
+                item.setReplicaWeight(0.0);
+                item.setReason("User swap (weight exhausted): " + sub.getSymbol());
+                continue;
             }
             
             double matchWeight = Math.min(
