@@ -142,6 +142,13 @@ public class BasketEngineService {
             opportunity.setMissingCount(total - matchCount);
         }
         opportunity.setInvestmentAmount(investmentAmount);
+        
+        double heldScore = opportunity.getComposition().stream().filter(i -> i.getStatus() == ItemStatus.HELD)
+                .mapToDouble(i -> i.getReplicaWeight() != null ? i.getReplicaWeight() : 0.0).sum();
+        double subScore = opportunity.getComposition().stream().filter(i -> i.getStatus() == ItemStatus.SUBSTITUTE)
+                .mapToDouble(i -> i.getReplicaWeight() != null ? i.getReplicaWeight() : 0.0).sum();
+        opportunity.setHeldMatchScore(BasketUtils.round(heldScore));
+        opportunity.setSubstituteMatchScore(BasketUtils.round(subScore));
 
         return opportunity;
     }
@@ -158,6 +165,15 @@ public class BasketEngineService {
                     if (h.getInvestmentCost() != null)
                         return h.getInvestmentCost();
                     return 0.0;
+                })
+                .sum();
+
+        // Calculate Remaining Portfolio Value
+        double remainingValue = userHoldings.stream()
+                .mapToDouble(h -> {
+                    double avail = h.getAvailableQuantity() != null ? h.getAvailableQuantity() : (h.getQuantity() != null ? h.getQuantity() : 0.0);
+                    double price = h.getCurrentPrice() != null ? h.getCurrentPrice() : 0.0;
+                    return avail * price;
                 })
                 .sum();
 
@@ -192,7 +208,10 @@ public class BasketEngineService {
         List<BasketOpportunity> opportunities = findOpportunitiesInternal(userHoldings, allQueries);
 
         // Set total portfolio value on each opportunity
-        opportunities.forEach(op -> op.setTotalPortfolioValue(totalValue));
+        opportunities.forEach(op -> {
+            op.setTotalPortfolioValue(totalValue);
+            op.setRemainingPortfolioValue(remainingValue);
+        });
 
         // 2. Sort by match score descending
         opportunities.sort(Comparator.comparingDouble(BasketOpportunity::getMatchScore).reversed());
@@ -283,7 +302,31 @@ public class BasketEngineService {
                 .filter(h -> h.getAvailableQuantity() == null || h.getAvailableQuantity() > 0)
                 .collect(Collectors.groupingBy(h -> SectorNormalizer.normalizeFine(h.getSector())));
 
-        return calculateOverlap(etfIsin, etf, userMap, userSectorMap, userHoldings);
+        BasketOpportunity opp = calculateOverlap(etfIsin, etf, userMap, userSectorMap, userHoldings);
+
+        // Calculate Total and Remaining Portfolio Value
+        double totalValue = userHoldings.stream()
+                .mapToDouble(h -> {
+                    if (h.getCurrentValue() != null)
+                        return h.getCurrentValue();
+                    if (h.getInvestmentCost() != null)
+                        return h.getInvestmentCost();
+                    return 0.0;
+                })
+                .sum();
+                
+        double remainingValue = userHoldings.stream()
+                .mapToDouble(h -> {
+                    double avail = h.getAvailableQuantity() != null ? h.getAvailableQuantity() : (h.getQuantity() != null ? h.getQuantity() : 0.0);
+                    double price = h.getCurrentPrice() != null ? h.getCurrentPrice() : 0.0;
+                    return avail * price;
+                })
+                .sum();
+                
+        opp.setTotalPortfolioValue(totalValue);
+        opp.setRemainingPortfolioValue(remainingValue);
+        
+        return opp;
     }
 
     private BasketOpportunity calculateOverlap(String etfIsin, EtfData etf,
@@ -369,6 +412,11 @@ public class BasketEngineService {
         double matchScore = (total == 0) ? 0 : (double) matchCount / total * 100.0;
         double replicaScore = replicaScoreTotal;
 
+        double heldScore = composition.stream().filter(i -> i.getStatus() == ItemStatus.HELD)
+                .mapToDouble(i -> i.getReplicaWeight() != null ? i.getReplicaWeight() : 0.0).sum();
+        double subScore = composition.stream().filter(i -> i.getStatus() == ItemStatus.SUBSTITUTE)
+                .mapToDouble(i -> i.getReplicaWeight() != null ? i.getReplicaWeight() : 0.0).sum();
+
         return BasketOpportunity.builder()
                 .etfIsin(etfIsin)
                 .etfName(etf.getName())
@@ -378,6 +426,8 @@ public class BasketEngineService {
                 .totalItems(total)
                 .heldCount(matchCount)
                 .missingCount(total - matchCount)
+                .heldMatchScore(BasketUtils.round(heldScore))
+                .substituteMatchScore(BasketUtils.round(subScore))
                 .composition(composition)
                 .buyList(buyList)
                 .minimumInvestmentAmount(minimumInvestmentAmount)

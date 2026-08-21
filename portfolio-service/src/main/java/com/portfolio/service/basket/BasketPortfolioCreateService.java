@@ -250,6 +250,7 @@ public class BasketPortfolioCreateService {
                 .sourcePortfolioId(source.getId().toString())
                 .etfIsin(request.getEtfIsin())
                 .etfName(request.getEtfName())
+                .investmentAmount(request.getInvestmentAmount())
                 .createdFromBasketAt(LocalDateTime.now())
                 .gapMissingCount(request.getRemainingMissingCount())
                 .equityModels(basketEquities)
@@ -364,6 +365,7 @@ public class BasketPortfolioCreateService {
         private String idempotencyKey;
         private Integer remainingMissingCount;
         private List<String> remainingMissing;
+        private Double investmentAmount;
         private List<CreateBasketLine> lines;
     }
 

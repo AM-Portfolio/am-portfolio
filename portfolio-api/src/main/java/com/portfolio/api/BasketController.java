@@ -67,6 +67,7 @@ public class BasketController {
                         .assetCount(p.getEquityModels() != null ? p.getEquityModels().size() : 0)
                         .gapMissingCount(p.getGapMissingCount())
                         .totalValue(p.getTotalValue())
+                        .investmentAmount(p.getInvestmentAmount())
                         .createdAt(p.getCreatedAt())
                         .build())
                 .collect(java.util.stream.Collectors.toList());
@@ -255,6 +256,7 @@ public class BasketController {
                 .etfIsin(basket.getEtfIsin() != null ? basket.getEtfIsin() : "")
                 .status(basket.getStatus() != null ? basket.getStatus() : "ACTIVE")
                 .createdAt(basket.getCreatedAt())
+                .investmentAmount(basket.getInvestmentAmount())
                 .totalInvestedValue(totalInvested)
                 .totalCurrentValue(totalCurrent)
                 .totalPnL(totalPnl)
@@ -318,13 +320,15 @@ public class BasketController {
                             + "Fields like etfSymbol/holdings are not used.");
         }
         log.info("Calculating quantities for investment amount: {}", request.getInvestmentAmount());
-        return basketService.calculateBasketQuantities(request.getInvestmentAmount(), opportunity, true);
+        boolean includeHeld = request.getIncludeHeld() != null ? request.getIncludeHeld() : true;
+        return basketService.calculateBasketQuantities(request.getInvestmentAmount(), opportunity, includeHeld);
     }
 
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class CalculationRequest {
         private Double investmentAmount;
+        private Boolean includeHeld;
         private BasketOpportunity opportunity;
     }
 
@@ -406,6 +410,7 @@ public class BasketController {
         private Integer assetCount;
         private Integer gapMissingCount;
         private Double totalValue;
+        private Double investmentAmount;
         private java.time.LocalDateTime createdAt;
     }
 
@@ -419,6 +424,7 @@ public class BasketController {
         private String status;
         private Double totalInvestedValue;
         private Double totalCurrentValue;
+        private Double investmentAmount;
         private Double totalPnL;
         private Double pnlPercent;
         private Double coveragePercent;
