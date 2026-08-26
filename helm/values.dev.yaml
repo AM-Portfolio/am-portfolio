@@ -2,6 +2,12 @@
 # Registers am-portfolio on https://am-dev.asrax.in/portfolio/* via Traefik.
 environment: dev
 
+global:
+  vault:
+    # The cluster uses Vault Agent Injector (sidecar), NOT the Secrets Store CSI Driver.
+    # Explicitly disable CSI here to override the universal-chart default (which is true).
+    csi:
+      enabled: false
 
 # Dev Vault secret paths — key mappings are in vault-mappings.yaml
 vault:
