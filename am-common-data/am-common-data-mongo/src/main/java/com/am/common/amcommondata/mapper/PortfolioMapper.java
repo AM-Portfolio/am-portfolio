@@ -34,6 +34,7 @@ public class PortfolioMapper {
 
         PortfolioModelV1 model = PortfolioModelV1.builder()
                 .id(parseOrGenerateUUID(document.getId()))
+                .sourcePortfolioId(document.getSourcePortfolioId())
                 .name(document.getName())
                 .description(document.getDescription())
                 .owner(document.getOwner())
@@ -70,6 +71,7 @@ public class PortfolioMapper {
 
         PortfolioDocument document = PortfolioDocument.builder()
                 .id(model.getId() != null ? model.getId().toString() : UUID.randomUUID().toString())
+                .sourcePortfolioId(model.getSourcePortfolioId())
                 .name(model.getName())
                 .description(model.getDescription())
                 .owner(model.getOwner())

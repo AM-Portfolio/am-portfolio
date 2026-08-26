@@ -85,6 +85,7 @@ public class PortfolioMapperv1 {
 
         return PortfolioModelV1.builder()
                 .id(portfolioUuid)
+                .sourcePortfolioId(tradeEvent.getId())
                 .name(tradeEvent.getPortfolioId() != null ? tradeEvent.getPortfolioId() : tradeEvent.getId())
                 .owner(tradeEvent.getUserId())
                 .brokerType(brokerType)

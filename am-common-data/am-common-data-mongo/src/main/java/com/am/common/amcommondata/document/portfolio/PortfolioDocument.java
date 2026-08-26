@@ -29,6 +29,9 @@ public class PortfolioDocument extends BaseDocument {
     @Field("name")
     private String name;
     
+    @Field("sourcePortfolioId")
+    private String sourcePortfolioId;
+    
     @Field("description")
     private String description;
     

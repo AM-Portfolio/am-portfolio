@@ -136,7 +136,10 @@ public class PortfolioOverviewService {
 
         // Filter for the specific portfolio
         var filteredPortfolios = portfolios.stream()
-                .filter(portfolio -> portfolio.getId() != null && portfolio.getId().toString().equals(portfolioId))
+                .filter(portfolio -> 
+                    (portfolio.getId() != null && portfolio.getId().toString().equals(portfolioId)) ||
+                    (portfolio.getSourcePortfolioId() != null && portfolio.getSourcePortfolioId().equals(portfolioId))
+                )
                 .collect(java.util.stream.Collectors.toList());
 
         if (filteredPortfolios.isEmpty()) {

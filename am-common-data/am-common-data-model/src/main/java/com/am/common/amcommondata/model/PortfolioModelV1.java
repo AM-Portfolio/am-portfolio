@@ -21,6 +21,7 @@ import com.fasterxml.jackson.annotation.JsonInclude.Include;
 @JsonInclude(Include.NON_NULL)
 public class PortfolioModelV1 {
     private UUID id;
+    private String sourcePortfolioId;
     private String name;
     private String description;
     private String owner;
