@@ -7,6 +7,22 @@ Run **portfolio-app** on your laptop with secrets from Vault, without committing
 - **Java 17**, **Maven**, **Node.js** (for `npm` / `dotenv-cli`)
 - **Python 3** (for `npm run env:preprod` / `env:dev`)
 - Network access to VPS-hosted MongoDB, Redis, and public preprod/dev API URLs (or override URLs for local services)
+- **GitHub Packages** (same as CI): User env `GITHUB_ACTOR` (your GitHub login) and `GITHUB_TOKEN` (PAT with `read:packages`; org SSO authorized for AM-Portfolio). Maven reads `~/.m2/settings.xml` — same server ids as am-pipelines (`github-investment`, `github-am-common`, `github-core`). The repo `settings.xml` matches that; optional `mvn -s settings.xml`.
+
+### GitHub Packages (local Maven)
+
+CI writes `~/.m2/settings.xml` and sets `GITHUB_TOKEN` / `GITHUB_ACTOR`. On a laptop Maven does not use the repo `settings.xml` unless you pass `-s`, so a missing `~/.m2/settings.xml` yields **401** on `maven.pkg.github.com`.
+
+One-time (PowerShell as your user; do not commit the token):
+
+```powershell
+[Environment]::SetEnvironmentVariable("GITHUB_ACTOR", "YOUR_GITHUB_LOGIN", "User")
+# GITHUB_TOKEN should already be a User env (gh auth / ~/.asrax/credentials.env).
+# If not: [Environment]::SetEnvironmentVariable("GITHUB_TOKEN", "ghp_...", "User")
+# Then open a new terminal.
+```
+
+Confirm: `echo $env:GITHUB_ACTOR` and `[bool]$env:GITHUB_TOKEN`. Token needs `read:packages` (and `write:packages` if you publish). For org packages, authorize the PAT for **AM-Portfolio** (GitHub → token → Enable SSO).
 
 ## Files
 
@@ -116,25 +132,30 @@ App listens on `SERVER_PORT` (default **8072** in template/mapper — avoids Win
 | `JWT_SECRET` | `apps/{env}/services/am-auth` → `JWT_SECRET` | |
 | `INTERNAL_SECRET_KEY` | `apps/{env}/services/am-auth` → `SECRET_KEY` | |
 | `JWT_ALGORITHM` | — | `HS256` |
+| `APP_JWT_VERIFY` | — | Laptop only. Default `true` in `application.yml`. Set `false` in `.env` to skip JWT signature so a prod token still works locally. User id still comes from the token. Never set in Helm. |
 | `LOG_LEVEL` | `apps/{env}/services/am-auth` | Stored for parity with Helm; not all levels wired in `application.yml` locally |
 
 Kubernetes deploys use Helm + Vault (`helm/vault-mappings.yaml`), not these `.env` files.
 
 ## Common local overrides
 
-Edit `.env.preprod` or `.env.dev` after generation:
+Edit `.env` (this laptop) or `.env.preprod` / `.env.dev` after generation:
 
 ```properties
 ETF_API_URL=http://localhost:8022
 MARKET_DATA_API_URL=http://localhost:8092
 KAFKA_ENABLED=false
 SERVER_PORT=8072
+# Skip JWT signature locally so a prod token is accepted. User id still comes from the token.
+# This laptop uses Maven + root `.env` (no `.env.dev` required). Do not set in Helm.
+APP_JWT_VERIFY=false
 ```
 
 ## Blockers
 
 | Issue | Mitigation |
 |-------|------------|
+| Maven `401 Unauthorized` from `maven.pkg.github.com` | CI already has a token. Locally: User env `GITHUB_TOKEN` + `GITHUB_ACTOR`, and `~/.m2/settings.xml` servers for `github-investment` / `github-am-common` / `github-core`. If the PAT is org-SSO, authorize it for **AM-Portfolio**. |
 | No `vps_vault_full_backup_*.json` | Run `npm run vault:backup` in am-auth; or pass `--backup` |
 | Vault backup stale | Re-run backup after secret rotation |
 | Mongo/Redis unreachable from laptop | VPN/firewall to VPS; verify host `mongodb.asrax.in` / `redis.asrax.in` |

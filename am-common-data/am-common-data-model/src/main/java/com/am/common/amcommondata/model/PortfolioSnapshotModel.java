@@ -2,6 +2,7 @@ package com.am.common.amcommondata.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -22,13 +23,20 @@ public class PortfolioSnapshotModel {
     private LocalDate snapshotDate;
     
     // User-Level Totals
+    @JsonSerialize(using = TwoDecimalSerializer.class)
     private Double totalUserWealth;       // Matches "close" at the user level
+    @JsonSerialize(using = TwoDecimalSerializer.class)
     private Double totalUserWealthOpen;   // Matches "open" at the user level
-    private Double totalUserWealthHigh;   
-    private Double totalUserWealthLow;    
+    @JsonSerialize(using = TwoDecimalSerializer.class)
+    private Double totalUserWealthHigh;
+    @JsonSerialize(using = TwoDecimalSerializer.class)
+    private Double totalUserWealthLow;
     
+    @JsonSerialize(using = TwoDecimalSerializer.class)
     private Double totalUserInvestment;
+    @JsonSerialize(using = TwoDecimalSerializer.class)
     private Double totalUserGainLoss;
+    @JsonSerialize(using = TwoDecimalSerializer.class)
     private Double totalUserGainLossPercentage;
     
     // Nested Portfolio Details

@@ -142,6 +142,9 @@ app:
     internal-secret: ${INTERNAL_SECRET_KEY:internal-service-super-secret-key-32chars-minimum-change-in-prod}
     secret: ${JWT_SECRET:internal-service-super-secret-key-32chars-minimum-change-in-prod}
     algorithm: ${JWT_ALGORITHM:HS256}
+    # Laptop only: APP_JWT_VERIFY=false skips signature check so a prod token still works locally.
+    # Pods leave this unset (true). User id still comes from the Bearer payload.
+    verify: ${APP_JWT_VERIFY:true}
   kafka:
     enabled: ${KAFKA_ENABLED:true}
     trigger-calculation:

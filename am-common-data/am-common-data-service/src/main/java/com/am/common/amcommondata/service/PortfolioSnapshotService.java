@@ -2,7 +2,6 @@ package com.am.common.amcommondata.service;
 
 import com.am.common.amcommondata.document.portfolio.PortfolioSnapshotDocument;
 import com.am.common.amcommondata.document.portfolio.PortfolioSnapshotEntry;
-import com.am.common.amcommondata.model.HoldingSnapshotItemModel;
 import com.am.common.amcommondata.model.PortfolioSnapshotEntryModel;
 import com.am.common.amcommondata.model.PortfolioSnapshotModel;
 import com.am.common.amcommondata.repository.portfolio.PortfolioSnapshotRepository;
@@ -98,7 +97,7 @@ public class PortfolioSnapshotService {
         existing.ifPresent(portfolioSnapshotRepository::delete);
     }
 
-    @org.springframework.cache.annotation.Cacheable(value = "portfolioHistory", key = "#userId + '_' + (#portfolioId != null ? #portfolioId : 'all') + '_' + #timeFrame")
+    @org.springframework.cache.annotation.Cacheable(value = "portfolioHistory", key = "#userId + '_' + (#portfolioId != null ? #portfolioId : 'all') + '_' + #timeFrame + '_v2'")
     public List<PortfolioSnapshotModel> getHistory(String userId, String portfolioId, String timeFrame) {
         String frame = timeFrame != null ? timeFrame.toUpperCase() : "1M";
         LocalDate today = LocalDate.now();
@@ -166,43 +165,43 @@ public class PortfolioSnapshotService {
                 .snapshotId(doc.getSnapshotId())
                 .userId(doc.getUserId())
                 .snapshotDate(doc.getSnapshotDate())
-                .totalUserWealth(wealth)
-                .totalUserWealthOpen(open)
-                .totalUserWealthHigh(high)
-                .totalUserWealthLow(low)
-                .totalUserInvestment(investment)
-                .totalUserGainLoss(gainLoss)
-                .totalUserGainLossPercentage(gainLossPct)
+                .totalUserWealth(round2(wealth))
+                .totalUserWealthOpen(round2(open))
+                .totalUserWealthHigh(round2(high))
+                .totalUserWealthLow(round2(low))
+                .totalUserInvestment(round2(investment))
+                .totalUserGainLoss(round2(gainLoss))
+                .totalUserGainLossPercentage(round2(gainLossPct))
                 .portfolios(entryModels)
                 .createdAt(doc.getCreatedAt())
                 .build();
     }
 
+    /**
+     * History/chart DTO: OHLC + investment/PnL only. Holdings stay on the Mongo
+     * document for catch-up; {@code @JsonInclude(NON_NULL)} omits the field.
+     */
     private PortfolioSnapshotEntryModel toEntryModel(PortfolioSnapshotEntry entry) {
-        List<HoldingSnapshotItemModel> holdingModels = Collections.emptyList();
-        if (entry.getHoldings() != null) {
-            holdingModels = entry.getHoldings().stream()
-                    .map(h -> HoldingSnapshotItemModel.builder()
-                            .symbol(h.getSymbol())
-                            .isin(h.getIsin())
-                            .quantity(h.getQuantity())
-                            .avgBuyPrice(h.getAvgBuyPrice())
-                            .build())
-                    .collect(Collectors.toList());
-        }
-
         return PortfolioSnapshotEntryModel.builder()
                 .portfolioId(entry.getPortfolioId())
                 .portfolioName(entry.getPortfolioName())
                 .brokerType(entry.getBrokerType())
-                .open(entry.getOpen())
-                .high(entry.getHigh())
-                .low(entry.getLow())
-                .close(entry.getClose())
-                .totalInvestment(entry.getTotalInvestment())
-                .totalGainLoss(entry.getTotalGainLoss())
-                .totalGainLossPercentage(entry.getTotalGainLossPercentage())
-                .holdings(holdingModels)
+                .open(round2(entry.getOpen()))
+                .high(round2(entry.getHigh()))
+                .low(round2(entry.getLow()))
+                .close(round2(entry.getClose()))
+                .totalInvestment(round2(entry.getTotalInvestment()))
+                .totalGainLoss(round2(entry.getTotalGainLoss()))
+                .totalGainLossPercentage(round2(entry.getTotalGainLossPercentage()))
                 .build();
+    }
+
+    private static Double round2(Double value) {
+        if (value == null) {
+            return null;
+        }
+        return java.math.BigDecimal.valueOf(value)
+                .setScale(2, java.math.RoundingMode.HALF_UP)
+                .doubleValue();
     }
 }
