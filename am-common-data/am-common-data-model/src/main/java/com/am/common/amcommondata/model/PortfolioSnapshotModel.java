@@ -1,5 +1,7 @@
 package com.am.common.amcommondata.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
@@ -13,12 +15,16 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Data
-@Builder
+@Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
 @JsonInclude(Include.NON_NULL)
+@JsonIgnoreProperties({"userId"})
 public class PortfolioSnapshotModel {
     private String snapshotId;
+    /** Kept for in-process/cache use; history JSON must not emit this. */
+    @lombok.Getter(onMethod_ = @JsonIgnore)
+    @lombok.Setter(onMethod_ = @JsonIgnore)
     private String userId;
     private LocalDate snapshotDate;
     

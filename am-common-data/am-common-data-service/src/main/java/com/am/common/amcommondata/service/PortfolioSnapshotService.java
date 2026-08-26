@@ -97,7 +97,7 @@ public class PortfolioSnapshotService {
         existing.ifPresent(portfolioSnapshotRepository::delete);
     }
 
-    @org.springframework.cache.annotation.Cacheable(value = "portfolioHistory", key = "#userId + '_' + (#portfolioId != null ? #portfolioId : 'all') + '_' + #timeFrame + '_v2'")
+    @org.springframework.cache.annotation.Cacheable(value = "portfolioHistory", key = "#userId + '_' + (#portfolioId != null ? #portfolioId : 'all') + '_' + #timeFrame + '_v3'")
     public List<PortfolioSnapshotModel> getHistory(String userId, String portfolioId, String timeFrame) {
         String frame = timeFrame != null ? timeFrame.toUpperCase() : "1M";
         LocalDate today = LocalDate.now();
@@ -163,7 +163,6 @@ public class PortfolioSnapshotService {
 
         return PortfolioSnapshotModel.builder()
                 .snapshotId(doc.getSnapshotId())
-                .userId(doc.getUserId())
                 .snapshotDate(doc.getSnapshotDate())
                 .totalUserWealth(round2(wealth))
                 .totalUserWealthOpen(round2(open))

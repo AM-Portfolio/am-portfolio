@@ -117,5 +117,14 @@ class PortfolioSnapshotServiceHistoryTest {
         org.junit.jupiter.api.Assertions.assertTrue(json.contains("\"close\":933243.69"));
         org.junit.jupiter.api.Assertions.assertTrue(json.contains("\"totalInvestment\":854184.61"));
         org.junit.jupiter.api.Assertions.assertTrue(json.contains("\"totalUserGainLossPercentage\":9.26"));
+
+        PortfolioSnapshotModel withUserId = history.get(0).toBuilder()
+                .userId("user-1")
+                .build();
+        String jsonWithUser = mapper.writeValueAsString(withUserId);
+        org.junit.jupiter.api.Assertions.assertFalse(json.contains("userId"));
+        org.junit.jupiter.api.Assertions.assertFalse(json.contains("user-1"));
+        org.junit.jupiter.api.Assertions.assertFalse(jsonWithUser.contains("userId"));
+        org.junit.jupiter.api.Assertions.assertFalse(jsonWithUser.contains("user-1"));
     }
 }
