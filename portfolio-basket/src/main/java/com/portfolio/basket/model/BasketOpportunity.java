@@ -56,6 +56,7 @@ public class BasketOpportunity {
         private Double lastPrice; // Current market price
         private String marketCapCategory;
         private Double marketCapValue;
+        private Double targetQuantity; // Ideal total quantity user should hold for this stock in this basket
 
         private Double heldQuantity; // Actual quantity held in main portfolio
         private Double heldAveragePrice; // Average buying price of held stock

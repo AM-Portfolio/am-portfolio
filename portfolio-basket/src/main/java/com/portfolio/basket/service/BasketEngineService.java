@@ -109,10 +109,14 @@ public class BasketEngineService {
         log.info("Fetching live prices for {} symbols to calculate quantities", symbols.size());
         Map<String, Double> prices = marketDataService.getCurrentPrices(new ArrayList<>(symbols));
 
-        // 3. Calculate Quantities
+        // === PASS 1: Calculate base targets and collect surplus ===
+        Map<String, Double> surplusPoolMap = new HashMap<>();
+        Map<String, Double> gapAmounts = new HashMap<>();
+        double totalSurplus = 0.0;
+
         for (BasketItem item : opportunity.getComposition()) {
-            // Skip excluded items entirely — they have been zeroed above
             if (excluded.contains(item.getStockSymbol())) {
+                item.setBuyQuantity(0.0);
                 continue;
             }
 
@@ -120,63 +124,78 @@ public class BasketEngineService {
             if ((price == null || price <= 0) && item.getUserHoldingSymbol() != null) {
                 price = prices.get(item.getUserHoldingSymbol());
             }
+            if (price == null || price <= 0) price = item.getLastPrice();
             if (price == null || price <= 0) {
-                // Try fallback to the lastPrice stored during preview
-                price = item.getLastPrice();
-            }
-            if (price == null || price <= 0) {
-                log.warn("Price not found for {} (or holding {}), defaulting quantity to 0", item.getStockSymbol(), item.getUserHoldingSymbol());
+                log.warn("Price not found for {}, defaulting quantity to 0", item.getStockSymbol());
                 item.setBuyQuantity(0.0);
                 continue;
             }
+            item.setLastPrice(price);
 
-            // If includeHeld is false and item is HELD, we skip buying (quantity = 0)
+            double weight = item.getRebalancedWeight() != null ? item.getRebalancedWeight() : (item.getEtfWeight() != null ? item.getEtfWeight() : 0.0);
+            double baseTargetAmount = (weight / 100.0) * effectiveInvestmentAmount;
+            int baseTargetQty = (int) Math.floor(baseTargetAmount / price);
+
             if (!includeHeld && item.getStatus() == ItemStatus.HELD) {
                 item.setBuyQuantity(0.0);
-                item.setLastPrice(price);
+                item.setTargetQuantity((double) baseTargetQty);
                 continue;
             }
 
-            // Target Amount for this stock based on ETF weight and total investment amount
-            double weight = item.getRebalancedWeight() != null ? item.getRebalancedWeight() : item.getEtfWeight();
-            double targetAmount = (weight / 100.0) * effectiveInvestmentAmount;
-
-            // If we are including held items, we must subtract the value of what we already
-            // hold
-            // so we only buy the "gap" (or nothing if over-held).
             if (includeHeld && (item.getStatus() == ItemStatus.HELD || item.getStatus() == ItemStatus.SUBSTITUTE)) {
-                double existingValue = 0.0;
-
-                // Method 1: Use Held Quantity * Current Price (Most Accurate)
-                if (item.getHeldQuantity() != null && price != null) {
-                    existingValue = item.getHeldQuantity() * price;
-                }
-                // Method 2: Fallback to User Weight (Less Accurate if TotalValue incorrect)
-                else if (opportunity.getTotalPortfolioValue() != null && item.getUserWeight() != null) {
-                    existingValue = (item.getUserWeight() / 100.0) * opportunity.getTotalPortfolioValue();
-                } else {
-                    log.warn("Cannot determine held value for {}. Qty: {}, TotalVal: {}",
-                            item.getStockSymbol(), item.getHeldQuantity(), opportunity.getTotalPortfolioValue());
-                }
-
-                double requiredAmount = targetAmount - existingValue;
-
-                if (requiredAmount <= 0) {
-                    // We have enough or more than enough
+                double heldValue = (item.getHeldQuantity() != null ? item.getHeldQuantity() : 0) * price;
+                if (heldValue >= baseTargetAmount) {
+                    // Over-held -> surplus generated
+                    totalSurplus += (heldValue - baseTargetAmount);
                     item.setBuyQuantity(0.0);
-                    item.setLastPrice(price);
-                    continue;
+                    item.setTargetQuantity((double) baseTargetQty);
                 } else {
-                    // We need to buy more to reach the target
-                    targetAmount = requiredAmount;
+                    // Under-held -> needs purchases
+                    double gap = baseTargetAmount - heldValue;
+                    gapAmounts.put(item.getStockSymbol(), gap);
+                    item.setTargetQuantity((double) baseTargetQty);
+                }
+            } else if (item.getStatus() == ItemStatus.MISSING) {
+                // Missing -> needs full purchases
+                gapAmounts.put(item.getStockSymbol(), baseTargetAmount);
+                item.setTargetQuantity((double) baseTargetQty);
+            }
+        }
+
+        // === PASS 2: Redistribute surplus proportionally to needy items ===
+        if (totalSurplus > 0 && !gapAmounts.isEmpty()) {
+            double totalGapWeight = gapAmounts.keySet().stream()
+                    .mapToDouble(sym -> {
+                        BasketItem it = opportunity.getComposition().stream().filter(i -> i.getStockSymbol().equals(sym)).findFirst().orElse(null);
+                        if (it == null) return 0.0;
+                        Double w = it.getRebalancedWeight() != null ? it.getRebalancedWeight() : it.getEtfWeight();
+                        return w != null ? w : 0.0;
+                    }).sum();
+
+            if (totalGapWeight > 0) {
+                for (BasketItem item : opportunity.getComposition()) {
+                    if (!gapAmounts.containsKey(item.getStockSymbol())) continue;
+                    Double itemWeight = item.getRebalancedWeight() != null ? item.getRebalancedWeight() : item.getEtfWeight();
+                    double bonus = totalSurplus * ((itemWeight != null ? itemWeight : 0.0) / totalGapWeight);
+                    double finalGapAmount = gapAmounts.get(item.getStockSymbol()) + bonus;
+                    Double price = item.getLastPrice();
+                    int buyQty = (int) Math.floor(finalGapAmount / price);
+                    item.setBuyQuantity((double) buyQty);
+                    
+                    // Update targetQuantity to reflect surplus-adjusted target
+                    double heldQty = item.getHeldQuantity() != null ? item.getHeldQuantity() : 0.0;
+                    item.setTargetQuantity(heldQty + buyQty);
                 }
             }
-
-            // Calculate quantity (floor)
-            int quantity = (int) Math.floor(targetAmount / price);
-
-            item.setBuyQuantity((double) quantity);
-            item.setLastPrice(price);
+        } else {
+            // No surplus or no gaps -> just set buy quantity based on base target amount gap
+            for (BasketItem item : opportunity.getComposition()) {
+                if (gapAmounts.containsKey(item.getStockSymbol())) {
+                    Double price = item.getLastPrice();
+                    int buyQty = (int) Math.floor(gapAmounts.get(item.getStockSymbol()) / price);
+                    item.setBuyQuantity((double) buyQty);
+                }
+            }
         }
         // Recalculate basket-level scores from updated composition (exclude EXCLUDED items from totals)
         if (opportunity.getComposition() != null) {
@@ -189,10 +208,13 @@ public class BasketEngineService {
                 if (item.getStatus() == ItemStatus.EXCLUDED) continue;
                 if (item.getStatus() == ItemStatus.HELD || item.getStatus() == ItemStatus.SUBSTITUTE) {
                     matchCount++;
-                    replicaTotal += item.getReplicaWeight() != null ? item.getReplicaWeight() : 0.0;
+                    // Always count their weight towards replicaScore
+                    double w = item.getRebalancedWeight() != null ? item.getRebalancedWeight() : (item.getEtfWeight() != null ? item.getEtfWeight() : 0.0);
+                    item.setReplicaWeight(BasketUtils.round(w));
+                    replicaTotal += item.getReplicaWeight();
                 } else if (item.getBuyQuantity() != null && item.getBuyQuantity() > 0 
                            && item.getLastPrice() != null) {
-                    // Recalculate replicaWeight based on actual purchased value
+                    // Recalculate replicaWeight based on actual purchased value for missing items
                     double purchasedValue = item.getBuyQuantity() * item.getLastPrice();
                     double replicaWeight = investmentAmount > 0 ? (purchasedValue / investmentAmount) * 100.0 : 0.0;
                     item.setReplicaWeight(BasketUtils.round(replicaWeight));
