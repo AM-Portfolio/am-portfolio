@@ -28,9 +28,64 @@ public class BasketEngineService {
     private final com.portfolio.marketdata.service.MarketDataService marketDataService;
 
     public BasketOpportunity calculateBasketQuantities(Double investmentAmount, BasketOpportunity opportunity,
-            boolean includeHeld) {
+            boolean includeHeld, List<String> excludedSymbols) {
         if (investmentAmount == null || investmentAmount <= 0) {
             return opportunity;
+        }
+
+        // 0. Mark excluded items and normalize remaining weights to sum to 100%
+        Set<String> excluded = excludedSymbols != null
+                ? new HashSet<>(excludedSymbols) : Collections.emptySet();
+
+        if (opportunity.getComposition() != null) {
+            for (BasketItem item : opportunity.getComposition()) {
+                if (excluded.contains(item.getStockSymbol())) {
+                    item.setStatus(ItemStatus.EXCLUDED);
+                    item.setBuyQuantity(0.0);
+                    item.setRebalancedWeight(0.0);
+                }
+            }
+
+            List<BasketItem> activeItems = opportunity.getComposition().stream()
+                    .filter(i -> !excluded.contains(i.getStockSymbol()))
+                    .collect(Collectors.toList());
+
+            double totalActiveWeight = activeItems.stream()
+                    .mapToDouble(i -> i.getEtfWeight() != null ? i.getEtfWeight() : 0.0)
+                    .sum();
+
+            if (totalActiveWeight > 0 && totalActiveWeight < 99.99) {
+                double multiplier = 100.0 / totalActiveWeight;
+                for (BasketItem item : activeItems) {
+                    item.setRebalancedWeight(BasketUtils.round(
+                            (item.getEtfWeight() != null ? item.getEtfWeight() : 0.0) * multiplier));
+                }
+            }
+        }
+
+        // 0b. Compute effective investment amount adjusting for held items
+        //     (This logic previously lived in the Flutter UI — moved here for correct architecture)
+        double effectiveInvestmentAmount = investmentAmount;
+        if (includeHeld && opportunity.getComposition() != null) {
+            double totalHeldCurrentValue = opportunity.getComposition().stream()
+                    .filter(i -> !excluded.contains(i.getStockSymbol()))
+                    .filter(i -> i.getStatus() == ItemStatus.HELD || i.getStatus() == ItemStatus.SUBSTITUTE)
+                    .mapToDouble(i -> {
+                        double qty = i.getHeldQuantity() != null ? i.getHeldQuantity() : 0;
+                        double price = i.getLastPrice() != null ? i.getLastPrice() : 0;
+                        return qty * price;
+                    }).sum();
+            double totalHeldCost = opportunity.getComposition().stream()
+                    .filter(i -> !excluded.contains(i.getStockSymbol()))
+                    .filter(i -> i.getStatus() == ItemStatus.HELD || i.getStatus() == ItemStatus.SUBSTITUTE)
+                    .mapToDouble(i -> {
+                        double qty = i.getHeldQuantity() != null ? i.getHeldQuantity() : 0;
+                        double avgPrice = i.getHeldAveragePrice() != null ? i.getHeldAveragePrice() : 0;
+                        return qty * avgPrice;
+                    }).sum();
+            if (investmentAmount > totalHeldCost) {
+                effectiveInvestmentAmount = totalHeldCurrentValue + (investmentAmount - totalHeldCost);
+            }
         }
 
         // 1. Gather all unique symbols from the composition (held + missing)
@@ -56,14 +111,22 @@ public class BasketEngineService {
 
         // 3. Calculate Quantities
         for (BasketItem item : opportunity.getComposition()) {
+            // Skip excluded items entirely — they have been zeroed above
+            if (excluded.contains(item.getStockSymbol())) {
+                continue;
+            }
+
             Double price = prices.get(item.getStockSymbol());
             if ((price == null || price <= 0) && item.getUserHoldingSymbol() != null) {
                 price = prices.get(item.getUserHoldingSymbol());
             }
             if (price == null || price <= 0) {
+                // Try fallback to the lastPrice stored during preview
+                price = item.getLastPrice();
+            }
+            if (price == null || price <= 0) {
                 log.warn("Price not found for {} (or holding {}), defaulting quantity to 0", item.getStockSymbol(), item.getUserHoldingSymbol());
                 item.setBuyQuantity(0.0);
-                item.setLastPrice(null);
                 continue;
             }
 
@@ -76,7 +139,7 @@ public class BasketEngineService {
 
             // Target Amount for this stock based on ETF weight and total investment amount
             double weight = item.getRebalancedWeight() != null ? item.getRebalancedWeight() : item.getEtfWeight();
-            double targetAmount = (weight / 100.0) * investmentAmount;
+            double targetAmount = (weight / 100.0) * effectiveInvestmentAmount;
 
             // If we are including held items, we must subtract the value of what we already
             // hold
@@ -115,12 +178,15 @@ public class BasketEngineService {
             item.setBuyQuantity((double) quantity);
             item.setLastPrice(price);
         }
-        // Recalculate basket-level scores from updated composition
+        // Recalculate basket-level scores from updated composition (exclude EXCLUDED items from totals)
         if (opportunity.getComposition() != null) {
-            int total = opportunity.getComposition().size();
+            int total = (int) opportunity.getComposition().stream()
+                    .filter(i -> i.getStatus() != ItemStatus.EXCLUDED)
+                    .count();
             int matchCount = 0;
             double replicaTotal = 0.0;
             for (BasketItem item : opportunity.getComposition()) {
+                if (item.getStatus() == ItemStatus.EXCLUDED) continue;
                 if (item.getStatus() == ItemStatus.HELD || item.getStatus() == ItemStatus.SUBSTITUTE) {
                     matchCount++;
                     replicaTotal += item.getReplicaWeight() != null ? item.getReplicaWeight() : 0.0;
@@ -137,7 +203,7 @@ public class BasketEngineService {
             }
             opportunity.setMatchScore(BasketUtils.round(total == 0 ? 0 : (double) matchCount / total * 100.0));
             opportunity.setReplicaScore(BasketUtils.round(replicaTotal));
-            opportunity.setReadyToReplicate(replicaTotal >= 70.0);
+            opportunity.setReadyToReplicate(replicaTotal >= 90.0);
             opportunity.setHeldCount(matchCount);
             opportunity.setMissingCount(total - matchCount);
         }
@@ -149,6 +215,16 @@ public class BasketEngineService {
                 .mapToDouble(i -> i.getReplicaWeight() != null ? i.getReplicaWeight() : 0.0).sum();
         opportunity.setHeldMatchScore(BasketUtils.round(heldScore));
         opportunity.setSubstituteMatchScore(BasketUtils.round(subScore));
+
+        // Compute and return actual investment cost and budget variance
+        double actualCost = opportunity.getComposition().stream()
+                .filter(i -> i.getBuyQuantity() != null && i.getBuyQuantity() > 0
+                        && i.getLastPrice() != null)
+                .mapToDouble(i -> i.getBuyQuantity() * i.getLastPrice())
+                .sum();
+        opportunity.setActualInvestmentCost(BasketUtils.round(actualCost));
+        opportunity.setBudgetVariance(BasketUtils.round(actualCost - investmentAmount));
+        opportunity.setExcludedSymbols(new ArrayList<>(excluded));
 
         return opportunity;
     }
@@ -318,7 +394,8 @@ public class BasketEngineService {
         double remainingValue = userHoldings.stream()
                 .mapToDouble(h -> {
                     double avail = h.getAvailableQuantity() != null ? h.getAvailableQuantity() : (h.getQuantity() != null ? h.getQuantity() : 0.0);
-                    double price = h.getCurrentPrice() != null ? h.getCurrentPrice() : 0.0;
+                    double price = (h.getCurrentPrice() != null && h.getCurrentPrice() > 0) ? h.getCurrentPrice() : 
+                                   (h.getAverageBuyingPrice() != null ? h.getAverageBuyingPrice() : 0.0);
                     return avail * price;
                 })
                 .sum();
@@ -341,12 +418,43 @@ public class BasketEngineService {
         int total = etf.getHoldings() != null ? etf.getHoldings().size() : 0;
         Map<String, Double> consumedWeightByIsin = new HashMap<>();
 
-        // PERFORMANCE FIX: For preview, we use cached prices from allUserHoldings instead of live fetch
-        // Live prices will be explicitly fetched during calculateQuantities
-        Map<String, Double> prices = new HashMap<>();
+        // Gather all symbols from ETF holdings and User holdings
+        Set<String> symbolsToFetch = new HashSet<>();
+        if (etf.getHoldings() != null) {
+            for (EtfHolding h : etf.getHoldings()) {
+                if (h.getSymbol() != null && !h.getSymbol().isBlank()) {
+                    symbolsToFetch.add(h.getSymbol());
+                }
+            }
+        }
         for (EquityHoldings h : allUserHoldings) {
-            if (h.getSymbol() != null && h.getCurrentPrice() != null) {
-                prices.put(h.getSymbol(), h.getCurrentPrice());
+            if (h.getSymbol() != null && !h.getSymbol().isBlank()) {
+                symbolsToFetch.add(h.getSymbol());
+            }
+        }
+
+        Map<String, Double> prices = new HashMap<>();
+        try {
+            if (!symbolsToFetch.isEmpty()) {
+                prices = marketDataService.getCurrentPrices(new ArrayList<>(symbolsToFetch));
+            }
+        } catch (Exception e) {
+            log.warn("Failed to fetch live prices for preview symbols: {}", e.getMessage());
+        }
+        if (prices == null) {
+            prices = new HashMap<>();
+        }
+        // Add fallback to user's average buying price or current price
+        for (EquityHoldings h : allUserHoldings) {
+            if (h.getSymbol() != null) {
+                Double existingPrice = prices.get(h.getSymbol());
+                if (existingPrice == null || existingPrice <= 0) {
+                    if (h.getCurrentPrice() != null && h.getCurrentPrice() > 0) {
+                        prices.put(h.getSymbol(), h.getCurrentPrice());
+                    } else if (h.getAverageBuyingPrice() != null && h.getAverageBuyingPrice() > 0) {
+                        prices.put(h.getSymbol(), h.getAverageBuyingPrice());
+                    }
+                }
             }
         }
 
@@ -377,7 +485,7 @@ public class BasketEngineService {
             // Pass 1: Direct Matches
             for (ItemReqPair pair : pairs) {
                 if (pair.req.getIsin() != null && userMap.containsKey(pair.req.getIsin())) {
-                    boolean isMatch = processDirectMatch(pair.item, pair.req, userMap.get(pair.req.getIsin()), consumedWeightByIsin);
+                    boolean isMatch = processDirectMatch(pair.item, pair.req, userMap.get(pair.req.getIsin()), consumedWeightByIsin, prices);
                     if (isMatch) {
                         replicaScoreTotal += pair.item.getReplicaWeight();
                         matchCount++;
@@ -422,7 +530,7 @@ public class BasketEngineService {
                 .etfName(etf.getName())
                 .matchScore(BasketUtils.round(matchScore))
                 .replicaScore(BasketUtils.round(replicaScore))
-                .readyToReplicate(replicaScore >= 70.0)
+                .readyToReplicate(replicaScore >= 90.0)
                 .totalItems(total)
                 .heldCount(matchCount)
                 .missingCount(total - matchCount)
@@ -446,7 +554,7 @@ public class BasketEngineService {
         return 0.0;
     }
 
-    private boolean processDirectMatch(BasketItem item, EtfHolding req, EquityHoldings userHolding, Map<String, Double> consumedWeightByIsin) {
+    private boolean processDirectMatch(BasketItem item, EtfHolding req, EquityHoldings userHolding, Map<String, Double> consumedWeightByIsin, Map<String, Double> prices) {
         log.info("Checking Held Item: {} | Qty: {} | AvgPrice: {}",
                 userHolding.getSymbol(), userHolding.getQuantity(), userHolding.getAverageBuyingPrice());
 
@@ -464,6 +572,16 @@ public class BasketEngineService {
         item.setUserWeight(BasketUtils.round(totalWeight));
         item.setHeldQuantity(userHolding.getQuantity());
         item.setHeldAveragePrice(userHolding.getAverageBuyingPrice());
+        
+        Double price = prices.get(userHolding.getSymbol());
+        if (price == null || price <= 0) {
+            price = (userHolding.getCurrentPrice() != null && userHolding.getCurrentPrice() > 0)
+                    ? userHolding.getCurrentPrice()
+                    : userHolding.getAverageBuyingPrice();
+        }
+        if (price != null && price > 0) {
+            item.setLastPrice(price);
+        }
 
         double matchWeight = Math.min(req.getWeight(), available);
         item.setReplicaWeight(BasketUtils.round(matchWeight));
@@ -546,6 +664,16 @@ public class BasketEngineService {
                     item.setHeldAveragePrice(substitute.getAverageBuyingPrice());
                     item.setReason("Substitute: " + req.getSector()
                             + (req.getMarketCapCategory() != null ? "/" + req.getMarketCapCategory() : ""));
+
+                    Double subPrice = prices.get(substitute.getSymbol());
+                    if (subPrice == null || subPrice <= 0) {
+                        subPrice = (substitute.getCurrentPrice() != null && substitute.getCurrentPrice() > 0)
+                                ? substitute.getCurrentPrice()
+                                : substitute.getAverageBuyingPrice();
+                    }
+                    if (subPrice != null && subPrice > 0) {
+                        item.setLastPrice(subPrice);
+                    }
 
                     double matchWeight = Math.min(req.getWeight(), available);
                     item.setReplicaWeight(BasketUtils.round(matchWeight));
@@ -725,7 +853,12 @@ public class BasketEngineService {
             item.setReplicaWeight(BasketUtils.round(matchWeight));
             
             Double subPrice = prices.get(sub.getSymbol());
-            if (subPrice != null) {
+            if (subPrice == null || subPrice <= 0) {
+                subPrice = (sub.getCurrentPrice() != null && sub.getCurrentPrice() > 0)
+                        ? sub.getCurrentPrice()
+                        : sub.getAverageBuyingPrice();
+            }
+            if (subPrice != null && subPrice > 0) {
                 item.setLastPrice(subPrice);
             }
         }
@@ -733,11 +866,18 @@ public class BasketEngineService {
         // Recalc scores
         int total = base.getComposition().size();
         int matchCount = 0;
+        int heldCount = 0;
+        int subCount = 0;
         double replica = 0;
         List<BasketItem> buyList = new ArrayList<>();
         for (BasketItem item : base.getComposition()) {
-            if (item.getStatus() == ItemStatus.HELD || item.getStatus() == ItemStatus.SUBSTITUTE) {
+            if (item.getStatus() == ItemStatus.HELD) {
                 matchCount++;
+                heldCount++;
+                replica += item.getReplicaWeight() != null ? item.getReplicaWeight() : 0;
+            } else if (item.getStatus() == ItemStatus.SUBSTITUTE) {
+                matchCount++;
+                subCount++;
                 replica += item.getReplicaWeight() != null ? item.getReplicaWeight() : 0;
             } else {
                 buyList.add(item);
@@ -746,8 +886,10 @@ public class BasketEngineService {
         base.setHeldCount(matchCount);
         base.setMissingCount(total - matchCount);
         base.setMatchScore(BasketUtils.round(total == 0 ? 0 : (double) matchCount / total * 100.0));
+        base.setHeldMatchScore(BasketUtils.round(total == 0 ? 0 : (double) heldCount / total * 100.0));
+        base.setSubstituteMatchScore(BasketUtils.round(total == 0 ? 0 : (double) subCount / total * 100.0));
         base.setReplicaScore(BasketUtils.round(replica));
-        base.setReadyToReplicate(replica >= 70.0);
+        base.setReadyToReplicate(replica >= 90.0);
         base.setBuyList(buyList);
         return base;
     }

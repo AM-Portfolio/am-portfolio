@@ -17,7 +17,7 @@ public class BasketOpportunity {
     private String etfName;
     private double matchScore;
     private double replicaScore; // Score based on weight alignment
-    private boolean readyToReplicate; // true if replicaScore >= 70
+    private boolean readyToReplicate; // true if replicaScore >= 90
     private int totalItems;
     private int heldCount;
     private int missingCount;
@@ -27,6 +27,11 @@ public class BasketOpportunity {
     private Double minimumInvestmentAmount;
     private Double heldMatchScore;
     private Double substituteMatchScore;
+
+    // --- New fields returned from calculateBasketQuantities ---
+    private List<String> excludedSymbols;   // symbols the user excluded — echoed back so UI stays in sync
+    private Double actualInvestmentCost;    // sum of floor(qty) * lastPrice across all BUY items
+    private Double budgetVariance;          // actualInvestmentCost - investmentAmount (+ve = over budget)
 
     private List<BasketItem> composition;
     private List<BasketItem> buyList; // Stocks to buy to reach 100% or bridge gap
@@ -76,6 +81,6 @@ public class BasketOpportunity {
     }
 
     public enum ItemStatus {
-        HELD, MISSING, SUBSTITUTE
+        HELD, MISSING, SUBSTITUTE, EXCLUDED
     }
 }

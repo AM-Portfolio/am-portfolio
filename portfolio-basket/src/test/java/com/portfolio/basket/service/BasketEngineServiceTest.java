@@ -70,7 +70,7 @@ public class BasketEngineServiceTest {
     void testCalculateBasketQuantities_ValidInvestment() {
         when(marketDataService.getCurrentPrices(anyList())).thenReturn(prices);
 
-        BasketOpportunity result = basketEngineService.calculateBasketQuantities(10000.0, opportunity, false);
+        BasketOpportunity result = basketEngineService.calculateBasketQuantities(10000.0, opportunity, false, null);
 
         assertNotNull(result);
         List<BasketItem> items = result.getComposition();
@@ -86,7 +86,7 @@ public class BasketEngineServiceTest {
 
     @Test
     void testCalculateBasketQuantities_ZeroInvestment() {
-        BasketOpportunity result = basketEngineService.calculateBasketQuantities(0.0, opportunity, false);
+        BasketOpportunity result = basketEngineService.calculateBasketQuantities(0.0, opportunity, false, null);
         assertEquals(opportunity, result);
         verifyNoInteractions(marketDataService);
     }
@@ -94,7 +94,7 @@ public class BasketEngineServiceTest {
     @Test
     void testCalculateBasketQuantities_EmptyComposition() {
         opportunity.setComposition(Collections.emptyList());
-        BasketOpportunity result = basketEngineService.calculateBasketQuantities(10000.0, opportunity, false);
+        BasketOpportunity result = basketEngineService.calculateBasketQuantities(10000.0, opportunity, false, null);
         assertEquals(opportunity, result);
         verifyNoInteractions(marketDataService);
     }
@@ -104,7 +104,7 @@ public class BasketEngineServiceTest {
         prices.remove("AAPL");
         when(marketDataService.getCurrentPrices(anyList())).thenReturn(prices);
 
-        BasketOpportunity result = basketEngineService.calculateBasketQuantities(10000.0, opportunity, false);
+        BasketOpportunity result = basketEngineService.calculateBasketQuantities(10000.0, opportunity, false, null);
 
         List<BasketItem> items = result.getComposition();
         // AAPL skipped because price not found
@@ -125,7 +125,7 @@ public class BasketEngineServiceTest {
         // Held value = 10 * 150 = 1500.
         // Required = 5000 - 1500 = 3500.
         // Qty to buy = 3500 / 150 = 23.33 -> 23.
-        BasketOpportunity result = basketEngineService.calculateBasketQuantities(10000.0, opportunity, true);
+        BasketOpportunity result = basketEngineService.calculateBasketQuantities(10000.0, opportunity, true, null);
 
         List<BasketItem> items = result.getComposition();
         assertEquals(23.0, items.get(0).getBuyQuantity());

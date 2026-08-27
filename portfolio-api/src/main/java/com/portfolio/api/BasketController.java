@@ -57,7 +57,8 @@ public class BasketController {
         }
         List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
         return portfolios.stream()
-                .filter(p -> PortfolioKind.isBasket(p.getPortfolioKind()))
+                .filter(p -> PortfolioKind.isBasket(p.getPortfolioKind()) || 
+                            (p.getPortfolioKind() == null && p.getSourcePortfolioId() != null && !p.getSourcePortfolioId().isBlank()))
                 .filter(p -> portfolioId == null || portfolioId.isBlank() || portfolioId.equals(p.getSourcePortfolioId()))
                 .map(p -> BasketSummaryDto.builder()
                         .id(p.getId().toString())
@@ -217,10 +218,19 @@ public class BasketController {
             for (com.am.common.amcommondata.model.asset.equity.EquityModel eq : basket.getEquityModels()) {
                 double qty = eq.getQuantity() != null ? eq.getQuantity() : 0.0;
                 double avgPrice = eq.getAvgBuyingPrice() != null ? eq.getAvgBuyingPrice() : 0.0;
-                double currentPrice = prices.getOrDefault(eq.getSymbol(), eq.getCurrentPrice() != null ? eq.getCurrentPrice() : avgPrice);
+                double displayCurrentPrice = 0.0;
+                Double livePrice = prices.get(eq.getSymbol());
+                if (livePrice != null && livePrice > 0) {
+                    displayCurrentPrice = livePrice;
+                }
+
+                // Fallback for aggregate calculations so missing data doesn't skew total P&L
+                double aggregateCurrentPrice = (displayCurrentPrice > 0) ? displayCurrentPrice : avgPrice;
+
                 double invested = qty * avgPrice;
-                double current = qty * currentPrice;
-                double pnl = current - invested;
+                double current = qty * aggregateCurrentPrice;
+                double pnl = (displayCurrentPrice > 0) ? (current - invested) : 0.0;
+
 
                 totalInvested += invested;
                 totalCurrent += current;
@@ -239,12 +249,15 @@ public class BasketController {
                         .status(status)
                         .quantity(qty)
                         .avgPrice(avgPrice)
-                        .currentPrice(currentPrice)
+                        .currentPrice(displayCurrentPrice)
                         .pnl(pnl)
                         .build());
             }
         }
         missingCount = basket.getGapMissingCount() != null ? basket.getGapMissingCount() : missingCount;
+
+        double coveragePercent = (heldCount + missingCount) > 0
+                ? ((double) heldCount / (heldCount + missingCount)) * 100.0 : 0.0;
         
         double totalPnl = totalCurrent - totalInvested;
         double pnlPct = totalInvested > 0 ? (totalPnl / totalInvested) * 100.0 : 0.0;
@@ -265,6 +278,7 @@ public class BasketController {
                 .heldCount(heldCount)
                 .missingCount(missingCount)
                 .underfundedCount(underfundedCount)
+                .coveragePercent(coveragePercent)
                 .lines(lines)
                 .build();
     }
@@ -319,9 +333,14 @@ public class BasketController {
                             + "BasketOpportunity response (etfIsin, composition with etfWeight per stock). "
                             + "Fields like etfSymbol/holdings are not used.");
         }
-        log.info("Calculating quantities for investment amount: {}", request.getInvestmentAmount());
+        log.info("Calculating quantities for investment amount: {}, excluded: {}",
+                request.getInvestmentAmount(),
+                request.getExcludedSymbols() != null ? request.getExcludedSymbols().size() : 0);
         boolean includeHeld = request.getIncludeHeld() != null ? request.getIncludeHeld() : true;
-        return basketService.calculateBasketQuantities(request.getInvestmentAmount(), opportunity, includeHeld);
+        List<String> excludedSymbols = request.getExcludedSymbols() != null
+                ? request.getExcludedSymbols() : java.util.Collections.emptyList();
+        return basketService.calculateBasketQuantities(
+                request.getInvestmentAmount(), opportunity, includeHeld, excludedSymbols);
     }
 
     @Data
@@ -330,6 +349,7 @@ public class BasketController {
         private Double investmentAmount;
         private Boolean includeHeld;
         private BasketOpportunity opportunity;
+        private List<String> excludedSymbols;  // NEW: symbols to exclude from this calculation
     }
 
     private List<EquityHoldings> resolveUserHoldings(String userId, String portfolioId,
