@@ -5,8 +5,6 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,24 +12,15 @@ import java.util.Optional;
 import java.util.TreeMap;
 import org.springframework.stereotype.Service;
 
-import com.am.common.amcommondata.model.HoldingSnapshotItemModel;
-import com.am.common.amcommondata.model.PortfolioSnapshotEntryModel;
-import com.am.common.amcommondata.model.PortfolioSnapshotModel;
 import com.am.common.amcommondata.service.PortfolioSnapshotService;
-import com.portfolio.marketdata.model.FilterType;
-import com.portfolio.marketdata.model.InstrumentType;
-import com.portfolio.marketdata.model.HistoricalDataRequest;
-import com.portfolio.model.market.MarketData;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.redis.service.PortfolioIntradayRedisService;
 import com.portfolio.model.TimeInterval;
-import com.portfolio.model.market.TimeFrame;
 import com.portfolio.model.portfolio.IntradayDataPoint;
 import com.portfolio.model.portfolio.PortfolioHoldings;
+import com.portfolio.model.portfolio.PortfolioIntradayEntry;
 import com.am.common.amcommondata.repository.portfolio.PortfolioDocumentRepository;
-import com.am.common.amcommondata.document.portfolio.PortfolioDocument;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
@@ -88,24 +77,44 @@ public class PortfolioIntradayService {
         double liveTotalValue = 0.0;
         double liveTodayGainLoss = 0.0;
         Map<String, Double> symbolQty = new HashMap<>();
+        Map<String, Map<String, Double>> qtyByPortfolio = new HashMap<>();
+        Map<String, String> nameByPortfolio = new HashMap<>();
+        Map<String, Double> liveValueByPortfolio = new HashMap<>();
+        Map<String, Double> todayGlByPortfolio = new HashMap<>();
 
         if (liveHoldings != null && liveHoldings.getEquityHoldings() != null) {
             for (com.portfolio.model.portfolio.EquityHoldings h : liveHoldings.getEquityHoldings()) {
                 if (h.getSymbol() != null) {
                     double qty = h.getQuantity() != null ? h.getQuantity() : 0.0;
                     symbolQty.merge(h.getSymbol(), qty, Double::sum);
+                    if (h.getPortfolioId() != null && !h.getPortfolioId().isBlank()) {
+                        qtyByPortfolio
+                                .computeIfAbsent(h.getPortfolioId(), k -> new HashMap<>())
+                                .merge(h.getSymbol(), qty, Double::sum);
+                        if (h.getPortfolioName() != null && !h.getPortfolioName().isBlank()) {
+                            nameByPortfolio.putIfAbsent(h.getPortfolioId(), h.getPortfolioName());
+                        }
+                    }
                 }
                 
+                double holdingValue = 0.0;
                 if (h.getCurrentValue() != null) {
-                    liveTotalValue += h.getCurrentValue();
+                    holdingValue = h.getCurrentValue();
                 } else if (h.getInvestmentCost() != null && h.getInvestmentCost() > 0) {
-                    liveTotalValue += h.getInvestmentCost();
+                    holdingValue = h.getInvestmentCost();
                 } else if (h.getCurrentPrice() != null && h.getQuantity() != null) {
-                    liveTotalValue += h.getCurrentPrice() * h.getQuantity();
+                    holdingValue = h.getCurrentPrice() * h.getQuantity();
+                }
+                liveTotalValue += holdingValue;
+                if (h.getPortfolioId() != null && !h.getPortfolioId().isBlank() && holdingValue != 0.0) {
+                    liveValueByPortfolio.merge(h.getPortfolioId(), holdingValue, Double::sum);
                 }
                 
                 if (h.getTodayGainLoss() != null) {
                     liveTodayGainLoss += h.getTodayGainLoss();
+                    if (h.getPortfolioId() != null && !h.getPortfolioId().isBlank()) {
+                        todayGlByPortfolio.merge(h.getPortfolioId(), h.getTodayGainLoss(), Double::sum);
+                    }
                 }
             }
         }
@@ -115,7 +124,12 @@ public class PortfolioIntradayService {
         double missingAssetValue = 0.0;
 
         if (symbolQty.isEmpty()) {
-            return List.of(makeGlobalPoint("09:15", baselineWealth, baselineWealth, false));
+            return List.of(makeGlobalPoint(
+                    "09:15",
+                    baselineWealth,
+                    baselineWealth,
+                    false,
+                    portfolioEntries(qtyByPortfolio, nameByPortfolio, liveValueByPortfolio, todayGlByPortfolio, Map.of())));
         }
 
         // ── STEP 3: Fetch 1D OHLC candles for all symbols in batch ─────────────
@@ -237,7 +251,12 @@ public class PortfolioIntradayService {
         List<IntradayDataPoint> result = new ArrayList<>();
 
         // Anchor: 9:15 AM = yesterday's close
-        result.add(makeGlobalPoint("09:15", baselineWealth, baselineWealth, false));
+        result.add(makeGlobalPoint(
+                "09:15",
+                baselineWealth,
+                baselineWealth,
+                false,
+                portfolioEntries(qtyByPortfolio, nameByPortfolio, liveValueByPortfolio, todayGlByPortfolio, Map.of())));
 
         LocalTime latestCandle = priceSeries.isEmpty() ? null : priceSeries.lastKey();
 
@@ -258,7 +277,12 @@ public class PortfolioIntradayService {
 
             double totalWealth = equityValue + missingAssetValue;
             boolean isLive = t.equals(latestCandle) && marketOpen;
-            result.add(makeGlobalPoint(t.toString(), totalWealth, baselineWealth, isLive));
+            result.add(makeGlobalPoint(
+                    t.toString(),
+                    totalWealth,
+                    baselineWealth,
+                    isLive,
+                    portfolioEntries(qtyByPortfolio, nameByPortfolio, liveValueByPortfolio, todayGlByPortfolio, lastKnown)));
         }
 
         // ── STEP 6: LTP Stitching (Industry Standard real-time update) ───
@@ -266,7 +290,12 @@ public class PortfolioIntradayService {
             LocalTime nowTime = nowIST.withSecond(0).withNano(0);
             if (latestCandle == null || nowTime.isAfter(latestCandle)) {
                 double totalWealth = liveEquityWealth + missingAssetValue;
-                result.add(makeGlobalPoint(nowTime.toString(), totalWealth, baselineWealth, true));
+                result.add(makeGlobalPoint(
+                        nowTime.toString(),
+                        totalWealth,
+                        baselineWealth,
+                        true,
+                        portfolioEntries(qtyByPortfolio, nameByPortfolio, liveValueByPortfolio, todayGlByPortfolio, lastKnown)));
             }
         }
 
@@ -278,13 +307,65 @@ public class PortfolioIntradayService {
         return result;
     }
 
-    private IntradayDataPoint makeGlobalPoint(String ts, double value, double baseline, boolean isLive) {
+    private IntradayDataPoint makeGlobalPoint(
+            String ts,
+            double value,
+            double baseline,
+            boolean isLive) {
+        return makeGlobalPoint(ts, value, baseline, isLive, List.of());
+    }
+
+    private IntradayDataPoint makeGlobalPoint(
+            String ts,
+            double value,
+            double baseline,
+            boolean isLive,
+            List<PortfolioIntradayEntry> portfolios) {
         double change = value - baseline;
         double changePct = baseline > 0 ? (change / baseline) * 100.0 : 0.0;
         return IntradayDataPoint.builder()
                 .timestamp(ts).totalWealth(value)
                 .changeFromOpen(change).changeFromOpenPct(changePct)
                 .isLive(isLive)
+                .portfolios(portfolios == null || portfolios.isEmpty() ? null : portfolios)
                 .build();
+    }
+
+    private List<PortfolioIntradayEntry> portfolioEntries(
+            Map<String, Map<String, Double>> qtyByPortfolio,
+            Map<String, String> nameByPortfolio,
+            Map<String, Double> liveValueByPortfolio,
+            Map<String, Double> todayGlByPortfolio,
+            Map<String, Double> lastKnown) {
+        if (qtyByPortfolio.isEmpty()) {
+            return List.of();
+        }
+        List<PortfolioIntradayEntry> entries = new ArrayList<>();
+        for (Map.Entry<String, Map<String, Double>> book : qtyByPortfolio.entrySet()) {
+            String id = book.getKey();
+            double value = book.getValue().entrySet().stream()
+                    .mapToDouble(sq -> {
+                        Double price = lastKnown.get(sq.getKey());
+                        return (price != null ? price : 0.0) * sq.getValue();
+                    })
+                    .sum();
+            double live = liveValueByPortfolio.getOrDefault(id, 0.0);
+            double todayGl = todayGlByPortfolio.getOrDefault(id, 0.0);
+            double baseline = live - todayGl;
+            if (value <= 0) {
+                value = baseline;
+            }
+            double change = value - baseline;
+            double changePct = baseline > 0 ? (change / baseline) * 100.0 : 0.0;
+            String name = nameByPortfolio.get(id);
+            entries.add(PortfolioIntradayEntry.builder()
+                    .portfolioId(id)
+                    .portfolioName(name != null && !name.isBlank() ? name : "Portfolio")
+                    .value(value)
+                    .changeFromOpen(change)
+                    .changeFromOpenPct(changePct)
+                    .build());
+        }
+        return entries;
     }
 }
