@@ -34,6 +34,7 @@ public class BasketOpportunity {
     private Double budgetVariance;          // actualInvestmentCost - investmentAmount (+ve = over budget)
     private Double residualCash;            // Leftover unallocated cash after integer lot allocations
     private Double budgetUtilization;       // Percentage of budget deployed (actualInvestmentCost / investmentAmount * 100)
+    private Double heldCoverageValue;       // Total value of basket covered by user holdings
 
     private List<BasketItem> composition;
     private List<BasketItem> buyList; // Stocks to buy to reach 100% or bridge gap

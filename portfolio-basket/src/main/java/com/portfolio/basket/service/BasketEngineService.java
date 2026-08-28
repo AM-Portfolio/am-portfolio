@@ -43,6 +43,19 @@ public class BasketEngineService {
                     item.setStatus(ItemStatus.EXCLUDED);
                     item.setBuyQuantity(0.0);
                     item.setRebalancedWeight(0.0);
+                } else {
+                    // If it was excluded but is no longer excluded, restore its status
+                    if (item.getStatus() == ItemStatus.EXCLUDED) {
+                        if (item.getUserHoldingSymbol() != null && !item.getUserHoldingSymbol().equals(item.getStockSymbol())) {
+                            item.setStatus(ItemStatus.SUBSTITUTE);
+                        } else if (item.getHeldQuantity() != null && item.getHeldQuantity() > 0) {
+                            item.setStatus(ItemStatus.HELD);
+                        } else {
+                            item.setStatus(ItemStatus.MISSING);
+                        }
+                    }
+                    // Reset to base ETF weight before normalizing
+                    item.setRebalancedWeight(item.getEtfWeight() != null ? item.getEtfWeight() : 0.0);
                 }
             }
 
@@ -54,7 +67,7 @@ public class BasketEngineService {
                     .mapToDouble(i -> i.getEtfWeight() != null ? i.getEtfWeight() : 0.0)
                     .sum();
 
-            if (totalActiveWeight > 0 && totalActiveWeight < 99.99) {
+            if (totalActiveWeight > 0) {
                 double multiplier = 100.0 / totalActiveWeight;
                 for (BasketItem item : activeItems) {
                     item.setRebalancedWeight(BasketUtils.round(
@@ -141,6 +154,11 @@ public class BasketEngineService {
             final double maxResidualBudget = remainingCash;
             List<BasketItem> candidates = opportunity.getComposition().stream()
                     .filter(i -> !excluded.contains(i.getStockSymbol()))
+                    .filter(i -> {
+                        double held = i.getHeldQuantity() != null ? i.getHeldQuantity() : 0.0;
+                        double target = i.getTargetQuantity() != null ? i.getTargetQuantity() : 0.0;
+                        return (held < target) || i.getStatus() == ItemStatus.MISSING;
+                    })
                     .filter(i -> i.getLastPrice() != null && i.getLastPrice() > 0 && i.getLastPrice() <= maxResidualBudget)
                     .sorted((a, b) -> {
                         double wa = a.getRebalancedWeight() != null ? a.getRebalancedWeight() : (a.getEtfWeight() != null ? a.getEtfWeight() : 0.0);
@@ -203,6 +221,16 @@ public class BasketEngineService {
                 .mapToDouble(i -> i.getReplicaWeight() != null ? i.getReplicaWeight() : 0.0).sum();
         opportunity.setHeldMatchScore(BasketUtils.round(heldScore));
         opportunity.setSubstituteMatchScore(BasketUtils.round(subScore));
+
+        double heldCoverageValue = opportunity.getComposition().stream()
+                .filter(i -> i.getStatus() == ItemStatus.HELD || i.getStatus() == ItemStatus.SUBSTITUTE)
+                .mapToDouble(i -> {
+                    double held = i.getHeldQuantity() != null ? i.getHeldQuantity() : 0.0;
+                    double target = i.getTargetQuantity() != null ? i.getTargetQuantity() : 0.0;
+                    double price = i.getLastPrice() != null ? i.getLastPrice() : 0.0;
+                    return Math.min(held, target) * price;
+                }).sum();
+        opportunity.setHeldCoverageValue(BasketUtils.round(heldCoverageValue));
 
         // Compute and return actual investment cost, variance, residual cash, and budget utilization
         double actualCost = opportunity.getComposition().stream()
