@@ -253,6 +253,7 @@ public class BasketPortfolioCreateService {
                 .investmentAmount(request.getInvestmentAmount())
                 .createdFromBasketAt(LocalDateTime.now())
                 .gapMissingCount(request.getRemainingMissingCount())
+                .replicaScore(request.getReplicaScore())
                 .equityModels(basketEquities)
                 .currency(source.getCurrency() != null ? source.getCurrency() : "INR")
                 .totalValue(basketEquities.stream()
@@ -366,6 +367,7 @@ public class BasketPortfolioCreateService {
         private Integer remainingMissingCount;
         private List<String> remainingMissing;
         private Double investmentAmount;
+        private Double replicaScore;
         private List<CreateBasketLine> lines;
     }
 

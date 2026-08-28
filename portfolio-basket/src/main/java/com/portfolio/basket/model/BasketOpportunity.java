@@ -32,6 +32,8 @@ public class BasketOpportunity {
     private List<String> excludedSymbols;   // symbols the user excluded — echoed back so UI stays in sync
     private Double actualInvestmentCost;    // sum of floor(qty) * lastPrice across all BUY items
     private Double budgetVariance;          // actualInvestmentCost - investmentAmount (+ve = over budget)
+    private Double residualCash;            // Leftover unallocated cash after integer lot allocations
+    private Double budgetUtilization;       // Percentage of budget deployed (actualInvestmentCost / investmentAmount * 100)
 
     private List<BasketItem> composition;
     private List<BasketItem> buyList; // Stocks to buy to reach 100% or bridge gap
@@ -57,6 +59,7 @@ public class BasketOpportunity {
         private String marketCapCategory;
         private Double marketCapValue;
         private Double targetQuantity; // Ideal total quantity user should hold for this stock in this basket
+        private Boolean underfunded; // True if unit price > stock's target allocation budget
 
         private Double heldQuantity; // Actual quantity held in main portfolio
         private Double heldAveragePrice; // Average buying price of held stock

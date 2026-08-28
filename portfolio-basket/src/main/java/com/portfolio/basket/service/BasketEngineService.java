@@ -63,31 +63,6 @@ public class BasketEngineService {
             }
         }
 
-        // 0b. Compute effective investment amount adjusting for held items
-        //     (This logic previously lived in the Flutter UI — moved here for correct architecture)
-        double effectiveInvestmentAmount = investmentAmount;
-        if (includeHeld && opportunity.getComposition() != null) {
-            double totalHeldCurrentValue = opportunity.getComposition().stream()
-                    .filter(i -> !excluded.contains(i.getStockSymbol()))
-                    .filter(i -> i.getStatus() == ItemStatus.HELD || i.getStatus() == ItemStatus.SUBSTITUTE)
-                    .mapToDouble(i -> {
-                        double qty = i.getHeldQuantity() != null ? i.getHeldQuantity() : 0;
-                        double price = i.getLastPrice() != null ? i.getLastPrice() : 0;
-                        return qty * price;
-                    }).sum();
-            double totalHeldCost = opportunity.getComposition().stream()
-                    .filter(i -> !excluded.contains(i.getStockSymbol()))
-                    .filter(i -> i.getStatus() == ItemStatus.HELD || i.getStatus() == ItemStatus.SUBSTITUTE)
-                    .mapToDouble(i -> {
-                        double qty = i.getHeldQuantity() != null ? i.getHeldQuantity() : 0;
-                        double avgPrice = i.getHeldAveragePrice() != null ? i.getHeldAveragePrice() : 0;
-                        return qty * avgPrice;
-                    }).sum();
-            if (investmentAmount > totalHeldCost) {
-                effectiveInvestmentAmount = totalHeldCurrentValue + (investmentAmount - totalHeldCost);
-            }
-        }
-
         // 1. Gather all unique symbols from the composition (held + missing)
         Set<String> symbols = new HashSet<>();
         if (opportunity.getComposition() != null) {
@@ -109,14 +84,12 @@ public class BasketEngineService {
         log.info("Fetching live prices for {} symbols to calculate quantities", symbols.size());
         Map<String, Double> prices = marketDataService.getCurrentPrices(new ArrayList<>(symbols));
 
-        // === PASS 1: Calculate base targets and collect surplus ===
-        Map<String, Double> surplusPoolMap = new HashMap<>();
-        Map<String, Double> gapAmounts = new HashMap<>();
-        double totalSurplus = 0.0;
-
+        // === PASS 1: Calculate base target quantities and initial buy requirements ===
         for (BasketItem item : opportunity.getComposition()) {
             if (excluded.contains(item.getStockSymbol())) {
                 item.setBuyQuantity(0.0);
+                item.setTargetQuantity(0.0);
+                item.setUnderfunded(false);
                 continue;
             }
 
@@ -124,128 +97,122 @@ public class BasketEngineService {
             if ((price == null || price <= 0) && item.getUserHoldingSymbol() != null) {
                 price = prices.get(item.getUserHoldingSymbol());
             }
-            if (price == null || price <= 0) price = item.getLastPrice();
             if (price == null || price <= 0) {
-                log.warn("Price not found for {}, defaulting quantity to 0", item.getStockSymbol());
+                price = item.getLastPrice(); // Fallback to DB
+            }
+            if (price == null || price <= 0) {
+                log.warn("Price totally missing for {}, defaulting quantity to 0", item.getStockSymbol());
                 item.setBuyQuantity(0.0);
+                item.setTargetQuantity(0.0);
+                item.setUnderfunded(false);
                 continue;
             }
             item.setLastPrice(price);
 
             double weight = item.getRebalancedWeight() != null ? item.getRebalancedWeight() : (item.getEtfWeight() != null ? item.getEtfWeight() : 0.0);
-            double baseTargetAmount = (weight / 100.0) * effectiveInvestmentAmount;
-            int baseTargetQty = (int) Math.floor(baseTargetAmount / price);
+            double targetAmount = (weight / 100.0) * investmentAmount;
+            int targetQty = (int) Math.floor(targetAmount / price);
+            item.setTargetQuantity((double) targetQty);
 
-            if (!includeHeld && item.getStatus() == ItemStatus.HELD) {
-                item.setBuyQuantity(0.0);
-                item.setTargetQuantity((double) baseTargetQty);
-                continue;
-            }
-
+            double heldQty = item.getHeldQuantity() != null ? item.getHeldQuantity() : 0.0;
             if (includeHeld && (item.getStatus() == ItemStatus.HELD || item.getStatus() == ItemStatus.SUBSTITUTE)) {
-                double heldValue = (item.getHeldQuantity() != null ? item.getHeldQuantity() : 0) * price;
-                if (heldValue >= baseTargetAmount) {
-                    // Over-held -> surplus generated
-                    totalSurplus += (heldValue - baseTargetAmount);
-                    item.setBuyQuantity(0.0);
-                    item.setTargetQuantity((double) baseTargetQty);
-                } else {
-                    // Under-held -> needs purchases
-                    double gap = baseTargetAmount - heldValue;
-                    gapAmounts.put(item.getStockSymbol(), gap);
-                    item.setTargetQuantity((double) baseTargetQty);
-                }
+                int buyQty = Math.max(0, targetQty - (int) heldQty);
+                item.setBuyQuantity((double) buyQty);
             } else if (item.getStatus() == ItemStatus.MISSING) {
-                // Missing -> needs full purchases
-                gapAmounts.put(item.getStockSymbol(), baseTargetAmount);
-                item.setTargetQuantity((double) baseTargetQty);
+                item.setBuyQuantity((double) targetQty);
+            } else {
+                item.setBuyQuantity(0.0);
             }
+
+            // Mark underfunded if stock is missing and unit price exceeds target allocation budget
+            boolean isUnderfunded = item.getStatus() == ItemStatus.MISSING && targetQty == 0 && price > targetAmount;
+            item.setUnderfunded(isUnderfunded);
         }
 
-        // === PASS 2: Redistribute surplus proportionally to needy items ===
-        if (totalSurplus > 0 && !gapAmounts.isEmpty()) {
-            double totalGapWeight = gapAmounts.keySet().stream()
-                    .mapToDouble(sym -> {
-                        BasketItem it = opportunity.getComposition().stream().filter(i -> i.getStockSymbol().equals(sym)).findFirst().orElse(null);
-                        if (it == null) return 0.0;
-                        Double w = it.getRebalancedWeight() != null ? it.getRebalancedWeight() : it.getEtfWeight();
-                        return w != null ? w : 0.0;
-                    }).sum();
+        // === PASS 2: Greedy residual cash redistribution ===
+        double currentCashSpent = opportunity.getComposition().stream()
+                .filter(i -> !excluded.contains(i.getStockSymbol()))
+                .filter(i -> i.getBuyQuantity() != null && i.getBuyQuantity() > 0 && i.getLastPrice() != null)
+                .mapToDouble(i -> i.getBuyQuantity() * i.getLastPrice())
+                .sum();
+        double remainingCash = investmentAmount - currentCashSpent;
 
-            if (totalGapWeight > 0) {
-                for (BasketItem item : opportunity.getComposition()) {
-                    if (!gapAmounts.containsKey(item.getStockSymbol())) continue;
-                    Double itemWeight = item.getRebalancedWeight() != null ? item.getRebalancedWeight() : item.getEtfWeight();
-                    double bonus = totalSurplus * ((itemWeight != null ? itemWeight : 0.0) / totalGapWeight);
-                    double finalGapAmount = gapAmounts.get(item.getStockSymbol()) + bonus;
-                    Double price = item.getLastPrice();
-                    int buyQty = (int) Math.floor(finalGapAmount / price);
-                    item.setBuyQuantity((double) buyQty);
-                    
-                    // Update targetQuantity to reflect surplus-adjusted target
-                    double heldQty = item.getHeldQuantity() != null ? item.getHeldQuantity() : 0.0;
-                    item.setTargetQuantity(heldQty + buyQty);
-                }
-            }
-        } else {
-            // No surplus or no gaps -> just set buy quantity based on base target amount gap
-            for (BasketItem item : opportunity.getComposition()) {
-                if (gapAmounts.containsKey(item.getStockSymbol())) {
-                    Double price = item.getLastPrice();
-                    int buyQty = (int) Math.floor(gapAmounts.get(item.getStockSymbol()) / price);
-                    item.setBuyQuantity((double) buyQty);
+        if (remainingCash > 0) {
+            final double maxResidualBudget = remainingCash;
+            List<BasketItem> candidates = opportunity.getComposition().stream()
+                    .filter(i -> !excluded.contains(i.getStockSymbol()))
+                    .filter(i -> i.getLastPrice() != null && i.getLastPrice() > 0 && i.getLastPrice() <= maxResidualBudget)
+                    .sorted((a, b) -> {
+                        double wa = a.getRebalancedWeight() != null ? a.getRebalancedWeight() : (a.getEtfWeight() != null ? a.getEtfWeight() : 0.0);
+                        double wb = b.getRebalancedWeight() != null ? b.getRebalancedWeight() : (b.getEtfWeight() != null ? b.getEtfWeight() : 0.0);
+                        return Double.compare(wb, wa);
+                    })
+                    .collect(Collectors.toList());
+
+            for (BasketItem item : candidates) {
+                double p = item.getLastPrice();
+                if (remainingCash >= p) {
+                    double currentBuy = item.getBuyQuantity() != null ? item.getBuyQuantity() : 0.0;
+                    item.setBuyQuantity(currentBuy + 1.0);
+                    if (item.getTargetQuantity() != null) {
+                        item.setTargetQuantity(item.getTargetQuantity() + 1.0);
+                    }
+                    remainingCash -= p;
                 }
             }
         }
-        // Recalculate basket-level scores from updated composition (exclude EXCLUDED items from totals)
+        opportunity.setResidualCash(BasketUtils.round(remainingCash));
+
+        // === PASS 3: Recalculate basket-level scores and metadata ===
         if (opportunity.getComposition() != null) {
             int total = (int) opportunity.getComposition().stream()
                     .filter(i -> i.getStatus() != ItemStatus.EXCLUDED)
                     .count();
             int matchCount = 0;
-            double replicaTotal = 0.0;
+            double totalCoveredWeight = 0.0;
+
             for (BasketItem item : opportunity.getComposition()) {
                 if (item.getStatus() == ItemStatus.EXCLUDED) continue;
-                if (item.getStatus() == ItemStatus.HELD || item.getStatus() == ItemStatus.SUBSTITUTE) {
+                double w = item.getRebalancedWeight() != null ? item.getRebalancedWeight() : (item.getEtfWeight() != null ? item.getEtfWeight() : 0.0);
+                double heldQty = item.getHeldQuantity() != null ? item.getHeldQuantity() : 0.0;
+                double buyQty = item.getBuyQuantity() != null ? item.getBuyQuantity() : 0.0;
+
+                if (heldQty > 0 || buyQty > 0) {
                     matchCount++;
-                    // Always count their weight towards replicaScore
-                    double w = item.getRebalancedWeight() != null ? item.getRebalancedWeight() : (item.getEtfWeight() != null ? item.getEtfWeight() : 0.0);
                     item.setReplicaWeight(BasketUtils.round(w));
-                    replicaTotal += item.getReplicaWeight();
-                } else if (item.getBuyQuantity() != null && item.getBuyQuantity() > 0 
-                           && item.getLastPrice() != null) {
-                    // Recalculate replicaWeight based on actual purchased value for missing items
-                    double purchasedValue = item.getBuyQuantity() * item.getLastPrice();
-                    double replicaWeight = investmentAmount > 0 ? (purchasedValue / investmentAmount) * 100.0 : 0.0;
-                    item.setReplicaWeight(BasketUtils.round(replicaWeight));
-                    replicaTotal += item.getReplicaWeight();
+                    totalCoveredWeight += w;
                 } else {
                     item.setReplicaWeight(0.0);
                 }
             }
+
             opportunity.setMatchScore(BasketUtils.round(total == 0 ? 0 : (double) matchCount / total * 100.0));
-            opportunity.setReplicaScore(BasketUtils.round(replicaTotal));
-            opportunity.setReadyToReplicate(replicaTotal >= 90.0);
+            opportunity.setReplicaScore(Math.min(100.0, BasketUtils.round(totalCoveredWeight)));
+            opportunity.setReadyToReplicate(opportunity.getReplicaScore() >= 90.0);
             opportunity.setHeldCount(matchCount);
             opportunity.setMissingCount(total - matchCount);
         }
+
         opportunity.setInvestmentAmount(investmentAmount);
-        
-        double heldScore = opportunity.getComposition().stream().filter(i -> i.getStatus() == ItemStatus.HELD)
+
+        double heldScore = opportunity.getComposition().stream()
+                .filter(i -> i.getStatus() == ItemStatus.HELD)
                 .mapToDouble(i -> i.getReplicaWeight() != null ? i.getReplicaWeight() : 0.0).sum();
-        double subScore = opportunity.getComposition().stream().filter(i -> i.getStatus() == ItemStatus.SUBSTITUTE)
+        double subScore = opportunity.getComposition().stream()
+                .filter(i -> i.getStatus() == ItemStatus.SUBSTITUTE)
                 .mapToDouble(i -> i.getReplicaWeight() != null ? i.getReplicaWeight() : 0.0).sum();
         opportunity.setHeldMatchScore(BasketUtils.round(heldScore));
         opportunity.setSubstituteMatchScore(BasketUtils.round(subScore));
 
-        // Compute and return actual investment cost and budget variance
+        // Compute and return actual investment cost, variance, residual cash, and budget utilization
         double actualCost = opportunity.getComposition().stream()
-                .filter(i -> i.getBuyQuantity() != null && i.getBuyQuantity() > 0
-                        && i.getLastPrice() != null)
+                .filter(i -> i.getBuyQuantity() != null && i.getBuyQuantity() > 0 && i.getLastPrice() != null)
                 .mapToDouble(i -> i.getBuyQuantity() * i.getLastPrice())
                 .sum();
         opportunity.setActualInvestmentCost(BasketUtils.round(actualCost));
         opportunity.setBudgetVariance(BasketUtils.round(actualCost - investmentAmount));
+        opportunity.setResidualCash(BasketUtils.round(Math.max(0, investmentAmount - actualCost)));
+        opportunity.setBudgetUtilization(investmentAmount > 0 ? BasketUtils.round((actualCost / investmentAmount) * 100.0) : 0.0);
         opportunity.setExcludedSymbols(new ArrayList<>(excluded));
 
         return opportunity;
@@ -755,8 +722,8 @@ public class BasketEngineService {
     private BasketOpportunity.Alternative toAlternative(EquityHoldings h, double reqWeight, double availableWeight, Map<String, Double> prices, boolean isSameSector) {
         boolean canFullyCover = availableWeight >= reqWeight;
         String coverageLabel = canFullyCover 
-                ? String.format("Covers %.1f%% gap fully", reqWeight) 
-                : String.format("Covers %.1f%% of %.1f%% gap", availableWeight, reqWeight);
+                ? String.format("Matching %.1f%% gap fully", reqWeight) 
+                : String.format("Matching %.1f%% of %.1f%% gap", availableWeight, reqWeight);
                 
         return BasketOpportunity.Alternative.builder()
                 .symbol(h.getSymbol())

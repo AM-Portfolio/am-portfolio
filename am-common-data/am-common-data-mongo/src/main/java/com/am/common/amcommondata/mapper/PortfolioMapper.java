@@ -58,6 +58,7 @@ public class PortfolioMapper {
                 .etfName(document.getEtfName())
                 .createdFromBasketAt(document.getCreatedFromBasketAt())
                 .gapMissingCount(document.getGapMissingCount())
+                .replicaScore(document.getReplicaScore())
                 .allocations(document.getAllocations() != null
                         ? document.getAllocations().stream().map(this::toAllocationModel).collect(Collectors.toList())
                         : null)
@@ -101,6 +102,7 @@ public class PortfolioMapper {
                 .etfName(model.getEtfName())
                 .createdFromBasketAt(model.getCreatedFromBasketAt())
                 .gapMissingCount(model.getGapMissingCount())
+                .replicaScore(model.getReplicaScore())
                 .allocations(model.getAllocations() != null
                         ? model.getAllocations().stream().map(this::toAllocationDocument).collect(Collectors.toList())
                         : null)

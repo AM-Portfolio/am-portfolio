@@ -84,6 +84,9 @@ public class PortfolioDocument extends BaseDocument {
     @Field("gapMissingCount")
     private Integer gapMissingCount;
 
+    @Field("replicaScore")
+    private Double replicaScore;
+
     /** Quantity reserved from this BROKER book into baskets. */
     @Field("allocations")
     private List<HoldingAllocationDocument> allocations;

@@ -40,6 +40,7 @@ public class PortfolioModelV1 {
     private String etfName;
     private LocalDateTime createdFromBasketAt;
     private Integer gapMissingCount;
+    private Double replicaScore;
     private List<HoldingAllocation> allocations;
     private Integer assetCount;
     private LocalDateTime createdAt;

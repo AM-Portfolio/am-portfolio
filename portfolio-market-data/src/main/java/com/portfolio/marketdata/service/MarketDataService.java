@@ -417,7 +417,7 @@ public class MarketDataService {
     public Map<String, Double> getCurrentPrices(List<String> symbols) {
         Map<String, MarketData> data = getMarketData(symbols);
         return data.entrySet().stream()
-                .filter(e -> e.getValue() != null && e.getValue().getLastPrice() != null)
+                .filter(e -> e.getValue() != null && e.getValue().getLastPrice() != null && e.getValue().getLastPrice() > 0)
                 .collect(Collectors.toMap(
                         Map.Entry::getKey,
                         entry -> entry.getValue().getLastPrice()));
