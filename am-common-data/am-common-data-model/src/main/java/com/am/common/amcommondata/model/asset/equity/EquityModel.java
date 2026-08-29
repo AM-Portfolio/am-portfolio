@@ -28,6 +28,7 @@ public class EquityModel extends AssetModel {
     private Integer sharesOutstanding;
     private String stockType; // Common, Preferred
     private String countryOfIncorporation;
+    /** Broker holding status from Mongo `holdingStatus` (ACTIVE / CLOSED / …). */
     private String status;
     private Double gapQuantity;
 }

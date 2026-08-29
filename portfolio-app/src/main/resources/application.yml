@@ -142,6 +142,9 @@ app:
     internal-secret: ${INTERNAL_SECRET_KEY:internal-service-super-secret-key-32chars-minimum-change-in-prod}
     secret: ${JWT_SECRET:internal-service-super-secret-key-32chars-minimum-change-in-prod}
     algorithm: ${JWT_ALGORITHM:HS256}
+    # Laptop only: APP_JWT_VERIFY=false skips signature check so a prod token still works locally.
+    # Pods leave this unset (true). User id still comes from the Bearer payload.
+    verify: ${APP_JWT_VERIFY:true}
   kafka:
     enabled: ${KAFKA_ENABLED:true}
     trigger-calculation:
@@ -283,7 +286,8 @@ management:
     kafka:
       enabled: ${KAFKA_ENABLED:true}
   tracing:
-    enabled: true
+    # Cluster default on. Laptop: TRACING_ENABLED=false when no collector on :4318.
+    enabled: ${TRACING_ENABLED:true}
     sampling:
       # 1.0 while validating flows in Tempo; dial helm back to 0.1 when comfortable
       probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
@@ -293,7 +297,7 @@ management:
   # OTLP exporter — sends spans to the shared otel-collector over HTTP (port 4318).
   # In k8s the collector is in the "monitoring" namespace (same as am-core-services-otel).
   # In Docker compose:  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
-  # Local dev: no override needed.
+  # Local: leave endpoint; set TRACING_ENABLED=false so this exporter is not used.
   otlp:
     tracing:
       endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
