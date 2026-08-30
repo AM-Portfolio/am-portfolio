@@ -1,4 +1,5 @@
 package com.portfolio.api;
+import io.swagger.v3.oas.annotations.Operation;
 
 import java.util.Arrays;
 import java.util.List;
@@ -37,6 +38,7 @@ public class MarketDataDebugController {
      * @return Raw API response
      */
     @Hidden
+    @Operation(summary="Get /market-data/raw", description="Endpoint to getRawMarketData", operationId="getRawMarketData")
     @GetMapping("/market-data/raw")
     public ResponseEntity<String> getRawMarketData(
             @RequestParam(defaultValue = "NIFTY 50,INFY,TCS") String symbols) {
@@ -65,6 +67,7 @@ public class MarketDataDebugController {
      * @return Raw API response
      */
     @Hidden
+    @Operation(summary="Get /nse-indices/raw", description="Endpoint to getRawNseIndicesData", operationId="getRawNseIndicesData")
     @GetMapping("/nse-indices/raw")
     public ResponseEntity<String> getRawNseIndicesData(
             @RequestParam(defaultValue = "NIFTY50") String indexSymbol) {

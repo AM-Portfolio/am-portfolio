@@ -145,8 +145,7 @@ public class BasketEngineService {
             if (includeHeld && (item.getStatus() == ItemStatus.HELD || item.getStatus() == ItemStatus.SUBSTITUTE)) {
                 double heldValue = (item.getHeldQuantity() != null ? item.getHeldQuantity() : 0) * price;
                 if (heldValue >= baseTargetAmount) {
-                    // Over-held -> surplus generated
-                    totalSurplus += (heldValue - baseTargetAmount);
+                    // Over-held -> no purchases needed
                     item.setBuyQuantity(0.0);
                     item.setTargetQuantity((double) baseTargetQty);
                 } else {
@@ -540,12 +539,12 @@ public class BasketEngineService {
         double minimumInvestmentAmount = Math.max(maxPrice, 50000.0);
 
         double matchScore = (total == 0) ? 0 : (double) matchCount / total * 100.0;
-        double replicaScore = replicaScoreTotal;
-
         double heldScore = composition.stream().filter(i -> i.getStatus() == ItemStatus.HELD)
-                .mapToDouble(i -> i.getReplicaWeight() != null ? i.getReplicaWeight() : 0.0).sum();
+                .mapToDouble(i -> i.getEtfWeight() != null ? i.getEtfWeight() : 0.0).sum();
         double subScore = composition.stream().filter(i -> i.getStatus() == ItemStatus.SUBSTITUTE)
-                .mapToDouble(i -> i.getReplicaWeight() != null ? i.getReplicaWeight() : 0.0).sum();
+                .mapToDouble(i -> i.getEtfWeight() != null ? i.getEtfWeight() : 0.0).sum();
+
+        double replicaScore = heldScore + subScore;
 
         return BasketOpportunity.builder()
                 .etfIsin(etfIsin)
@@ -678,11 +677,18 @@ public class BasketEngineService {
                 double available = totalWeight - consumed;
 
                 if (available >= 0.01) {
+                    double matchWeight = Math.min(req.getWeight(), available);
+
                     item.setStatus(ItemStatus.SUBSTITUTE);
                     item.setUserHoldingSymbol(substitute.getSymbol());
                     item.setUserHoldingIsin(substitute.getIsin());
                     item.setUserWeight(BasketUtils.round(totalWeight));
-                    item.setHeldQuantity(substitute.getAvailableQuantity());
+                    
+                    double physicalWeight = substitute.getWeightInPortfolio() != null ? substitute.getWeightInPortfolio() : 0.0;
+                    double physicalQty = substitute.getQuantity() != null ? substitute.getQuantity() : 0.0;
+                    double allocatedQty = (physicalWeight > 0) ? (matchWeight / physicalWeight) * physicalQty : (substitute.getAvailableQuantity() != null ? substitute.getAvailableQuantity() : 0.0);
+                    item.setHeldQuantity(BasketUtils.round(allocatedQty));
+                    
                     item.setHeldAveragePrice(substitute.getAverageBuyingPrice());
                     item.setReason("Substitute: " + req.getSector()
                             + (req.getMarketCapCategory() != null ? "/" + req.getMarketCapCategory() : ""));
@@ -697,7 +703,6 @@ public class BasketEngineService {
                         item.setLastPrice(subPrice);
                     }
 
-                    double matchWeight = Math.min(req.getWeight(), available);
                     item.setReplicaWeight(BasketUtils.round(matchWeight));
 
                     consumedWeightByIsin.merge(substitute.getIsin(), matchWeight, Double::sum);
@@ -758,11 +763,15 @@ public class BasketEngineService {
                 ? String.format("Covers %.1f%% gap fully", reqWeight) 
                 : String.format("Covers %.1f%% of %.1f%% gap", availableWeight, reqWeight);
                 
+        double physicalWeight = h.getWeightInPortfolio() != null ? h.getWeightInPortfolio() : 0.0;
+        double physicalQty = h.getQuantity() != null ? h.getQuantity() : 0.0;
+        double remainingQty = (physicalWeight > 0) ? (availableWeight / physicalWeight) * physicalQty : (h.getAvailableQuantity() != null ? h.getAvailableQuantity() : 0.0);
+
         return BasketOpportunity.Alternative.builder()
                 .symbol(h.getSymbol())
                 .isin(h.getIsin())
                 .userWeight(BasketUtils.round(availableWeight))
-                .quantity(h.getAvailableQuantity())
+                .quantity(BasketUtils.round(remainingQty))
                 .lastPrice(prices != null && h.getSymbol() != null ? prices.get(h.getSymbol()) : null)
                 .sector(h.getSector())
                 .isSameSector(isSameSector)
@@ -869,7 +878,12 @@ public class BasketEngineService {
             item.setUserHoldingSymbol(sub.getSymbol());
             item.setUserHoldingIsin(sub.getIsin());
             item.setUserWeight(BasketUtils.round(getAvailableWeight(sub)));
-            item.setHeldQuantity(sub.getAvailableQuantity());
+            
+            double physicalWeight = sub.getWeightInPortfolio() != null ? sub.getWeightInPortfolio() : 0.0;
+            double physicalQty = sub.getQuantity() != null ? sub.getQuantity() : 0.0;
+            double allocatedQty = (physicalWeight > 0) ? (matchWeight / physicalWeight) * physicalQty : (sub.getAvailableQuantity() != null ? sub.getAvailableQuantity() : 0.0);
+            item.setHeldQuantity(BasketUtils.round(allocatedQty));
+            
             item.setHeldAveragePrice(sub.getAverageBuyingPrice());
             item.setReason("User swap: " + sub.getSymbol());
             item.setReplicaWeight(BasketUtils.round(matchWeight));

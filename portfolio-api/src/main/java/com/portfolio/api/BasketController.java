@@ -19,6 +19,7 @@ import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import io.swagger.v3.oas.annotations.Operation;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
@@ -39,17 +40,20 @@ public class BasketController {
     private final AllocationLedgerService allocationLedgerService;
     private final com.portfolio.marketdata.service.MarketDataService marketDataService;
 
+    @Operation(summary="Get /catalog", description="Endpoint to endpoint", operationId="endpoint")
     @GetMapping("/catalog")
     public com.portfolio.basket.model.BasketCatalogResponse getCatalog() {
         return basketCatalogService.getCatalog();
     }
 
+    @Operation(summary="Put /catalog", description="Endpoint to endpoint", operationId="endpoint")
     @PutMapping("/catalog")
     public com.portfolio.basket.model.BasketCatalogResponse upsertCatalog(
             @RequestBody com.portfolio.model.basket.cache.CachedBasketCatalog body) {
         return basketCatalogService.upsertCatalog(body);
     }
 
+    @Operation(summary="Get /my", description="Endpoint to getMyBaskets", operationId="getMyBaskets")
     @GetMapping("/my")
     public List<BasketSummaryDto> getMyBaskets(@RequestParam String userId, @RequestParam(required = false) String portfolioId) {
         if (userId == null || userId.isBlank()) {
@@ -74,6 +78,7 @@ public class BasketController {
                 .collect(java.util.stream.Collectors.toList());
     }
 
+    @Operation(summary="Post /opportunities", description="Endpoint to getOpportunities", operationId="getOpportunities")
     @PostMapping("/opportunities")
     public List<BasketOpportunity> getOpportunities(@RequestBody OpportunityRequest request) {
         log.info("Received Basket Opportunities Request - User: {}, Portfolio: {}, Query: {}",
@@ -86,6 +91,7 @@ public class BasketController {
         return basketService.findOpportunities(userHoldings, request.getEtfQuery());
     }
 
+    @Operation(summary="Post /exposure", description="Endpoint to endpoint", operationId="endpoint")
     @PostMapping("/exposure")
     public com.portfolio.model.basket.ExposureResponse getExposure(@RequestBody OpportunityRequest request) {
         log.info("DIAGNOSTIC: Entered getExposure - User: {}, Portfolio: {}",
@@ -105,6 +111,7 @@ public class BasketController {
         return response;
     }
 
+    @Operation(summary="Post /allocations", description="Endpoint to endpoint", operationId="endpoint")
     @PostMapping("/allocations")
     public com.portfolio.model.basket.PortfolioAllocationResponse getAllocations(
             @RequestBody OpportunityRequest request) {
@@ -125,6 +132,7 @@ public class BasketController {
         return allocation;
     }
 
+    @Operation(summary="Post /preview", description="Endpoint to getPreview", operationId="getPreview")
     @PostMapping("/preview")
     public BasketOpportunity getPreview(@RequestBody PreviewRequest request) {
         log.info("Received Basket Preview Request - ETF: {}, User: {}, Portfolio: {}",
@@ -145,6 +153,7 @@ public class BasketController {
         }
     }
 
+    @Operation(summary="Post /apply-substitutes", description="Endpoint to applySubstitutes", operationId="applySubstitutes")
     @PostMapping("/apply-substitutes")
     public BasketOpportunity applySubstitutes(@RequestBody ApplySubstitutesRequest request) {
         if (request == null || request.getEtfIsin() == null || request.getEtfIsin().isBlank()) {
@@ -178,12 +187,14 @@ public class BasketController {
         }
     }
 
+    @Operation(summary="Post /create-portfolio", description="Endpoint to endpoint", operationId="endpoint")
     @PostMapping("/create-portfolio")
     public BasketPortfolioCreateService.CreateBasketResponse createPortfolio(
             @RequestBody BasketPortfolioCreateService.CreateBasketRequest request) {
         return basketPortfolioCreateService.create(request);
     }
 
+    @Operation(summary="Get /{basketId}", description="Endpoint to getBasketDetail", operationId="getBasketDetail")
     @GetMapping("/{basketId}")
     public BasketDetailDto getBasketDetail(@PathVariable String basketId, @RequestParam String userId) {
         if (userId == null || userId.isBlank()) {
@@ -284,6 +295,7 @@ public class BasketController {
     }
 
 
+    @Operation(summary="Delete /{basketId}", description="Endpoint to deleteBasket", operationId="deleteBasket")
     @DeleteMapping("/{basketId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteBasket(@PathVariable String basketId, @RequestParam(required = false) String userId) {
@@ -320,6 +332,7 @@ public class BasketController {
         }
     }
 
+    @Operation(summary="Post /calculate-quantities", description="Endpoint to calculateQuantities", operationId="calculateQuantities")
     @PostMapping("/calculate-quantities")
     public BasketOpportunity calculateQuantities(@RequestBody CalculationRequest request) {
         if (request == null || request.getInvestmentAmount() == null || request.getInvestmentAmount() <= 0) {
