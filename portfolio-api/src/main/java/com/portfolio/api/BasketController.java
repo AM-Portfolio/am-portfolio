@@ -163,10 +163,10 @@ public class BasketController {
                 request.getPortfolioId(), request.getUserHoldings());
         try {
             List<BasketEngineService.SubstituteAssignment> assignments = request.getAssignments() == null
-                    ? List.of()
+                    ? java.util.Collections.emptyList()
                     : request.getAssignments().stream()
                             .map(a -> new BasketEngineService.SubstituteAssignment(
-                                    a.getMissingIsin(), a.getSubstituteIsin()))
+                                    a.getMissingIsin(), a.getSubstituteIsin(), a.getAssignedWeight()))
                             .toList();
             
             BasketOpportunity base;
@@ -431,6 +431,7 @@ public class BasketController {
     public static class AssignmentDto {
         private String missingIsin;
         private String substituteIsin;
+        private Double assignedWeight;
     }
 
     @Data

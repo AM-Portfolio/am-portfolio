@@ -107,8 +107,8 @@ public class BasketEngineServiceTest {
         BasketOpportunity result = basketEngineService.calculateBasketQuantities(10000.0, opportunity, false, null);
 
         List<BasketItem> items = result.getComposition();
-        // AAPL skipped because price not found
-        assertNull(items.get(0).getBuyQuantity());
+        // AAPL skipped because price not found (defaults to 0.0 quantity)
+        assertEquals(0.0, items.get(0).getBuyQuantity());
         // GOOGL should be calculated
         assertEquals(2.0, items.get(1).getBuyQuantity());
     }

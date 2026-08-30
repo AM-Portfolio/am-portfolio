@@ -72,8 +72,8 @@ class BasketEngineExclusiveSubstituteTest {
         long subCount = opp.getComposition().stream()
                 .filter(i -> i.getStatus() == ItemStatus.SUBSTITUTE)
                 .count();
-        assertEquals(1, subCount, "One holding can cover only one missing row");
-        assertEquals(2, opp.getMissingCount());
+        assertEquals(3, subCount, "INFY with 30% weight should cover all 3 missing rows of 10% each");
+        assertEquals(0, opp.getMissingCount());
     }
 
     @Test
@@ -95,11 +95,15 @@ class BasketEngineExclusiveSubstituteTest {
 
         BasketOpportunity opp = engine.getPreview("ETF1", List.of(infy, wipro));
 
-        assertThrows(IllegalStateException.class, () ->
-                engine.applySubstitutesOnExisting(opp, List.of(infy, wipro), List.of(
-                        new BasketEngineService.SubstituteAssignment("INE001", "INEINFY"),
-                        new BasketEngineService.SubstituteAssignment("INE002", "INEINFY")
-                )));
+        BasketOpportunity updated = engine.applySubstitutesOnExisting(opp, List.of(infy, wipro), List.of(
+                new BasketEngineService.SubstituteAssignment("INE001", "INEINFY", null),
+                new BasketEngineService.SubstituteAssignment("INE002", "INEINFY", null)
+        ));
+        
+        long subCount = updated.getComposition().stream()
+                .filter(i -> i.getStatus() == ItemStatus.SUBSTITUTE && "INEINFY".equals(i.getUserHoldingIsin()))
+                .count();
+        assertEquals(2, subCount, "Should split INFY to cover both HCLTECH and TECHM");
     }
 
   @Test
@@ -138,8 +142,9 @@ class BasketEngineExclusiveSubstituteTest {
         assertFalse(missing.getAlternatives() == null || missing.getAlternatives().isEmpty(),
                 "Unknown ETF sector should still expose unused holdings as swap alternatives");
         assertTrue(missing.getAlternatives().stream().anyMatch(a -> "INEHDFC".equals(a.getIsin())));
-        assertTrue(missing.getAlternatives().stream().noneMatch(a -> "INEINFY".equals(a.getIsin())),
-                "Held ISINs must not appear in alternatives");
+        List<BasketOpportunity.Alternative> alts = missing.getAlternatives();
+        boolean found = alts.stream().anyMatch(a -> a.getIsin().equals("INEINFY"));
+        assertTrue(found, "Held ISINs with remaining weight CAN appear in alternatives for splitting");
     }
 
     @Test
