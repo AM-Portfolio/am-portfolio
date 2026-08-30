@@ -32,6 +32,7 @@ public class PortfolioModelV1 {
     private String notes;
     private List<EquityModel> equityModels;
     private Double totalValue;
+    private Double investmentAmount;
     private BrokerType brokerType;
     private PortfolioKind portfolioKind;
     private String sourcePortfolioId;

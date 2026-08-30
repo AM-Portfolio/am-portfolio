@@ -48,8 +48,17 @@ public class HoldingSectorEnricher {
             for (EquityHoldings h : needsEnrichment) {
                 BatchSearchResponse.SecurityMatch match = marketCapData.get(h.getSymbol());
                 if (match != null) {
-                    if (SectorNormalizer.isUnknown(h.getSector()) && match.getSector() != null) {
-                        h.setSector(match.getSector());
+                    if (SectorNormalizer.isUnknown(h.getSector())) {
+                        String bestSector = match.getSector();
+                        if (bestSector != null && "Financial Services".equalsIgnoreCase(bestSector.trim())
+                                && match.getIndustry() != null && !match.getIndustry().isBlank()) {
+                            bestSector = match.getIndustry();
+                        } else if (bestSector == null && match.getIndustry() != null) {
+                            bestSector = match.getIndustry();
+                        }
+                        if (bestSector != null) {
+                            h.setSector(bestSector);
+                        }
                     }
                     if (h.getMarketCapCategory() == null && match.getMarketCapType() != null) {
                         h.setMarketCapCategory(match.getMarketCapType());

@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
+import org.springframework.scheduling.annotation.Async;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -31,6 +32,7 @@ public class EnrichedEtfService {
 
     private final EtfApiClient etfApiClient;
     private final BasketEtfRedisService basketEtfRedisService;
+    private final BasketCatalogService basketCatalogService;
 
     @Value("${basket.cache.etf-ttl-seconds:86400}")
     private long etfL1TtlSeconds;
@@ -39,9 +41,11 @@ public class EnrichedEtfService {
 
     public EnrichedEtfService(
             EtfApiClient etfApiClient,
-            @Nullable BasketEtfRedisService basketEtfRedisService) {
+            @Nullable BasketEtfRedisService basketEtfRedisService,
+            BasketCatalogService basketCatalogService) {
         this.etfApiClient = etfApiClient;
         this.basketEtfRedisService = basketEtfRedisService;
+        this.basketCatalogService = basketCatalogService;
     }
 
     @PostConstruct
@@ -50,6 +54,20 @@ public class EnrichedEtfService {
                 .expireAfterWrite(Math.max(60, etfL1TtlSeconds), TimeUnit.SECONDS)
                 .maximumSize(500)
                 .build();
+    }
+
+    @Async
+    @PostConstruct
+    public void warmCache() {
+        try {
+            List<String> topEtfs = basketCatalogService.getTopEtfSymbols();
+            if (topEtfs != null && !topEtfs.isEmpty()) {
+                log.info("Pre-warming ETF cache for {} ETFs", topEtfs.size());
+                getEnrichedEtfsBatch(topEtfs);
+            }
+        } catch (Exception e) {
+            log.warn("ETF cache warm-up failed (non-fatal): {}", e.getMessage());
+        }
     }
 
     public EtfData getEnrichedEtf(String symbolOrIsin) {

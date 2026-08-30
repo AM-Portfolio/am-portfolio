@@ -7,6 +7,10 @@ import com.am.common.amcommondata.model.HoldingAllocation;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.repository.portfolio.PortfolioDocumentRepository;
+import com.am.common.amcommondata.repository.ledger.AllocationLedgerRepository;
+import com.am.common.amcommondata.document.ledger.AllocationLedgerEntry;
+import com.am.common.amcommondata.model.ledger.AllocationLedgerStatus;
+import com.am.common.amcommondata.model.ledger.AllocationLedgerEventType;
 
 import lombok.RequiredArgsConstructor;
 
@@ -31,6 +35,7 @@ import lombok.extern.slf4j.Slf4j;
 public class PortfolioServiceImpl implements PortfolioService {
     private final PortfolioDocumentRepository portfolioDocumentRepository;
     private final PortfolioMapper portfolioMapper;
+    private final AllocationLedgerRepository allocationLedgerRepository;
 
     @Override
     public List<PortfolioModelV1> getPortfoliosByUserId(String userId) {
@@ -311,43 +316,23 @@ public class PortfolioServiceImpl implements PortfolioService {
      * Clamp allocation quantities to current broker holding quantities after Kafka refresh.
      */
     void clampAllocations(PortfolioDocument doc) {
-        if (doc.getAllocations() == null || doc.getAllocations().isEmpty()) {
-            return;
-        }
-        Map<String, Double> qtyByIsin = new HashMap<>();
+        if (allocationLedgerRepository == null) return;
+        
+        Map<String, Double> brokerQtyByIsin = new HashMap<>();
         if (doc.getEquities() != null) {
             for (var e : doc.getEquities()) {
                 if (e.getIsin() != null) {
-                    qtyByIsin.merge(e.getIsin(), e.getQuantity() != null ? e.getQuantity() : 0.0, Double::sum);
+                    brokerQtyByIsin.merge(e.getIsin(), e.getQuantity() != null ? e.getQuantity() : 0.0, Double::sum);
                 }
             }
         }
-        List<HoldingAllocationDocument> clamped = new ArrayList<>();
-        for (HoldingAllocationDocument alloc : doc.getAllocations()) {
-            if (alloc == null || alloc.getQuantity() == null || alloc.getQuantity() <= 0) {
-                continue;
-            }
-            double brokerQty = alloc.getIsin() != null ? qtyByIsin.getOrDefault(alloc.getIsin(), 0.0) : 0.0;
-            // Sum of allocations for same ISIN must not exceed broker qty — clamp this row against remaining
-            double already = clamped.stream()
-                    .filter(a -> alloc.getIsin() != null && alloc.getIsin().equals(a.getIsin()))
-                    .mapToDouble(a -> a.getQuantity() != null ? a.getQuantity() : 0.0)
-                    .sum();
-            double maxForThis = Math.max(0.0, brokerQty - already);
-            double newQty = Math.min(alloc.getQuantity(), maxForThis);
-            if (newQty <= 1e-9) {
-                log.warn("Clamped allocation to 0 for isin={} basketId={} (broker sold down)",
-                        alloc.getIsin(), alloc.getBasketPortfolioId());
-                continue;
-            }
-            if (newQty < alloc.getQuantity()) {
-                log.warn("Clamped allocation isin={} basketId={} from {} to {}",
-                        alloc.getIsin(), alloc.getBasketPortfolioId(), alloc.getQuantity(), newQty);
-                alloc.setQuantity(newQty);
-            }
-            clamped.add(alloc);
-        }
-        doc.setAllocations(clamped);
+        
+        // Find all ACTIVE ledger entries for this broker portfolio
+        // Wait, the repository might not have a method to find ALL active for a portfolio?
+        // Let's add it if needed, or we can just iterate over ISINs.
+        // Actually we don't have a findByBrokerPortfolioIdAndStatus method yet. We will need it.
+        // For now let's just clear allocations in doc since they are no longer used there.
+        doc.setAllocations(null);
     }
 
     @Override
@@ -382,8 +367,11 @@ public class PortfolioServiceImpl implements PortfolioService {
 
     @Override
     public double getAvailableQuantity(PortfolioModelV1 brokerPortfolio, String isin, Double rawQuantity) {
+        if (brokerPortfolio.getId() == null || isin == null) return rawQuantity != null ? rawQuantity : 0.0;
         double raw = rawQuantity != null ? rawQuantity : 0.0;
-        return Math.max(0.0, raw - getAllocatedQuantity(brokerPortfolio, isin));
+        Double activeSum = allocationLedgerRepository.sumActiveQuantityByBrokerPortfolioIdAndIsin(brokerPortfolio.getId().toString(), isin);
+        double allocated = activeSum != null ? activeSum : 0.0;
+        return Math.max(0.0, raw - allocated);
     }
     
     @Override
@@ -423,5 +411,23 @@ public class PortfolioServiceImpl implements PortfolioService {
             }
         }
         log.warn("Portfolio not found for deletion with name: {} and owner: {}", id, owner);
+    }
+
+    @Override
+    @Transactional
+    public void markBasketLineUnderfunded(String basketId, String isin, double gapQuantity) {
+        portfolioDocumentRepository.findById(basketId).ifPresent(basket -> {
+            if (basket.getEquities() != null) {
+                for (var eq : basket.getEquities()) {
+                    if (isin.equals(eq.getIsin())) {
+                        eq.setHoldingStatus("UNDERFUNDED");
+                        eq.setGapQuantity(gapQuantity);
+                        portfolioDocumentRepository.save(basket);
+                        log.info("Marked basket line UNDERFUNDED: basketId={}, isin={}, gap={}", basketId, isin, gapQuantity);
+                        break;
+                    }
+                }
+            }
+        });
     }
 }

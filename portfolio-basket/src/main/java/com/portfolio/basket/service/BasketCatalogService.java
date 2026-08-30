@@ -162,6 +162,18 @@ public class BasketCatalogService {
         }
     }
 
+    public List<String> getTopEtfSymbols() {
+        CachedBasketCatalog catalog = resolveCached();
+        if (catalog == null || catalog.getThemes() == null) return List.of();
+        
+        return catalog.getThemes().stream()
+                .filter(t -> t != null && t.isFeatured() && t.getQuery() != null && !t.getQuery().isBlank())
+                .flatMap(t -> java.util.Arrays.stream(t.getQuery().split(",")))
+                .map(String::trim)
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
     private BasketCatalogResponse toResponse(CachedBasketCatalog cached) {
         List<BasketCatalogResponse.Theme> themes = cached.getThemes().stream()
                 .filter(t -> t.getId() != null && t.getQuery() != null && !t.getQuery().isBlank())

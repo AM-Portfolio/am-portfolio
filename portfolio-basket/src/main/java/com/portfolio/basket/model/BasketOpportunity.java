@@ -17,12 +17,21 @@ public class BasketOpportunity {
     private String etfName;
     private double matchScore;
     private double replicaScore; // Score based on weight alignment
-    private boolean readyToReplicate; // true if replicaScore >= 70
+    private boolean readyToReplicate; // true if replicaScore >= 90
     private int totalItems;
     private int heldCount;
     private int missingCount;
     private Double totalPortfolioValue;
+    private Double remainingPortfolioValue;
     private Double investmentAmount;
+    private Double minimumInvestmentAmount;
+    private Double heldMatchScore;
+    private Double substituteMatchScore;
+
+    // --- New fields returned from calculateBasketQuantities ---
+    private List<String> excludedSymbols;   // symbols the user excluded — echoed back so UI stays in sync
+    private Double actualInvestmentCost;    // sum of floor(qty) * lastPrice across all BUY items
+    private Double budgetVariance;          // actualInvestmentCost - investmentAmount (+ve = over budget)
 
     private List<BasketItem> composition;
     private List<BasketItem> buyList; // Stocks to buy to reach 100% or bridge gap
@@ -42,10 +51,12 @@ public class BasketOpportunity {
         private Double etfWeight; // Target Weight in ETF
         private Double userWeight; // Actual Weight in User Portfolio
         private Double replicaWeight; // Weight contributed to the replica
+        private Double rebalancedWeight; // Pro-rata redistributed weight
         private Double buyQuantity; // Suggested if MISSING
         private Double lastPrice; // Current market price
         private String marketCapCategory;
         private Double marketCapValue;
+        private Double targetQuantity; // Ideal total quantity user should hold for this stock in this basket
 
         private Double heldQuantity; // Actual quantity held in main portfolio
         private Double heldAveragePrice; // Average buying price of held stock
@@ -64,9 +75,13 @@ public class BasketOpportunity {
         private Double userWeight;
         private Double quantity;
         private Double lastPrice;
+        private String sector;
+        private boolean isSameSector;
+        private boolean canFullyCover;
+        private String coverageLabel;
     }
 
     public enum ItemStatus {
-        HELD, MISSING, SUBSTITUTE
+        HELD, MISSING, SUBSTITUTE, EXCLUDED
     }
 }

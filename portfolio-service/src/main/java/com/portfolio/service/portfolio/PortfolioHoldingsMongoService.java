@@ -43,20 +43,15 @@ public class PortfolioHoldingsMongoService {
         }
     }
 
-    public Optional<PortfolioHoldings> getLatestFreshHoldings(String userId, TimeInterval interval, String portfolioId) {
+    public Optional<PortfolioHoldings> getLatestHoldings(String userId, TimeInterval interval, String portfolioId) {
         String key = buildKey(userId, interval, portfolioId);
         try {
             Query query = new Query(Criteria.where("_id").is(key));
             MongoCacheDoc doc = mongoTemplate.findOne(query, MongoCacheDoc.class, "portfolio_holdings_cache");
             
             if (doc != null && doc.getHoldings() != null) {
-                LocalDateTime cutoff = LocalDateTime.now().minusMinutes(freshnessMinutes);
-                if (doc.getUpdatedAt() != null && doc.getUpdatedAt().isAfter(cutoff)) {
-                    log.debug("Found fresh portfolio holdings in Mongo cache for key: {}", key);
-                    return Optional.of(doc.getHoldings());
-                } else {
-                    log.debug("Found stale portfolio holdings in Mongo cache for key: {}", key);
-                }
+                log.debug("Found portfolio holdings in Mongo cache for key: {}", key);
+                return Optional.of(doc.getHoldings());
             }
         } catch (Exception e) {
             log.error("Error retrieving portfolio holdings from Mongo cache for key {}: {}", key, e.getMessage());

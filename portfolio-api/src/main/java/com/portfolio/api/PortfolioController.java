@@ -128,7 +128,8 @@ public class PortfolioController {
                 .map(portfolio -> new PortfolioBasicInfo(
                         portfolio.getId() != null ? portfolio.getId().toString() : null,
                         portfolio.getName(),
-                        portfolio.getPortfolioKind() != null ? portfolio.getPortfolioKind().name() : "BROKER",
+                        portfolio.getPortfolioKind() != null ? portfolio.getPortfolioKind().name() : 
+                        (portfolio.getSourcePortfolioId() != null && !portfolio.getSourcePortfolioId().isBlank() ? "BASKET" : "BROKER"),
                         portfolio.getGapMissingCount()))
                 .collect(java.util.stream.Collectors.toList());
 

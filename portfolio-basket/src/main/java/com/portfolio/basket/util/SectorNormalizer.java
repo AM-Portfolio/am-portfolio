@@ -10,6 +10,7 @@ import java.util.Map;
 public final class SectorNormalizer {
 
     private static final Map<String, String> ALIASES = new HashMap<>();
+    private static final Map<String, String> FINE_ALIASES = new HashMap<>();
 
     static {
         ALIASES.put("it", "information technology");
@@ -68,6 +69,17 @@ public final class SectorNormalizer {
         ALIASES.put("realty", "real estate");
         ALIASES.put("media & entertainment", "communication");
         ALIASES.put("unknown", "unknown");
+
+        FINE_ALIASES.put("private sector bank",             "bank:private");
+        FINE_ALIASES.put("private bank",                    "bank:private");
+        FINE_ALIASES.put("public sector bank",              "bank:public");
+        FINE_ALIASES.put("public bank",                     "bank:public");
+        FINE_ALIASES.put("nbfc",                            "bank:nbfc");
+        FINE_ALIASES.put("non banking financial companies", "bank:nbfc");
+        FINE_ALIASES.put("insurance",                       "financial:insurance");
+        FINE_ALIASES.put("capital markets",                 "financial:capital_markets");
+        FINE_ALIASES.put("bank",                            "bank:unknown"); // safe: avoids PSU→private misclass
+        FINE_ALIASES.put("banks",                           "bank:unknown");
     }
 
     private SectorNormalizer() {
@@ -79,6 +91,14 @@ public final class SectorNormalizer {
         }
         String key = sector.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
         return ALIASES.getOrDefault(key, key);
+    }
+
+    public static String normalizeFine(String sector) {
+        if (sector == null || sector.isBlank()) {
+            return "unknown";
+        }
+        String key = sector.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+        return FINE_ALIASES.getOrDefault(key, normalize(sector));
     }
 
     public static boolean isUnknown(String sector) {

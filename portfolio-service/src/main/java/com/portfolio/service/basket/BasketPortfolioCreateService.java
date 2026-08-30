@@ -9,6 +9,7 @@ import com.portfolio.basket.util.BasketNaming;
 import com.portfolio.redis.service.ActiveMarketSymbolPublisher;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
 import com.portfolio.redis.service.PortfolioSummaryRedisService;
+import com.portfolio.service.basket.AllocationLedgerService.AllocationLine;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +43,8 @@ public class BasketPortfolioCreateService {
 
     @Autowired(required = false)
     private ActiveMarketSymbolPublisher activeMarketSymbolPublisher;
+
+    private final AllocationLedgerService allocationLedgerService;
 
     /** In-process idempotency (Redis optional). */
     private final ConcurrentHashMap<String, CreateBasketResponse> idempotencyCache = new ConcurrentHashMap<>();
@@ -89,16 +92,87 @@ public class BasketPortfolioCreateService {
         }
 
         List<EquityModel> basketEquities = new ArrayList<>();
-        List<HoldingAllocation> newAllocations = source.getAllocations() != null
-                ? new ArrayList<>(source.getAllocations())
-                : new ArrayList<>();
+        List<HoldingAllocation> newAllocations = new ArrayList<>();
         List<MovedLine> moved = new ArrayList<>();
+        List<AllocationLine> ledgerLines = new ArrayList<>();
 
         for (CreateBasketLine line : request.getLines()) {
-            if (line.getStatus() != null && "MISSING".equalsIgnoreCase(line.getStatus())) {
-                throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
-                        "Cannot allocate MISSING line: " + line.getHoldingSymbol());
+            String status = line.getStatus();
+
+            // PATH 1: MISSING — persist to basket, no ledger entry
+            if ("MISSING".equalsIgnoreCase(status)) {
+                if (line.getQuantity() == null || line.getQuantity() <= 0) continue;
+                basketEquities.add(EquityModel.builder()
+                        .symbol(line.getHoldingSymbol())
+                        .isin(line.getHoldingIsin() != null ? line.getHoldingIsin() : line.getEtfIsin())
+                        .quantity(line.getQuantity())
+                        .avgBuyingPrice(line.getAverageBuyingPrice() != null ? line.getAverageBuyingPrice() : 0.0)
+                        .status("MISSING")
+                        .build());
+                continue; // NO ledger entry
             }
+
+            // PATH 2: HELD or SUBSTITUTE — use heldQuantity, earmark from source portfolio
+            if ("HELD".equalsIgnoreCase(status) || "SUBSTITUTE".equalsIgnoreCase(status)) {
+                double heldQty = line.getHeldQuantity() != null ? line.getHeldQuantity() : 0.0;
+                if (heldQty <= 0) continue;
+                
+                EquityModel sourceEq = equityByIsin.get(line.getHoldingIsin());
+                if (sourceEq == null) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "Holding not on source: " + line.getHoldingIsin());
+                }
+                
+                double raw = sourceEq.getQuantity() != null ? sourceEq.getQuantity() : 0.0;
+                double dbAllocated = allocationLedgerService.sumActiveQuantityByBrokerPortfolioIdAndIsin(source.getId().toString(), line.getHoldingIsin());
+                double inFlightAllocated = ledgerLines.stream()
+                        .filter(a -> line.getHoldingIsin().equals(a.getIsin()))
+                        .mapToDouble(a -> a.getQuantity() != null ? a.getQuantity() : 0)
+                        .sum();
+                double alreadyAllocated = dbAllocated + inFlightAllocated;
+                double available = Math.max(0.0, raw - alreadyAllocated);
+                double allocQty = Math.min(heldQty, available);
+                if (allocQty <= 0) continue;
+
+                double avg = line.getAverageBuyingPrice() != null
+                        ? line.getAverageBuyingPrice()
+                        : (sourceEq.getAvgBuyingPrice() != null ? sourceEq.getAvgBuyingPrice() : 0.0);
+
+                EquityModel basketEq = EquityModel.builder()
+                        .symbol(line.getHoldingSymbol() != null ? line.getHoldingSymbol() : sourceEq.getSymbol())
+                        .isin(line.getHoldingIsin())
+                        .quantity(allocQty)
+                        .avgBuyingPrice(avg)
+                        .currentPrice(sourceEq.getCurrentPrice())
+                        .sector(sourceEq.getSector())
+                        .companyName(sourceEq.getCompanyName())
+                        .status(status)
+                        .build();
+                basketEquities.add(basketEq);
+
+                newAllocations.add(HoldingAllocation.builder()
+                        .basketPortfolioId("PENDING")
+                        .isin(line.getHoldingIsin())
+                        .symbol(basketEq.getSymbol())
+                        .quantity(allocQty)
+                        .build());
+
+                ledgerLines.add(AllocationLine.builder()
+                        .isin(line.getHoldingIsin())
+                        .symbol(basketEq.getSymbol())
+                        .quantity(allocQty)
+                        .build());
+
+                moved.add(MovedLine.builder()
+                        .isin(line.getHoldingIsin())
+                        .symbol(basketEq.getSymbol())
+                        .quantity(allocQty)
+                        .coversEtfSymbol(line.getEtfSymbol())
+                        .build());
+                continue;
+            }
+
+            // PATH 3: Legacy/null status — existing buy logic (gap-fill)
             if (line.getHoldingIsin() == null) {
                 log.warn("Skipping line {} — holdingIsin is null", line.getHoldingSymbol());
                 continue;
@@ -113,10 +187,12 @@ public class BasketPortfolioCreateService {
                         "Holding not on source: " + line.getHoldingIsin());
             }
             double raw = sourceEq.getQuantity() != null ? sourceEq.getQuantity() : 0.0;
-            double alreadyAllocated = newAllocations.stream()
+            double dbAllocated = allocationLedgerService.sumActiveQuantityByBrokerPortfolioIdAndIsin(source.getId().toString(), line.getHoldingIsin());
+            double inFlightAllocated = ledgerLines.stream()
                     .filter(a -> line.getHoldingIsin().equals(a.getIsin()))
                     .mapToDouble(a -> a.getQuantity() != null ? a.getQuantity() : 0)
                     .sum();
+            double alreadyAllocated = dbAllocated + inFlightAllocated;
             double available = Math.max(0.0, raw - alreadyAllocated);
             double allocatedQty = Math.min(line.getQuantity(), available);
             if (allocatedQty < 1e-6) {
@@ -146,6 +222,12 @@ public class BasketPortfolioCreateService {
                     .quantity(allocatedQty)
                     .build());
 
+            ledgerLines.add(AllocationLine.builder()
+                    .isin(line.getHoldingIsin())
+                    .symbol(basketEq.getSymbol())
+                    .quantity(allocatedQty)
+                    .build());
+
             moved.add(MovedLine.builder()
                     .isin(line.getHoldingIsin())
                     .symbol(basketEq.getSymbol())
@@ -164,9 +246,11 @@ public class BasketPortfolioCreateService {
                 .name(basketName)
                 .brokerType(source.getBrokerType())
                 .portfolioKind(PortfolioKind.BASKET)
+                .status("ACTIVE")
                 .sourcePortfolioId(source.getId().toString())
                 .etfIsin(request.getEtfIsin())
                 .etfName(request.getEtfName())
+                .investmentAmount(request.getInvestmentAmount())
                 .createdFromBasketAt(LocalDateTime.now())
                 .gapMissingCount(request.getRemainingMissingCount())
                 .equityModels(basketEquities)
@@ -184,21 +268,22 @@ public class BasketPortfolioCreateService {
         PortfolioModelV1 savedBasket = portfolioService.createBasketPortfolio(basket);
         String basketId = savedBasket.getId().toString();
 
-        // Finalize allocations with real basket id
-        List<HoldingAllocation> finalized = new ArrayList<>();
-        if (source.getAllocations() != null) {
-            finalized.addAll(source.getAllocations());
+        // Write ledger entries via compensating write pattern (PENDING -> ACTIVE)
+        if (!ledgerLines.isEmpty()) {
+            for (AllocationLine line : ledgerLines) {
+                EquityModel sourceEq = equityByIsin.get(line.getIsin());
+                double rawQty = (sourceEq != null && sourceEq.getQuantity() != null) ? sourceEq.getQuantity() : 0.0;
+                double alreadyActive = allocationLedgerService.sumActiveQuantityByBrokerPortfolioIdAndIsin(
+                        source.getId().toString(), line.getIsin());
+                
+                if (alreadyActive + line.getQuantity() > rawQty) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Over-allocation for ISIN " + line.getIsin() +
+                        ": available=" + (rawQty - alreadyActive) + " requested=" + line.getQuantity());
+                }
+            }
+            allocationLedgerService.reserveAllocations(basketId, source.getId().toString(), ledgerLines);
         }
-        for (MovedLine m : moved) {
-            finalized.add(HoldingAllocation.builder()
-                    .basketPortfolioId(basketId)
-                    .isin(m.getIsin())
-                    .symbol(m.getSymbol())
-                    .quantity(m.getQuantity())
-                    .build());
-        }
-        source.setAllocations(finalized);
-        portfolioService.savePortfolioDocument(source);
 
         evictCaches(request.getUserId(), source.getId().toString(), basketId);
         publishSymbols(basketEquities);
@@ -280,6 +365,7 @@ public class BasketPortfolioCreateService {
         private String idempotencyKey;
         private Integer remainingMissingCount;
         private List<String> remainingMissing;
+        private Double investmentAmount;
         private List<CreateBasketLine> lines;
     }
 
@@ -294,6 +380,7 @@ public class BasketPortfolioCreateService {
         private String holdingIsin;
         private String holdingSymbol;
         private Double quantity;
+        private Double heldQuantity;
         private Double averageBuyingPrice;
     }
 

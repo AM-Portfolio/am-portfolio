@@ -15,6 +15,7 @@ import java.util.Map;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import lombok.extern.slf4j.Slf4j;
+import com.portfolio.basket.exception.EtfNotFoundException;
 
 @ControllerAdvice
 @ConditionalOnProperty(prefix = "am.api.core.exception-handler", name = "enabled", havingValue = "false", matchIfMissing = true)
@@ -35,6 +36,19 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         responseBody.put("status", statusCode.value());
 
         return new ResponseEntity<>(responseBody, headers, statusCode);
+    }
+
+    @ExceptionHandler(EtfNotFoundException.class)
+    public ResponseEntity<Object> handleEtfNotFound(EtfNotFoundException ex, WebRequest request) {
+        log.warn("ETF not found: {}", ex.getMessage());
+        
+        Map<String, Object> responseBody = new LinkedHashMap<>();
+        responseBody.put("timestamp", LocalDateTime.now());
+        responseBody.put("message", ex.getMessage());
+        responseBody.put("errorCode", "ETF_NOT_FOUND");
+        responseBody.put("status", HttpStatus.NOT_FOUND.value());
+
+        return new ResponseEntity<>(responseBody, HttpStatus.NOT_FOUND);
     }
 
     @ExceptionHandler(Exception.class)

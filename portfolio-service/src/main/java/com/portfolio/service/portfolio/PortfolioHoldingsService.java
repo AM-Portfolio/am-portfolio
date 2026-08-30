@@ -20,6 +20,8 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
 
+import com.portfolio.service.basket.AllocationLedgerService;
+
 import io.micrometer.observation.annotation.Observed;
 
 @Service
@@ -35,6 +37,7 @@ public class PortfolioHoldingsService {
     private final PortfolioCalculator portfolioCalculator;
     private final PortfolioHoldingsMongoService portfolioHoldingsMongoService;
     private final java.util.concurrent.Executor taskExecutor;
+    private final AllocationLedgerService allocationLedgerService;
 
 
 
@@ -44,13 +47,15 @@ public class PortfolioHoldingsService {
             @org.springframework.lang.Nullable PortfolioHoldingsRedisService portfolioHoldingsRedisService,
             PortfolioCalculator portfolioCalculator,
             PortfolioHoldingsMongoService portfolioHoldingsMongoService,
-            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
+            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
+            AllocationLedgerService allocationLedgerService) {
         this.portfolioService = portfolioService;
         this.portfolioHoldingsMapper = portfolioHoldingsMapper;
         this.portfolioHoldingsRedisService = portfolioHoldingsRedisService;
         this.portfolioCalculator = portfolioCalculator;
         this.portfolioHoldingsMongoService = portfolioHoldingsMongoService;
         this.taskExecutor = taskExecutor;
+        this.allocationLedgerService = allocationLedgerService;
     }
     
     @org.springframework.beans.factory.annotation.Value("${portfolio.redis.enabled:true}")
@@ -179,6 +184,33 @@ public class PortfolioHoldingsService {
 
         var portfolioHoldings = portfolioHoldingsMapper.toPortfolioHoldingsV1(portfolios);
 
+        if (portfolioHoldings.getEquityHoldings() != null) {
+            // Pre-fetch active allocations for all portfolios to avoid N+1 queries
+            java.util.Map<String, java.util.Map<String, Double>> allocationsByPortfolio = new java.util.HashMap<>();
+            for (PortfolioModelV1 p : portfolios) {
+                if (p.getId() != null) {
+                    allocationsByPortfolio.put(p.getId().toString(), 
+                        allocationLedgerService.getActiveAllocationsMap(p.getId().toString()));
+                }
+            }
+
+            for (EquityHoldings h : portfolioHoldings.getEquityHoldings()) {
+                if (h.getIsin() != null) {
+                    double activeAllocated = 0.0;
+                    for (PortfolioModelV1 p : portfolios) {
+                        if (p.getId() != null) {
+                            java.util.Map<String, Double> map = allocationsByPortfolio.get(p.getId().toString());
+                            if (map != null && map.containsKey(h.getIsin())) {
+                                activeAllocated += map.get(h.getIsin());
+                            }
+                        }
+                    }
+                    double rawQty = h.getQuantity() != null ? h.getQuantity() : 0.0;
+                    h.setAvailableQuantity(Math.max(0.0, rawQty - activeAllocated));
+                }
+            }
+        }
+
         if (enrich) {
             log.info("Enriching stock prices and performance data for {} equity holdings for {}",
                     portfolioHoldings.getEquityHoldings() != null ? portfolioHoldings.getEquityHoldings().size() : 0,
@@ -255,7 +287,7 @@ public class PortfolioHoldingsService {
         }
 
         // Tier 2: Check MongoDB if Redis missed
-        cachedHoldings = portfolioHoldingsMongoService.getLatestFreshHoldings(userId, interval, portfolioId);
+        cachedHoldings = portfolioHoldingsMongoService.getLatestHoldings(userId, interval, portfolioId);
         if (cachedHoldings.isPresent()) {
             List<EquityHoldings> cachedList = cachedHoldings.get().getEquityHoldings();
             boolean hasLivePrices = cachedList != null
@@ -264,17 +296,42 @@ public class PortfolioHoldingsService {
                         .filter(h -> h.getCurrentPrice() != null && h.getCurrentPrice() > 0)
                         .count() >= cachedList.size() * 0.5);
             
-            if (hasLivePrices) {
-                log.info("Serving valid portfolio holdings from MongoDB cache - User: {}", userId);
+            LocalDateTime cutoff = LocalDateTime.now().minusMinutes(15);
+            boolean isStale = cachedHoldings.get().getLastUpdated() == null || cachedHoldings.get().getLastUpdated().isBefore(cutoff);
+
+            if (hasLivePrices && !isStale) {
+                log.info("Serving valid and fresh portfolio holdings from MongoDB cache - User: {}", userId);
                 return cachedHoldings;  // ✅ real data
             }
-            log.warn("MongoDB holdings cache has stale/zero prices for User: {} — rebuilding fresh", userId);
-            try {
-                portfolioHoldingsMongoService.deleteCache(userId, interval, portfolioId);
-            } catch (Exception ex) {
-                log.warn("Failed to delete stale holdings cache: {}", ex.getMessage());
-            }
-            // fall through to rebuild fresh
+            
+            log.warn("MongoDB holdings cache has stale prices or is older than 15 mins for User: {} — triggering async rebuild", userId);
+            
+            // Stale-While-Revalidate: Trigger an async refresh but return the stale data immediately
+            java.util.concurrent.CompletableFuture.runAsync(() -> {
+                try {
+                    log.info("Async cache rebuild started for user: {}", userId);
+                    var portfolios = portfolioService.getPortfoliosByUserId(userId);
+                    if (portfolios != null && !portfolios.isEmpty()) {
+                        if (portfolioId != null) {
+                            portfolios = portfolios.stream()
+                                    .filter(p -> p.getId() != null && p.getId().toString().equals(portfolioId))
+                                    .collect(java.util.stream.Collectors.toList());
+                        } else {
+                            portfolios = portfolios.stream()
+                                    .filter(p -> com.am.common.amcommondata.model.enums.PortfolioKind.isBroker(p.getPortfolioKind()))
+                                    .collect(java.util.stream.Collectors.toList());
+                        }
+                        if (!portfolios.isEmpty()) {
+                            buildPortfolioHoldings(portfolios, userId, portfolioId, interval, true);
+                        }
+                    }
+                } catch (Exception ex) {
+                    log.error("Async rebuild failed for user: {}", userId, ex);
+                }
+            }, taskExecutor);
+            
+            // Return stale data for immediate UI rendering
+            return cachedHoldings;
         }
         
         return Optional.empty();
