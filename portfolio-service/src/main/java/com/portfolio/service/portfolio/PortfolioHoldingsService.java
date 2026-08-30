@@ -185,12 +185,25 @@ public class PortfolioHoldingsService {
         var portfolioHoldings = portfolioHoldingsMapper.toPortfolioHoldingsV1(portfolios);
 
         if (portfolioHoldings.getEquityHoldings() != null) {
+            // Pre-fetch active allocations for all portfolios to avoid N+1 queries
+            java.util.Map<String, java.util.Map<String, Double>> allocationsByPortfolio = new java.util.HashMap<>();
+            for (PortfolioModelV1 p : portfolios) {
+                if (p.getId() != null) {
+                    allocationsByPortfolio.put(p.getId().toString(), 
+                        allocationLedgerService.getActiveAllocationsMap(p.getId().toString()));
+                }
+            }
+
             for (EquityHoldings h : portfolioHoldings.getEquityHoldings()) {
                 if (h.getIsin() != null) {
                     double activeAllocated = 0.0;
                     for (PortfolioModelV1 p : portfolios) {
-                        activeAllocated += allocationLedgerService.sumActiveQuantityByBrokerPortfolioIdAndIsin(
-                                p.getId().toString(), h.getIsin());
+                        if (p.getId() != null) {
+                            java.util.Map<String, Double> map = allocationsByPortfolio.get(p.getId().toString());
+                            if (map != null && map.containsKey(h.getIsin())) {
+                                activeAllocated += map.get(h.getIsin());
+                            }
+                        }
                     }
                     double rawQty = h.getQuantity() != null ? h.getQuantity() : 0.0;
                     h.setAvailableQuantity(Math.max(0.0, rawQty - activeAllocated));

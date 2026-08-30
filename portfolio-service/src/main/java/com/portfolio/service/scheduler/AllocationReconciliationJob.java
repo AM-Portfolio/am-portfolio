@@ -9,12 +9,19 @@ import com.am.common.amcommondata.repository.portfolio.PortfolioDocumentReposito
 import com.am.common.amcommondata.service.PortfolioService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
+// SAFETY: This job is DISABLED by default. It must be explicitly enabled via config.
+// Set portfolio.reconciliation.enabled=true ONLY after the allocation_ledger has been fully
+// migrated from legacy allocations data. Without migration, this job will mark ALL existing
+// BASKET portfolios as DELETED (since they have no ledger entries).
+@ConditionalOnProperty(name = "portfolio.reconciliation.enabled", havingValue = "true", matchIfMissing = false)
 @Component
 @Slf4j
 @RequiredArgsConstructor
@@ -38,7 +45,15 @@ public class AllocationReconciliationJob {
                 List<AllocationLedgerEntry> active = ledgerRepository.findByBasketIdAndStatus(basket.getId().toString(), AllocationLedgerStatus.ACTIVE);
                 
                 // 1. Orphan check
-                if (basket.getAudit() != null && basket.getAudit().getCreatedAt() != null && basket.getAudit().getCreatedAt().isBefore(cutoff)) {
+                // SAFETY GUARD: Only consider a basket orphaned if it was created AFTER the
+                // allocation_ledger feature was introduced (2026-08-30). Existing baskets
+                // created before this date used the old 'allocations' array, not the ledger.
+                LocalDate ledgerFeatureDate = LocalDate.of(2026, 8, 30);
+                boolean createdAfterLedgerFeature = basket.getAudit() != null
+                        && basket.getAudit().getCreatedAt() != null
+                        && basket.getAudit().getCreatedAt().toLocalDate().isAfter(ledgerFeatureDate);
+
+                if (createdAfterLedgerFeature && basket.getAudit().getCreatedAt().isBefore(cutoff)) {
                     if (pending.isEmpty() && active.isEmpty()) {
                         log.warn("Found orphaned basket document without ledger entries: {}. Marking DELETED.", basket.getId());
                         basket.setPortfolioKind(PortfolioKind.DELETED);

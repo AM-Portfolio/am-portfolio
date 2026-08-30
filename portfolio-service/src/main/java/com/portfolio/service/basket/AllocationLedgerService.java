@@ -90,6 +90,21 @@ public class AllocationLedgerService {
         return sum != null ? sum : 0.0;
     }
 
+    public java.util.Map<String, Double> getActiveAllocationsMap(String brokerPortfolioId) {
+        List<com.am.common.amcommondata.document.ledger.AllocationLedgerSumResult> results = 
+            ledgerRepository.sumActiveQuantitiesByBrokerPortfolioId(brokerPortfolioId);
+            
+        java.util.Map<String, Double> map = new java.util.HashMap<>();
+        if (results != null) {
+            for (var result : results) {
+                if (result.getId() != null && result.getTotalQuantity() != null) {
+                    map.put(result.getId(), result.getTotalQuantity());
+                }
+            }
+        }
+        return map;
+    }
+
     public List<AllocationLedgerEntry> getActiveAllocations(String basketId) {
         return ledgerRepository.findByBasketIdAndStatus(basketId, AllocationLedgerStatus.ACTIVE);
     }
