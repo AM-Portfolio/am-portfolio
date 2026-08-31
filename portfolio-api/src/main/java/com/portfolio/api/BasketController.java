@@ -356,6 +356,12 @@ public class BasketController {
                 request.getInvestmentAmount(), opportunity, includeHeld, excludedSymbols);
     }
 
+    @Operation(summary="Post /calculate-quantities/final-preview", description="Endpoint to calculate quantities for final preview", operationId="calculateQuantitiesFinalPreview")
+    @PostMapping("/calculate-quantities/final-preview")
+    public BasketOpportunity calculateQuantitiesFinalPreview(@RequestBody CalculationRequest request) {
+        return calculateQuantities(request);
+    }
+
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class CalculationRequest {

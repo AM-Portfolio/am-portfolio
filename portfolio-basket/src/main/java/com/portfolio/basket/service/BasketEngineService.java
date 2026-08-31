@@ -54,7 +54,7 @@ public class BasketEngineService {
                     .mapToDouble(i -> i.getEtfWeight() != null ? i.getEtfWeight() : 0.0)
                     .sum();
 
-            if (totalActiveWeight > 0 && totalActiveWeight < 99.99) {
+            if (totalActiveWeight > 0 && Math.abs(totalActiveWeight - 100.0) > 0.5) {
                 double multiplier = 100.0 / totalActiveWeight;
                 for (BasketItem item : activeItems) {
                     item.setRebalancedWeight(BasketUtils.round(
@@ -137,6 +137,15 @@ public class BasketEngineService {
             }
             item.setLastPrice(price);
 
+            // Short-circuit for manually locked items
+            if (Boolean.TRUE.equals(item.getTargetQuantityLocked()) && item.getTargetQuantity() != null && price > 0) {
+                double lockedQty = item.getTargetQuantity();
+                double heldQty = item.getHeldQuantity() != null ? item.getHeldQuantity() : 0.0;
+                int buyQty = (int) Math.max(0, lockedQty - heldQty);
+                item.setBuyQuantity((double) buyQty);
+                continue;
+            }
+
             double weight = item.getRebalancedWeight() != null ? item.getRebalancedWeight() : (item.getEtfWeight() != null ? item.getEtfWeight() : 0.0);
             double baseTargetAmount = (weight / 100.0) * effectiveInvestmentAmount;
             int baseTargetQty = (int) Math.floor(baseTargetAmount / price);
@@ -210,25 +219,37 @@ public class BasketEngineService {
             double replicaTotal = 0.0;
             for (BasketItem item : opportunity.getComposition()) {
                 if (item.getStatus() == ItemStatus.EXCLUDED) continue;
+                double price = item.getLastPrice() != null ? item.getLastPrice() : 0.0;
+
                 if (item.getStatus() == ItemStatus.HELD || item.getStatus() == ItemStatus.SUBSTITUTE) {
                     matchCount++;
-                    // Always count their weight towards replicaScore
-                    double w = item.getRebalancedWeight() != null ? item.getRebalancedWeight() : (item.getEtfWeight() != null ? item.getEtfWeight() : 0.0);
-                    item.setReplicaWeight(BasketUtils.round(w));
-                    replicaTotal += item.getReplicaWeight();
-                } else if (item.getBuyQuantity() != null && item.getBuyQuantity() > 0 
-                           && item.getLastPrice() != null) {
-                    // Recalculate replicaWeight based on actual purchased value for missing items
-                    double purchasedValue = item.getBuyQuantity() * item.getLastPrice();
-                    double replicaWeight = investmentAmount > 0 ? (purchasedValue / investmentAmount) * 100.0 : 0.0;
-                    item.setReplicaWeight(BasketUtils.round(replicaWeight));
-                    replicaTotal += item.getReplicaWeight();
+                    double heldQty = item.getHeldQuantity() != null ? item.getHeldQuantity() : 0.0;
+                    double targetQty = item.getTargetQuantity() != null ? item.getTargetQuantity() : 0.0;
+                    // Cap held credit at target — don't over-credit
+                    double heldValue = Math.min(heldQty * price, targetQty * price);
+                    // Add what they're buying to fill the gap
+                    double buyValue = item.getBuyQuantity() != null ? item.getBuyQuantity() * price : 0.0;
+                    double totalContribution = Math.min(heldValue + buyValue, targetQty * price);
+                    double itemWeight = investmentAmount > 0
+                        ? BasketUtils.round((totalContribution / investmentAmount) * 100.0) : 0.0;
+                    item.setReplicaWeight(itemWeight);
+                    replicaTotal += itemWeight;
+                } else if (item.getStatus() == ItemStatus.MISSING) {
+                    if (item.getBuyQuantity() != null && item.getBuyQuantity() > 0) {
+                        double buyValue = item.getBuyQuantity() * price;
+                        double itemWeight = investmentAmount > 0
+                            ? BasketUtils.round((buyValue / investmentAmount) * 100.0) : 0.0;
+                        item.setReplicaWeight(itemWeight);
+                        replicaTotal += itemWeight;
+                    } else {
+                        item.setReplicaWeight(0.0);
+                    }
                 } else {
                     item.setReplicaWeight(0.0);
                 }
             }
             opportunity.setMatchScore(BasketUtils.round(total == 0 ? 0 : (double) matchCount / total * 100.0));
-            opportunity.setReplicaScore(BasketUtils.round(replicaTotal));
+            opportunity.setReplicaScore(BasketUtils.round(Math.min(replicaTotal, 100.0)));
             opportunity.setReadyToReplicate(replicaTotal >= 90.0);
             opportunity.setHeldCount(matchCount);
             opportunity.setMissingCount(total - matchCount);
@@ -239,8 +260,13 @@ public class BasketEngineService {
                 .mapToDouble(i -> i.getReplicaWeight() != null ? i.getReplicaWeight() : 0.0).sum();
         double subScore = opportunity.getComposition().stream().filter(i -> i.getStatus() == ItemStatus.SUBSTITUTE)
                 .mapToDouble(i -> i.getReplicaWeight() != null ? i.getReplicaWeight() : 0.0).sum();
+        double missingScore = opportunity.getComposition().stream()
+                .filter(i -> i.getStatus() == ItemStatus.MISSING && !excluded.contains(i.getStockSymbol()))
+                .mapToDouble(i -> i.getRebalancedWeight() != null ? i.getRebalancedWeight() : (i.getEtfWeight() != null ? i.getEtfWeight() : 0.0))
+                .sum();
         opportunity.setHeldMatchScore(BasketUtils.round(heldScore));
         opportunity.setSubstituteMatchScore(BasketUtils.round(subScore));
+        opportunity.setMissingMatchScore(BasketUtils.round(missingScore));
 
         // Compute and return actual investment cost and budget variance
         double actualCost = opportunity.getComposition().stream()
@@ -872,17 +898,30 @@ public class BasketEngineService {
             List<SubstituteAssignment> itemAssignments = assignmentsByMissing.get(originalItem.getIsin());
             if (itemAssignments == null) itemAssignments = assignmentsByMissing.get(originalItem.getStockSymbol());
 
-            if (itemAssignments == null || itemAssignments.isEmpty() || originalItem.getStatus() == ItemStatus.HELD) {
+            if (itemAssignments == null || itemAssignments.isEmpty()) {
                 newComposition.add(originalItem);
                 continue;
             }
 
             double remainingEtfWeight = originalItem.getEtfWeight() != null ? originalItem.getEtfWeight() : 0.0;
             
-            // Free previous auto-sub if flipping from SUBSTITUTE
-            if (originalItem.getStatus() == ItemStatus.SUBSTITUTE && originalItem.getUserHoldingIsin() != null) {
-                consumedWeightByIsin.computeIfPresent(originalItem.getUserHoldingIsin(), 
-                    (k, v) -> Math.max(0, v - (originalItem.getReplicaWeight() != null ? originalItem.getReplicaWeight() : 0.0)));
+            if (originalItem.getStatus() == ItemStatus.HELD) {
+                double existingReplica = originalItem.getReplicaWeight() != null ? originalItem.getReplicaWeight() : 0.0;
+                if (existingReplica > 0 && remainingEtfWeight > existingReplica) {
+                    BasketItem preservedPart = originalItem.toBuilder()
+                            .etfWeight(existingReplica)
+                            .build();
+                    newComposition.add(preservedPart);
+                    remainingEtfWeight -= existingReplica;
+                } else {
+                    newComposition.add(originalItem);
+                    continue;
+                }
+            } else if (originalItem.getStatus() == ItemStatus.SUBSTITUTE) {
+                if (originalItem.getUserHoldingIsin() != null) {
+                    consumedWeightByIsin.computeIfPresent(originalItem.getUserHoldingIsin(), 
+                        (k, v) -> Math.max(0, v - (originalItem.getReplicaWeight() != null ? originalItem.getReplicaWeight() : 0.0)));
+                }
             }
             
             for (SubstituteAssignment assignment : itemAssignments) {
@@ -1000,7 +1039,7 @@ public class BasketEngineService {
         base.setMatchScore(BasketUtils.round(total == 0 ? 0 : (double) matchCount / total * 100.0));
         base.setHeldMatchScore(BasketUtils.round(total == 0 ? 0 : (double) heldCount / total * 100.0));
         base.setSubstituteMatchScore(BasketUtils.round(total == 0 ? 0 : (double) subCount / total * 100.0));
-        base.setReplicaScore(BasketUtils.round(replica));
+        base.setReplicaScore(Math.min(100.0, BasketUtils.round(replica)));
         base.setReadyToReplicate(replica >= 90.0);
         base.setHeldCount(heldCount);
         base.setMissingCount(total - matchCount);

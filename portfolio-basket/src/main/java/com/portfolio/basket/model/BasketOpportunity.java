@@ -27,6 +27,7 @@ public class BasketOpportunity {
     private Double minimumInvestmentAmount;
     private Double heldMatchScore;
     private Double substituteMatchScore;
+    private Double missingMatchScore;
 
     // --- New fields returned from calculateBasketQuantities ---
     private List<String> excludedSymbols;   // symbols the user excluded — echoed back so UI stays in sync
@@ -37,7 +38,7 @@ public class BasketOpportunity {
     private List<BasketItem> buyList; // Stocks to buy to reach 100% or bridge gap
 
     @Data
-    @Builder
+    @Builder(toBuilder = true)
     @AllArgsConstructor
     @NoArgsConstructor
     public static class BasketItem {
@@ -57,6 +58,7 @@ public class BasketOpportunity {
         private String marketCapCategory;
         private Double marketCapValue;
         private Double targetQuantity; // Ideal total quantity user should hold for this stock in this basket
+        private Boolean targetQuantityLocked; // Whether this quantity was manually adjusted and should be excluded from surplus redistributions
 
         private Double heldQuantity; // Actual quantity held in main portfolio
         private Double heldAveragePrice; // Average buying price of held stock
