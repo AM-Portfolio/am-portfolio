@@ -61,6 +61,7 @@ public class BasketController {
         }
         List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
         return portfolios.stream()
+                .filter(p -> p.getPortfolioKind() != PortfolioKind.DELETED)
                 .filter(p -> PortfolioKind.isBasket(p.getPortfolioKind()) || 
                             (p.getPortfolioKind() == null && p.getSourcePortfolioId() != null && !p.getSourcePortfolioId().isBlank()))
                 .filter(p -> portfolioId == null || portfolioId.isBlank() || portfolioId.equals(p.getSourcePortfolioId()))
@@ -163,10 +164,10 @@ public class BasketController {
                 request.getPortfolioId(), request.getUserHoldings());
         try {
             List<BasketEngineService.SubstituteAssignment> assignments = request.getAssignments() == null
-                    ? List.of()
+                    ? java.util.Collections.emptyList()
                     : request.getAssignments().stream()
                             .map(a -> new BasketEngineService.SubstituteAssignment(
-                                    a.getMissingIsin(), a.getSubstituteIsin()))
+                                    a.getMissingIsin(), a.getSubstituteIsin(), a.getAssignedWeight()))
                             .toList();
             
             BasketOpportunity base;
@@ -219,28 +220,41 @@ public class BasketController {
         int underfundedCount = 0;
 
         if (basket.getEquityModels() != null) {
-            List<String> symbols = basket.getEquityModels().stream()
-                .map(com.am.common.amcommondata.model.asset.equity.EquityModel::getSymbol)
-                .filter(s -> s != null && !s.isBlank())
-                .distinct()
-                .toList();
-            java.util.Map<String, Double> prices = marketDataService.getCurrentPrices(new java.util.ArrayList<>(symbols));
+            List<String> symbolsNeedingLive = new java.util.ArrayList<>();
+            for (com.am.common.amcommondata.model.asset.equity.EquityModel eq : basket.getEquityModels()) {
+                if (eq.getSymbol() == null || eq.getSymbol().isBlank()) {
+                    continue;
+                }
+                // Prefer live refresh; still allow stored snapshot as seed when market is slow
+                symbolsNeedingLive.add(eq.getSymbol());
+            }
+            java.util.Map<String, Double> prices = symbolsNeedingLive.isEmpty()
+                    ? java.util.Collections.emptyMap()
+                    : marketDataService.getCurrentPrices(symbolsNeedingLive);
 
             for (com.am.common.amcommondata.model.asset.equity.EquityModel eq : basket.getEquityModels()) {
                 double qty = eq.getQuantity() != null ? eq.getQuantity() : 0.0;
                 double avgPrice = eq.getAvgBuyingPrice() != null ? eq.getAvgBuyingPrice() : 0.0;
-                double displayCurrentPrice = 0.0;
+                double storedPrice = eq.getCurrentPrice() != null && eq.getCurrentPrice() > 0
+                        ? eq.getCurrentPrice() : 0.0;
+
                 Double livePrice = prices.get(eq.getSymbol());
+                double displayCurrentPrice = 0.0;
+                boolean hasMarketPrice = false;
                 if (livePrice != null && livePrice > 0) {
                     displayCurrentPrice = livePrice;
+                    hasMarketPrice = true;
+                } else if (storedPrice > 0) {
+                    displayCurrentPrice = storedPrice;
+                    hasMarketPrice = true;
                 }
 
-                // Fallback for aggregate calculations so missing data doesn't skew total P&L
-                double aggregateCurrentPrice = (displayCurrentPrice > 0) ? displayCurrentPrice : avgPrice;
+                // Valuation: live → stored snapshot → cost basis
+                double valuationPrice = hasMarketPrice ? displayCurrentPrice : avgPrice;
 
                 double invested = qty * avgPrice;
-                double current = qty * aggregateCurrentPrice;
-                double pnl = (displayCurrentPrice > 0) ? (current - invested) : 0.0;
+                double current = qty * valuationPrice;
+                double pnl = hasMarketPrice ? (current - invested) : 0.0;
 
 
                 totalInvested += invested;
@@ -253,6 +267,11 @@ public class BasketController {
                     heldCount++;
                 }
 
+                String companyName = eq.getCompanyName();
+                if (companyName == null || companyName.isBlank()) {
+                    companyName = eq.getName();
+                }
+
                 lines.add(BasketLineDetail.builder()
                         .symbol(eq.getSymbol())
                         .isin(eq.getIsin())
@@ -262,13 +281,23 @@ public class BasketController {
                         .avgPrice(avgPrice)
                         .currentPrice(displayCurrentPrice)
                         .pnl(pnl)
+                        .companyName(companyName)
+                        .etfWeight(eq.getEtfWeight())
+                        .coversEtfSymbol(eq.getCoversEtfSymbol())
                         .build());
             }
         }
         missingCount = basket.getGapMissingCount() != null ? basket.getGapMissingCount() : missingCount;
 
-        double coveragePercent = (heldCount + missingCount) > 0
-                ? ((double) heldCount / (heldCount + missingCount)) * 100.0 : 0.0;
+        double coveragePercent;
+        if (basket.getReplicaScore() != null && basket.getReplicaScore() > 0) {
+            coveragePercent = basket.getReplicaScore();
+        } else if (basket.getCoverageAfterCreation() != null && basket.getCoverageAfterCreation() > 0) {
+            coveragePercent = basket.getCoverageAfterCreation();
+        } else {
+            coveragePercent = (heldCount + missingCount) > 0
+                    ? ((double) heldCount / (heldCount + missingCount)) * 100.0 : 0.0;
+        }
         
         double totalPnl = totalCurrent - totalInvested;
         double pnlPct = totalInvested > 0 ? (totalPnl / totalInvested) * 100.0 : 0.0;
@@ -280,11 +309,14 @@ public class BasketController {
                 .etfIsin(basket.getEtfIsin() != null ? basket.getEtfIsin() : "")
                 .status(basket.getStatus() != null ? basket.getStatus() : "ACTIVE")
                 .createdAt(basket.getCreatedAt())
+                .updatedAt(basket.getUpdatedAt())
                 .investmentAmount(basket.getInvestmentAmount())
                 .totalInvestedValue(totalInvested)
                 .totalCurrentValue(totalCurrent)
                 .totalPnL(totalPnl)
                 .pnlPercent(pnlPct)
+                .replicaScore(basket.getReplicaScore())
+                .coverageAfterCreation(basket.getCoverageAfterCreation())
                 .totalItems(heldCount + missingCount)
                 .heldCount(heldCount)
                 .missingCount(missingCount)
@@ -320,15 +352,12 @@ public class BasketController {
         
         basket.setPortfolioKind(PortfolioKind.DELETED);
         portfolioService.savePortfolioDocument(basket);
-        
+
+        String sourcePortfolioId = basket.getSourcePortfolioId();
         try {
-            // Since HoldingsRedisService isn't exposed directly here but via other services,
-            // we can evict it indirectly or let the next fetch deal with it. The plan mentions evicting caches.
-            // Ideally we'd call holdingsRedisService.evictPortfolioHoldings(userId, basketId);
-            // We can also evict the source portfolio holdings. For now, since BasketPortfolioCreateService has it,
-            // we might not have holdingsRedisService directly in BasketController. Let's just rely on the next fetch or add it if needed.
+            basketPortfolioCreateService.evictBasketCaches(userId, sourcePortfolioId, basketId);
         } catch (Exception e) {
-            log.warn("Cache eviction failed", e);
+            log.warn("Cache eviction failed after basket delete", e);
         }
     }
 
@@ -356,6 +385,12 @@ public class BasketController {
                 request.getInvestmentAmount(), opportunity, includeHeld, excludedSymbols);
     }
 
+    @Operation(summary="Post /calculate-quantities/final-preview", description="Endpoint to calculate quantities for final preview", operationId="calculateQuantitiesFinalPreview")
+    @PostMapping("/calculate-quantities/final-preview")
+    public BasketOpportunity calculateQuantitiesFinalPreview(@RequestBody CalculationRequest request) {
+        return calculateQuantities(request);
+    }
+
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class CalculationRequest {
@@ -375,11 +410,13 @@ public class BasketController {
             log.warn("No userId or manual holdings provided in request.");
             return java.util.Collections.emptyList();
         } else {
+            // enrich=false: skip PortfolioCalculator market round-trip; basket engine
+            // fetches prices once (shared map). Sector/mcap filled by HoldingSectorEnricher gaps only.
             com.portfolio.model.portfolio.PortfolioHoldings portfolioHoldings;
             if (portfolioId != null && !portfolioId.isEmpty()) {
-                portfolioHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, null, true);
+                portfolioHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, null, false);
             } else {
-                portfolioHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, null, true);
+                portfolioHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, null, false);
             }
 
             if (portfolioHoldings != null && portfolioHoldings.getEquityHoldings() != null) {
@@ -389,7 +426,7 @@ public class BasketController {
             }
         }
 
-        // Filter zero-available and enrich sectors
+        // Filter zero-available and enrich sectors only where missing
         holdings = holdings.stream()
                 .filter(h -> h.getAvailableQuantity() == null || h.getAvailableQuantity() > 0)
                 .collect(java.util.stream.Collectors.toList());
@@ -431,6 +468,7 @@ public class BasketController {
     public static class AssignmentDto {
         private String missingIsin;
         private String substituteIsin;
+        private Double assignedWeight;
     }
 
     @Data
@@ -461,11 +499,14 @@ public class BasketController {
         private Double totalPnL;
         private Double pnlPercent;
         private Double coveragePercent;
+        private Double replicaScore;
+        private Double coverageAfterCreation;
         private Integer totalItems;
         private Integer heldCount;
         private Integer missingCount;
         private Integer underfundedCount;
         private java.time.LocalDateTime createdAt;
+        private java.time.LocalDateTime updatedAt;
         private List<BasketLineDetail> lines;
     }
 
@@ -482,5 +523,7 @@ public class BasketController {
         private Double pnl;
         private Double etfWeight;
         private Double rebalancedWeight;
+        private String companyName;
+        private String coversEtfSymbol;
     }
 }

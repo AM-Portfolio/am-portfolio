@@ -58,6 +58,9 @@ public class PortfolioMapper {
                 .etfName(document.getEtfName())
                 .createdFromBasketAt(document.getCreatedFromBasketAt())
                 .gapMissingCount(document.getGapMissingCount())
+                .investmentAmount(document.getInvestmentAmount())
+                .replicaScore(document.getReplicaScore())
+                .coverageAfterCreation(document.getCoverageAfterCreation())
                 .allocations(document.getAllocations() != null
                         ? document.getAllocations().stream().map(this::toAllocationModel).collect(Collectors.toList())
                         : null)
@@ -101,6 +104,9 @@ public class PortfolioMapper {
                 .etfName(model.getEtfName())
                 .createdFromBasketAt(model.getCreatedFromBasketAt())
                 .gapMissingCount(model.getGapMissingCount())
+                .investmentAmount(model.getInvestmentAmount())
+                .replicaScore(model.getReplicaScore())
+                .coverageAfterCreation(model.getCoverageAfterCreation())
                 .allocations(model.getAllocations() != null
                         ? model.getAllocations().stream().map(this::toAllocationDocument).collect(Collectors.toList())
                         : null)
@@ -112,13 +118,13 @@ public class PortfolioMapper {
         //document.setBaseStatus(DocumentStatus.ACTIVE); // Default status for new documents
 
         boolean isNew = (model.getVersion() == null || model.getId() == null);
-        long existingVersion = model.getVersion() != null ? model.getVersion() : 0L;
+        long auditVersion = model.getVersion() != null ? model.getVersion() : 1L;
         document.setAudit(AuditMetadata.builder()
                 .createdAt(model.getCreatedAt() != null ? model.getCreatedAt() : java.time.LocalDateTime.now())
                 .createdBy(model.getCreatedBy())
                 .updatedAt(model.getUpdatedAt())
                 .updatedBy(model.getUpdatedBy())
-                .version(existingVersion)
+                .version(auditVersion)
                 .lastAction(isNew ? "CREATE" : "UPDATE")
                 .build());
 

@@ -31,4 +31,8 @@ public class EquityModel extends AssetModel {
     /** Broker holding status from Mongo `holdingStatus` (ACTIVE / CLOSED / …). */
     private String status;
     private Double gapQuantity;
+    /** Target ETF slot weight (%) when line was added to basket. */
+    private Double etfWeight;
+    /** Original ETF constituent symbol this holding covers (for substitutes). */
+    private String coversEtfSymbol;
 }

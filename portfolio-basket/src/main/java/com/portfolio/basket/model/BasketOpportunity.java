@@ -27,17 +27,30 @@ public class BasketOpportunity {
     private Double minimumInvestmentAmount;
     private Double heldMatchScore;
     private Double substituteMatchScore;
+    private Double missingMatchScore;
 
     // --- New fields returned from calculateBasketQuantities ---
     private List<String> excludedSymbols;   // symbols the user excluded — echoed back so UI stays in sync
     private Double actualInvestmentCost;    // sum of floor(qty) * lastPrice across all BUY items
     private Double budgetVariance;          // actualInvestmentCost - investmentAmount (+ve = over budget)
+    private Double freshOrderAmount;        // alias clarity for UI — fresh buy total
+    private Double heldCoverageValue;       // value of held stock applied to basket targets
+    private Double budgetUtilization;       // (held + fresh) / investmentAmount * 100
+
+    // Basket profile for substitute UX
+    private Boolean sectorialBasket;        // true when ETF is sector-concentrated (>75% one sector)
+    private String dominantSector;          // human-readable dominant sector key
+    private List<String> etfConstituentIsins; // ETF index members for broad-basket search filter
+
+    // apply-substitutes feedback
+    private Integer appliedSubstituteCount;
+    private List<String> substituteWarnings;
 
     private List<BasketItem> composition;
     private List<BasketItem> buyList; // Stocks to buy to reach 100% or bridge gap
 
     @Data
-    @Builder
+    @Builder(toBuilder = true)
     @AllArgsConstructor
     @NoArgsConstructor
     public static class BasketItem {
@@ -57,6 +70,7 @@ public class BasketOpportunity {
         private String marketCapCategory;
         private Double marketCapValue;
         private Double targetQuantity; // Ideal total quantity user should hold for this stock in this basket
+        private Boolean targetQuantityLocked; // Whether this quantity was manually adjusted and should be excluded from surplus redistributions
 
         private Double heldQuantity; // Actual quantity held in main portfolio
         private Double heldAveragePrice; // Average buying price of held stock

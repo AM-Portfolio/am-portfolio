@@ -8,6 +8,7 @@ import com.portfolio.basket.model.EtfData;
 import com.portfolio.basket.model.EtfHolding;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.basket.util.BasketUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -107,8 +108,8 @@ public class BasketEngineServiceTest {
         BasketOpportunity result = basketEngineService.calculateBasketQuantities(10000.0, opportunity, false, null);
 
         List<BasketItem> items = result.getComposition();
-        // AAPL skipped because price not found
-        assertNull(items.get(0).getBuyQuantity());
+        // AAPL skipped because price not found (defaults to 0.0 quantity)
+        assertEquals(0.0, items.get(0).getBuyQuantity());
         // GOOGL should be calculated
         assertEquals(2.0, items.get(1).getBuyQuantity());
     }
@@ -121,15 +122,14 @@ public class BasketEngineServiceTest {
         
         when(marketDataService.getCurrentPrices(anyList())).thenReturn(prices);
 
-        // Total investment 10000. AAPL target 5000. 
-        // Held value = 10 * 150 = 1500.
-        // Required = 5000 - 1500 = 3500.
-        // Qty to buy = 3500 / 150 = 23.33 -> 23.
+        // Total investment 10000. AAPL 50% -> base target 33 units at 150.
+        // Held 10 -> allocate 10 from holdings, no buy orders.
         BasketOpportunity result = basketEngineService.calculateBasketQuantities(10000.0, opportunity, true, null);
 
         List<BasketItem> items = result.getComposition();
-        assertEquals(23.0, items.get(0).getBuyQuantity());
-        assertEquals(2.0, items.get(1).getBuyQuantity()); // GOOGL unaffected
+        assertEquals(0.0, items.get(0).getBuyQuantity());
+        assertEquals(10.0, items.get(0).getTargetQuantity());
+        assertEquals(0.0, items.get(1).getBuyQuantity()); // missing — holdings-only, no buy orders
     }
 
     @Test
@@ -191,6 +191,39 @@ public class BasketEngineServiceTest {
         assertEquals(1, result.size());
         assertEquals("Nifty Bees", result.get(0).getEtfName());
         verify(etfApiClient).searchEtfs("Nifty 50");
+    }
+
+    @Test
+    void resolveBaseTargetQty_minimumOneForSmallAllocations() {
+        assertEquals(1, BasketUtils.resolveBaseTargetQty(500.0, 5000.0, 5.0));
+        assertEquals(33, BasketUtils.resolveBaseTargetQty(5000.0, 150.0, 50.0));
+        assertEquals(0, BasketUtils.resolveBaseTargetQty(0.0, 150.0, 50.0));
+    }
+
+    @Test
+    void testCalculateBasketQuantities_SmallWeightGetsMinimumTargetQty() {
+        List<BasketItem> composition = new ArrayList<>();
+        composition.add(BasketItem.builder()
+                .stockSymbol("OTHER")
+                .etfWeight(99.5)
+                .status(ItemStatus.MISSING)
+                .build());
+        composition.add(BasketItem.builder()
+                .stockSymbol("LTIM")
+                .etfWeight(0.5)
+                .status(ItemStatus.MISSING)
+                .build());
+        opportunity.setComposition(composition);
+        prices.put("OTHER", 100.0);
+        prices.put("LTIM", 5000.0);
+        when(marketDataService.getCurrentPrices(anyList())).thenReturn(prices);
+
+        BasketOpportunity result = basketEngineService.calculateBasketQuantities(100000.0, opportunity, false, null);
+        BasketItem ltim = result.getComposition().stream()
+                .filter(i -> "LTIM".equals(i.getStockSymbol()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(1.0, ltim.getTargetQuantity());
     }
 
     @Test

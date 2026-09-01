@@ -56,4 +56,9 @@ public class AuditMetadata {
     public Long getVersion() {
         return this.version != null ? this.version : 1L;
     }
+
+    /** Raw stored version; null means unset (unlike {@link #getVersion()} read default). */
+    public Long getStoredVersion() {
+        return version;
+    }
 }

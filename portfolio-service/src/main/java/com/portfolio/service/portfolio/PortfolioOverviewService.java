@@ -189,6 +189,9 @@ public class PortfolioOverviewService {
         log.debug("Grouping portfolios by broker for user: {} and {}", userId, context);
 
         for (var portfolio : portfolios) {
+            if (!com.am.common.amcommondata.model.enums.PortfolioKind.isBroker(portfolio.getPortfolioKind())) {
+                continue;
+            }
             log.debug("Processing portfolio: ID={}, Broker={}, Value={}",
                     portfolio.getId(), portfolio.getBrokerType(), portfolio.getTotalValue());
 

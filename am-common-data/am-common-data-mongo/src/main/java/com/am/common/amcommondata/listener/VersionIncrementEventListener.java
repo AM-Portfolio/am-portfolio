@@ -24,10 +24,15 @@ public class VersionIncrementEventListener extends AbstractMongoEventListener<Ba
                 audit.setLastAction("CREATE");
                 document.setAudit(audit);
             } else {
-                // Create path often builds AuditMetadata with createdAt but null version
-                // (Lombok builder skips field defaults) — never unbox null.
-                if (audit.getVersion() == null) {
-                    audit.setVersion(1L);
+                // Use stored version — getVersion() defaults null to 1L for reads and breaks create detection.
+                Long stored = audit.getStoredVersion();
+                boolean isCreate = stored == null
+                        || stored <= 0L
+                        || "CREATE".equalsIgnoreCase(audit.getLastAction());
+                if (isCreate) {
+                    if (stored == null || stored <= 0L) {
+                        audit.setVersion(1L);
+                    }
                     if (audit.getLastAction() == null) {
                         audit.setLastAction("CREATE");
                     }
@@ -35,7 +40,7 @@ public class VersionIncrementEventListener extends AbstractMongoEventListener<Ba
                         audit.setCreatedAt(LocalDateTime.now());
                     }
                 } else if (audit.getCreatedAt() != null) {
-                    audit.setVersion((audit.getVersion() != null ? audit.getVersion() : 1L) + 1);
+                    audit.setVersion(stored + 1);
                     audit.setUpdatedAt(LocalDateTime.now());
                     if (audit.getLastAction() == null) {
                         audit.setLastAction("UPDATE");
