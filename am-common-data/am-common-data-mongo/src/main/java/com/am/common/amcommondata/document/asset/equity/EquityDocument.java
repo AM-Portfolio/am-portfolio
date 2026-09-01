@@ -46,4 +46,6 @@ public class EquityDocument extends AssetDocument {
     private String countryOfIncorporation;
     private String holdingStatus;
     private Double gapQuantity;
+    private Double etfWeight;
+    private String coversEtfSymbol;
 }

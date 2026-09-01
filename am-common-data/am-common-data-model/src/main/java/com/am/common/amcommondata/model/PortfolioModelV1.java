@@ -40,6 +40,9 @@ public class PortfolioModelV1 {
     private String etfName;
     private LocalDateTime createdFromBasketAt;
     private Integer gapMissingCount;
+    /** Replica / ETF alignment score captured at basket creation (0–100). */
+    private Double replicaScore;
+    private Double coverageAfterCreation;
     private List<HoldingAllocation> allocations;
     private Integer assetCount;
     private LocalDateTime createdAt;

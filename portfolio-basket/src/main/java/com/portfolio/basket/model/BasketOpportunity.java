@@ -33,6 +33,18 @@ public class BasketOpportunity {
     private List<String> excludedSymbols;   // symbols the user excluded — echoed back so UI stays in sync
     private Double actualInvestmentCost;    // sum of floor(qty) * lastPrice across all BUY items
     private Double budgetVariance;          // actualInvestmentCost - investmentAmount (+ve = over budget)
+    private Double freshOrderAmount;        // alias clarity for UI — fresh buy total
+    private Double heldCoverageValue;       // value of held stock applied to basket targets
+    private Double budgetUtilization;       // (held + fresh) / investmentAmount * 100
+
+    // Basket profile for substitute UX
+    private Boolean sectorialBasket;        // true when ETF is sector-concentrated (>75% one sector)
+    private String dominantSector;          // human-readable dominant sector key
+    private List<String> etfConstituentIsins; // ETF index members for broad-basket search filter
+
+    // apply-substitutes feedback
+    private Integer appliedSubstituteCount;
+    private List<String> substituteWarnings;
 
     private List<BasketItem> composition;
     private List<BasketItem> buyList; // Stocks to buy to reach 100% or bridge gap

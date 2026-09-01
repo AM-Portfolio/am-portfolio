@@ -36,6 +36,8 @@ public class EquityMapper extends AssetMapper<EquityModel, EquityDocument> {
         model.setCountryOfIncorporation(document.getCountryOfIncorporation());
         model.setStatus(document.getHoldingStatus());
         model.setGapQuantity(document.getGapQuantity());
+        model.setEtfWeight(document.getEtfWeight());
+        model.setCoversEtfSymbol(document.getCoversEtfSymbol());
     }
 
     @Override
@@ -56,5 +58,7 @@ public class EquityMapper extends AssetMapper<EquityModel, EquityDocument> {
         document.setCountryOfIncorporation(model.getCountryOfIncorporation());
         document.setHoldingStatus(model.getStatus());
         document.setGapQuantity(model.getGapQuantity());
+        document.setEtfWeight(model.getEtfWeight());
+        document.setCoversEtfSymbol(model.getCoversEtfSymbol());
     }
 }

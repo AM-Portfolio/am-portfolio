@@ -108,6 +108,8 @@ public class BasketPortfolioCreateService {
                         .quantity(line.getQuantity())
                         .avgBuyingPrice(line.getAverageBuyingPrice() != null ? line.getAverageBuyingPrice() : 0.0)
                         .status("MISSING")
+                        .etfWeight(line.getEtfWeight())
+                        .coversEtfSymbol(line.getEtfSymbol())
                         .build());
                 continue; // NO ledger entry
             }
@@ -143,10 +145,13 @@ public class BasketPortfolioCreateService {
                         .isin(line.getHoldingIsin())
                         .quantity(allocQty)
                         .avgBuyingPrice(avg)
-                        .currentPrice(sourceEq.getCurrentPrice())
+                        .currentPrice(resolveCurrentPrice(sourceEq, line))
                         .sector(sourceEq.getSector())
-                        .companyName(sourceEq.getCompanyName())
+                        .companyName(resolveCompanyName(sourceEq, line))
+                        .name(resolveCompanyName(sourceEq, line))
                         .status(status)
+                        .etfWeight(line.getEtfWeight())
+                        .coversEtfSymbol(line.getEtfSymbol())
                         .build();
                 basketEquities.add(basketEq);
 
@@ -209,9 +214,13 @@ public class BasketPortfolioCreateService {
                     .isin(line.getHoldingIsin())
                     .quantity(allocatedQty)
                     .avgBuyingPrice(avg)
-                    .currentPrice(sourceEq.getCurrentPrice())
+                    .currentPrice(resolveCurrentPrice(sourceEq, line))
                     .sector(sourceEq.getSector())
-                    .companyName(sourceEq.getCompanyName())
+                    .companyName(resolveCompanyName(sourceEq, line))
+                    .name(resolveCompanyName(sourceEq, line))
+                    .status(status)
+                    .etfWeight(line.getEtfWeight())
+                    .coversEtfSymbol(line.getEtfSymbol())
                     .build();
             basketEquities.add(basketEq);
 
@@ -241,6 +250,9 @@ public class BasketPortfolioCreateService {
             basketName = BasketNaming.defaultBasketName(request.getEtfName(), source.getName());
         }
 
+        Double replicaScore = request.getReplicaScore() != null ? request.getReplicaScore()
+                : request.getCoverageAfterCreation();
+
         PortfolioModelV1 basket = PortfolioModelV1.builder()
                 .owner(request.getUserId())
                 .name(basketName)
@@ -251,6 +263,8 @@ public class BasketPortfolioCreateService {
                 .etfIsin(request.getEtfIsin())
                 .etfName(request.getEtfName())
                 .investmentAmount(request.getInvestmentAmount())
+                .replicaScore(replicaScore)
+                .coverageAfterCreation(replicaScore)
                 .createdFromBasketAt(LocalDateTime.now())
                 .gapMissingCount(request.getRemainingMissingCount())
                 .equityModels(basketEquities)
@@ -314,6 +328,11 @@ public class BasketPortfolioCreateService {
         return response;
     }
 
+    /** Evict holdings/summary caches after basket create or delete. */
+    public void evictBasketCaches(String userId, String sourceId, String basketId) {
+        evictCaches(userId, sourceId, basketId);
+    }
+
     private void evictCaches(String userId, String sourceId, String basketId) {
         try {
             if (holdingsRedisService != null) {
@@ -332,6 +351,26 @@ public class BasketPortfolioCreateService {
         } catch (Exception e) {
             log.warn("Summary redis evict fail-open: {}", e.getMessage());
         }
+    }
+
+    private Double resolveCurrentPrice(EquityModel sourceEq, CreateBasketLine line) {
+        if (line.getLastKnownPrice() != null && line.getLastKnownPrice() > 0) {
+            return line.getLastKnownPrice();
+        }
+        if (sourceEq.getCurrentPrice() != null && sourceEq.getCurrentPrice() > 0) {
+            return sourceEq.getCurrentPrice();
+        }
+        return null;
+    }
+
+    private String resolveCompanyName(EquityModel sourceEq, CreateBasketLine line) {
+        if (line.getCompanyName() != null && !line.getCompanyName().isBlank()) {
+            return line.getCompanyName();
+        }
+        if (sourceEq.getCompanyName() != null && !sourceEq.getCompanyName().isBlank()) {
+            return sourceEq.getCompanyName();
+        }
+        return sourceEq.getName();
     }
 
     private void publishSymbols(List<EquityModel> equities) {
@@ -366,6 +405,8 @@ public class BasketPortfolioCreateService {
         private Integer remainingMissingCount;
         private List<String> remainingMissing;
         private Double investmentAmount;
+        private Double replicaScore;
+        private Double coverageAfterCreation;
         private List<CreateBasketLine> lines;
     }
 
@@ -382,6 +423,10 @@ public class BasketPortfolioCreateService {
         private Double quantity;
         private Double heldQuantity;
         private Double averageBuyingPrice;
+        private Double etfWeight;
+        /** Market price snapshot at basket creation (for P&L when live feed is delayed). */
+        private Double lastKnownPrice;
+        private String companyName;
     }
 
     @Data

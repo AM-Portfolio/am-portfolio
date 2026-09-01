@@ -252,6 +252,20 @@ public class MarketDataService {
      * @param symbol The symbol with potential exchange prefix
      * @return The cleaned symbol without the exchange prefix
      */
+    private boolean hasUsablePrice(MarketData md) {
+        if (md == null) {
+            return false;
+        }
+        if (md.getLastPrice() != null && md.getLastPrice() > 0) {
+            return true;
+        }
+        if (md.getPreviousClose() != null && md.getPreviousClose() > 0) {
+            return true;
+        }
+        return md.getOhlc() != null
+                && ((md.getOhlc().getClose() > 0) || (md.getOhlc().getOpen() > 0));
+    }
+
     private String cleanSymbol(String symbol) {
         if (symbol == null || symbol.isEmpty()) {
             return symbol;
@@ -416,11 +430,35 @@ public class MarketDataService {
      */
     public Map<String, Double> getCurrentPrices(List<String> symbols) {
         Map<String, MarketData> data = getMarketData(symbols);
-        return data.entrySet().stream()
-                .filter(e -> e.getValue() != null && e.getValue().getLastPrice() != null)
-                .collect(Collectors.toMap(
-                        Map.Entry::getKey,
-                        entry -> entry.getValue().getLastPrice()));
+        Map<String, Double> prices = new HashMap<>();
+        for (Map.Entry<String, MarketData> e : data.entrySet()) {
+            Double px = resolveUsableLastPrice(e.getValue());
+            if (px != null) {
+                prices.put(e.getKey(), px);
+            }
+        }
+        return prices;
+    }
+
+    private Double resolveUsableLastPrice(MarketData md) {
+        if (md == null) {
+            return null;
+        }
+        if (md.getLastPrice() != null && md.getLastPrice() > 0) {
+            return md.getLastPrice();
+        }
+        if (md.getPreviousClose() != null && md.getPreviousClose() > 0) {
+            return md.getPreviousClose();
+        }
+        if (md.getOhlc() != null) {
+            if (md.getOhlc().getClose() > 0) {
+                return md.getOhlc().getClose();
+            }
+            if (md.getOhlc().getOpen() > 0) {
+                return md.getOhlc().getOpen();
+            }
+        }
+        return null;
     }
 
     /**
@@ -503,39 +541,48 @@ public class MarketDataService {
         }
 
         Map<String, MarketData> result = new HashMap<>();
-        List<String> normalized = symbols.stream().map(this::cleanSymbol).collect(Collectors.toList());
+        List<String> normalized = symbols.stream()
+                .filter(s -> s != null && !s.isBlank())
+                .map(this::cleanSymbol)
+                .distinct()
+                .collect(Collectors.toList());
 
-        // 1.5. Find missing after L1 cache
+        // 1. L1 in-pod cache (was written but never read — restore for basket latency)
+        Map<String, MarketData> l1Hits = localCache.getAllPresent(normalized);
+        if (l1Hits != null && !l1Hits.isEmpty()) {
+            result.putAll(l1Hits);
+        }
+
         List<String> missing = normalized.stream()
             .filter(s -> !result.containsKey(s))
             .collect(Collectors.toList());
 
         if (missing.isEmpty()) {
+            log.debug("[MarketData] All {} symbols served from L1", result.size());
             return result;
         }
 
-        // Last-trade Redis/Mongo is only valid while cash is open. After 15:30 / weekend
-        // skip them so holdings call the same am-market OHLC path as the dashboard (official close).
-        boolean useLiveTickCaches = marketDataRedisService != null
-                && marketDataRedisService.isCashMarketHours();
-        if (!useLiveTickCaches) {
-            log.info("[MarketData] Cash session closed — skipping last-trade Redis/Mongo for {} symbols",
+        // Cash-open: prefer fresh last-trade caches.
+        // Cash-closed: still use Redis/Mongo previousClose/lastPrice for basket APIs (avoid OHLC waves),
+        // then fall through to OHLC only for true misses.
+        boolean cashOpen = marketDataRedisService != null && marketDataRedisService.isCashMarketHours();
+        if (!cashOpen) {
+            log.info("[MarketData] Cash session closed — using Redis/Mongo close prices before OHLC for {} missing",
                     missing.size());
         }
 
-        // 2. Try market data cache next (populated by am-market service or last live fetch)
-        if (useLiveTickCaches && marketDataRedisService != null) {
+        // 2. Redis last-trade / previous-close cache
+        if (marketDataRedisService != null) {
             try {
                 Map<String, MarketData> cached = marketDataRedisService.getMarketData(missing);
                 if (cached != null) {
                     cached.forEach((symbol, md) -> {
-                        boolean hasUsableData = md.getPreviousClose() != null && md.getPreviousClose() > 0
-                            || (md.getOhlc() != null && md.getOhlc().getOpen() > 0);
+                        boolean hasUsableData = hasUsablePrice(md);
                         if (hasUsableData) {
                             result.put(symbol, md);
-                            localCache.put(symbol, md); // promote to L1
+                            localCache.put(symbol, md);
                         } else {
-                            log.debug("[MarketData] Skipping stale Redis entry for {} due to missing previousClose/openPrice", symbol);
+                            log.debug("[MarketData] Skipping Redis entry for {} — no usable price", symbol);
                         }
                     });
                 }
@@ -552,26 +599,31 @@ public class MarketDataService {
             return result;
         }
 
-        // 3. Try MongoDB cache next (populated by Kafka live stream)
-        if (useLiveTickCaches && stockPriceMongoService != null) {
+        // 3. MongoDB cache (Kafka live stream / prior OHLC writes)
+        if (stockPriceMongoService != null) {
             try {
-                java.util.Map<String, com.am.common.amcommondata.document.price.StockPriceDocument> mongoPrices = stockPriceMongoService.getPrices(missing);
+                java.util.Map<String, com.am.common.amcommondata.document.price.StockPriceDocument> mongoPrices =
+                        stockPriceMongoService.getPrices(missing);
                 if (mongoPrices != null && !mongoPrices.isEmpty()) {
                     for (java.util.Map.Entry<String, com.am.common.amcommondata.document.price.StockPriceDocument> entry : mongoPrices.entrySet()) {
                         com.am.common.amcommondata.document.price.StockPriceDocument doc = entry.getValue();
-                        
-                        // Reject stale MongoDB entries — force them through to OHLC API
-                        boolean isStale = doc.getUpdatedAt() != null
-                            && doc.getUpdatedAt().isBefore(java.time.LocalDateTime.now().minusHours(6));
+
+                        // During cash hours, reject very stale ticks; after hours keep last known close.
+                        boolean isStale = cashOpen
+                                && doc.getUpdatedAt() != null
+                                && doc.getUpdatedAt().isBefore(java.time.LocalDateTime.now().minusHours(6));
                         if (isStale) {
                             log.info("[MarketData] Stale MongoDB entry for {} (updatedAt={}), forcing API refresh",
                                 doc.getSymbol(), doc.getUpdatedAt());
                             continue;
                         }
 
-                        if (doc.getLastPrice() == null || doc.getLastPrice() <= 0) {
-                            log.debug("[MarketData] Skipping stale MongoDB entry for {} (lastPrice={})",
-                                      doc.getSymbol(), doc.getLastPrice());
+                        Double usable = doc.getLastPrice() != null && doc.getLastPrice() > 0
+                                ? doc.getLastPrice()
+                                : (doc.getPreviousClose() != null && doc.getPreviousClose() > 0 ? doc.getPreviousClose() : null);
+                        if (usable == null) {
+                            log.debug("[MarketData] Skipping MongoDB entry for {} (no last/prev close)",
+                                      doc.getSymbol());
                             continue;
                         }
                         Double previousClose = (doc.getPreviousClose() != null && doc.getPreviousClose() > 0)
@@ -580,7 +632,7 @@ public class MarketDataService {
 
                         MarketData md = MarketData.builder()
                             .symbol(doc.getSymbol())
-                            .lastPrice(doc.getLastPrice())
+                            .lastPrice(usable)
                             .previousClose(previousClose)
                             .timestamp(java.time.Instant.ofEpochMilli(doc.getTimestamp() != null ? doc.getTimestamp() : System.currentTimeMillis()))
                             .ohlc(doc.getOpenPrice() != null && doc.getOpenPrice() > 0 
@@ -588,11 +640,12 @@ public class MarketDataService {
                                     .open(doc.getOpenPrice())
                                     .high(doc.getHighPrice())
                                     .low(doc.getLowPrice())
-                                    .close(doc.getLastPrice() != null && doc.getLastPrice() > 0 ? doc.getLastPrice() : 0.0)
+                                    .close(usable)
                                     .build()
                                 : null)
                             .build();
                         result.put(doc.getSymbol(), md);
+                        localCache.put(doc.getSymbol(), md);
                     }
                     log.info("[MarketData] MongoDB cache hit for {} symbols.", mongoPrices.size());
                 }
@@ -643,6 +696,7 @@ public class MarketDataService {
                     if (fetched != null && !fetched.isEmpty()) {
                         fetched.forEach((k, v) -> {
                             result.put(k, v);
+                            localCache.put(k, v);
                             CompletableFuture<MarketData> fut = newFutures.get(k);
                             if (fut != null) fut.complete(v);
                         });
@@ -712,6 +766,7 @@ public class MarketDataService {
                             MarketData md = fut.get();
                             if (md != null) {
                                 result.put(symbol, md);
+                                localCache.put(symbol, md);
                             }
                         } catch (Exception ignored) {}
                     }

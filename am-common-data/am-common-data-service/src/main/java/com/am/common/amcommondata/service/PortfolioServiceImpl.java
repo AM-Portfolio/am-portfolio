@@ -40,6 +40,7 @@ public class PortfolioServiceImpl implements PortfolioService {
     @Override
     public List<PortfolioModelV1> getPortfoliosByUserId(String userId) {
         return portfolioDocumentRepository.findByOwner(userId).stream()
+                .filter(doc -> doc.getPortfolioKind() != PortfolioKind.DELETED)
                 .map(portfolioMapper::toModel)
                 .collect(Collectors.toList());
     }

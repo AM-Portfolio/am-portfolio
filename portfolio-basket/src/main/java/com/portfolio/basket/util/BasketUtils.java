@@ -9,6 +9,27 @@ public class BasketUtils {
         return Math.round(value * 100.0) / 100.0;
     }
 
+    /** Minimum 1 share when allocation warrants a non-zero target. */
+    public static int resolveBaseTargetQty(double baseTargetAmount, double price, double weight) {
+        if (price <= 0 || weight <= 0 || baseTargetAmount <= 0) {
+            return 0;
+        }
+        int floored = (int) Math.floor(baseTargetAmount / price);
+        return floored <= 0 ? 1 : floored;
+    }
+
+    /** Buy quantity from gap amount; min 1 when weight > 0 and gap is positive. */
+    public static int resolveBuyQty(double gapAmount, double price, double weight) {
+        if (price <= 0 || gapAmount <= 0) {
+            return 0;
+        }
+        int floored = (int) Math.floor(gapAmount / price);
+        if (floored <= 0 && weight > 0) {
+            return 1;
+        }
+        return floored;
+    }
+
     public static void calculateUserWeights(List<EquityHoldings> userHoldings) {
         if (userHoldings == null || userHoldings.isEmpty())
             return;
