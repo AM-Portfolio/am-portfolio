@@ -26,6 +26,9 @@ public class PortfolioBasicInfo {
     @Schema(description = "ETF constituents still missing after basket create")
     private Integer gapMissingCount;
 
+    @Schema(description = "True when this is the shared demo portfolio for new users")
+    private boolean isDummy;
+
     public PortfolioBasicInfo(String portfolioId, String portfolioName) {
         this.portfolioId = portfolioId;
         this.portfolioName = portfolioName;

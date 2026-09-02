@@ -145,8 +145,14 @@ app:
     # Laptop only: APP_JWT_VERIFY=false skips signature check so a prod token still works locally.
     # Pods leave this unset (true). User id still comes from the Bearer payload.
     verify: ${APP_JWT_VERIFY:true}
+  demo:
+    # ID of the shared development portfolio shown to users who have no portfolios yet.
+    # Override via DEMO_PORTFOLIO_ID env-var in each environment / Vault mapping.
+    portfolio-id: ${DEMO_PORTFOLIO_ID:}
   kafka:
     enabled: ${KAFKA_ENABLED:true}
+    topics:
+      portfolio: ${PORTFOLIO_TOPIC:am-portfolio}
     trigger-calculation:
       consumer:
         id: am-portfolio-trigger-calculation-group

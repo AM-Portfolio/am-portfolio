@@ -7,6 +7,7 @@ import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.PortfolioAnalysis;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
+import com.portfolio.service.DemoPortfolioService;
 import com.portfolio.service.PortfolioDashboardService;
 import com.portfolio.service.scheduler.PortfolioHistoryScheduler;
 import com.am.common.amcommondata.model.PortfolioSnapshotModel;
@@ -45,17 +46,45 @@ public class PortfolioController {
     private final com.portfolio.service.portfolio.PortfolioIntradayService portfolioIntradayService;
     private final com.portfolio.redis.service.ActiveMarketSymbolPublisher activeMarketSymbolPublisher;
     private final com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer;
+    private final DemoPortfolioService demoPortfolioService;
 
     @org.springframework.beans.factory.annotation.Value("${app.jwt.internal-secret}")
     private String internalSecret;
+
+    private static class DemoResolution {
+        public final String userId;
+        public final String portfolioId;
+        public DemoResolution(String userId, String portfolioId) {
+            this.userId = userId;
+            this.portfolioId = portfolioId;
+        }
+    }
+
+    private DemoResolution resolveDemo(String userId, String portfolioId) {
+        if (demoPortfolioService.getDemoPortfolioId() == null || demoPortfolioService.getDemoPortfolioId().isBlank()) {
+            return new DemoResolution(userId, portfolioId);
+        }
+        
+        List<PortfolioModelV1> real = portfolioService.getPortfoliosByUserId(userId);
+        if (real.isEmpty() && demoPortfolioService.getDemoModelIfEligible(userId, demoPortfolioService.getDemoPortfolioId(), real) != null) {
+            if (portfolioId == null || portfolioId.equals(demoPortfolioService.getDemoPortfolioId())) {
+                String demoOwner = demoPortfolioService.getDemoOwner();
+                if (demoOwner != null) {
+                    return new DemoResolution(demoOwner, demoPortfolioService.getDemoPortfolioId());
+                }
+            }
+        }
+        return new DemoResolution(userId, portfolioId);
+    }
 
     @Operation(summary = "Get intraday data for all portfolios")
     @GetMapping("/intraday")
     public ResponseEntity<List<com.portfolio.model.portfolio.IntradayDataPoint>> getAllPortfoliosIntraday() {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        DemoResolution res = resolveDemo(userId, null);
         String traceId = org.slf4j.MDC.get("traceId");
-        log.info("[Intraday] Request for all portfolios, user={}, traceId={}", userId, traceId);
-        return ResponseEntity.ok(portfolioIntradayService.getIntraday(userId, null));
+        log.info("[Intraday] Request for all portfolios, user={}, traceId={}", res.userId, traceId);
+        return ResponseEntity.ok(portfolioIntradayService.getIntraday(res.userId, res.portfolioId));
     }
 
     @Operation(summary = "Get intraday data for specific portfolio")
@@ -63,9 +92,10 @@ public class PortfolioController {
     public ResponseEntity<List<com.portfolio.model.portfolio.IntradayDataPoint>> getPortfolioIntraday(
             @PathVariable String portfolioId) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        DemoResolution res = resolveDemo(userId, portfolioId);
         String traceId = org.slf4j.MDC.get("traceId");
-        log.info("[Intraday] Request for portfolio={}, user={}, traceId={}", portfolioId, userId, traceId);
-        return ResponseEntity.ok(portfolioIntradayService.getIntraday(userId, portfolioId));
+        log.info("[Intraday] Request for portfolio={}, user={}, traceId={}", res.portfolioId, res.userId, traceId);
+        return ResponseEntity.ok(portfolioIntradayService.getIntraday(res.userId, res.portfolioId));
     }
 
     @Operation(summary = "Get portfolio by ID", description = "Retrieves detailed portfolio information for a specific portfolio ID")
@@ -118,25 +148,47 @@ public class PortfolioController {
         List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
 
         if (portfolios == null || portfolios.isEmpty()) {
-            log.info("PortfolioController - getPortfolioBasicDetails - No portfolios for user: {} (returning empty list)",
-                    userId);
-            // Empty is a valid state — UI shows "No portfolios" / upload CTA. Do not 404.
-            return ResponseEntity.ok(java.util.Collections.emptyList());
+            // Check if we should inject the shared demo portfolio for this new user.
+            List<PortfolioBasicInfo> emptyReal = java.util.Collections.emptyList();
+            PortfolioModelV1 demoModel = demoPortfolioService.getDemoPortfolioForNewUser(userId, emptyReal);
+            if (demoModel != null) {
+                log.info("PortfolioController - getPortfolioBasicDetails - Injecting demo portfolio for new user: {}", userId);
+                PortfolioBasicInfo demoInfo = new PortfolioBasicInfo(
+                        demoModel.getId() != null ? demoModel.getId().toString() : null,
+                        demoModel.getName() != null ? demoModel.getName() : "Demo Portfolio",
+                        "BROKER",
+                        null,
+                        true
+                );
+                return ResponseEntity.ok(java.util.Collections.singletonList(demoInfo));
+            }
+            log.info("PortfolioController - getPortfolioBasicDetails - No portfolios for user: {} (returning empty list)", userId);
+            return ResponseEntity.ok(emptyReal);
         }
 
         List<PortfolioBasicInfo> basicInfoList = portfolios.stream()
                 .map(portfolio -> new PortfolioBasicInfo(
                         portfolio.getId() != null ? portfolio.getId().toString() : null,
                         portfolio.getName(),
-                        portfolio.getPortfolioKind() != null ? portfolio.getPortfolioKind().name() : 
+                        portfolio.getPortfolioKind() != null ? portfolio.getPortfolioKind().name() :
                         (portfolio.getSourcePortfolioId() != null && !portfolio.getSourcePortfolioId().isBlank() ? "BASKET" : "BROKER"),
-                        portfolio.getGapMissingCount()))
+                        portfolio.getGapMissingCount(),
+                        false))
                 .collect(java.util.stream.Collectors.toList());
 
         log.info("PortfolioController - getPortfolioBasicDetails - Found {} portfolio basic details for user: {}",
                 basicInfoList.size(), userId);
 
         return ResponseEntity.ok(basicInfoList);
+    }
+
+    @Operation(summary = "Dismiss demo portfolio", description = "Records that the user has explicitly dismissed the demo portfolio. The demo will no longer appear regardless of portfolio count.")
+    @DeleteMapping("/demo")
+    public ResponseEntity<Void> dismissDemoPortfolio() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        log.info("PortfolioController - dismissDemoPortfolio called for userId: {}", userId);
+        demoPortfolioService.dismissForUser(userId);
+        return ResponseEntity.noContent().build();
     }
 
     /**
@@ -200,23 +252,24 @@ public class PortfolioController {
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        DemoResolution res = resolveDemo(userId, portfolioId);
         log.info(
                 "PortfolioController - getPortfolioAnalysis called - Portfolio: {}, User: {}, Page: {}, Size: {}, Interval: {}",
-                portfolioId, userId, page, size, interval != null ? interval : "null");
+                res.portfolioId, res.userId, page, size, interval != null ? interval : "null");
 
         try {
             TimeInterval timeInterval = TimeInterval.fromCode(interval);
             PortfolioAnalysis analysis = portfolioDashboardService.analyzePortfolio(
-                    portfolioId, userId, page, size, timeInterval);
+                    res.portfolioId, res.userId, page, size, timeInterval);
 
             if (analysis == null) {
                 log.warn("PortfolioController - getPortfolioAnalysis - No analysis found for portfolio: {}",
-                        portfolioId);
+                        res.portfolioId);
                 return ResponseEntity.notFound().build();
             }
 
             log.info("PortfolioController - getPortfolioAnalysis - Successfully retrieved analysis for portfolio: {}",
-                    portfolioId);
+                    res.portfolioId);
             return ResponseEntity.ok(analysis);
         } catch (IllegalArgumentException e) {
             log.error("PortfolioController - getPortfolioAnalysis - Invalid interval: {}", interval, e);
@@ -236,32 +289,33 @@ public class PortfolioController {
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        DemoResolution res = resolveDemo(userId, portfolioId);
         log.info(
                 "PortfolioController - getPortfolioSummary called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}",
-                userId, portfolioId != null ? portfolioId : "all", page, size, interval != null ? interval : "null");
+                res.userId, res.portfolioId != null ? res.portfolioId : "all", page, size, interval != null ? interval : "null");
 
         try {
             TimeInterval timeInterval = TimeInterval.fromCode(interval);
             PortfolioSummaryV1 portfolioSummary;
 
-            if (portfolioId != null && !portfolioId.trim().isEmpty() && !portfolioId.equals(userId)) {
+            if (res.portfolioId != null && !res.portfolioId.trim().isEmpty() && !res.portfolioId.equals(res.userId)) {
                 // Filter by specific portfolio
-                log.info("PortfolioController - getPortfolioSummary - Filtering by portfolio: {}", portfolioId);
-                portfolioSummary = portfolioDashboardService.overviewPortfolio(userId, portfolioId, timeInterval);
+                log.info("PortfolioController - getPortfolioSummary - Filtering by portfolio: {}", res.portfolioId);
+                portfolioSummary = portfolioDashboardService.overviewPortfolio(res.userId, res.portfolioId, timeInterval);
             } else {
                 // Get summary for all portfolios
-                portfolioSummary = portfolioDashboardService.overviewPortfolio(userId, timeInterval);
+                portfolioSummary = portfolioDashboardService.overviewPortfolio(res.userId, timeInterval);
             }
 
             if (portfolioSummary == null) {
                 log.info("PortfolioController - getPortfolioSummary - No summary found for user: {} and portfolio: {}. Returning empty state.",
-                        userId, portfolioId != null ? portfolioId : "all");
+                        res.userId, res.portfolioId != null ? res.portfolioId : "all");
                 return ResponseEntity.ok(PortfolioSummaryV1.empty());
             }
 
             log.info(
                     "PortfolioController - getPortfolioSummary - Successfully retrieved summary for user: {} and portfolio: {}",
-                    userId, portfolioId != null ? portfolioId : "all");
+                    res.userId, res.portfolioId != null ? res.portfolioId : "all");
             return ResponseEntity.ok(portfolioSummary);
         } catch (IllegalArgumentException e) {
             log.error("PortfolioController - getPortfolioSummary - Invalid interval: {}", interval, e);
@@ -281,33 +335,34 @@ public class PortfolioController {
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        DemoResolution res = resolveDemo(userId, portfolioId);
         log.info(
                 "PortfolioController - getPortfolioHoldings called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}",
-                userId, portfolioId != null ? portfolioId : "all", page, size, interval != null ? interval : "null");
+                res.userId, res.portfolioId != null ? res.portfolioId : "all", page, size, interval != null ? interval : "null");
 
         try {
             TimeInterval timeInterval = TimeInterval.fromCode(interval);
             PortfolioHoldings portfolioHoldings;
 
-            if (portfolioId != null && !portfolioId.trim().isEmpty() && !portfolioId.equals(userId)) {
+            if (res.portfolioId != null && !res.portfolioId.trim().isEmpty() && !res.portfolioId.equals(res.userId)) {
                 // Filter by specific portfolio
-                log.info("PortfolioController - getPortfolioHoldings - Filtering by portfolio: {}", portfolioId);
-                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(userId, portfolioId, timeInterval);
+                log.info("PortfolioController - getPortfolioHoldings - Filtering by portfolio: {}", res.portfolioId);
+                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(res.userId, res.portfolioId, timeInterval);
             } else {
                 // Get holdings for all portfolios
-                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(userId, timeInterval);
+                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(res.userId, timeInterval);
             }
 
             if (portfolioHoldings == null) {
                 log.info(
                         "PortfolioController - getPortfolioHoldings - No holdings found for user: {} and portfolio: {}. Returning empty state.",
-                        userId, portfolioId != null ? portfolioId : "all");
+                        res.userId, res.portfolioId != null ? res.portfolioId : "all");
                 return ResponseEntity.ok(PortfolioHoldings.empty());
             }
 
             log.info(
                     "PortfolioController - getPortfolioHoldings - Successfully retrieved holdings for user: {} and portfolio: {}",
-                    userId, portfolioId != null ? portfolioId : "all");
+                    res.userId, res.portfolioId != null ? res.portfolioId : "all");
             return ResponseEntity.ok(portfolioHoldings);
         } catch (IllegalArgumentException e) {
             log.error("PortfolioController - getPortfolioHoldings - Invalid interval: {}", interval, e);
@@ -324,9 +379,10 @@ public class PortfolioController {
     public ResponseEntity<List<PortfolioSnapshotModel>> getPortfolioHistory(
             @RequestParam(required = false, defaultValue = "1M") String timeFrame) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
-        log.info("PortfolioController - getPortfolioHistory called - User: {}, TimeFrame: {}", userId, timeFrame);
+        DemoResolution res = resolveDemo(userId, null);
+        log.info("PortfolioController - getPortfolioHistory called - User: {}, TimeFrame: {}", res.userId, timeFrame);
 
-        List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(userId, null, timeFrame);
+        List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(res.userId, res.portfolioId, timeFrame);
         if (history == null) {
             return ResponseEntity.ok(java.util.Collections.emptyList());
         }
@@ -343,9 +399,10 @@ public class PortfolioController {
             @PathVariable String portfolioId,
             @RequestParam(required = false, defaultValue = "1M") String timeFrame) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
-        log.info("PortfolioController - getSpecificPortfolioHistory called - User: {}, Portfolio: {}, TimeFrame: {}", userId, portfolioId, timeFrame);
+        DemoResolution res = resolveDemo(userId, portfolioId);
+        log.info("PortfolioController - getSpecificPortfolioHistory called - User: {}, Portfolio: {}, TimeFrame: {}", res.userId, res.portfolioId, timeFrame);
 
-        List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(userId, portfolioId, timeFrame);
+        List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(res.userId, res.portfolioId, timeFrame);
         if (history == null) {
             return ResponseEntity.ok(java.util.Collections.emptyList());
         }
