@@ -1,14 +1,19 @@
 package com.portfolio.basket.service;
 
 import com.portfolio.basket.client.EtfApiClient;
+import com.portfolio.basket.engine.overlap.BasketOverlapCalculator;
+import com.portfolio.basket.engine.sizing.BasketQuantityCalculator;
+import com.portfolio.basket.engine.substitutes.BasketSubstituteApplier;
+import com.portfolio.basket.kernel.BasketPortfolioValueCalculator;
+import com.portfolio.basket.kernel.BasketPriceResolver;
 import com.portfolio.basket.model.BasketOpportunity;
 import com.portfolio.basket.model.BasketOpportunity.BasketItem;
 import com.portfolio.basket.model.BasketOpportunity.ItemStatus;
 import com.portfolio.basket.model.EtfData;
 import com.portfolio.basket.model.EtfHolding;
-import com.portfolio.model.portfolio.EquityHoldings;
-import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.basket.util.BasketUtils;
+import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.model.portfolio.EquityHoldings;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -16,12 +21,23 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.anySet;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 public class BasketEngineServiceTest {
@@ -38,7 +54,15 @@ public class BasketEngineServiceTest {
     @Mock
     private MarketDataService marketDataService;
 
-    @InjectMocks
+    @Mock
+    private BasketPriceResolver basketPriceResolver;
+
+    @Mock
+    private BasketPortfolioValueCalculator basketPortfolioValueCalculator;
+
+    private BasketOverlapCalculator overlapCalculator;
+    private BasketSubstituteApplier substituteApplier;
+    private BasketQuantityCalculator quantityCalculator;
     private BasketEngineService basketEngineService;
 
     private BasketOpportunity opportunity;
@@ -49,6 +73,28 @@ public class BasketEngineServiceTest {
         prices = new HashMap<>();
         prices.put("AAPL", 150.0);
         prices.put("GOOGL", 2500.0);
+
+        lenient().when(basketPriceResolver.fetchPricesWithHoldingsFallback(anySet(), anyList()))
+                .thenAnswer(inv -> prices);
+        lenient().when(basketPortfolioValueCalculator.calculate(anyList()))
+                .thenReturn(BasketPortfolioValueCalculator.PortfolioValues.builder()
+                        .totalPortfolioValue(1000.0)
+                        .remainingPortfolioValue(800.0)
+                        .build());
+
+        overlapCalculator = new BasketOverlapCalculator(basketPriceResolver);
+        substituteApplier = new BasketSubstituteApplier(marketDataService, enrichedEtfService, overlapCalculator);
+        quantityCalculator = new BasketQuantityCalculator(marketDataService);
+        basketEngineService = new BasketEngineService(
+                etfApiClient,
+                enrichedEtfService,
+                basketCatalogService,
+                basketPriceResolver,
+                basketPortfolioValueCalculator,
+                overlapCalculator,
+                substituteApplier,
+                quantityCalculator
+        );
 
         List<BasketItem> composition = new ArrayList<>();
         composition.add(BasketItem.builder()
@@ -75,12 +121,9 @@ public class BasketEngineServiceTest {
 
         assertNotNull(result);
         List<BasketItem> items = result.getComposition();
-        
-        // AAPL: 50% of 10000 = 5000. 5000 / 150 = 33.33 -> 33
+
         assertEquals(33.0, items.get(0).getBuyQuantity());
         assertEquals(150.0, items.get(0).getLastPrice());
-
-        // GOOGL: 50% of 10000 = 5000. 5000 / 2500 = 2
         assertEquals(2.0, items.get(1).getBuyQuantity());
         assertEquals(2500.0, items.get(1).getLastPrice());
     }
@@ -108,28 +151,23 @@ public class BasketEngineServiceTest {
         BasketOpportunity result = basketEngineService.calculateBasketQuantities(10000.0, opportunity, false, null);
 
         List<BasketItem> items = result.getComposition();
-        // AAPL skipped because price not found (defaults to 0.0 quantity)
         assertEquals(0.0, items.get(0).getBuyQuantity());
-        // GOOGL should be calculated
         assertEquals(2.0, items.get(1).getBuyQuantity());
     }
 
     @Test
     void testCalculateBasketQuantities_IncludeHeld_MissingGap() {
-        // Mark AAPL as HELD with quantity 10 (value 1500)
         opportunity.getComposition().get(0).setStatus(ItemStatus.HELD);
         opportunity.getComposition().get(0).setHeldQuantity(10.0);
-        
+
         when(marketDataService.getCurrentPrices(anyList())).thenReturn(prices);
 
-        // Total investment 10000. AAPL 50% -> base target 33 units at 150.
-        // Held 10 -> allocate 10 from holdings, no buy orders.
         BasketOpportunity result = basketEngineService.calculateBasketQuantities(10000.0, opportunity, true, null);
 
         List<BasketItem> items = result.getComposition();
         assertEquals(0.0, items.get(0).getBuyQuantity());
         assertEquals(10.0, items.get(0).getTargetQuantity());
-        assertEquals(0.0, items.get(1).getBuyQuantity()); // missing — holdings-only, no buy orders
+        assertEquals(0.0, items.get(1).getBuyQuantity());
     }
 
     @Test
@@ -229,9 +267,9 @@ public class BasketEngineServiceTest {
     @Test
     void testGetEtfData_FallbackWarn() {
         when(enrichedEtfService.getEnrichedEtf("INVALID")).thenReturn(null);
-        
+
         EtfData result = basketEngineService.getEtfData("INVALID");
-        
+
         assertNull(result);
     }
 }

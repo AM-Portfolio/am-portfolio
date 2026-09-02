@@ -25,7 +25,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @Override
     protected ResponseEntity<Object> handleExceptionInternal(
             Exception ex, Object body, HttpHeaders headers, HttpStatusCode statusCode, WebRequest request) {
-        
+
         log.error("Handling exception [{}]: {}", statusCode, ex.getMessage(), ex);
 
         Map<String, Object> responseBody = new LinkedHashMap<>();
@@ -38,10 +38,22 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return new ResponseEntity<>(responseBody, headers, statusCode);
     }
 
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Object> handleIllegalArgument(IllegalArgumentException ex, WebRequest request) {
+        log.warn("Bad request: {}", ex.getMessage());
+
+        Map<String, Object> responseBody = new LinkedHashMap<>();
+        responseBody.put("timestamp", LocalDateTime.now());
+        responseBody.put("message", ex.getMessage());
+        responseBody.put("status", HttpStatus.BAD_REQUEST.value());
+
+        return new ResponseEntity<>(responseBody, HttpStatus.BAD_REQUEST);
+    }
+
     @ExceptionHandler(EtfNotFoundException.class)
     public ResponseEntity<Object> handleEtfNotFound(EtfNotFoundException ex, WebRequest request) {
         log.warn("ETF not found: {}", ex.getMessage());
-        
+
         Map<String, Object> responseBody = new LinkedHashMap<>();
         responseBody.put("timestamp", LocalDateTime.now());
         responseBody.put("message", ex.getMessage());
@@ -54,7 +66,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Object> handleUncaughtException(Exception ex, WebRequest request) {
         log.error("Uncaught exception handled by GlobalExceptionHandler: {}", ex.getMessage(), ex);
-        
+
         Map<String, Object> responseBody = new LinkedHashMap<>();
         responseBody.put("timestamp", LocalDateTime.now());
         responseBody.put("message", "An unexpected error occurred. Please try again later.");

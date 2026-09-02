@@ -21,8 +21,8 @@ public class MarketIndicesUpdateConsumerService {
     private final ObjectMapper objectMapper;
     private final MarketIndexIndicesRedisService marketIndexIndicesRedisService;
 
-    @KafkaListener(topics = "${app.kafka.market-index.topic}", 
-                  groupId = "${app.kafka.market-index.consumer.id}",
+    @KafkaListener(topics = "${app.kafka.market-index.topic:${app.kafka.market-index.consumer.topic:nse-stock-indices-update}}", 
+                  groupId = "${app.kafka.market-index.consumer.id:am-market-index-group-1}",
                   containerFactory = "kafkaListenerContainerFactory")
     public void consume(String message, Acknowledgment acknowledgment) {
         try {

@@ -39,13 +39,13 @@ spring:
       auto-offset-reset: latest
       enable-auto-commit: false
       max-poll-records: 100
-    properties:
-      "[security.protocol]": ${PROJ_KAFKA_SECURITY_PROTOCOL}
-      "[sasl.mechanism]": ${PROJ_KAFKA_SASL_MECHANISM}
-      "[sasl.jaas.config]": ${PROJ_KAFKA_JAAS_CONFIG}
-      "[ssl.endpoint.identification.algorithm]": ""
-      "[ssl.truststore.location]": /etc/ssl/certs/java/cacerts
-      "[ssl.truststore.password]": changeit
+      properties:
+        "[security.protocol]": ${PROJ_KAFKA_SECURITY_PROTOCOL}
+        "[sasl.mechanism]": ${PROJ_KAFKA_SASL_MECHANISM}
+        "[sasl.jaas.config]": ${PROJ_KAFKA_JAAS_CONFIG}
+        "[ssl.endpoint.identification.algorithm]": ""
+        "[ssl.truststore.location]": /etc/ssl/certs/java/cacerts
+        "[ssl.truststore.password]": changeit
   data:
     redis:
       host: ${PROJ_REDIS_HOSTNAME}
@@ -154,7 +154,7 @@ app:
       consumer:
         id: ${PORTFOLIO_CONSUMER_ID:am-portfolio-group-1}
         enabled: ${KAFKA_ENABLED:true}
-      topic: ${PORTFOLIO_TOPIC:am-portfolio}
+        topic: ${PORTFOLIO_TOPIC:am-portfolio}
       publish-topic: ${PORTFOLIO_PUBLISH_TOPIC:am-portfolio-update}
       stream:
         topic: ${PORTFOLIO_STREAM_TOPIC:am-portfolio-stream}
@@ -162,22 +162,22 @@ app:
       consumer:
         id: ${LOGIN_CONSUMER_ID:am-portfolio-login-group}
         enabled: ${LOGIN_KAFKA_ENABLED:false}
-      topic: ${LOGIN_TOPIC:active-user}
+        topic: ${LOGIN_TOPIC:active-user}
     stock:
       consumer:
         id: ${STOCK_CONSUMER_GROUP}
         enabled: ${KAFKA_ENABLED:true}
-      topic: ${STOCK_TOPIC_NAME}
+        topic: ${STOCK_TOPIC_NAME}
     holding:
       consumer:
         id: ${HOLDING_CONSUMER_ID:am-portfolio-holding-group}
         enabled: ${KAFKA_ENABLED:true}
-      topic: ${HOLDING_TOPIC:am-holding-update}
+        topic: ${HOLDING_TOPIC:am-holding-update}
     market-index:
       consumer:
         id: ${MARKET_INDEX_CONSUMER_GROUP}
         enabled: ${KAFKA_ENABLED:true}
-      topic: ${MARKET_INDEX_TOPIC_NAME}
+        topic: ${MARKET_INDEX_TOPIC_NAME}
 
 server:
   port: ${SERVER_PORT:8080}
@@ -193,6 +193,8 @@ etf:
   url: ${ETF_API_URL:http://localhost:8022}
 
 basket:
+  scheduler:
+    enabled: false
   holdings:
     enrichment:
       enabled: ${BASKET_HOLDINGS_ENRICHMENT:true}
@@ -221,11 +223,11 @@ market-data:
     read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:32000}
     connection-timeout: 3000
     max-retry-attempts: 0
-    batch:
-      chunk-size: ${MARKET_DATA_BATCH_CHUNK_SIZE:20}
-      parallel-batching-enabled: ${MARKET_DATA_PARALLEL_BATCHING:true}
-      # Cap concurrent OHLC chunks so one advanced page cannot stampede Upstox
-      max-parallel-chunks: ${MARKET_DATA_MAX_PARALLEL_CHUNKS:2}
+  batch:
+    chunk-size: ${MARKET_DATA_BATCH_CHUNK_SIZE:20}
+    parallel-batching-enabled: ${MARKET_DATA_PARALLEL_BATCHING:true}
+    # Cap concurrent OHLC chunks so one advanced page cannot stampede Upstox
+    max-parallel-chunks: ${MARKET_DATA_MAX_PARALLEL_CHUNKS:2}
 
 # OpenAPI Documentation
 springdoc:
@@ -292,15 +294,15 @@ management:
       # 1.0 while validating flows in Tempo; dial helm back to 0.1 when comfortable
       probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
     propagation:
-      type: w3c                  # Must match core-services: "traceparent" / "tracestate" headers
+      type: w3c # Must match core-services: "traceparent" / "tracestate" headers
 
-  # OTLP exporter — sends spans to the shared otel-collector over HTTP (port 4318).
-  # In k8s the collector is in the "monitoring" namespace (same as am-core-services-otel).
-  # In Docker compose:  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
-  # Local: leave endpoint; set TRACING_ENABLED=false so this exporter is not used.
-  otlp:
-    tracing:
-      endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+    # OTLP exporter — sends spans to the shared otel-collector over HTTP (port 4318).
+    # In k8s the collector is in the "monitoring" namespace (same as am-core-services-otel).
+    # In Docker compose: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
+    # Local: leave endpoint; set TRACING_ENABLED=false so this exporter is not used.
+    otlp:
+      tracing:
+        endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
 
 # ─── Observability properties (am.observability.*) ───────────────────────────
 # Enable the request-log filter and standard MDC fields:
