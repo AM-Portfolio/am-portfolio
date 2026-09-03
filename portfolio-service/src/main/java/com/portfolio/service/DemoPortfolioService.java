@@ -8,7 +8,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
@@ -17,9 +16,10 @@ import java.util.UUID;
  *
  * Strategy:
  *   1. Reads the shared demo portfolio from the DB using app.demo.portfolio-id.
- *   2. Returns a cloned, in-memory copy with isDummy=true overlaid on the user's context.
- *   3. Stores a per-user Redis flag when the user explicitly dismisses the demo so we stop
- *      showing it even if they still have 0 real portfolios.
+ *   2. Returns a cloned, in-memory copy with name "Demo Portfolio" and owner = current user.
+ *   3. Demo is shown only while the user has zero real portfolios. Uploading/linking a
+ *      real portfolio automatically hides it. There is no separate "dismiss" path —
+ *      legacy Redis dismiss keys are cleared and ignored so modules stay in sync.
  */
 @Service
 @RequiredArgsConstructor
@@ -27,7 +27,6 @@ import java.util.UUID;
 public class DemoPortfolioService {
 
     private static final String DISMISSED_KEY_PREFIX = "demo:dismissed:";
-    private static final Duration DISMISSED_TTL = Duration.ofDays(365 * 10); // effectively forever
 
     private final PortfolioService portfolioService;
     private final StringRedisTemplate redisTemplate;
@@ -40,14 +39,13 @@ public class DemoPortfolioService {
     // ---------------------------------------------------------------------------
 
     /**
-     * Returns the demo PortfolioModelV1 (in-memory clone with isDummy=true) if:
+     * Returns the demo PortfolioModelV1 (in-memory clone) if:
      *  - A DEMO_PORTFOLIO_ID is configured, AND
-     *  - The user's real portfolio list is empty, AND
-     *  - The user has not explicitly dismissed the demo.
+     *  - The user's real portfolio list is empty.
      * Returns null otherwise.
      */
     public PortfolioModelV1 getDemoPortfolioForNewUser(String userId, List<?> realPortfolios) {
-        if (!isConfigured() || !realPortfolios.isEmpty() || isDismissed(userId)) {
+        if (!isConfigured() || !realPortfolios.isEmpty()) {
             return null;
         }
         PortfolioModelV1 demo = fetchDemoPortfolio();
@@ -58,12 +56,12 @@ public class DemoPortfolioService {
     }
 
     /**
-     * Returns the demo PortfolioModelV1 (in-memory clone with isDummy=true) if the
-     * given portfolioId matches the configured demo ID and the user is still eligible.
+     * Returns the demo PortfolioModelV1 (in-memory clone) if the
+     * given portfolioId matches the configured demo ID and the user still has 0 real portfolios.
      * Returns null if not eligible or not the demo ID.
      */
     public PortfolioModelV1 getDemoModelIfEligible(String userId, String portfolioId, List<?> realPortfolios) {
-        if (!isConfigured() || !realPortfolios.isEmpty() || isDismissed(userId)) {
+        if (!isConfigured() || !realPortfolios.isEmpty()) {
             return null;
         }
         if (!demoPortfolioId.equals(portfolioId)) {
@@ -77,13 +75,18 @@ public class DemoPortfolioService {
     }
 
     /**
-     * Marks the demo as dismissed for this user.
-     * After this, all get methods will return null regardless of portfolio count.
+     * Legacy no-op restore: clears any old per-user dismiss flag so demo injection
+     * stays consistent across portfolio / trade / analysis. Demo is only hidden when
+     * the user has at least one real portfolio.
      */
     public void dismissForUser(String userId) {
         String key = DISMISSED_KEY_PREFIX + userId;
-        redisTemplate.opsForValue().set(key, "1", DISMISSED_TTL);
-        log.info("[DemoPortfolio] User {} dismissed the demo portfolio", userId);
+        try {
+            Boolean removed = redisTemplate.delete(key);
+            log.info("[DemoPortfolio] Cleared legacy dismiss flag for user {} (removed={})", userId, removed);
+        } catch (Exception e) {
+            log.warn("[DemoPortfolio] Failed to clear dismiss flag for {}: {}", userId, e.getMessage());
+        }
     }
 
     /** Returns the configured demo portfolio ID, or blank if not configured. */
@@ -102,10 +105,6 @@ public class DemoPortfolioService {
 
     private boolean isConfigured() {
         return demoPortfolioId != null && !demoPortfolioId.isBlank();
-    }
-
-    private boolean isDismissed(String userId) {
-        return Boolean.TRUE.equals(redisTemplate.hasKey(DISMISSED_KEY_PREFIX + userId));
     }
 
     private PortfolioModelV1 fetchDemoPortfolio() {

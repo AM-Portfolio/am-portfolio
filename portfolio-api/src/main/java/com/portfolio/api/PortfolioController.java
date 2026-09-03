@@ -182,11 +182,11 @@ public class PortfolioController {
         return ResponseEntity.ok(basicInfoList);
     }
 
-    @Operation(summary = "Dismiss demo portfolio", description = "Records that the user has explicitly dismissed the demo portfolio. The demo will no longer appear regardless of portfolio count.")
+    @Operation(summary = "Restore demo portfolio eligibility", description = "Clears any legacy per-user demo dismiss flag. The demo is shown whenever the user has zero real portfolios; uploading a real portfolio hides it automatically.")
     @DeleteMapping("/demo")
     public ResponseEntity<Void> dismissDemoPortfolio() {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
-        log.info("PortfolioController - dismissDemoPortfolio called for userId: {}", userId);
+        log.info("PortfolioController - dismissDemoPortfolio (legacy clear) called for userId: {}", userId);
         demoPortfolioService.dismissForUser(userId);
         return ResponseEntity.noContent().build();
     }
