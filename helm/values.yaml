@@ -54,6 +54,9 @@ env:
   PORTFOLIO_CONSUMER_ID: "am-portfolio-group-1"
   MARKET_INDEX_TOPIC: "nse-stock-indices-update"
   MARKET_INDEX_CONSUMER_ID: "am-market-index-group-1"
+  # Shared demo portfolio UUID (non-secret). Env overlays inherit via Helm deep-merge;
+  # override per-env only when a different demo source is required.
+  DEMO_PORTFOLIO_ID: "f969745c-f492-4b86-88ed-6588e9f28bb3"
 
 probes:
   port: 8080

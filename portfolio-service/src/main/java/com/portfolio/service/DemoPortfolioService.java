@@ -8,8 +8,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Manages the shared "Demo Portfolio" shown to new users who have no portfolios yet.
@@ -27,6 +29,7 @@ import java.util.UUID;
 public class DemoPortfolioService {
 
     private static final String DISMISSED_KEY_PREFIX = "demo:dismissed:";
+    private static final String DEMO_DISPLAY_NAME = "Demo Portfolio";
 
     private final PortfolioService portfolioService;
     private final StringRedisTemplate redisTemplate;
@@ -34,9 +37,76 @@ public class DemoPortfolioService {
     @Value("${app.demo.portfolio-id:}")
     private String demoPortfolioId;
 
+    /**
+     * Resolved owner/portfolio IDs for dashboard reads when the caller may be viewing the demo.
+     * When eligible, remaps to the demo document's real owner so downstream queries hit Mongo data.
+     */
+    public record DemoResolution(String userId, String portfolioId) {}
+
+    /** Lightweight list row for {@code GET /list} (keeps API DTO mapping out of the controller). */
+    public record BasicPortfolioRow(
+            String portfolioId,
+            String portfolioName,
+            String kind,
+            Integer gapMissingCount,
+            boolean dummy) {}
+
     // ---------------------------------------------------------------------------
     // Public API
     // ---------------------------------------------------------------------------
+
+    /**
+     * Remaps user/portfolio for summary, holdings, history, and intraday when the
+     * authenticated user has zero real portfolios and is addressing the demo ID (or all portfolios).
+     */
+    public DemoResolution resolveRequest(String userId, String portfolioId) {
+        if (!isConfigured()) {
+            return new DemoResolution(userId, portfolioId);
+        }
+
+        List<PortfolioModelV1> real = portfolioService.getPortfoliosByUserId(userId);
+        if (real == null || real.isEmpty()) {
+            if (portfolioId == null || portfolioId.equals(demoPortfolioId)) {
+                String demoOwner = getDemoOwner();
+                if (demoOwner != null) {
+                    return new DemoResolution(demoOwner, demoPortfolioId);
+                }
+            }
+        }
+        return new DemoResolution(userId, portfolioId);
+    }
+
+    /**
+     * Returns real portfolios as list rows, or a single demo row when the user has none.
+     */
+    public List<BasicPortfolioRow> listBasicPortfolios(String userId) {
+        List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
+
+        if (portfolios == null || portfolios.isEmpty()) {
+            PortfolioModelV1 demoModel = getDemoPortfolioForNewUser(userId, Collections.emptyList());
+            if (demoModel == null) {
+                return Collections.emptyList();
+            }
+            log.info("[DemoPortfolio] Injecting demo portfolio for new user: {}", userId);
+            return Collections.singletonList(new BasicPortfolioRow(
+                    demoModel.getId() != null ? demoModel.getId().toString() : null,
+                    demoModel.getName() != null ? demoModel.getName() : DEMO_DISPLAY_NAME,
+                    "BROKER",
+                    null,
+                    true));
+        }
+
+        return portfolios.stream()
+                .map(portfolio -> new BasicPortfolioRow(
+                        portfolio.getId() != null ? portfolio.getId().toString() : null,
+                        portfolio.getName(),
+                        portfolio.getPortfolioKind() != null ? portfolio.getPortfolioKind().name()
+                                : (portfolio.getSourcePortfolioId() != null && !portfolio.getSourcePortfolioId().isBlank()
+                                        ? "BASKET" : "BROKER"),
+                        portfolio.getGapMissingCount(),
+                        false))
+                .collect(Collectors.toList());
+    }
 
     /**
      * Returns the demo PortfolioModelV1 (in-memory clone) if:
@@ -119,7 +189,7 @@ public class DemoPortfolioService {
     private PortfolioModelV1 cloneAsDemo(PortfolioModelV1 source, String userId) {
         return PortfolioModelV1.builder()
             .id(source.getId())
-            .name("Demo Portfolio")
+            .name(DEMO_DISPLAY_NAME)
             .description(source.getDescription())
             .owner(userId)
             .currency(source.getCurrency())
@@ -133,8 +203,6 @@ public class DemoPortfolioService {
             .assetCount(source.getAssetCount())
             .createdAt(source.getCreatedAt())
             .updatedAt(source.getUpdatedAt())
-            // We cannot set isDummy since PortfolioModelV1 doesn't have it.
-            // PortfolioController will wrap it in PortfolioBasicInfo and setDummy(true).
             .build();
     }
 }

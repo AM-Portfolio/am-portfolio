@@ -54,7 +54,7 @@ ingress:
 
 env:
   SPRING_PROFILES_ACTIVE: "prod,security"
-  DEMO_PORTFOLIO_ID: "f969745c-f492-4b86-88ed-6588e9f28bb3"
+  # DEMO_PORTFOLIO_ID inherited from values.yaml (single source of truth)
 
 resources:
   limits:
