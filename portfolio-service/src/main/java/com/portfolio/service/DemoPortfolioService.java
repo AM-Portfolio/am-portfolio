@@ -130,7 +130,7 @@ public class DemoPortfolioService {
             .totalValue(source.getTotalValue())
             .investmentAmount(source.getInvestmentAmount())
             .brokerType(source.getBrokerType())
-            .portfolioKind(source.getPortfolioKind())
+            .portfolioKind(com.am.common.amcommondata.model.enums.PortfolioKind.BROKER)
             .assetCount(source.getAssetCount())
             .createdAt(source.getCreatedAt())
             .updatedAt(source.getUpdatedAt())
