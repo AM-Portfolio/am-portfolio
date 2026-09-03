@@ -7,6 +7,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        GITHUB_PACKAGES_USERNAME: ${GITHUB_PACKAGES_USERNAME}
+        GITHUB_PACKAGES_TOKEN: ${GITHUB_PACKAGES_TOKEN}
     env_file:
         - .env
     environment:
@@ -38,6 +41,9 @@ services:
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       JWT_SECRET: ${JWT_SECRET}
       JWT_ALGORITHM: ${JWT_ALGORITHM}
+      
+      # Demo Portfolio
+      APP_DEMO_PORTFOLIO_ID: ${APP_DEMO_PORTFOLIO_ID}
 
       # Distributed Tracing — forward spans to the shared otel-collector (am-infra stack)
       # The "docker" Spring profile enables JSON structured logging (logback-spring.xml)
