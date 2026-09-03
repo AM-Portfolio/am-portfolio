@@ -19,6 +19,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -217,11 +218,15 @@ public class BasketOverlapCalculator {
             Map<String, Double> prices,
             SectorProfile sectorProfile) {
         for (BasketItem item : composition) {
-            if (item.getStatus() != ItemStatus.MISSING) {
+            double etfW = item.getEtfWeight() != null ? item.getEtfWeight() : 0.0;
+            double repW = item.getReplicaWeight() != null ? item.getReplicaWeight() : 0.0;
+            boolean missing = item.getStatus() == ItemStatus.MISSING;
+            boolean heldGap = item.getStatus() == ItemStatus.HELD && (etfW - repW) > 0.01;
+            if (!missing && !heldGap) {
                 continue;
             }
+            double reqWeight = missing ? etfW : (etfW - repW);
             PeerTiers tiers = collectPeerTiers(item.getSector(), item.getMarketCapCategory(), userSectorMap);
-            double reqWeight = item.getEtfWeight() != null ? item.getEtfWeight() : 0.0;
             item.setAlternatives(buildTieredAlternatives(
                     item.getSector(), item.getMarketCapCategory(), reqWeight,
                     tiers.tier1, tiers.tier2, userSectorMap, allUserHoldings,
@@ -404,7 +409,8 @@ public class BasketOverlapCalculator {
                         (EquityHoldings h) -> getAvailableWeight(h) - consumedWeightByIsin.getOrDefault(h.getIsin(), 0.0))
                         .reversed())
                 .map(p -> toAlternative(p, reqWeight,
-                        getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices, true))
+                        getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices, true,
+                        false, consumedWeightByIsin))
                 .collect(Collectors.toList()));
 
         alts.addAll(tier2.stream()
@@ -415,11 +421,23 @@ public class BasketOverlapCalculator {
                         (EquityHoldings h) -> getAvailableWeight(h) - consumedWeightByIsin.getOrDefault(h.getIsin(), 0.0))
                         .reversed())
                 .map(p -> toAlternative(p, reqWeight,
-                        getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices, true))
+                        getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices, true,
+                        false, consumedWeightByIsin))
                 .collect(Collectors.toList()));
 
-        appendTier3Alternatives(alts, sector, marketCapCategory, reqWeight, tier1, tier2,
-                allUserHoldings, consumedWeightByIsin, prices, sectorProfile);
+        // Sectorial baskets: never append cross-sector tier-3.
+        if (sectorProfile == null || !sectorProfile.sectorial) {
+            appendIndexEtfAlternatives(alts, reqWeight, allUserHoldings, consumedWeightByIsin, prices,
+                    sectorProfile);
+            appendTier3Alternatives(alts, sector, marketCapCategory, reqWeight, tier1, tier2,
+                    allUserHoldings, consumedWeightByIsin, prices, sectorProfile);
+        }
+
+        // Drop zero-remaining alternatives from the recommended list.
+        alts.removeIf(a -> {
+            Double rem = a.getRemainingQuantity() != null ? a.getRemainingQuantity() : a.getQuantity();
+            return rem == null || rem <= 0.0;
+        });
 
         if (alts.size() > 25) {
             return new ArrayList<>(alts.subList(0, 25));
@@ -445,7 +463,7 @@ public class BasketOverlapCalculator {
                 .map(BasketOpportunity.Alternative::getIsin)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
-        Set<String> constituentSet = sectorProfile.constituentIsins != null
+        Set<String> constituentSet = (sectorProfile != null && sectorProfile.constituentIsins != null)
                 ? new HashSet<>(sectorProfile.constituentIsins)
                 : Collections.emptySet();
 
@@ -465,7 +483,8 @@ public class BasketOverlapCalculator {
 
         alts.addAll(tier3.stream()
                 .map(p -> toAlternative(p, reqWeight,
-                        getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices, false))
+                        getAvailableWeight(p) - consumedWeightByIsin.getOrDefault(p.getIsin(), 0.0), prices, false,
+                        false, consumedWeightByIsin))
                 .collect(Collectors.toList()));
     }
 
@@ -519,28 +538,105 @@ public class BasketOverlapCalculator {
         }
     }
 
+    /**
+     * For broad (non-sectorial) baskets, surface held index ETFs (INF* / *BEES)
+     * that still have remaining quantity — e.g. NIFTYBEES while replicating Nifty 50.
+     */
+    private void appendIndexEtfAlternatives(
+            List<BasketOpportunity.Alternative> alts,
+            double reqWeight,
+            List<EquityHoldings> allUserHoldings,
+            Map<String, Double> consumedWeightByIsin,
+            Map<String, Double> prices,
+            SectorProfile sectorProfile) {
+        if (allUserHoldings == null || allUserHoldings.isEmpty()) {
+            return;
+        }
+        Set<String> existingIsins = alts.stream()
+                .map(BasketOpportunity.Alternative::getIsin)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<String> constituentSet = (sectorProfile != null && sectorProfile.constituentIsins != null)
+                ? new HashSet<>(sectorProfile.constituentIsins)
+                : Collections.emptySet();
+
+        for (EquityHoldings h : allUserHoldings) {
+            if (h.getIsin() == null || existingIsins.contains(h.getIsin())) {
+                continue;
+            }
+            if (!isLikelyIndexEtfHolding(h)) {
+                continue;
+            }
+            if (constituentSet.contains(h.getIsin())) {
+                continue;
+            }
+            double remainingWeight = getAvailableWeight(h) - consumedWeightByIsin.getOrDefault(h.getIsin(), 0.0);
+            if (remainingWeight <= 0.01) {
+                continue;
+            }
+            if (h.getAvailableQuantity() != null && h.getAvailableQuantity() <= 0) {
+                continue;
+            }
+            alts.add(0, toAlternative(h, reqWeight, remainingWeight, prices, false, true, consumedWeightByIsin));
+            existingIsins.add(h.getIsin());
+        }
+    }
+
+    private static boolean isLikelyIndexEtfHolding(EquityHoldings h) {
+        if (h.getIsin() != null) {
+            String isin = h.getIsin().trim().toUpperCase(Locale.ROOT);
+            if (isin.startsWith("INF")) {
+                return true;
+            }
+        }
+        if (h.getSymbol() != null) {
+            String sym = h.getSymbol().trim().toUpperCase(Locale.ROOT);
+            return sym.endsWith("BEES") || sym.endsWith("ETF") || sym.contains("BEES");
+        }
+        return false;
+    }
+
     private BasketOpportunity.Alternative toAlternative(EquityHoldings h, double reqWeight, double availableWeight,
-            Map<String, Double> prices, boolean isSameSector) {
+            Map<String, Double> prices, boolean isSameSector, boolean indexEtf,
+            Map<String, Double> consumedWeightByIsin) {
         boolean canFullyCover = availableWeight >= reqWeight;
-        String coverageLabel = canFullyCover
-                ? String.format("Covers %.1f%% gap fully", reqWeight)
-                : String.format("Covers %.1f%% of %.1f%% gap", availableWeight, reqWeight);
+        String coverageLabel = indexEtf
+                ? "Index ETF in your portfolio"
+                : (canFullyCover
+                        ? String.format("Covers %.1f%% gap fully", reqWeight)
+                        : String.format("Covers %.1f%% of %.1f%% gap", availableWeight, reqWeight));
 
         double physicalWeight = h.getWeightInPortfolio() != null ? h.getWeightInPortfolio() : 0.0;
         double physicalQty = h.getQuantity() != null ? h.getQuantity() : 0.0;
-        double remainingQty = (physicalWeight > 0) ? (availableWeight / physicalWeight) * physicalQty
-                : (h.getAvailableQuantity() != null ? h.getAvailableQuantity() : 0.0);
+        double availableQty = h.getAvailableQuantity() != null ? h.getAvailableQuantity() : physicalQty;
+        double usedInActive = Math.max(0.0, physicalQty - availableQty);
+
+        double remainingQty = (physicalWeight > 0)
+                ? (availableWeight / physicalWeight) * physicalQty
+                : availableQty;
+        remainingQty = Math.max(0.0, BasketUtils.round(remainingQty));
+
+        double usedInThisBasketQty = 0.0;
+        if (h.getIsin() != null && consumedWeightByIsin != null && physicalWeight > 0) {
+            double consumedW = consumedWeightByIsin.getOrDefault(h.getIsin(), 0.0);
+            usedInThisBasketQty = BasketUtils.round((consumedW / physicalWeight) * physicalQty);
+        }
 
         return BasketOpportunity.Alternative.builder()
                 .symbol(h.getSymbol())
                 .isin(h.getIsin())
                 .userWeight(BasketUtils.round(availableWeight))
-                .quantity(BasketUtils.round(remainingQty))
+                .quantity(remainingQty)
                 .lastPrice(prices != null && h.getSymbol() != null ? prices.get(h.getSymbol()) : null)
                 .sector(h.getSector())
                 .isSameSector(isSameSector)
                 .canFullyCover(canFullyCover)
                 .coverageLabel(coverageLabel)
+                .physicalQuantity(BasketUtils.round(physicalQty))
+                .usedInThisBasketQuantity(usedInThisBasketQty)
+                .usedInActiveBasketsQuantity(BasketUtils.round(usedInActive))
+                .remainingQuantity(remainingQty)
+                .indexEtf(indexEtf)
                 .build();
     }
 }

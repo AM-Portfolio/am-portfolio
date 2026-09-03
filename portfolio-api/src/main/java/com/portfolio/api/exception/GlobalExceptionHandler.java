@@ -16,6 +16,7 @@ import java.util.Map;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import lombok.extern.slf4j.Slf4j;
 import com.portfolio.basket.exception.EtfNotFoundException;
+import com.portfolio.service.basket.exception.DraftLimitReachedException;
 
 @ControllerAdvice
 @ConditionalOnProperty(prefix = "am.api.core.exception-handler", name = "enabled", havingValue = "false", matchIfMissing = true)
@@ -61,6 +62,19 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         responseBody.put("status", HttpStatus.NOT_FOUND.value());
 
         return new ResponseEntity<>(responseBody, HttpStatus.NOT_FOUND);
+    }
+
+    @ExceptionHandler(DraftLimitReachedException.class)
+    public ResponseEntity<Object> handleDraftLimitReached(DraftLimitReachedException ex, WebRequest request) {
+        log.warn("Draft limit reached: {}", ex.getMessage());
+
+        Map<String, Object> responseBody = new LinkedHashMap<>();
+        responseBody.put("timestamp", LocalDateTime.now());
+        responseBody.put("message", ex.getMessage());
+        responseBody.put("errorCode", DraftLimitReachedException.ERROR_CODE);
+        responseBody.put("status", HttpStatus.CONFLICT.value());
+
+        return new ResponseEntity<>(responseBody, HttpStatus.CONFLICT);
     }
 
     @ExceptionHandler(Exception.class)

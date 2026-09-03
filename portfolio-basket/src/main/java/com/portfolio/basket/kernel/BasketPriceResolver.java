@@ -27,10 +27,12 @@ public class BasketPriceResolver {
             return prices;
         }
         try {
+            log.info("basket.prices.fetch symbols={}", symbolsToFetch.size());
             Map<String, Double> fetched = marketDataService.getCurrentPrices(new ArrayList<>(symbolsToFetch));
             if (fetched != null) {
                 prices.putAll(fetched);
             }
+            log.info("basket.prices.done requested={} resolved={}", symbolsToFetch.size(), prices.size());
         } catch (Exception e) {
             log.warn("Failed to fetch live prices for symbols: {}", e.getMessage());
         }

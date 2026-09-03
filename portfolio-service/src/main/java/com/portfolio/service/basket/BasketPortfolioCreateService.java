@@ -53,6 +53,9 @@ public class BasketPortfolioCreateService {
     @Autowired(required = false)
     private ActiveMarketSymbolPublisher activeMarketSymbolPublisher;
 
+    @Autowired(required = false)
+    private BasketDraftService basketDraftService;
+
     private final AllocationLedgerService allocationLedgerService;
     private final AllocationAvailabilityService allocationAvailabilityService;
 
@@ -67,6 +70,7 @@ public class BasketPortfolioCreateService {
         if (idempotencyKey != null) {
             CreateBasketResponse cached = lookupIdempotentResponse(idempotencyKey);
             if (cached != null) {
+                clearDraftAfterSuccess(request);
                 return cached;
             }
         }
@@ -239,7 +243,19 @@ public class BasketPortfolioCreateService {
         if (idempotencyKey != null) {
             storeIdempotentResponse(idempotencyKey, request.getUserId(), response);
         }
+        clearDraftAfterSuccess(request);
         return response;
+    }
+
+    private void clearDraftAfterSuccess(CreateBasketRequest request) {
+        if (basketDraftService == null || request == null) {
+            return;
+        }
+        basketDraftService.deleteAfterCreate(
+                request.getUserId(),
+                request.getDraftId(),
+                request.getSourcePortfolioId(),
+                request.getEtfIsin());
     }
 
     private String normalizeIdempotencyKey(String idempotencyKey) {
@@ -446,6 +462,7 @@ public class BasketPortfolioCreateService {
         private Double investmentAmount;
         private Double replicaScore;
         private Double coverageAfterCreation;
+        private String draftId;
         private List<CreateBasketLine> lines;
     }
 

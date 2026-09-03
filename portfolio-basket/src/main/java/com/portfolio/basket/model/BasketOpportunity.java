@@ -93,6 +93,16 @@ public class BasketOpportunity {
         private boolean isSameSector;
         private boolean canFullyCover;
         private String coverageLabel;
+        /** Full physical units in the portfolio (before consumption). */
+        private Double physicalQuantity;
+        /** Units already allocated in this basket composition. */
+        private Double usedInThisBasketQuantity;
+        /** Units reserved by other ACTIVE baskets (quantity − availableQuantity). */
+        private Double usedInActiveBasketsQuantity;
+        /** Units still free for substitution. */
+        private Double remainingQuantity;
+        /** True when this alternative is a held index ETF covering the basket. */
+        private boolean indexEtf;
     }
 
     public enum ItemStatus {

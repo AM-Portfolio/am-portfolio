@@ -43,6 +43,9 @@ class BasketPortfolioCreateServiceTest {
     private BasketCreateIdempotencyRepository idempotencyRepository;
 
     @Mock
+    private BasketDraftService basketDraftService;
+
+    @Mock
     private ObjectMapper objectMapper;
 
     @InjectMocks
@@ -51,6 +54,7 @@ class BasketPortfolioCreateServiceTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(basketPortfolioCreateService, "idempotencyRepository", idempotencyRepository);
+        ReflectionTestUtils.setField(basketPortfolioCreateService, "basketDraftService", basketDraftService);
     }
 
     @Test
@@ -157,5 +161,57 @@ class BasketPortfolioCreateServiceTest {
         assertThat(second).isEqualTo(first);
         assertThat(second.getPortfolioId()).isEqualTo(basketId.toString());
         verify(portfolioService, times(1)).createBasketPortfolio(any());
+        verify(basketDraftService, times(2)).deleteAfterCreate(
+                eq("user-1"), any(), eq(sourceId.toString()), any());
+    }
+
+    @Test
+    void create_withDraftId_clearsDraftAfterSuccess() {
+        UUID sourceId = UUID.randomUUID();
+        PortfolioModelV1 source = PortfolioModelV1.builder()
+                .id(sourceId)
+                .owner("user-1")
+                .portfolioKind(PortfolioKind.BROKER)
+                .equityModels(List.of(
+                        EquityModel.builder()
+                                .isin("INE040A01034")
+                                .symbol("HDFCBANK")
+                                .quantity(20.0)
+                                .avgBuyingPrice(100.0)
+                                .currentPrice(105.0)
+                                .build()))
+                .build();
+
+        when(portfolioService.getPortfolioById(sourceId)).thenReturn(source);
+        when(allocationAvailabilityService.getActiveAllocations(sourceId.toString()))
+                .thenReturn(new HashMap<>());
+        when(allocationAvailabilityService.getAvailableQuantity(any(), eq("INE040A01034"), eq(20.0), eq(0.0)))
+                .thenReturn(20.0);
+        when(portfolioService.createBasketPortfolio(any())).thenAnswer(invocation -> {
+            PortfolioModelV1 created = invocation.getArgument(0);
+            created.setId(UUID.randomUUID());
+            return created;
+        });
+        when(portfolioService.getAvailableQuantity(any(), eq("INE040A01034"), eq(20.0))).thenReturn(20.0);
+
+        BasketPortfolioCreateService.CreateBasketRequest request =
+                BasketPortfolioCreateService.CreateBasketRequest.builder()
+                        .userId("user-1")
+                        .sourcePortfolioId(sourceId.toString())
+                        .etfIsin("INF204KB15I2")
+                        .draftId("draft-99")
+                        .lines(List.of(
+                                BasketPortfolioCreateService.CreateBasketLine.builder()
+                                        .status("HELD")
+                                        .holdingIsin("INE040A01034")
+                                        .holdingSymbol("HDFCBANK")
+                                        .heldQuantity(5.0)
+                                        .build()))
+                        .build();
+
+        basketPortfolioCreateService.create(request);
+
+        verify(basketDraftService).deleteAfterCreate(
+                eq("user-1"), eq("draft-99"), eq(sourceId.toString()), eq("INF204KB15I2"));
     }
 }

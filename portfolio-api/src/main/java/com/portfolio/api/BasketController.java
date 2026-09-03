@@ -10,8 +10,10 @@ import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.service.basket.AllocationLedgerService;
 import com.portfolio.service.basket.BasketPortfolioCreateService;
 import com.portfolio.service.basket.BasketReadService;
+import com.portfolio.service.basket.BasketDraftService;
 import com.portfolio.service.basket.dto.BasketDetailDto;
 import com.portfolio.service.basket.dto.BasketSummaryDto;
+import com.portfolio.service.basket.dto.BasketDraftDtos;
 import com.portfolio.service.portfolio.PortfolioHoldingsService;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
@@ -44,6 +46,7 @@ public class BasketController {
     private final PortfolioService portfolioService;
     private final AllocationLedgerService allocationLedgerService;
     private final BasketReadService basketReadService;
+    private final BasketDraftService basketDraftService;
 
     @Operation(summary = "Get basket catalog", description = "Returns curated basket themes and default ETF query", operationId = "getBasketCatalog")
     @GetMapping("/catalog")
@@ -179,6 +182,45 @@ public class BasketController {
     public BasketPortfolioCreateService.CreateBasketResponse createPortfolio(
             @RequestBody BasketPortfolioCreateService.CreateBasketRequest request) {
         return basketPortfolioCreateService.create(request);
+    }
+
+    @Operation(summary = "List basket drafts", description = "List durable basket drafts for a user", operationId = "listBasketDrafts")
+    @GetMapping("/drafts")
+    public BasketDraftDtos.BasketDraftListResponse listDrafts(
+            @RequestParam String userId,
+            @RequestParam(required = false) String portfolioId) {
+        return basketDraftService.listDrafts(userId, portfolioId);
+    }
+
+    @Operation(summary = "Upsert basket draft", description = "Save or update a basket draft (max 5 per user)", operationId = "upsertBasketDraft")
+    @PutMapping("/drafts")
+    public BasketDraftDtos.BasketDraftDetailDto upsertDraft(
+            @RequestBody BasketDraftDtos.UpsertBasketDraftRequest request) {
+        return basketDraftService.upsert(request);
+    }
+
+    @Operation(summary = "Upsert basket draft (POST)", description = "Same as PUT /drafts — gateway-friendly upsert", operationId = "upsertBasketDraftPost")
+    @PostMapping("/drafts")
+    public BasketDraftDtos.BasketDraftDetailDto upsertDraftPost(
+            @RequestBody BasketDraftDtos.UpsertBasketDraftRequest request) {
+        return basketDraftService.upsert(request);
+    }
+
+    @Operation(summary = "Get basket draft", description = "Load a full basket draft snapshot", operationId = "getBasketDraft")
+    @GetMapping("/drafts/{draftId}")
+    public BasketDraftDtos.BasketDraftDetailDto getDraft(
+            @PathVariable String draftId,
+            @RequestParam String userId) {
+        return basketDraftService.getDraft(draftId, userId);
+    }
+
+    @Operation(summary = "Delete basket draft", description = "Hard-delete a basket draft", operationId = "deleteBasketDraft")
+    @DeleteMapping("/drafts/{draftId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteDraft(
+            @PathVariable String draftId,
+            @RequestParam String userId) {
+        basketDraftService.deleteDraft(draftId, userId);
     }
 
     @Operation(summary = "Get /{basketId}", description = "Endpoint to getBasketDetail", operationId = "getBasketDetail")
