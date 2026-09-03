@@ -10,6 +10,7 @@ import com.portfolio.model.events.PortfolioUpdateEvent;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
+import com.portfolio.service.DemoPortfolioService;
 import com.portfolio.service.calculator.PortfolioCalculator;
 import com.portfolio.service.portfolio.PortfolioHoldingsService;
 
@@ -35,6 +36,7 @@ public class PortfolioCalculationService {
     private final PortfolioCalculator portfolioCalculator;
     private final KafkaProducerService kafkaProducerService;
     private final PortfolioService portfolioService;
+    private final DemoPortfolioService demoPortfolioService;
 
     public void processCalculation(String userId, String portfolioId, String correlationId) {
         log.info("Processing portfolio calculation in service for UserID: {}, PortfolioID: {}", userId, portfolioId);
@@ -50,7 +52,15 @@ public class PortfolioCalculationService {
     private void processAllPortfolios(String userId, String correlationId) {
         List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
         if (portfolios == null || portfolios.isEmpty()) {
-            log.warn("No portfolios found for user: {}", userId);
+            // Fall back to demo portfolio so new/demo users get analysis entities populated
+            PortfolioModelV1 demo = demoPortfolioService.getDemoPortfolioForNewUser(userId, List.of());
+            if (demo != null && demo.getId() != null) {
+                log.info("No real portfolios for user={}, falling back to demo portfolio id={} for calculation",
+                        userId, demo.getId());
+                calculateAndPublish(userId, demo.getId().toString(), correlationId);
+            } else {
+                log.warn("No portfolios found for user: {}", userId);
+            }
             return;
         }
 
@@ -62,6 +72,7 @@ public class PortfolioCalculationService {
             calculateAndPublish(userId, portfolio.getId().toString(), correlationId);
         }
     }
+
 
     private void calculateAndPublish(String userId, String portfolioId, String correlationId) {
         try {
