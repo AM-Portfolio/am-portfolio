@@ -10,7 +10,7 @@ import com.portfolio.model.events.PortfolioUpdateEvent;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
-import com.portfolio.service.DemoPortfolioService;
+import com.portfolio.service.NewUserPortfolioFallbackService;
 import com.portfolio.service.calculator.PortfolioCalculator;
 import com.portfolio.service.portfolio.PortfolioHoldingsService;
 
@@ -36,7 +36,7 @@ public class PortfolioCalculationService {
     private final PortfolioCalculator portfolioCalculator;
     private final KafkaProducerService kafkaProducerService;
     private final PortfolioService portfolioService;
-    private final DemoPortfolioService demoPortfolioService;
+    private final NewUserPortfolioFallbackService newUserPortfolioFallbackService;
 
     public void processCalculation(String userId, String portfolioId, String correlationId) {
         log.info("Processing portfolio calculation in service for UserID: {}, PortfolioID: {}", userId, portfolioId);
@@ -53,7 +53,7 @@ public class PortfolioCalculationService {
         List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
         if (portfolios == null || portfolios.isEmpty()) {
             // Fall back to demo portfolio so new/demo users get analysis entities populated
-            PortfolioModelV1 demo = demoPortfolioService.getDemoPortfolioForNewUser(userId, List.of());
+            PortfolioModelV1 demo = newUserPortfolioFallbackService.getDemoPortfolioForNewUser(userId, List.of());
             if (demo != null && demo.getId() != null) {
                 log.info("No real portfolios for user={}, falling back to demo portfolio id={} for calculation",
                         userId, demo.getId());
