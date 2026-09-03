@@ -10,7 +10,7 @@ github:
   repo: AM-Portfolio/am-portfolio
   deploy_workflow: deploy-portfolio.yml
   # workflow_dispatch ref — must be default branch once workflow is registered
-  ref: feature/mongo-live-price
+  ref: feature/demo-portfolio-support
 deploy:
   # Cluster apply after local build+push. CLI --via / AM_DEPLOY_VIA override this.
   # actions = GitHub Direct Deploy (same Helm as CI)

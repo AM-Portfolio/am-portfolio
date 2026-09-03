@@ -1,5 +1,6 @@
 package com.portfolio.api.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -25,6 +26,10 @@ public class PortfolioBasicInfo {
 
     @Schema(description = "ETF constituents still missing after basket create")
     private Integer gapMissingCount;
+
+    @Schema(description = "True when this is the shared demo portfolio for new users")
+    @JsonProperty("isDummy")
+    private boolean isDummy;
 
     public PortfolioBasicInfo(String portfolioId, String portfolioName) {
         this.portfolioId = portfolioId;

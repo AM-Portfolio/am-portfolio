@@ -51,4 +51,6 @@ public class PortfolioModelV1 {
     private String updatedBy;
     private Long version;
     private String lastTradeAction;
+    /** True when this portfolio is the shared demo portfolio injected for new users. Never stored. */
+    private Boolean isDummy;
 }
