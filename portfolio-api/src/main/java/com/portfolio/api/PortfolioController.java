@@ -7,7 +7,7 @@ import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.PortfolioAnalysis;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
-import com.portfolio.service.DemoPortfolioService;
+import com.portfolio.service.NewUserPortfolioFallbackService;
 import com.portfolio.service.PortfolioDashboardService;
 import com.portfolio.service.scheduler.PortfolioHistoryScheduler;
 import com.am.common.amcommondata.model.PortfolioSnapshotModel;
@@ -46,7 +46,7 @@ public class PortfolioController {
     private final com.portfolio.service.portfolio.PortfolioIntradayService portfolioIntradayService;
     private final com.portfolio.redis.service.ActiveMarketSymbolPublisher activeMarketSymbolPublisher;
     private final com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer;
-    private final DemoPortfolioService demoPortfolioService;
+    private final NewUserPortfolioFallbackService newUserPortfolioFallbackService;
 
     @org.springframework.beans.factory.annotation.Value("${app.jwt.internal-secret}")
     private String internalSecret;
@@ -55,7 +55,7 @@ public class PortfolioController {
     @GetMapping("/intraday")
     public ResponseEntity<List<com.portfolio.model.portfolio.IntradayDataPoint>> getAllPortfoliosIntraday() {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
-        DemoPortfolioService.DemoResolution res = demoPortfolioService.resolveRequest(userId, null);
+        NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, null);
         String traceId = org.slf4j.MDC.get("traceId");
         log.info("[Intraday] Request for all portfolios, user={}, traceId={}", res.userId(), traceId);
         return ResponseEntity.ok(portfolioIntradayService.getIntraday(res.userId(), res.portfolioId()));
@@ -66,7 +66,7 @@ public class PortfolioController {
     public ResponseEntity<List<com.portfolio.model.portfolio.IntradayDataPoint>> getPortfolioIntraday(
             @PathVariable String portfolioId) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
-        DemoPortfolioService.DemoResolution res = demoPortfolioService.resolveRequest(userId, portfolioId);
+        NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
         String traceId = org.slf4j.MDC.get("traceId");
         log.info("[Intraday] Request for portfolio={}, user={}, traceId={}", res.portfolioId(), res.userId(), traceId);
         return ResponseEntity.ok(portfolioIntradayService.getIntraday(res.userId(), res.portfolioId()));
@@ -119,7 +119,7 @@ public class PortfolioController {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
         log.info("PortfolioController - getPortfolioBasicDetails called with userId: {}", userId);
 
-        List<PortfolioBasicInfo> basicInfoList = demoPortfolioService.listBasicPortfolios(userId).stream()
+        List<PortfolioBasicInfo> basicInfoList = newUserPortfolioFallbackService.listBasicPortfolios(userId).stream()
                 .map(row -> new PortfolioBasicInfo(
                         row.portfolioId(),
                         row.portfolioName(),
@@ -139,7 +139,7 @@ public class PortfolioController {
     public ResponseEntity<Void> dismissDemoPortfolio() {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
         log.info("PortfolioController - dismissDemoPortfolio (legacy clear) called for userId: {}", userId);
-        demoPortfolioService.dismissForUser(userId);
+        newUserPortfolioFallbackService.dismissForUser(userId);
         return ResponseEntity.noContent().build();
     }
 
@@ -204,7 +204,7 @@ public class PortfolioController {
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
-        DemoPortfolioService.DemoResolution res = demoPortfolioService.resolveRequest(userId, portfolioId);
+        NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
         log.info(
                 "PortfolioController - getPortfolioAnalysis called - Portfolio: {}, User: {}, Page: {}, Size: {}, Interval: {}",
                 res.portfolioId(), res.userId(), page, size, interval != null ? interval : "null");
@@ -241,7 +241,7 @@ public class PortfolioController {
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
-        DemoPortfolioService.DemoResolution res = demoPortfolioService.resolveRequest(userId, portfolioId);
+        NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
         log.info(
                 "PortfolioController - getPortfolioSummary called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}",
                 res.userId(), res.portfolioId() != null ? res.portfolioId() : "all", page, size, interval != null ? interval : "null");
@@ -287,7 +287,7 @@ public class PortfolioController {
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
-        DemoPortfolioService.DemoResolution res = demoPortfolioService.resolveRequest(userId, portfolioId);
+        NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
         log.info(
                 "PortfolioController - getPortfolioHoldings called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}",
                 res.userId(), res.portfolioId() != null ? res.portfolioId() : "all", page, size, interval != null ? interval : "null");
@@ -331,7 +331,7 @@ public class PortfolioController {
     public ResponseEntity<List<PortfolioSnapshotModel>> getPortfolioHistory(
             @RequestParam(required = false, defaultValue = "1M") String timeFrame) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
-        DemoPortfolioService.DemoResolution res = demoPortfolioService.resolveRequest(userId, null);
+        NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, null);
         log.info("PortfolioController - getPortfolioHistory called - User: {}, TimeFrame: {}", res.userId(), timeFrame);
 
         List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(res.userId(), res.portfolioId(), timeFrame);
@@ -351,7 +351,7 @@ public class PortfolioController {
             @PathVariable String portfolioId,
             @RequestParam(required = false, defaultValue = "1M") String timeFrame) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
-        DemoPortfolioService.DemoResolution res = demoPortfolioService.resolveRequest(userId, portfolioId);
+        NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
         log.info("PortfolioController - getSpecificPortfolioHistory called - User: {}, Portfolio: {}, TimeFrame: {}", res.userId(), res.portfolioId(), timeFrame);
 
         List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(res.userId(), res.portfolioId(), timeFrame);
