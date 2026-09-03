@@ -120,7 +120,7 @@ public class DemoPortfolioService {
     private PortfolioModelV1 cloneAsDemo(PortfolioModelV1 source, String userId) {
         return PortfolioModelV1.builder()
             .id(source.getId())
-            .name(source.getName())
+            .name("Demo Portfolio")
             .description(source.getDescription())
             .owner(userId)
             .currency(source.getCurrency())
