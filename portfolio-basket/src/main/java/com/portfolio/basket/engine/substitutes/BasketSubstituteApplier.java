@@ -63,14 +63,9 @@ public class BasketSubstituteApplier {
 
         Set<String> subSymbols = new HashSet<>();
         for (SubstituteAssignment assignment : assignments) {
-            if (assignment.getSubstituteIsin() != null) {
-                EquityHoldings sub = byIsin.get(assignment.getSubstituteIsin());
-                if (sub == null) {
-                    sub = bySymbol.get(assignment.getSubstituteIsin().toUpperCase(Locale.ROOT));
-                }
-                if (sub != null && sub.getSymbol() != null) {
-                    subSymbols.add(sub.getSymbol());
-                }
+            EquityHoldings sub = resolveSubstituteHolding(assignment, byIsin, bySymbol);
+            if (sub != null && sub.getSymbol() != null) {
+                subSymbols.add(sub.getSymbol());
             }
         }
         Map<String, Double> prices = subSymbols.isEmpty() ? Collections.emptyMap()
@@ -135,17 +130,14 @@ public class BasketSubstituteApplier {
                     break;
                 }
 
-                String substituteKey = assignment.getSubstituteIsin();
-                if (substituteKey == null || substituteKey.isBlank()) {
-                    continue;
-                }
-
-                EquityHoldings sub = byIsin.get(substituteKey);
+                EquityHoldings sub = resolveSubstituteHolding(assignment, byIsin, bySymbol);
                 if (sub == null) {
-                    sub = bySymbol.get(substituteKey.toUpperCase(Locale.ROOT));
-                }
-                if (sub == null) {
-                    warnings.add("Substitute not in holdings: " + substituteKey);
+                    String key = firstNonBlank(assignment.getSubstituteIsin(), assignment.getSubstituteSymbol());
+                    if (key == null || key.isBlank()) {
+                        warnings.add("Missing substitute ISIN/symbol for " + originalItem.getStockSymbol());
+                    } else {
+                        warnings.add("Substitute not in holdings: " + key);
+                    }
                     continue;
                 }
 
@@ -161,7 +153,8 @@ public class BasketSubstituteApplier {
                     warnings.add("Not an index constituent: " + sub.getSymbol());
                 }
 
-                String resolvedIsin = sub.getIsin() != null ? sub.getIsin() : substituteKey;
+                String resolvedIsin = sub.getIsin() != null ? sub.getIsin()
+                        : firstNonBlank(assignment.getSubstituteIsin(), assignment.getSubstituteSymbol());
                 double subWeight = overlapCalculator.getAvailableWeight(sub);
 
                 double consumed = consumedWeightByIsin.getOrDefault(resolvedIsin, 0.0);
@@ -354,7 +347,7 @@ public class BasketSubstituteApplier {
             if (missingKey == null || missingKey.isBlank()) {
                 continue;
             }
-            String substituteKey = assignment.getSubstituteIsin();
+            String substituteKey = firstNonBlank(assignment.getSubstituteIsin(), assignment.getSubstituteSymbol());
             if (substituteKey == null || substituteKey.isBlank()) {
                 continue;
             }
@@ -363,10 +356,7 @@ public class BasketSubstituteApplier {
                 continue;
             }
 
-            EquityHoldings sub = byIsin.get(substituteKey);
-            if (sub == null) {
-                sub = bySymbol.get(substituteKey.toUpperCase(Locale.ROOT));
-            }
+            EquityHoldings sub = resolveSubstituteHolding(assignment, byIsin, bySymbol);
             if (sub == null) {
                 continue;
             }
@@ -453,5 +443,40 @@ public class BasketSubstituteApplier {
             return SectorNormalizer.normalize(missingSector).equals(SectorNormalizer.normalize(substituteSector));
         }
         return SectorNormalizer.normalize(missingSector).equals(SectorNormalizer.normalize(substituteSector));
+    }
+
+    private static EquityHoldings resolveSubstituteHolding(
+            SubstituteAssignment assignment,
+            Map<String, EquityHoldings> byIsin,
+            Map<String, EquityHoldings> bySymbol) {
+        if (assignment == null) {
+            return null;
+        }
+        String isinOrKey = assignment.getSubstituteIsin();
+        if (isinOrKey != null && !isinOrKey.isBlank()) {
+            EquityHoldings byKey = byIsin.get(isinOrKey);
+            if (byKey != null) {
+                return byKey;
+            }
+            byKey = bySymbol.get(isinOrKey.toUpperCase(Locale.ROOT));
+            if (byKey != null) {
+                return byKey;
+            }
+        }
+        String symbol = assignment.getSubstituteSymbol();
+        if (symbol != null && !symbol.isBlank()) {
+            return bySymbol.get(symbol.toUpperCase(Locale.ROOT));
+        }
+        return null;
+    }
+
+    private static String firstNonBlank(String a, String b) {
+        if (a != null && !a.isBlank()) {
+            return a;
+        }
+        if (b != null && !b.isBlank()) {
+            return b;
+        }
+        return null;
     }
 }

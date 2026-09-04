@@ -75,7 +75,7 @@ public class BasketController {
                 request.getUserId(), request.getPortfolioId(), request.getEtfQuery());
 
         List<EquityHoldings> userHoldings = resolveUserHoldings(request.getUserId(),
-                request.getPortfolioId(), request.getUserHoldings());
+                request.getPortfolioId(), request.getUserHoldings(), false);
 
         log.info("Generating opportunities for {} holdings", userHoldings.size());
         return basketEngineFacade.findOpportunities(userHoldings, request.getEtfQuery());
@@ -150,13 +150,16 @@ public class BasketController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "etfIsin is required");
         }
         List<EquityHoldings> userHoldings = resolveUserHoldings(request.getUserId(),
-                request.getPortfolioId(), request.getUserHoldings());
+                request.getPortfolioId(), request.getUserHoldings(), true);
         try {
             List<com.portfolio.basket.model.SubstituteAssignment> assignments = request.getAssignments() == null
                     ? java.util.Collections.emptyList()
                     : request.getAssignments().stream()
                             .map(a -> new com.portfolio.basket.model.SubstituteAssignment(
-                                    a.getMissingIsin(), a.getSubstituteIsin(), a.getAssignedWeight()))
+                                    a.getMissingIsin(),
+                                    a.getSubstituteIsin(),
+                                    a.getAssignedWeight(),
+                                    a.getSubstituteSymbol()))
                             .toList();
 
             BasketOpportunity base;
@@ -306,6 +309,16 @@ public class BasketController {
 
     private List<EquityHoldings> resolveUserHoldings(String userId, String portfolioId,
             List<EquityHoldings> manualHoldings) {
+        return resolveUserHoldings(userId, portfolioId, manualHoldings, false);
+    }
+
+    /**
+     * @param includeFullyAllocated when true (apply-substitutes), keep holdings even if
+     *                              availableQuantity is 0 so in-basket reclaim/swap can resolve
+     *                              peers the user still owns.
+     */
+    private List<EquityHoldings> resolveUserHoldings(String userId, String portfolioId,
+            List<EquityHoldings> manualHoldings, boolean includeFullyAllocated) {
         List<EquityHoldings> holdings;
         if (manualHoldings != null && !manualHoldings.isEmpty()) {
             log.info("Using manual holdings provided in request. Count: {}", manualHoldings.size());
@@ -328,9 +341,15 @@ public class BasketController {
             }
         }
 
-        holdings = holdings.stream()
-                .filter(h -> h.getAvailableQuantity() == null || h.getAvailableQuantity() > 0)
-                .collect(java.util.stream.Collectors.toList());
+        if (includeFullyAllocated) {
+            holdings = holdings.stream()
+                    .filter(h -> h.getQuantity() == null || h.getQuantity() > 0)
+                    .collect(java.util.stream.Collectors.toList());
+        } else {
+            holdings = holdings.stream()
+                    .filter(h -> h.getAvailableQuantity() == null || h.getAvailableQuantity() > 0)
+                    .collect(java.util.stream.Collectors.toList());
+        }
         return holdingSectorEnricher.enrich(holdings);
     }
 
@@ -378,5 +397,7 @@ public class BasketController {
         private String missingIsin;
         private String substituteIsin;
         private Double assignedWeight;
+        /** Optional ticker when ISIN is missing from the client selection. */
+        private String substituteSymbol;
     }
 }

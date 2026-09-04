@@ -325,6 +325,31 @@ class BasketEngineExclusiveSubstituteTest {
     }
 
     @Test
+    void applySubstitutes_resolvesBySymbolWhenIsinBlank() {
+        EtfData etf = new EtfData();
+        etf.setName("Nifty IT");
+        etf.setHoldings(List.of(
+                holding("INE001", "HCLTECH", "Information Technology", 10)
+        ));
+        when(enrichedEtfService.getEnrichedEtf(anyString())).thenReturn(etf);
+
+        EquityHoldings wipro = EquityHoldings.builder()
+                .isin("INEWIPRO").symbol("WIPRO").sector("Information Technology")
+                .quantity(50.0).weightInPortfolio(15.0).averageBuyingPrice(500.0).build();
+
+        BasketOpportunity opp = engine.getPreview("ETF1", List.of(wipro));
+        BasketOpportunity updated = engine.applySubstitutesOnExisting(opp, List.of(wipro), List.of(
+                new SubstituteAssignment("INE001", null, null, "WIPRO")
+        ));
+
+        assertEquals(1, updated.getAppliedSubstituteCount());
+        assertTrue(updated.getComposition().stream().anyMatch(i ->
+                "HCLTECH".equals(i.getStockSymbol())
+                        && i.getStatus() == ItemStatus.SUBSTITUTE
+                        && "WIPRO".equals(i.getUserHoldingSymbol())));
+    }
+
+    @Test
     void getPreview_exposesSectorialProfileForItEtf() {
         EtfData etf = new EtfData();
         etf.setName("Nifty IT");
