@@ -39,6 +39,7 @@ vault:
       mappings:
         OAUTH2_CLIENT_ID: "AM_PORTFOLIO_CLIENT_ID"
         OAUTH2_CLIENT_SECRET: "AM_PORTFOLIO_CLIENT_SECRET"
+        DEMO_PORTFOLIO_ID: "DEMO_PORTFOLIO_ID"
 
     otel:
       mappings:
