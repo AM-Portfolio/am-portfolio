@@ -3,26 +3,32 @@ package com.portfolio.api;
 import com.portfolio.basket.model.BasketOpportunity;
 import com.portfolio.basket.service.BasketAllocationService;
 import com.portfolio.basket.service.BasketCatalogService;
+import com.portfolio.basket.service.BasketEngineFacade;
 import com.portfolio.basket.service.BasketEngineService;
-import com.portfolio.service.basket.BasketPortfolioCreateService;
 import com.portfolio.basket.service.HoldingSectorEnricher;
 import com.portfolio.model.portfolio.EquityHoldings;
-import com.portfolio.service.portfolio.PortfolioHoldingsService;
-import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.service.basket.AllocationLedgerService;
-import com.am.common.amcommondata.model.enums.PortfolioKind;
+import com.portfolio.service.basket.BasketPortfolioCreateService;
+import com.portfolio.service.basket.BasketReadService;
+import com.portfolio.service.basket.BasketDraftService;
+import com.portfolio.service.basket.dto.BasketDetailDto;
+import com.portfolio.service.basket.dto.BasketSummaryDto;
+import com.portfolio.service.basket.dto.BasketDraftDtos;
+import com.portfolio.service.portfolio.PortfolioHoldingsService;
 import com.am.common.amcommondata.model.PortfolioModelV1;
-import java.util.UUID;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
+import com.am.common.amcommondata.service.PortfolioService;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import lombok.RequiredArgsConstructor;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.Data;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
-import io.swagger.v3.oas.annotations.Operation;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/v1/basket")
@@ -31,6 +37,7 @@ import java.util.List;
 public class BasketController {
 
     private final BasketEngineService basketService;
+    private final BasketEngineFacade basketEngineFacade;
     private final BasketAllocationService basketAllocationService;
     private final BasketCatalogService basketCatalogService;
     private final PortfolioHoldingsService portfolioHoldingsService;
@@ -38,61 +45,43 @@ public class BasketController {
     private final BasketPortfolioCreateService basketPortfolioCreateService;
     private final PortfolioService portfolioService;
     private final AllocationLedgerService allocationLedgerService;
-    private final com.portfolio.marketdata.service.MarketDataService marketDataService;
+    private final BasketReadService basketReadService;
+    private final BasketDraftService basketDraftService;
 
-    @Operation(summary="Get /catalog", description="Endpoint to endpoint", operationId="endpoint")
+    @Operation(summary = "Get basket catalog", description = "Returns curated basket themes and default ETF query", operationId = "getBasketCatalog")
     @GetMapping("/catalog")
     public com.portfolio.basket.model.BasketCatalogResponse getCatalog() {
         return basketCatalogService.getCatalog();
     }
 
-    @Operation(summary="Put /catalog", description="Endpoint to endpoint", operationId="endpoint")
+    @Operation(summary = "Upsert basket catalog", description = "Replace basket catalog themes (admin/ops)", operationId = "upsertBasketCatalog")
     @PutMapping("/catalog")
     public com.portfolio.basket.model.BasketCatalogResponse upsertCatalog(
             @RequestBody com.portfolio.model.basket.cache.CachedBasketCatalog body) {
         return basketCatalogService.upsertCatalog(body);
     }
 
-    @Operation(summary="Get /my", description="Endpoint to getMyBaskets", operationId="getMyBaskets")
+    @Operation(summary = "Get /my", description = "Endpoint to getMyBaskets", operationId = "getMyBaskets")
     @GetMapping("/my")
-    public List<BasketSummaryDto> getMyBaskets(@RequestParam String userId, @RequestParam(required = false) String portfolioId) {
-        if (userId == null || userId.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "userId is required");
-        }
-        List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
-        return portfolios.stream()
-                .filter(p -> p.getPortfolioKind() != PortfolioKind.DELETED)
-                .filter(p -> PortfolioKind.isBasket(p.getPortfolioKind()) || 
-                            (p.getPortfolioKind() == null && p.getSourcePortfolioId() != null && !p.getSourcePortfolioId().isBlank()))
-                .filter(p -> portfolioId == null || portfolioId.isBlank() || portfolioId.equals(p.getSourcePortfolioId()))
-                .map(p -> BasketSummaryDto.builder()
-                        .id(p.getId().toString())
-                        .etfName(p.getEtfName() != null ? p.getEtfName() : (p.getName() != null ? p.getName() : "Basket"))
-                        .etfIsin(p.getEtfIsin() != null ? p.getEtfIsin() : "")
-                        .status(p.getStatus() != null ? p.getStatus() : "ACTIVE")
-                        .assetCount(p.getEquityModels() != null ? p.getEquityModels().size() : 0)
-                        .gapMissingCount(p.getGapMissingCount())
-                        .totalValue(p.getTotalValue())
-                        .investmentAmount(p.getInvestmentAmount())
-                        .createdAt(p.getCreatedAt())
-                        .build())
-                .collect(java.util.stream.Collectors.toList());
+    public List<BasketSummaryDto> getMyBaskets(
+            @RequestParam String userId, @RequestParam(required = false) String portfolioId) {
+        return basketReadService.findBasketsByOwner(userId, portfolioId);
     }
 
-    @Operation(summary="Post /opportunities", description="Endpoint to getOpportunities", operationId="getOpportunities")
+    @Operation(summary = "Post /opportunities", description = "Endpoint to getOpportunities", operationId = "getOpportunities")
     @PostMapping("/opportunities")
     public List<BasketOpportunity> getOpportunities(@RequestBody OpportunityRequest request) {
         log.info("Received Basket Opportunities Request - User: {}, Portfolio: {}, Query: {}",
                 request.getUserId(), request.getPortfolioId(), request.getEtfQuery());
 
         List<EquityHoldings> userHoldings = resolveUserHoldings(request.getUserId(),
-                request.getPortfolioId(), request.getUserHoldings());
+                request.getPortfolioId(), request.getUserHoldings(), false);
 
         log.info("Generating opportunities for {} holdings", userHoldings.size());
-        return basketService.findOpportunities(userHoldings, request.getEtfQuery());
+        return basketEngineFacade.findOpportunities(userHoldings, request.getEtfQuery());
     }
 
-    @Operation(summary="Post /exposure", description="Endpoint to endpoint", operationId="endpoint")
+    @Operation(summary = "Post /exposure", description = "Endpoint to endpoint", operationId = "endpoint")
     @PostMapping("/exposure")
     public com.portfolio.model.basket.ExposureResponse getExposure(@RequestBody OpportunityRequest request) {
         log.info("DIAGNOSTIC: Entered getExposure - User: {}, Portfolio: {}",
@@ -112,7 +101,7 @@ public class BasketController {
         return response;
     }
 
-    @Operation(summary="Post /allocations", description="Endpoint to endpoint", operationId="endpoint")
+    @Operation(summary = "Post /allocations", description = "Endpoint to endpoint", operationId = "endpoint")
     @PostMapping("/allocations")
     public com.portfolio.model.basket.PortfolioAllocationResponse getAllocations(
             @RequestBody OpportunityRequest request) {
@@ -133,7 +122,7 @@ public class BasketController {
         return allocation;
     }
 
-    @Operation(summary="Post /preview", description="Endpoint to getPreview", operationId="getPreview")
+    @Operation(summary = "Post /preview", description = "Endpoint to getPreview", operationId = "getPreview")
     @PostMapping("/preview")
     public BasketOpportunity getPreview(@RequestBody PreviewRequest request) {
         log.info("Received Basket Preview Request - ETF: {}, User: {}, Portfolio: {}",
@@ -145,7 +134,7 @@ public class BasketController {
         log.info("Fetch User Holdings complete. Count: {}", userHoldings.size());
 
         try {
-            BasketOpportunity opportunity = basketService.getPreview(request.getEtfIsin(), userHoldings);
+            BasketOpportunity opportunity = basketEngineFacade.getPreview(request.getEtfIsin(), userHoldings);
             log.info("Basket Preview generated successfully for ETF: {}", request.getEtfIsin());
             return opportunity;
         } catch (Exception e) {
@@ -154,22 +143,25 @@ public class BasketController {
         }
     }
 
-    @Operation(summary="Post /apply-substitutes", description="Endpoint to applySubstitutes", operationId="applySubstitutes")
+    @Operation(summary = "Post /apply-substitutes", description = "Endpoint to applySubstitutes", operationId = "applySubstitutes")
     @PostMapping("/apply-substitutes")
     public BasketOpportunity applySubstitutes(@RequestBody ApplySubstitutesRequest request) {
         if (request == null || request.getEtfIsin() == null || request.getEtfIsin().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "etfIsin is required");
         }
         List<EquityHoldings> userHoldings = resolveUserHoldings(request.getUserId(),
-                request.getPortfolioId(), request.getUserHoldings());
+                request.getPortfolioId(), request.getUserHoldings(), true);
         try {
-            List<BasketEngineService.SubstituteAssignment> assignments = request.getAssignments() == null
+            List<com.portfolio.basket.model.SubstituteAssignment> assignments = request.getAssignments() == null
                     ? java.util.Collections.emptyList()
                     : request.getAssignments().stream()
-                            .map(a -> new BasketEngineService.SubstituteAssignment(
-                                    a.getMissingIsin(), a.getSubstituteIsin(), a.getAssignedWeight()))
+                            .map(a -> new com.portfolio.basket.model.SubstituteAssignment(
+                                    a.getMissingIsin(),
+                                    a.getSubstituteIsin(),
+                                    a.getAssignedWeight(),
+                                    a.getSubstituteSymbol()))
                             .toList();
-            
+
             BasketOpportunity base;
             if (request.getCurrentOpportunity() != null &&
                 request.getCurrentOpportunity().getComposition() != null &&
@@ -179,177 +171,92 @@ public class BasketController {
             } else {
                 log.warn("apply-substitutes: currentOpportunity not provided — falling back to getPreview for: {}",
                     request.getEtfIsin());
-                base = basketService.getPreview(request.getEtfIsin(), userHoldings);
+                base = basketEngineFacade.getPreview(request.getEtfIsin(), userHoldings);
             }
-                    
+
             return basketService.applySubstitutesOnExisting(base, userHoldings, assignments);
         } catch (IllegalStateException conflict) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, conflict.getMessage());
         }
     }
 
-    @Operation(summary="Post /create-portfolio", description="Endpoint to endpoint", operationId="endpoint")
+    @Operation(summary = "Create basket portfolio", description = "Create a basket portfolio from preview lines", operationId = "createBasketPortfolio")
     @PostMapping("/create-portfolio")
     public BasketPortfolioCreateService.CreateBasketResponse createPortfolio(
             @RequestBody BasketPortfolioCreateService.CreateBasketRequest request) {
         return basketPortfolioCreateService.create(request);
     }
 
-    @Operation(summary="Get /{basketId}", description="Endpoint to getBasketDetail", operationId="getBasketDetail")
-    @GetMapping("/{basketId}")
-    public BasketDetailDto getBasketDetail(@PathVariable String basketId, @RequestParam String userId) {
-        if (userId == null || userId.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "userId is required");
-        }
-        PortfolioModelV1 basket = portfolioService.getPortfolioById(UUID.fromString(basketId));
-        if (basket == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Basket not found");
-        }
-        if (!userId.equals(basket.getOwner())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not owner of basket");
-        }
-        if (!PortfolioKind.isBasket(basket.getPortfolioKind()) && basket.getPortfolioKind() != PortfolioKind.DELETED) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Portfolio is not a basket");
-        }
-
-        List<BasketLineDetail> lines = new java.util.ArrayList<>();
-        double totalInvested = 0;
-        double totalCurrent = 0;
-        int heldCount = 0;
-        int missingCount = 0;
-        int underfundedCount = 0;
-
-        if (basket.getEquityModels() != null) {
-            List<String> symbolsNeedingLive = new java.util.ArrayList<>();
-            for (com.am.common.amcommondata.model.asset.equity.EquityModel eq : basket.getEquityModels()) {
-                if (eq.getSymbol() == null || eq.getSymbol().isBlank()) {
-                    continue;
-                }
-                // Prefer live refresh; still allow stored snapshot as seed when market is slow
-                symbolsNeedingLive.add(eq.getSymbol());
-            }
-            java.util.Map<String, Double> prices = symbolsNeedingLive.isEmpty()
-                    ? java.util.Collections.emptyMap()
-                    : marketDataService.getCurrentPrices(symbolsNeedingLive);
-
-            for (com.am.common.amcommondata.model.asset.equity.EquityModel eq : basket.getEquityModels()) {
-                double qty = eq.getQuantity() != null ? eq.getQuantity() : 0.0;
-                double avgPrice = eq.getAvgBuyingPrice() != null ? eq.getAvgBuyingPrice() : 0.0;
-                double storedPrice = eq.getCurrentPrice() != null && eq.getCurrentPrice() > 0
-                        ? eq.getCurrentPrice() : 0.0;
-
-                Double livePrice = prices.get(eq.getSymbol());
-                double displayCurrentPrice = 0.0;
-                boolean hasMarketPrice = false;
-                if (livePrice != null && livePrice > 0) {
-                    displayCurrentPrice = livePrice;
-                    hasMarketPrice = true;
-                } else if (storedPrice > 0) {
-                    displayCurrentPrice = storedPrice;
-                    hasMarketPrice = true;
-                }
-
-                // Valuation: live → stored snapshot → cost basis
-                double valuationPrice = hasMarketPrice ? displayCurrentPrice : avgPrice;
-
-                double invested = qty * avgPrice;
-                double current = qty * valuationPrice;
-                double pnl = hasMarketPrice ? (current - invested) : 0.0;
-
-
-                totalInvested += invested;
-                totalCurrent += current;
-
-                String status = eq.getStatus() != null ? eq.getStatus() : "HELD";
-                if ("MISSING".equalsIgnoreCase(status) || "MISSING_GAP".equalsIgnoreCase(status)) {
-                    missingCount++;
-                } else {
-                    heldCount++;
-                }
-
-                String companyName = eq.getCompanyName();
-                if (companyName == null || companyName.isBlank()) {
-                    companyName = eq.getName();
-                }
-
-                lines.add(BasketLineDetail.builder()
-                        .symbol(eq.getSymbol())
-                        .isin(eq.getIsin())
-                        .sector(eq.getSector())
-                        .status(status)
-                        .quantity(qty)
-                        .avgPrice(avgPrice)
-                        .currentPrice(displayCurrentPrice)
-                        .pnl(pnl)
-                        .companyName(companyName)
-                        .etfWeight(eq.getEtfWeight())
-                        .coversEtfSymbol(eq.getCoversEtfSymbol())
-                        .build());
-            }
-        }
-        missingCount = basket.getGapMissingCount() != null ? basket.getGapMissingCount() : missingCount;
-
-        double coveragePercent;
-        if (basket.getReplicaScore() != null && basket.getReplicaScore() > 0) {
-            coveragePercent = basket.getReplicaScore();
-        } else if (basket.getCoverageAfterCreation() != null && basket.getCoverageAfterCreation() > 0) {
-            coveragePercent = basket.getCoverageAfterCreation();
-        } else {
-            coveragePercent = (heldCount + missingCount) > 0
-                    ? ((double) heldCount / (heldCount + missingCount)) * 100.0 : 0.0;
-        }
-        
-        double totalPnl = totalCurrent - totalInvested;
-        double pnlPct = totalInvested > 0 ? (totalPnl / totalInvested) * 100.0 : 0.0;
-
-        return BasketDetailDto.builder()
-                .id(basket.getId().toString())
-                .name(basket.getName() != null ? basket.getName() : (basket.getEtfName() != null ? basket.getEtfName() : "Basket"))
-                .etfName(basket.getEtfName() != null ? basket.getEtfName() : "")
-                .etfIsin(basket.getEtfIsin() != null ? basket.getEtfIsin() : "")
-                .status(basket.getStatus() != null ? basket.getStatus() : "ACTIVE")
-                .createdAt(basket.getCreatedAt())
-                .updatedAt(basket.getUpdatedAt())
-                .investmentAmount(basket.getInvestmentAmount())
-                .totalInvestedValue(totalInvested)
-                .totalCurrentValue(totalCurrent)
-                .totalPnL(totalPnl)
-                .pnlPercent(pnlPct)
-                .replicaScore(basket.getReplicaScore())
-                .coverageAfterCreation(basket.getCoverageAfterCreation())
-                .totalItems(heldCount + missingCount)
-                .heldCount(heldCount)
-                .missingCount(missingCount)
-                .underfundedCount(underfundedCount)
-                .coveragePercent(coveragePercent)
-                .lines(lines)
-                .build();
+    @Operation(summary = "List basket drafts", description = "List durable basket drafts for a user", operationId = "listBasketDrafts")
+    @GetMapping("/drafts")
+    public BasketDraftDtos.BasketDraftListResponse listDrafts(
+            @RequestParam String userId,
+            @RequestParam(required = false) String portfolioId) {
+        return basketDraftService.listDrafts(userId, portfolioId);
     }
 
+    @Operation(summary = "Upsert basket draft", description = "Save or update a basket draft (max 5 per user)", operationId = "upsertBasketDraft")
+    @PutMapping("/drafts")
+    public BasketDraftDtos.BasketDraftDetailDto upsertDraft(
+            @RequestBody BasketDraftDtos.UpsertBasketDraftRequest request) {
+        return basketDraftService.upsert(request);
+    }
 
-    @Operation(summary="Delete /{basketId}", description="Endpoint to deleteBasket", operationId="deleteBasket")
+    @Operation(summary = "Upsert basket draft (POST)", description = "Same as PUT /drafts — gateway-friendly upsert", operationId = "upsertBasketDraftPost")
+    @PostMapping("/drafts")
+    public BasketDraftDtos.BasketDraftDetailDto upsertDraftPost(
+            @RequestBody BasketDraftDtos.UpsertBasketDraftRequest request) {
+        return basketDraftService.upsert(request);
+    }
+
+    @Operation(summary = "Get basket draft", description = "Load a full basket draft snapshot", operationId = "getBasketDraft")
+    @GetMapping("/drafts/{draftId}")
+    public BasketDraftDtos.BasketDraftDetailDto getDraft(
+            @PathVariable String draftId,
+            @RequestParam String userId) {
+        return basketDraftService.getDraft(draftId, userId);
+    }
+
+    @Operation(summary = "Delete basket draft", description = "Hard-delete a basket draft", operationId = "deleteBasketDraft")
+    @DeleteMapping("/drafts/{draftId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteDraft(
+            @PathVariable String draftId,
+            @RequestParam String userId) {
+        basketDraftService.deleteDraft(draftId, userId);
+    }
+
+    @Operation(summary = "Get /{basketId}", description = "Endpoint to getBasketDetail", operationId = "getBasketDetail")
+    @GetMapping("/{basketId}")
+    public BasketDetailDto getBasketDetail(@PathVariable String basketId, @RequestParam String userId) {
+        requireValidBasketId(basketId);
+        return basketReadService.getBasketDetail(basketId, userId);
+    }
+
+    @Operation(summary = "Delete /{basketId}", description = "Endpoint to deleteBasket", operationId = "deleteBasket")
     @DeleteMapping("/{basketId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteBasket(@PathVariable String basketId, @RequestParam(required = false) String userId) {
+        requireValidBasketId(basketId);
         if (userId == null || userId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "userId is required");
         }
-        
+
         PortfolioModelV1 basket = portfolioService.getPortfolioById(UUID.fromString(basketId));
         if (basket == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Basket not found");
         }
-        
+
         if (!userId.equals(basket.getOwner())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not owner of basket");
         }
-        
+
         if (!PortfolioKind.isBasket(basket.getPortfolioKind())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Portfolio is not a basket");
         }
-        
+
         allocationLedgerService.releaseAllocations(basketId, userId, "BASKET_DELETED");
-        
+
         basket.setPortfolioKind(PortfolioKind.DELETED);
         portfolioService.savePortfolioDocument(basket);
 
@@ -361,7 +268,7 @@ public class BasketController {
         }
     }
 
-    @Operation(summary="Post /calculate-quantities", description="Endpoint to calculateQuantities", operationId="calculateQuantities")
+    @Operation(summary = "Post /calculate-quantities", description = "Endpoint to calculateQuantities", operationId = "calculateQuantities")
     @PostMapping("/calculate-quantities")
     public BasketOpportunity calculateQuantities(@RequestBody CalculationRequest request) {
         if (request == null || request.getInvestmentAmount() == null || request.getInvestmentAmount() <= 0) {
@@ -385,7 +292,7 @@ public class BasketController {
                 request.getInvestmentAmount(), opportunity, includeHeld, excludedSymbols);
     }
 
-    @Operation(summary="Post /calculate-quantities/final-preview", description="Endpoint to calculate quantities for final preview", operationId="calculateQuantitiesFinalPreview")
+    @Operation(summary = "Post /calculate-quantities/final-preview", description = "Endpoint to calculate quantities for final preview", operationId = "calculateQuantitiesFinalPreview")
     @PostMapping("/calculate-quantities/final-preview")
     public BasketOpportunity calculateQuantitiesFinalPreview(@RequestBody CalculationRequest request) {
         return calculateQuantities(request);
@@ -397,11 +304,21 @@ public class BasketController {
         private Double investmentAmount;
         private Boolean includeHeld;
         private BasketOpportunity opportunity;
-        private List<String> excludedSymbols;  // NEW: symbols to exclude from this calculation
+        private List<String> excludedSymbols;
     }
 
     private List<EquityHoldings> resolveUserHoldings(String userId, String portfolioId,
             List<EquityHoldings> manualHoldings) {
+        return resolveUserHoldings(userId, portfolioId, manualHoldings, false);
+    }
+
+    /**
+     * @param includeFullyAllocated when true (apply-substitutes), keep holdings even if
+     *                              availableQuantity is 0 so in-basket reclaim/swap can resolve
+     *                              peers the user still owns.
+     */
+    private List<EquityHoldings> resolveUserHoldings(String userId, String portfolioId,
+            List<EquityHoldings> manualHoldings, boolean includeFullyAllocated) {
         List<EquityHoldings> holdings;
         if (manualHoldings != null && !manualHoldings.isEmpty()) {
             log.info("Using manual holdings provided in request. Count: {}", manualHoldings.size());
@@ -410,8 +327,6 @@ public class BasketController {
             log.warn("No userId or manual holdings provided in request.");
             return java.util.Collections.emptyList();
         } else {
-            // enrich=false: skip PortfolioCalculator market round-trip; basket engine
-            // fetches prices once (shared map). Sector/mcap filled by HoldingSectorEnricher gaps only.
             com.portfolio.model.portfolio.PortfolioHoldings portfolioHoldings;
             if (portfolioId != null && !portfolioId.isEmpty()) {
                 portfolioHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, null, false);
@@ -426,11 +341,24 @@ public class BasketController {
             }
         }
 
-        // Filter zero-available and enrich sectors only where missing
-        holdings = holdings.stream()
-                .filter(h -> h.getAvailableQuantity() == null || h.getAvailableQuantity() > 0)
-                .collect(java.util.stream.Collectors.toList());
+        if (includeFullyAllocated) {
+            holdings = holdings.stream()
+                    .filter(h -> h.getQuantity() == null || h.getQuantity() > 0)
+                    .collect(java.util.stream.Collectors.toList());
+        } else {
+            holdings = holdings.stream()
+                    .filter(h -> h.getAvailableQuantity() == null || h.getAvailableQuantity() > 0)
+                    .collect(java.util.stream.Collectors.toList());
+        }
         return holdingSectorEnricher.enrich(holdings);
+    }
+
+    private void requireValidBasketId(String basketId) {
+        try {
+            UUID.fromString(basketId);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid basketId");
+        }
     }
 
     @Data
@@ -469,61 +397,7 @@ public class BasketController {
         private String missingIsin;
         private String substituteIsin;
         private Double assignedWeight;
-    }
-
-    @Data
-    @lombok.Builder
-    public static class BasketSummaryDto {
-        private String id;
-        private String etfName;
-        private String etfIsin;
-        private String status;
-        private Integer assetCount;
-        private Integer gapMissingCount;
-        private Double totalValue;
-        private Double investmentAmount;
-        private java.time.LocalDateTime createdAt;
-    }
-
-    @Data
-    @lombok.Builder
-    public static class BasketDetailDto {
-        private String id;
-        private String name;
-        private String etfName;
-        private String etfIsin;
-        private String status;
-        private Double totalInvestedValue;
-        private Double totalCurrentValue;
-        private Double investmentAmount;
-        private Double totalPnL;
-        private Double pnlPercent;
-        private Double coveragePercent;
-        private Double replicaScore;
-        private Double coverageAfterCreation;
-        private Integer totalItems;
-        private Integer heldCount;
-        private Integer missingCount;
-        private Integer underfundedCount;
-        private java.time.LocalDateTime createdAt;
-        private java.time.LocalDateTime updatedAt;
-        private List<BasketLineDetail> lines;
-    }
-
-    @Data
-    @lombok.Builder
-    public static class BasketLineDetail {
-        private String symbol;
-        private String isin;
-        private String sector;
-        private String status;
-        private Double quantity;
-        private Double avgPrice;
-        private Double currentPrice;
-        private Double pnl;
-        private Double etfWeight;
-        private Double rebalancedWeight;
-        private String companyName;
-        private String coversEtfSymbol;
+        /** Optional ticker when ISIN is missing from the client selection. */
+        private String substituteSymbol;
     }
 }

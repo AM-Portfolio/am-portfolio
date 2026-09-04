@@ -26,20 +26,19 @@ import java.util.Map;
 @Slf4j
 public class KafkaConfig {
 
-
-    @Value("${spring.kafka.bootstrap-servers}")
+    @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
     private String bootstrapServers;
 
-    @Value("${spring.kafka.consumer.group-id}")
+    @Value("${spring.kafka.consumer.group-id:am-portfolio-group}")
     private String groupId;
 
-    @Value("${spring.kafka.properties.[security.protocol]}")
+    @Value("${spring.kafka.properties.security.protocol:}")
     private String securityProtocol;
     
-    @Value("${spring.kafka.properties.[sasl.mechanism]}")
+    @Value("${spring.kafka.properties.sasl.mechanism:}")
     private String saslMechanism;
     
-    @Value("${spring.kafka.properties.[sasl.jaas.config]}")
+    @Value("${spring.kafka.properties.sasl.jaas.config:}")
     private String jaasConfig;
 
     // @Value("${app.kafka.topic}")

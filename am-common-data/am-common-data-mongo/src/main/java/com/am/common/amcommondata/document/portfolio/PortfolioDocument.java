@@ -7,6 +7,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
 import com.am.common.amcommondata.document.asset.equity.EquityDocument;
+import com.am.common.amcommondata.document.basket.BasketPortfolioDocument;
 import com.am.common.amcommondata.document.base.BaseDocument;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.Currency;
@@ -68,6 +69,10 @@ public class PortfolioDocument extends BaseDocument {
     /** BROKER (default/null) or BASKET carve-out. */
     @Field("portfolioKind")
     private PortfolioKind portfolioKind;
+
+    /** PR56 nested basket metadata; legacy flat fields below remain for dual-read. */
+    @Field("basket")
+    private BasketPortfolioDocument basket;
 
     @Field("sourcePortfolioId")
     private String sourcePortfolioId;

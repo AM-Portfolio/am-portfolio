@@ -8,6 +8,7 @@ import com.portfolio.model.portfolio.EquityHoldings;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -17,6 +18,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 @Component
+@ConditionalOnProperty(name = "basket.scheduler.enabled", havingValue = "true", matchIfMissing = false)
 @Slf4j
 @RequiredArgsConstructor
 public class BasketRecommendationScheduler {
@@ -28,10 +30,9 @@ public class BasketRecommendationScheduler {
     @Value("${basket.scheduler.parallel-users:4}")
     private int parallelUsers;
 
-    // Run Daily at 6 PM
     @Scheduled(cron = "0 0 18 * * ?", zone = "Asia/Kolkata")
     public void runDailyRecommendation() {
-        log.info("⏰ Starting Daily Basket Recommendation Job...");
+        log.info("Starting Daily Basket Recommendation Job...");
 
         List<String> users = userProvider.getAllActiveUsers();
         log.info("found {} users to process", users.size());
@@ -52,14 +53,15 @@ public class BasketRecommendationScheduler {
             executor.shutdownNow();
         }
 
-        log.info("✅ Daily Basket Recommendation Job Completed.");
+        log.info("Daily Basket Recommendation Job Completed.");
     }
 
     private void processUser(String userId) {
         try {
             List<EquityHoldings> holdings = userProvider.getUserHoldings(userId);
-            if (holdings == null || holdings.isEmpty())
+            if (holdings == null || holdings.isEmpty()) {
                 return;
+            }
 
             String defaultQuery = basketCatalogService.resolveDefaultQuery();
             List<BasketOpportunity> opportunities = basketService.findOpportunities(holdings, defaultQuery);
