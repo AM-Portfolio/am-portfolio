@@ -26,7 +26,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class DemoPortfolioService {
+public class NewUserPortfolioFallbackService {
 
     private static final String DISMISSED_KEY_PREFIX = "demo:dismissed:";
     private static final String DEMO_DISPLAY_NAME = "Demo Portfolio";
