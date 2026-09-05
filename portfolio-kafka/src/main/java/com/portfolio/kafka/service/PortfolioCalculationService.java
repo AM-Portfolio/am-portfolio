@@ -76,11 +76,23 @@ public class PortfolioCalculationService {
 
     private void calculateAndPublish(String userId, String portfolioId, String correlationId) {
         try {
+            // Remap empty-user demo reads to the shared demo document owner while keeping
+            // Kafka events attributed to the authenticating user (analysis ownerId key).
+            NewUserPortfolioFallbackService.DemoResolution resolved =
+                    newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
+            String holdingsUserId = resolved.userId();
+            String holdingsPortfolioId = resolved.portfolioId();
+            if (!holdingsUserId.equals(userId) || !java.util.Objects.equals(holdingsPortfolioId, portfolioId)) {
+                log.info("Demo resolve for calc: authUser={} portfolioId={} -> holdingsUser={} holdingsPortfolioId={}",
+                        userId, portfolioId, holdingsUserId, holdingsPortfolioId);
+            }
+
             PortfolioHoldings holdings = portfolioHoldingsService.getPortfolioHoldings(
-                    userId, portfolioId, TimeInterval.ONE_DAY);
+                    holdingsUserId, holdingsPortfolioId, TimeInterval.ONE_DAY);
 
             if (holdings == null || holdings.getEquityHoldings() == null || holdings.getEquityHoldings().isEmpty()) {
-                log.warn("No holdings found for user: {}, portfolioId: {}", userId, portfolioId);
+                log.warn("No holdings found for user: {}, portfolioId: {} (holdingsUser={}, holdingsPortfolioId={})",
+                        userId, portfolioId, holdingsUserId, holdingsPortfolioId);
                 return;
             }
 
@@ -92,9 +104,9 @@ public class PortfolioCalculationService {
             List<EquityHoldings> enrichedHoldings = portfolioCalculator.enrichHoldings(holdings.getEquityHoldings());
             PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(enrichedHoldings, totalInvestment);
 
-            PortfolioUpdateEvent updateEvent = mapToUpdateEvent(holdings, summary, userId, portfolioId);
+            PortfolioUpdateEvent updateEvent = mapToUpdateEvent(holdings, summary, userId, holdingsPortfolioId);
 
-            log.info("Publishing calculated portfolio update for UserID: {}, PortfolioID: {}", userId, portfolioId);
+            log.info("Publishing calculated portfolio update for UserID: {}, PortfolioID: {}", userId, holdingsPortfolioId);
             kafkaProducerService.sendMessage(updateEvent, correlationId);
             kafkaProducerService.sendPortfolioStreamMessage(updateEvent, correlationId);
         } catch (Exception e) {
