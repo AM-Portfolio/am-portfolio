@@ -6,7 +6,6 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
-import com.am.common.amcommondata.model.HoldingAllocation;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
@@ -42,6 +41,15 @@ public class PortfolioHoldingsMapper {
      */
     private Map<String, EquityHoldings> processPortfolios(List<PortfolioModelV1> portfolios) {
         Map<String, EquityHoldings> equityHoldingsMap = new HashMap<>();
+        // One ledger aggregation per broker portfolio — never N+1 per ISIN.
+        Map<String, Map<String, Double>> allocationsByPortfolio = new HashMap<>();
+        for (PortfolioModelV1 portfolio : portfolios) {
+            if (portfolio.getId() != null && PortfolioKind.isBroker(portfolio.getPortfolioKind())) {
+                allocationsByPortfolio.put(
+                        portfolio.getId().toString(),
+                        allocationLedgerService.getActiveAllocationsMap(portfolio.getId().toString()));
+            }
+        }
 
         for (PortfolioModelV1 portfolio : portfolios) {
             if (portfolio.getEquityModels() == null) continue;
@@ -71,7 +79,7 @@ public class PortfolioHoldingsMapper {
                     // Enrich with portfolio context
                     holdings.setPortfolioId(portfolio.getId() != null ? portfolio.getId().toString() : null);
                     holdings.setPortfolioName(portfolio.getName());
-                    applyAllocationFields(holdings, portfolio, equity);
+                    applyAllocationFields(holdings, portfolio, equity, allocationsByPortfolio);
 
                     equityHoldingsMap.put(symbol, holdings);
                 } else {
@@ -88,7 +96,7 @@ public class PortfolioHoldingsMapper {
                     }
                     // Re-apply allocation against merged raw for BROKER books
                     if (PortfolioKind.isBroker(portfolio.getPortfolioKind())) {
-                        double alloc = allocatedForIsin(portfolio, equity.getIsin());
+                        double alloc = allocatedForIsin(portfolio, equity.getIsin(), allocationsByPortfolio);
                         double raw = mergedQty;
                         existing.setRawQuantity(raw);
                         existing.setAllocatedQuantity(
@@ -96,7 +104,7 @@ public class PortfolioHoldingsMapper {
                         double available = Math.max(0.0, raw - (existing.getAllocatedQuantity() != null
                                 ? existing.getAllocatedQuantity() : 0));
                         existing.setAvailableQuantity(available);
-                        existing.setAllocationNote(buildAllocationNote(portfolio, equity.getIsin()));
+                        existing.setAllocationNote(buildAllocationNote(alloc));
                     }
                 }
 
@@ -111,15 +119,19 @@ public class PortfolioHoldingsMapper {
         return equityHoldingsMap;
     }
 
-    private void applyAllocationFields(EquityHoldings holdings, PortfolioModelV1 portfolio, EquityModel equity) {
+    private void applyAllocationFields(
+            EquityHoldings holdings,
+            PortfolioModelV1 portfolio,
+            EquityModel equity,
+            Map<String, Map<String, Double>> allocationsByPortfolio) {
         double raw = equity.getQuantity() != null ? equity.getQuantity() : 0.0;
         holdings.setRawQuantity(raw);
         if (PortfolioKind.isBroker(portfolio.getPortfolioKind())) {
-            double alloc = allocatedForIsin(portfolio, equity.getIsin());
+            double alloc = allocatedForIsin(portfolio, equity.getIsin(), allocationsByPortfolio);
             holdings.setAllocatedQuantity(alloc);
             double available = Math.max(0.0, raw - alloc);
             holdings.setAvailableQuantity(available);
-            holdings.setAllocationNote(buildAllocationNote(portfolio, equity.getIsin()));
+            holdings.setAllocationNote(buildAllocationNote(alloc));
             if (available > 0 && equity.getAvgBuyingPrice() != null) {
                 holdings.setInvestmentCost(equity.getAvgBuyingPrice() * available);
             }
@@ -129,18 +141,21 @@ public class PortfolioHoldingsMapper {
         }
     }
 
-    private double allocatedForIsin(PortfolioModelV1 portfolio, String isin) {
+    private double allocatedForIsin(
+            PortfolioModelV1 portfolio,
+            String isin,
+            Map<String, Map<String, Double>> allocationsByPortfolio) {
         if (portfolio.getId() == null || isin == null) {
             return 0.0;
         }
-        return allocationLedgerService.sumActiveQuantityByBrokerPortfolioIdAndIsin(portfolio.getId().toString(), isin);
+        Map<String, Double> map = allocationsByPortfolio.get(portfolio.getId().toString());
+        if (map == null) {
+            return 0.0;
+        }
+        return map.getOrDefault(isin, 0.0);
     }
 
-    private String buildAllocationNote(PortfolioModelV1 portfolio, String isin) {
-        if (portfolio.getId() == null || isin == null) {
-            return null;
-        }
-        double total = allocatedForIsin(portfolio, isin);
+    private String buildAllocationNote(double total) {
         if (total > 0) {
             return String.format("%.0f allocated to baskets", total);
         }

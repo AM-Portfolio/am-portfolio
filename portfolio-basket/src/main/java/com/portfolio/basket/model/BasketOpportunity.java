@@ -45,6 +45,8 @@ public class BasketOpportunity {
     // apply-substitutes feedback
     private Integer appliedSubstituteCount;
     private List<String> substituteWarnings;
+    /** Soft warnings from sizing/price paths (e.g. SYMBOL:MISSING_PRICE). */
+    private List<String> priceWarnings;
 
     private List<BasketItem> composition;
     private List<BasketItem> buyList; // Stocks to buy to reach 100% or bridge gap
@@ -67,6 +69,9 @@ public class BasketOpportunity {
         private Double rebalancedWeight; // Pro-rata redistributed weight
         private Double buyQuantity; // Suggested if MISSING
         private Double lastPrice; // Current market price
+        /** LIVE | STALE | PREV_CLOSE | COST_BASIS | MISSING */
+        private String priceQuality;
+        private java.time.Instant priceAsOf;
         private String marketCapCategory;
         private Double marketCapValue;
         private Double targetQuantity; // Ideal total quantity user should hold for this stock in this basket
@@ -93,6 +98,16 @@ public class BasketOpportunity {
         private boolean isSameSector;
         private boolean canFullyCover;
         private String coverageLabel;
+        /** Full physical units in the portfolio (before consumption). */
+        private Double physicalQuantity;
+        /** Units already allocated in this basket composition. */
+        private Double usedInThisBasketQuantity;
+        /** Units reserved by other ACTIVE baskets (quantity − availableQuantity). */
+        private Double usedInActiveBasketsQuantity;
+        /** Units still free for substitution. */
+        private Double remainingQuantity;
+        /** True when this alternative is a held index ETF covering the basket. */
+        private boolean indexEtf;
     }
 
     public enum ItemStatus {
