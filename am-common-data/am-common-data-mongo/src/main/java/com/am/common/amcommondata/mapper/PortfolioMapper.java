@@ -53,19 +53,13 @@ public class PortfolioMapper {
                 .totalValue(document.getTotalValue())
                 .brokerType(document.getBrokerType())
                 .portfolioKind(PortfolioKind.orBroker(document.getPortfolioKind()))
-                .sourcePortfolioId(document.getSourcePortfolioId())
-                .etfIsin(document.getEtfIsin())
-                .etfName(document.getEtfName())
-                .createdFromBasketAt(document.getCreatedFromBasketAt())
-                .gapMissingCount(document.getGapMissingCount())
-                .investmentAmount(document.getInvestmentAmount())
-                .replicaScore(document.getReplicaScore())
-                .coverageAfterCreation(document.getCoverageAfterCreation())
                 .allocations(document.getAllocations() != null
                         ? document.getAllocations().stream().map(this::toAllocationModel).collect(Collectors.toList())
                         : null)
                 .assetCount(document.getEquities() != null ? document.getEquities().size() : 0)
                 .build();
+
+        BasketPortfolioMapper.applyBasketFieldsToModel(model, document);
 
         if (document.getAudit() != null) {
             model.setCreatedAt(document.getAudit().getCreatedAt());
@@ -99,14 +93,6 @@ public class PortfolioMapper {
                 .totalValue(model.getTotalValue())
                 .brokerType(model.getBrokerType())
                 .portfolioKind(PortfolioKind.orBroker(model.getPortfolioKind()))
-                .sourcePortfolioId(model.getSourcePortfolioId())
-                .etfIsin(model.getEtfIsin())
-                .etfName(model.getEtfName())
-                .createdFromBasketAt(model.getCreatedFromBasketAt())
-                .gapMissingCount(model.getGapMissingCount())
-                .investmentAmount(model.getInvestmentAmount())
-                .replicaScore(model.getReplicaScore())
-                .coverageAfterCreation(model.getCoverageAfterCreation())
                 .allocations(model.getAllocations() != null
                         ? model.getAllocations().stream().map(this::toAllocationDocument).collect(Collectors.toList())
                         : null)
@@ -127,6 +113,8 @@ public class PortfolioMapper {
                 .version(auditVersion)
                 .lastAction(isNew ? "CREATE" : "UPDATE")
                 .build());
+
+        BasketPortfolioMapper.applyBasketFieldsToDocument(document, model);
 
         return document;
     }

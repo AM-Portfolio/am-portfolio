@@ -75,8 +75,8 @@ public class PortfolioUpdateConsumerService {
     }
 
     @KafkaListener(
-            topics          = "${app.kafka.portfolio.topic}",
-            groupId         = "${app.kafka.portfolio.consumer.id}",
+            topics          = "${app.kafka.portfolio.topic:${app.kafka.portfolio.consumer.topic:am-portfolio}}",
+            groupId         = "${app.kafka.portfolio.consumer.id:am-portfolio-group-1}",
             containerFactory = "kafkaListenerContainerFactory")
     public void consume(
             org.apache.kafka.clients.consumer.ConsumerRecord<String, String> record,

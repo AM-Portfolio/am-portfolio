@@ -37,7 +37,7 @@ public class StockHoldingUpdateConsumerService {
     private final PortfolioCalculator portfolioCalculator;
     private final KafkaProducerService kafkaProducerService;
 
-    @KafkaListener(topics = "${app.kafka.holding.topic}", groupId = "${app.kafka.holding.consumer.id}", containerFactory = "kafkaListenerContainerFactory")
+    @KafkaListener(topics = "${app.kafka.holding.topic:${app.kafka.holding.consumer.topic:am-holding-update}}", groupId = "${app.kafka.holding.consumer.id:am-portfolio-holding-group}", containerFactory = "kafkaListenerContainerFactory")
     public void consume(String message, Acknowledgment acknowledgment) {
         try {
             log.info("Received holding update message: {}", message);

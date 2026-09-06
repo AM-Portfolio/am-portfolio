@@ -33,6 +33,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Component
@@ -63,9 +64,16 @@ public class EtfApiClient {
     @Value("${basket.cache.secmatch-ttl-seconds:21600}")
     private long secmatchL1TtlSeconds;
 
+    @Value("${basket.cache.etf-ttl-seconds:3600}")
+    private long etfL1TtlSeconds;
+
+    private static final Pattern INF_ISIN = Pattern.compile("(?i)^INF[A-Z0-9]{10}$");
+    private static final Pattern GENERIC_ISIN = Pattern.compile("(?i)^[A-Z]{2}[A-Z0-9]{10}$");
+    private static final Pattern DIRECT_HOLDINGS_KEY = Pattern.compile("^[A-Za-z0-9._-]+$");
+
     private RestTemplate etfRestTemplate;
     private RestTemplate marketRestTemplate;
-    private final Map<String, EtfData> etfCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private Cache<String, EtfData> etfCache;
     private final Map<String, Boolean> etfSymbolCache = new java.util.concurrent.ConcurrentHashMap<>();
     private Cache<String, SecurityMatch> secmatchL1;
     private Cache<String, String> isinToSymbolCache;
@@ -93,6 +101,10 @@ public class EtfApiClient {
         secmatchL1 = Caffeine.newBuilder()
                 .expireAfterWrite(Math.max(60, secmatchL1TtlSeconds), TimeUnit.SECONDS)
                 .maximumSize(20_000)
+                .build();
+        etfCache = Caffeine.newBuilder()
+                .expireAfterWrite(Math.max(60, etfL1TtlSeconds), TimeUnit.SECONDS)
+                .maximumSize(2_000)
                 .build();
         isinToSymbolCache = Caffeine.newBuilder()
                 .expireAfterWrite(86400, TimeUnit.SECONDS)
@@ -130,25 +142,51 @@ public class EtfApiClient {
         if (symbolOrIsin == null || symbolOrIsin.isBlank()) {
             return null;
         }
-        if (etfCache.containsKey(symbolOrIsin)) {
+        EtfData cached = etfCache.getIfPresent(symbolOrIsin);
+        if (cached != null) {
             log.info("Returning cached ETF holdings for: {}", symbolOrIsin);
-            return etfCache.get(symbolOrIsin);
+            return cached;
         }
         try {
             HoldingsLookupResponse response = lookupHoldings(List.of(symbolOrIsin));
             EtfData data = mapFirstEtfFromResponse(symbolOrIsin, response);
-            if (data != null) {
-                etfCache.put(symbolOrIsin, data);
-                if (data.getSymbol() != null && !data.getSymbol().isBlank()) {
-                    etfCache.put(data.getSymbol(), data);
-                }
-            }
+            maybeCacheEtf(symbolOrIsin, data);
             return data;
         } catch (Exception e) {
             log.error("Failed to fetch ETF holdings for {}. Error: {}", symbolOrIsin, e.getMessage());
             log.debug("Stack Trace:", e);
+            return null;
         }
-        return null;
+    }
+
+    private void maybeCacheEtf(String key, EtfData data) {
+        if (data == null) {
+            return;
+        }
+        if (unknownSectorCoverage(data) > 0.40) {
+            log.info("Skipping ETF L1 cache for {} — unknown sector coverage too high", key);
+            return;
+        }
+        etfCache.put(key, data);
+        if (data.getSymbol() != null && !data.getSymbol().isBlank()) {
+            etfCache.put(data.getSymbol(), data);
+        }
+    }
+
+    private static double unknownSectorCoverage(EtfData data) {
+        if (data.getHoldings() == null || data.getHoldings().isEmpty()) {
+            return 1.0;
+        }
+        double total = 0;
+        double unknown = 0;
+        for (EtfHolding h : data.getHoldings()) {
+            double w = h.getWeight() > 0 ? h.getWeight() : 1.0;
+            total += w;
+            if (h.getSector() == null || SectorNormalizer.isUnknown(h.getSector())) {
+                unknown += w;
+            }
+        }
+        return total <= 0 ? 1.0 : unknown / total;
     }
 
     /**
@@ -188,7 +226,9 @@ public class EtfApiClient {
 
     /**
      * Batch lookup for index names, symbols, or ISINs.
-     * Index names (e.g. "Nifty IT") are resolved via GET /v1/etf/search first, then holdings by symbol.
+     * Direct keys (ISIN / ticker) go straight to holdings lookup — no per-item
+     * {@code /v1/etf/search} (that N+1 was ~20–30s on exposure). Index / free-text
+     * names still resolve via search once, then one holdings POST.
      */
     public Map<String, EtfData> fetchEtfHoldingsBatch(List<String> items) {
         Map<String, EtfData> out = new LinkedHashMap<>();
@@ -196,32 +236,44 @@ public class EtfApiClient {
             return out;
         }
         try {
-            Map<String, String> queryToSymbol = new LinkedHashMap<>();
-            List<String> symbolsForHoldings = new ArrayList<>();
+            Map<String, String> queryToLookupKey = new LinkedHashMap<>();
+            List<String> holdingsKeys = new ArrayList<>();
             for (String item : items) {
                 if (item == null || item.isBlank()) {
                     continue;
                 }
                 String key = item.trim();
-                String symbol = resolveToSymbol(key);
-                if (symbol == null) {
-                    log.warn("Could not resolve ETF query '{}' to a symbol", key);
-                    continue;
+                String lookupKey;
+                if (isIsinKey(key) || isDirectHoldingsKey(key)) {
+                    lookupKey = key.toUpperCase(Locale.ROOT);
+                } else {
+                    lookupKey = resolveQueryToSymbol(key);
+                    if (lookupKey == null) {
+                        log.warn("Could not resolve ETF query '{}' to a symbol", key);
+                        continue;
+                    }
                 }
-                queryToSymbol.put(key, symbol);
-                if (!symbolsForHoldings.contains(symbol)) {
-                    symbolsForHoldings.add(symbol);
+                queryToLookupKey.put(key, lookupKey);
+                if (!holdingsKeys.contains(lookupKey)) {
+                    holdingsKeys.add(lookupKey);
                 }
             }
-            if (symbolsForHoldings.isEmpty()) {
+            if (holdingsKeys.isEmpty()) {
                 return out;
             }
-            HoldingsLookupResponse response = lookupHoldings(symbolsForHoldings);
+            long start = System.currentTimeMillis();
+            HoldingsLookupResponse response = lookupHoldings(holdingsKeys);
+            log.info("ETF holdings batch lookup keys={} durationMs={}",
+                    holdingsKeys.size(), System.currentTimeMillis() - start);
             Map<String, EtfData> bySymbol = indexHoldingsBySymbol(response);
-            for (Map.Entry<String, String> entry : queryToSymbol.entrySet()) {
-                EtfData data = bySymbol.get(entry.getValue().toUpperCase(Locale.ROOT));
+            for (Map.Entry<String, String> entry : queryToLookupKey.entrySet()) {
+                String lookup = entry.getValue();
+                EtfData data = bySymbol.get(lookup.toUpperCase(Locale.ROOT));
                 if (data == null) {
-                    data = resolveEtfForInput(entry.getValue(), response);
+                    data = resolveEtfForInput(lookup, response);
+                }
+                if (data == null) {
+                    data = resolveEtfForInput(entry.getKey(), response);
                 }
                 if (data != null) {
                     out.put(entry.getKey(), data);
@@ -237,6 +289,14 @@ public class EtfApiClient {
             log.error("Failed batch ETF holdings lookup: {}", e.getMessage());
         }
         return out;
+    }
+
+    static boolean isIsinKey(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String trimmed = value.trim();
+        return INF_ISIN.matcher(trimmed).matches() || GENERIC_ISIN.matcher(trimmed).matches();
     }
 
     private String resolveIsinToSymbol(String isin) {
@@ -257,7 +317,7 @@ public class EtfApiClient {
         }
         String trimmed = query.trim();
         // If it's an ISIN (12 chars, starts with IN/INF), resolve to symbol first
-        if (trimmed.matches("(?i)^INF[A-Z0-9]{10}$") || trimmed.matches("(?i)^[A-Z]{2}[A-Z0-9]{10}$")) {
+        if (INF_ISIN.matcher(trimmed).matches() || GENERIC_ISIN.matcher(trimmed).matches()) {
             String symbol = resolveIsinToSymbol(trimmed);
             return symbol != null ? symbol : trimmed;
         }
@@ -271,10 +331,10 @@ public class EtfApiClient {
         if (value.contains(" ")) {
             return false;
         }
-        if (value.matches("(?i)^INF[A-Z0-9]{10}$")) {
+        if (INF_ISIN.matcher(value).matches()) {
             return true;
         }
-        return value.matches("^[A-Za-z0-9._-]+$") && value.length() <= 24;
+        return DIRECT_HOLDINGS_KEY.matcher(value).matches() && value.length() <= 24;
     }
 
     public String resolveQueryToSymbol(String query) {

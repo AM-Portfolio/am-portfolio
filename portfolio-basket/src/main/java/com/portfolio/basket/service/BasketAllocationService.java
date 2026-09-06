@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 @Service
@@ -23,29 +24,31 @@ public class BasketAllocationService {
     private final EnrichedEtfService enrichedEtfService;
 
     /**
-     * Feature 1: Cumulative Look-Through Exposure
-     * Calculates total exposure to each stock and sector by aggregating direct
-     * holdings
-     * and indirect exposure via ETFs. Each stock exposure includes a detailed
-     * breakdown of sources.
+     * Cumulative look-through exposure.
+     * Uses one {@link EnrichedEtfService#getEnrichedEtfsBatch} for all distinct
+     * holding ISINs/symbols (no N+1 am-parser calls). Non-ETF / empty batch
+     * entries fall back to direct stock exposure (same as before).
      */
     public ExposureResponse calculateCumulativeExposure(List<EquityHoldings> userHoldings) {
-        // 0. Ensure weights are calculated
         BasketUtils.calculateUserWeights(userHoldings);
 
         Map<String, StockExposure> stockExposureMap = new HashMap<>();
         Map<String, Double> sectorExposureMap = new HashMap<>();
 
+        Map<String, EtfData> etfByQuery = loadEtfLookThroughBatch(userHoldings);
+        log.info("exposure.etf_batch size={} holdings={}", etfByQuery.size(),
+                userHoldings != null ? userHoldings.size() : 0);
+
         for (EquityHoldings holding : userHoldings) {
             String isin = holding.getIsin();
             double holdingWeight = holding.getWeightInPortfolio();
 
-            // 1. Try to fetch ETF constituents (Look-through)
-            EtfData etfDetails = getEtfData(isin);
-            if (etfDetails != null && etfDetails.getHoldings() != null) {
-                log.info("Look-through for ETF holding: {} ({})", etfDetails.getName(), isin);
+            EtfData etfDetails = resolveEtfFromBatch(etfByQuery, holding);
+            if (etfDetails != null
+                    && etfDetails.getHoldings() != null
+                    && !etfDetails.getHoldings().isEmpty()) {
+                log.debug("Look-through for ETF holding: {} ({})", etfDetails.getName(), isin);
                 for (EtfHolding constituent : etfDetails.getHoldings()) {
-                    // Indirect Weight = (ETF Weight in Portfolio * Stock Weight in ETF) / 100
                     double indirectWeight = (holdingWeight * constituent.getWeight()) / 100.0;
 
                     StockExposure exposure = stockExposureMap.computeIfAbsent(constituent.getIsin(),
@@ -64,12 +67,10 @@ public class BasketAllocationService {
                             .contribution(BasketUtils.round(indirectWeight))
                             .build());
 
-                    // Aggregate sector exposure
                     String sector = constituent.getSector() != null ? constituent.getSector() : "Unknown";
                     sectorExposureMap.put(sector, sectorExposureMap.getOrDefault(sector, 0.0) + indirectWeight);
                 }
             } else {
-                // 2. Direct Stock Exposure
                 StockExposure exposure = stockExposureMap.computeIfAbsent(isin, k -> StockExposure.builder()
                         .isin(isin)
                         .symbol(holding.getSymbol())
@@ -80,16 +81,14 @@ public class BasketAllocationService {
                 exposure.setDirectWeight(BasketUtils.round(exposure.getDirectWeight() + holdingWeight));
                 exposure.setTotalWeight(BasketUtils.round(exposure.getTotalWeight() + holdingWeight));
 
-                // Add source attribution for direct holding with portfolio context
                 exposure.getSources().add(EtfExposureSource.builder()
-                        .etfIsin(null) // No ETF for direct holdings
-                        .etfSymbol(null) // No ETF symbol for direct holdings
-                        .portfolioId(holding.getPortfolioId()) // Actual portfolio UUID
-                        .portfolioName(holding.getPortfolioName()) // Actual portfolio name
+                        .etfIsin(null)
+                        .etfSymbol(null)
+                        .portfolioId(holding.getPortfolioId())
+                        .portfolioName(holding.getPortfolioName())
                         .contribution(BasketUtils.round(holdingWeight))
                         .build());
 
-                // Aggregate sector exposure
                 String sector = holding.getSector() != null ? holding.getSector() : "Unknown";
                 sectorExposureMap.put(sector, sectorExposureMap.getOrDefault(sector, 0.0) + holdingWeight);
             }
@@ -110,36 +109,105 @@ public class BasketAllocationService {
     }
 
     /**
-     * Generate comprehensive portfolio allocation for UI visualization
-     * Includes stock counts, sector breakdown, and direct/indirect analysis
+     * Portfolio allocation for UI — reuses a single exposure compute (no second ETF batch).
      */
     public com.portfolio.model.basket.PortfolioAllocationResponse calculatePortfolioAllocation(
             List<EquityHoldings> userHoldings) {
-        // 0. Calculate weights
         BasketUtils.calculateUserWeights(userHoldings);
-
-        // Get exposure data first
         ExposureResponse exposure = calculateCumulativeExposure(userHoldings);
-
-        // Build comprehensive allocation response
         return buildAllocationResponse(exposure, userHoldings);
+    }
+
+    /**
+     * One am-parser / cache batch for holdings that look like ETFs (INF* ISIN or
+     * *BEES/*ETF symbol). Equity (INE*) rows stay direct-stock — no am-parser spam.
+     */
+    Map<String, EtfData> loadEtfLookThroughBatch(List<EquityHoldings> userHoldings) {
+        if (userHoldings == null || userHoldings.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        LinkedHashSet<String> queries = new LinkedHashSet<>();
+        for (EquityHoldings h : userHoldings) {
+            if (!isLikelyEtfHolding(h)) {
+                continue;
+            }
+            if (h.getIsin() != null && !h.getIsin().isBlank()) {
+                queries.add(h.getIsin().trim());
+            } else if (h.getSymbol() != null && !h.getSymbol().isBlank()) {
+                queries.add(h.getSymbol().trim());
+            }
+        }
+        if (queries.isEmpty()) {
+            log.info("exposure.etf_batch skipped — no ETF-like holdings among {}", userHoldings.size());
+            return Collections.emptyMap();
+        }
+        long start = System.currentTimeMillis();
+        Map<String, EtfData> batch = enrichedEtfService.getEnrichedEtfsBatch(new ArrayList<>(queries));
+        log.info("exposure.etf_batch.done queries={} resolved={} durationMs={}",
+                queries.size(),
+                batch != null ? batch.size() : 0,
+                System.currentTimeMillis() - start);
+        return batch != null ? batch : Collections.emptyMap();
+    }
+
+    static boolean isLikelyEtfHolding(EquityHoldings h) {
+        if (h == null) {
+            return false;
+        }
+        if (h.getIsin() != null && !h.getIsin().isBlank()) {
+            String isin = h.getIsin().trim().toUpperCase(Locale.ROOT);
+            if (isin.startsWith("INF")) {
+                return true;
+            }
+            // Equity ISINs (INE*) are not ETF look-through candidates
+            if (isin.startsWith("INE")) {
+                return false;
+            }
+        }
+        if (h.getSymbol() != null && !h.getSymbol().isBlank()) {
+            String sym = h.getSymbol().trim().toUpperCase(Locale.ROOT);
+            return sym.endsWith("BEES") || sym.endsWith("ETF") || sym.contains("BEES");
+        }
+        return false;
+    }
+
+    static EtfData resolveEtfFromBatch(Map<String, EtfData> batch, EquityHoldings holding) {
+        if (batch == null || batch.isEmpty() || holding == null) {
+            return null;
+        }
+        if (holding.getIsin() != null && !holding.getIsin().isBlank()) {
+            String isin = holding.getIsin().trim();
+            EtfData byIsin = batch.get(isin);
+            if (byIsin == null) {
+                byIsin = batch.get(isin.toUpperCase(Locale.ROOT));
+            }
+            if (byIsin != null) {
+                return byIsin;
+            }
+        }
+        if (holding.getSymbol() != null && !holding.getSymbol().isBlank()) {
+            String sym = holding.getSymbol().trim();
+            EtfData bySym = batch.get(sym);
+            if (bySym == null) {
+                bySym = batch.get(sym.toUpperCase(Locale.ROOT));
+            }
+            return bySym;
+        }
+        return null;
     }
 
     private com.portfolio.model.basket.PortfolioAllocationResponse buildAllocationResponse(
             ExposureResponse exposure, List<EquityHoldings> userHoldings) {
 
-        // Calculate overview stats
         int totalStocks = exposure.getStockExposure() != null ? exposure.getStockExposure().size() : 0;
         int directStockCount = 0;
         int indirectStockCount = 0;
         double totalDirectPercentage = 0.0;
         double totalIndirectPercentage = 0.0;
 
-        // Track portfolios and sources
         Map<String, com.portfolio.model.basket.PortfolioAllocationResponse.PortfolioContribution> portfolioContributions = new HashMap<>();
         Map<String, com.portfolio.model.basket.PortfolioAllocationResponse.IndirectAllocation> indirectSources = new HashMap<>();
 
-        // Process stock allocations
         List<com.portfolio.model.basket.PortfolioAllocationResponse.StockAllocation> stockAllocations = new ArrayList<>();
 
         if (exposure.getStockExposure() != null) {
@@ -154,7 +222,6 @@ public class BasketAllocationService {
                         String sourceId;
                         String sourceName;
 
-                        // Determine source type and ID
                         if (source.getPortfolioId() != null) {
                             sourceType = com.portfolio.model.basket.PortfolioAllocationResponse.SourceType.DIRECT_PORTFOLIO;
                             sourceId = source.getPortfolioId();
@@ -167,7 +234,6 @@ public class BasketAllocationService {
                             continue;
                         }
 
-                        // Track portfolio contribution
                         if (source.getPortfolioId() != null) {
                             portfolioContributions.computeIfAbsent(sourceId,
                                     k -> com.portfolio.model.basket.PortfolioAllocationResponse.PortfolioContribution
@@ -181,13 +247,10 @@ public class BasketAllocationService {
                                     .get(sourceId);
                             contrib.setPercentage(
                                     BasketUtils.round(contrib.getPercentage() + source.getContribution()));
-                            // Only increment stock count if we haven't seen this source for this stock yet
                             if (processedSourceIds.add(sourceId)) {
                                 contrib.setStockCount(contrib.getStockCount() + 1);
                             }
-                        }
-                        // Track indirect source
-                        else if (source.getEtfIsin() != null) {
+                        } else if (source.getEtfIsin() != null) {
                             indirectSources.computeIfAbsent(sourceId,
                                     k -> com.portfolio.model.basket.PortfolioAllocationResponse.IndirectAllocation
                                             .builder()
@@ -201,7 +264,6 @@ public class BasketAllocationService {
                                     .get(sourceId);
                             indirect.setPercentage(
                                     BasketUtils.round(indirect.getPercentage() + source.getContribution()));
-                            // Only increment stock count if we haven't seen this source for this stock yet
                             if (processedSourceIds.add(sourceId)) {
                                 indirect.setStockCount(indirect.getStockCount() + 1);
                             }
@@ -216,19 +278,14 @@ public class BasketAllocationService {
                     }
                 }
 
-                // Count unique stocks - each stock counted only once
-                // If stock has any direct weight, it's a "direct" stock
-                // Only count as "indirect" if it has NO direct weight
                 if (stock.getDirectWeight() > 0) {
                     directStockCount++;
                     totalDirectPercentage += stock.getDirectWeight();
                 } else if (stock.getIndirectWeight() > 0) {
-                    // Only count as indirect if there's NO direct weight
                     indirectStockCount++;
                     totalIndirectPercentage += stock.getIndirectWeight();
                 }
 
-                // Add indirect percentage to total even for direct stocks
                 if (stock.getDirectWeight() > 0 && stock.getIndirectWeight() > 0) {
                     totalIndirectPercentage += stock.getIndirectWeight();
                 }
@@ -245,7 +302,6 @@ public class BasketAllocationService {
             }
         }
 
-        // Process sector allocations
         List<com.portfolio.model.basket.PortfolioAllocationResponse.SectorAllocation> sectorAllocations = new ArrayList<>();
         Map<String, com.portfolio.model.basket.PortfolioAllocationResponse.SectorAllocation> sectorMap = new HashMap<>();
 
@@ -273,7 +329,6 @@ public class BasketAllocationService {
                                 BasketUtils.round(sectorAlloc.getIndirectPercentage() + stock.getIndirectWeight()));
                 sectorAlloc.setStockCount(sectorAlloc.getStockCount() + 1);
 
-                // Add to top stocks list (limit to 5)
                 if (sectorAlloc.getTopStocks().size() < 5) {
                     sectorAlloc.getTopStocks().add(stock.getSymbol());
                 }
@@ -286,7 +341,6 @@ public class BasketAllocationService {
                     .collect(Collectors.toList());
         }
 
-        // Build overview
         com.portfolio.model.basket.PortfolioAllocationResponse.AllocationOverview overview = com.portfolio.model.basket.PortfolioAllocationResponse.AllocationOverview
                 .builder()
                 .totalStocks(totalStocks)
@@ -297,7 +351,6 @@ public class BasketAllocationService {
                 .totalSectors(sectorAllocations.size())
                 .build();
 
-        // Build direct/indirect breakdown
         com.portfolio.model.basket.PortfolioAllocationResponse.DirectAllocation directAllocation = com.portfolio.model.basket.PortfolioAllocationResponse.DirectAllocation
                 .builder()
                 .totalPercentage(BasketUtils.round(totalDirectPercentage))
@@ -311,7 +364,6 @@ public class BasketAllocationService {
                 .indirectAllocations(new ArrayList<>(indirectSources.values()))
                 .build();
 
-        // Build final response
         return com.portfolio.model.basket.PortfolioAllocationResponse.builder()
                 .userId(exposure.getUserId())
                 .portfolioId(exposure.getPortfolioId())
@@ -320,9 +372,5 @@ public class BasketAllocationService {
                 .sectorAllocations(sectorAllocations)
                 .directIndirectBreakdown(breakdown)
                 .build();
-    }
-
-    private EtfData getEtfData(String isin) {
-        return enrichedEtfService.getEnrichedEtf(isin);
     }
 }

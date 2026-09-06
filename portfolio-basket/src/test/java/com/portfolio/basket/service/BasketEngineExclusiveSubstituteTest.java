@@ -1,6 +1,12 @@
 package com.portfolio.basket.service;
 
 import com.portfolio.basket.client.EtfApiClient;
+import com.portfolio.basket.engine.overlap.BasketOverlapCalculator;
+import com.portfolio.basket.engine.sizing.BasketQuantityCalculator;
+import com.portfolio.basket.engine.substitutes.BasketSubstituteApplier;
+import com.portfolio.basket.kernel.BasketPortfolioValueCalculator;
+import com.portfolio.basket.kernel.BasketPriceResolver;
+import com.portfolio.basket.model.SubstituteAssignment;
 import com.portfolio.basket.model.BasketOpportunity;
 import com.portfolio.basket.model.BasketOpportunity.BasketItem;
 import com.portfolio.basket.model.BasketOpportunity.ItemStatus;
@@ -9,16 +15,25 @@ import com.portfolio.basket.model.EtfHolding;
 import com.portfolio.basket.util.BasketNaming;
 import com.portfolio.basket.util.SectorNormalizer;
 import com.portfolio.model.portfolio.EquityHoldings;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Collections;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -32,9 +47,42 @@ class BasketEngineExclusiveSubstituteTest {
     private BasketCatalogService basketCatalogService;
     @Mock
     private com.portfolio.marketdata.service.MarketDataService marketDataService;
+    @Mock
+    private BasketPriceResolver basketPriceResolver;
+    @Mock
+    private BasketPortfolioValueCalculator basketPortfolioValueCalculator;
 
-    @InjectMocks
+    private BasketOverlapCalculator overlapCalculator;
+    private BasketSubstituteApplier substituteApplier;
+    private BasketQuantityCalculator quantityCalculator;
     private BasketEngineService engine;
+
+    @BeforeEach
+    void setUpKernelMocks() {
+        lenient().when(basketPriceResolver.fetchPricesWithHoldingsFallback(anySet(), anyList()))
+                .thenReturn(Collections.emptyMap());
+        lenient().when(basketPriceResolver.fetchResolvedPrices(anySet(), anyList()))
+                .thenReturn(Collections.emptyMap());
+        lenient().when(basketPortfolioValueCalculator.calculate(anyList()))
+                .thenReturn(BasketPortfolioValueCalculator.PortfolioValues.builder()
+                        .totalPortfolioValue(0.0)
+                        .remainingPortfolioValue(0.0)
+                        .build());
+
+        overlapCalculator = new BasketOverlapCalculator(basketPriceResolver);
+        substituteApplier = new BasketSubstituteApplier(marketDataService, enrichedEtfService, overlapCalculator);
+        quantityCalculator = new BasketQuantityCalculator(marketDataService);
+        engine = new BasketEngineService(
+                etfApiClient,
+                enrichedEtfService,
+                basketCatalogService,
+                basketPriceResolver,
+                basketPortfolioValueCalculator,
+                overlapCalculator,
+                substituteApplier,
+                quantityCalculator
+        );
+    }
 
     @Test
     void sectorNormalizer_aliasesIt() {
@@ -105,10 +153,10 @@ class BasketEngineExclusiveSubstituteTest {
         BasketOpportunity opp = engine.getPreview("ETF1", List.of(infy, wipro));
 
         BasketOpportunity updated = engine.applySubstitutesOnExisting(opp, List.of(infy, wipro), List.of(
-                new BasketEngineService.SubstituteAssignment("INE001", "INEINFY", null),
-                new BasketEngineService.SubstituteAssignment("INE002", "INEINFY", null)
+                new SubstituteAssignment("INE001", "INEINFY", null),
+                new SubstituteAssignment("INE002", "INEINFY", null)
         ));
-        
+
         assertEquals(2, updated.getAppliedSubstituteCount());
         long subCount = updated.getComposition().stream()
                 .filter(i -> i.getStatus() == ItemStatus.SUBSTITUTE && "INEINFY".equals(i.getUserHoldingIsin()))
@@ -116,7 +164,7 @@ class BasketEngineExclusiveSubstituteTest {
         assertEquals(2, subCount, "Should split INFY to cover both HCLTECH and TECHM");
     }
 
-  @Test
+    @Test
     void sectorNormalizer_aliasesSoftwareProducts() {
         assertEquals("information technology",
                 SectorNormalizer.normalize("Software Products"));
@@ -193,7 +241,7 @@ class BasketEngineExclusiveSubstituteTest {
         assertThrows(IllegalStateException.class, () -> engine.applySubstitutesOnExisting(
                 base,
                 List.of(),
-                List.of(new BasketEngineService.SubstituteAssignment("INE001", "INEINFY", null))));
+                List.of(new SubstituteAssignment("INE001", "INEINFY", null))));
     }
 
     @Test
@@ -223,7 +271,7 @@ class BasketEngineExclusiveSubstituteTest {
         assertThrows(IllegalStateException.class, () -> engine.applySubstitutesOnExisting(
                 base,
                 List.of(hdfc),
-                List.of(new BasketEngineService.SubstituteAssignment("INE001", "INEHDFC", null))));
+                List.of(new SubstituteAssignment("INE001", "INEHDFC", null))));
     }
 
     @Test
@@ -268,12 +316,79 @@ class BasketEngineExclusiveSubstituteTest {
         BasketOpportunity opp = engine.getPreview("ETF1", List.of(wipro));
 
         BasketOpportunity updated = engine.applySubstitutesOnExisting(opp, List.of(wipro), List.of(
-                new BasketEngineService.SubstituteAssignment("INEMPH", "INEWIPRO", null)
+                new SubstituteAssignment("INEMPH", "INEWIPRO", null)
         ));
 
         assertTrue(updated.getAppliedSubstituteCount() >= 1);
         assertTrue(updated.getComposition().stream().anyMatch(i ->
                 "MPHASIS".equals(i.getStockSymbol())
+                        && i.getStatus() == ItemStatus.SUBSTITUTE
+                        && "WIPRO".equals(i.getUserHoldingSymbol())));
+    }
+
+    @Test
+    void applySubstitutes_secondMissingUsesResidualPeerCapacity() {
+        EtfData etf = new EtfData();
+        etf.setName("Nifty IT");
+        etf.setHoldings(List.of(
+                holding("INE001", "HCLTECH", "Information Technology", 8),
+                holding("INE002", "TECHM", "Information Technology", 8),
+                holding("INEMPH", "MPHASIS", "Information Technology", 8)
+        ));
+        when(enrichedEtfService.getEnrichedEtf(anyString())).thenReturn(etf);
+
+        // Large peer: first missing consumes part; residual must remain for a second missing.
+        EquityHoldings wipro = EquityHoldings.builder()
+                .isin("INEWIPRO").symbol("WIPRO").sector("Information Technology")
+                .quantity(100.0).availableQuantity(0.0).weightInPortfolio(25.0)
+                .averageBuyingPrice(500.0).build();
+
+        BasketOpportunity opp = engine.getPreview("ETF1", List.of(wipro));
+
+        BasketOpportunity afterFirst = engine.applySubstitutesOnExisting(opp, List.of(wipro), List.of(
+                new SubstituteAssignment("INE001", "INEWIPRO", null)
+        ));
+        assertEquals(1, afterFirst.getAppliedSubstituteCount());
+
+        BasketItem stillMissing = afterFirst.getComposition().stream()
+                .filter(i -> i.getStatus() == ItemStatus.MISSING)
+                .findFirst()
+                .orElseThrow();
+        boolean wiproStillOffered = stillMissing.getAlternatives() != null
+                && stillMissing.getAlternatives().stream().anyMatch(a -> "WIPRO".equals(a.getSymbol()));
+        assertTrue(wiproStillOffered, "Residual WIPRO capacity should remain for other missing slots");
+
+        BasketOpportunity afterSecond = engine.applySubstitutesOnExisting(afterFirst, List.of(wipro), List.of(
+                new SubstituteAssignment(stillMissing.getIsin(), "INEWIPRO", null)
+        ));
+        assertTrue(afterSecond.getAppliedSubstituteCount() >= 1);
+        assertTrue(afterSecond.getComposition().stream().anyMatch(i ->
+                stillMissing.getStockSymbol().equals(i.getStockSymbol())
+                        && i.getStatus() == ItemStatus.SUBSTITUTE
+                        && "WIPRO".equals(i.getUserHoldingSymbol())));
+    }
+
+    @Test
+    void applySubstitutes_resolvesBySymbolWhenIsinBlank() {
+        EtfData etf = new EtfData();
+        etf.setName("Nifty IT");
+        etf.setHoldings(List.of(
+                holding("INE001", "HCLTECH", "Information Technology", 10)
+        ));
+        when(enrichedEtfService.getEnrichedEtf(anyString())).thenReturn(etf);
+
+        EquityHoldings wipro = EquityHoldings.builder()
+                .isin("INEWIPRO").symbol("WIPRO").sector("Information Technology")
+                .quantity(50.0).weightInPortfolio(15.0).averageBuyingPrice(500.0).build();
+
+        BasketOpportunity opp = engine.getPreview("ETF1", List.of(wipro));
+        BasketOpportunity updated = engine.applySubstitutesOnExisting(opp, List.of(wipro), List.of(
+                new SubstituteAssignment("INE001", null, null, "WIPRO")
+        ));
+
+        assertEquals(1, updated.getAppliedSubstituteCount());
+        assertTrue(updated.getComposition().stream().anyMatch(i ->
+                "HCLTECH".equals(i.getStockSymbol())
                         && i.getStatus() == ItemStatus.SUBSTITUTE
                         && "WIPRO".equals(i.getUserHoldingSymbol())));
     }
@@ -293,6 +408,21 @@ class BasketEngineExclusiveSubstituteTest {
         assertTrue(Boolean.TRUE.equals(opp.getSectorialBasket()));
         assertNotNull(opp.getDominantSector());
         assertEquals(3, opp.getEtfConstituentIsins().size());
+    }
+
+    @Test
+    void getPreview_allUnknownSectors_notSectorial() {
+        EtfData etf = new EtfData();
+        etf.setName("Mystery ETF");
+        etf.setHoldings(List.of(
+                holding("INE001", "AAA", "Unknown", 50),
+                holding("INE002", "BBB", "Unknown", 50)
+        ));
+        when(enrichedEtfService.getEnrichedEtf(anyString())).thenReturn(etf);
+
+        BasketOpportunity opp = engine.getPreview("ETF1", List.of());
+        assertFalse(Boolean.TRUE.equals(opp.getSectorialBasket()));
+        assertTrue(opp.getDominantSector() == null || opp.getDominantSector().isBlank());
     }
 
     private static EtfHolding holding(String isin, String symbol, String sector, double weight) {

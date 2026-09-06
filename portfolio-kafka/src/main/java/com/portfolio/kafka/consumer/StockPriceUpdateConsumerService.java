@@ -43,8 +43,8 @@ public class StockPriceUpdateConsumerService {
                 ZonedDateTime.now(ZoneId.of("Asia/Kolkata")));
     }
 
-    @KafkaListener(topics = "${app.kafka.stock.topic}", 
-                  groupId = "${app.kafka.stock.consumer.id}",
+    @KafkaListener(topics = "${app.kafka.stock.topic:${app.kafka.stock.consumer.topic:am-stock-price-update}}", 
+                  groupId = "${app.kafka.stock.consumer.id:am-stock-group.v2}",
                   containerFactory = "kafkaListenerContainerFactory")
     public void consume(String message, Acknowledgment acknowledgment) {
         try {
