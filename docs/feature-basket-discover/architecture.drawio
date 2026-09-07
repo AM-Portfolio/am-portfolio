@@ -1,0 +1,81 @@
+<mxfile host="app.diagrams.net" modified="2026-09-07T09:50:00.000Z" agent="AM" version="22.1.0" type="device">
+  <diagram id="discover-final" name="Discover E2E web+mobile">
+    <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Discover FINAL — Screen → Catalog → Opportunities → Client → Web table / Mobile dense cards&#xa;Sparklines: real sparklineCloses only · Mobile period: dropdown on theme row · N=3 until catalog M5" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=13;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="16" width="1200" height="44" as="geometry" />
+        </mxCell>
+
+        <mxCell id="web" value="WEB ≥600" style="swimlane;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;startSize=26;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="280" height="360" as="geometry" />
+        </mxCell>
+        <mxCell id="w1" value="Title + Discover toggle&#xa;Search&#xa;Themes + Performance chips&#xa;Sort + Clear" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="web">
+          <mxGeometry x="20" y="40" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="w2" value="Top picks grid&#xa;sector champions (M5)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="web">
+          <mxGeometry x="20" y="150" width="240" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="w3" value="All baskets dense table&#xa;Match = round % only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="web">
+          <mxGeometry x="20" y="240" width="240" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mob" value="MOBILE &lt;600" style="swimlane;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;startSize=26;" vertex="1" parent="1">
+          <mxGeometry x="360" y="80" width="280" height="360" as="geometry" />
+        </mxCell>
+        <mxCell id="m1" value="Sticky Discover|My Baskets&#xa;(once only)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="mob">
+          <mxGeometry x="20" y="40" width="240" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="m2" value="Search&#xa;ONE row: themes + 1Y▾ + Sort▾ + Clear" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="mob">
+          <mxGeometry x="20" y="120" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="m3" value="Dense cards (no table)&#xa;PreviewLayout-like pad&#xa;sparkline if real" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="mob">
+          <mxGeometry x="20" y="220" width="240" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="api" value="am-portfolio API" style="swimlane;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;startSize=26;" vertex="1" parent="1">
+          <mxGeometry x="680" y="80" width="300" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="c1" value="GET catalog&#xa;defaultQuery (today 3 symbols)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="api">
+          <mxGeometry x="20" y="40" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="c2" value="GET opportunities&#xa;match · returns · sparklineCloses" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="api">
+          <mxGeometry x="20" y="150" width="260" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="up" value="Upstream" style="swimlane;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;startSize=26;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="80" width="260" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="u1" value="basket-catalog.yml&#xa;Mongo / Redis" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="up">
+          <mxGeometry x="20" y="40" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="u2" value="am-parser /v2/funds&#xa;performance + sparkline" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="up">
+          <mxGeometry x="20" y="150" width="220" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="client" value="DiscoverViewState&#xa;period/sort client-only&#xa;topPicks / apply" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="360" y="480" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="prev" value="Create basket → openPreview&#xa;Preview funnel (stepper + sticky)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="680" y="480" width="300" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;endArrow=classic;html=1;" edge="1" parent="1" source="c1" target="c2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;endArrow=classic;html=1;dashed=1;" edge="1" parent="1" source="u1" target="c1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;endArrow=classic;html=1;dashed=1;" edge="1" parent="1" source="u2" target="c2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" value="List" style="edgeStyle=orthogonalEdgeStyle;endArrow=classic;html=1;" edge="1" parent="1" source="c2" target="client"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;endArrow=classic;html=1;" edge="1" parent="1" source="client" target="w2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;endArrow=classic;html=1;" edge="1" parent="1" source="client" target="w3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;endArrow=classic;html=1;" edge="1" parent="1" source="client" target="m3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;endArrow=classic;html=1;" edge="1" parent="1" source="w3" target="prev"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;endArrow=classic;html=1;" edge="1" parent="1" source="m3" target="prev"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="mods" value="Modules: M0 Docs · M1 Tokens · M2 Filters · M3 Cards/Table/Spark · M4 Chrome · M5 Catalog · M6 QA" style="rounded=1;align=left;spacingLeft=10;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="600" width="1240" height="40" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

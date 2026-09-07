@@ -38,6 +38,21 @@ public class BasketOverlapCalculator {
             List<EquityHoldings> allUserHoldings,
             SectorProfile sectorProfile,
             Map<String, Double> prefetchedPrices) {
+        return calculateOverlap(etfIsin, etf, userMap, userSectorMap, allUserHoldings,
+                sectorProfile, prefetchedPrices, false);
+    }
+
+    /**
+     * @param skipPriceFetch when true (Discover), never call market price APIs;
+     *                       use prefetched only (may be empty). minInv floors at 50000.
+     */
+    public BasketOpportunity calculateOverlap(String etfIsin, EtfData etf,
+            Map<String, EquityHoldings> userMap,
+            Map<String, List<EquityHoldings>> userSectorMap,
+            List<EquityHoldings> allUserHoldings,
+            SectorProfile sectorProfile,
+            Map<String, Double> prefetchedPrices,
+            boolean skipPriceFetch) {
 
         List<BasketItem> composition = new ArrayList<>();
         List<BasketItem> buyList = new ArrayList<>();
@@ -46,22 +61,36 @@ public class BasketOverlapCalculator {
         Map<String, Double> consumedWeightByIsin = new HashMap<>();
 
         Set<String> symbolsToFetch = new HashSet<>();
-        if (etf.getHoldings() != null) {
-            for (EtfHolding h : etf.getHoldings()) {
+        // Discover (skipPriceFetch): never need price symbol sets — slim response drops composition.
+        if (!skipPriceFetch) {
+            if (etf.getHoldings() != null) {
+                for (EtfHolding h : etf.getHoldings()) {
+                    if (h.getSymbol() != null && !h.getSymbol().isBlank()) {
+                        symbolsToFetch.add(h.getSymbol());
+                    }
+                }
+            }
+            for (EquityHoldings h : allUserHoldings) {
                 if (h.getSymbol() != null && !h.getSymbol().isBlank()) {
                     symbolsToFetch.add(h.getSymbol());
                 }
             }
         }
-        for (EquityHoldings h : allUserHoldings) {
-            if (h.getSymbol() != null && !h.getSymbol().isBlank()) {
-                symbolsToFetch.add(h.getSymbol());
-            }
-        }
 
         Map<String, BasketPriceResolver.ResolvedPrice> resolvedPrices = new HashMap<>();
         Map<String, Double> prices;
-        if (prefetchedPrices != null) {
+        if (skipPriceFetch) {
+            prices = prefetchedPrices != null ? new HashMap<>(prefetchedPrices) : new HashMap<>();
+            for (Map.Entry<String, Double> e : prices.entrySet()) {
+                if (e.getValue() != null && e.getValue() > 0) {
+                    resolvedPrices.put(e.getKey(), BasketPriceResolver.ResolvedPrice.builder()
+                            .price(e.getValue())
+                            .quality(BasketPriceResolver.QUALITY_STALE)
+                            .asOf(null)
+                            .build());
+                }
+            }
+        } else if (prefetchedPrices != null) {
             prices = new HashMap<>(prefetchedPrices);
             Set<String> gaps = new HashSet<>();
             for (String s : symbolsToFetch) {
@@ -149,17 +178,26 @@ public class BasketOverlapCalculator {
                 }
             }
 
-            refreshMissingAlternatives(composition, consumedWeightByIsin, allUserHoldings,
-                    userSectorMap, prices, sectorProfile);
-        }
-
-        double maxPrice = 0.0;
-        for (BasketItem item : composition) {
-            if (item.getLastPrice() != null && item.getLastPrice() > maxPrice) {
-                maxPrice = item.getLastPrice();
+            // Discover response nulls composition/buyList — skip alternatives enrichment.
+            if (!skipPriceFetch) {
+                refreshMissingAlternatives(composition, consumedWeightByIsin, allUserHoldings,
+                        userSectorMap, prices, sectorProfile);
             }
         }
-        double minimumInvestmentAmount = Math.max(maxPrice, 50000.0);
+
+        double minimumInvestmentAmount;
+        if (skipPriceFetch) {
+            // Discover floor (D-L6); prices are not fetched on this path.
+            minimumInvestmentAmount = 50000.0;
+        } else {
+            double maxPrice = 0.0;
+            for (BasketItem item : composition) {
+                if (item.getLastPrice() != null && item.getLastPrice() > maxPrice) {
+                    maxPrice = item.getLastPrice();
+                }
+            }
+            minimumInvestmentAmount = Math.max(maxPrice, 50000.0);
+        }
 
         double matchScore = (total == 0) ? 0 : (double) matchCount / total * 100.0;
         double heldScore = composition.stream().filter(i -> i.getStatus() == ItemStatus.HELD)
@@ -172,6 +210,8 @@ public class BasketOverlapCalculator {
         return BasketOpportunity.builder()
                 .etfIsin(etfIsin)
                 .etfName(etf.getName())
+                .etfSymbol(etf.getSymbol())
+                .categoryLabel(etf.getCategoryLabel())
                 .matchScore(BasketUtils.round(matchScore))
                 .replicaScore(BasketUtils.round(replicaScore))
                 .readyToReplicate(replicaScore >= 90.0)
@@ -186,6 +226,11 @@ public class BasketOverlapCalculator {
                 .composition(composition)
                 .buyList(buyList)
                 .minimumInvestmentAmount(minimumInvestmentAmount)
+                .return1Y(etf.getReturn1Y())
+                .return3Y(etf.getReturn3Y())
+                .return5Y(etf.getReturn5Y())
+                .returnsAsOf(etf.getReturnsAsOf())
+                .sparklineCloses(etf.getSparklineCloses())
                 .build();
     }
 
@@ -290,7 +335,7 @@ public class BasketOverlapCalculator {
 
     private boolean processDirectMatch(BasketItem item, EtfHolding req, EquityHoldings userHolding,
             Map<String, Double> consumedWeightByIsin, Map<String, Double> prices) {
-        log.info("Checking Held Item: {} | Qty: {} | AvgPrice: {}",
+        log.debug("Checking Held Item: {} | Qty: {} | AvgPrice: {}",
                 userHolding.getSymbol(), userHolding.getQuantity(), userHolding.getAverageBuyingPrice());
 
         double consumed = consumedWeightByIsin.getOrDefault(userHolding.getIsin(), 0.0);

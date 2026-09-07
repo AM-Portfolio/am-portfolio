@@ -220,6 +220,8 @@ basket:
     catalog-ttl-seconds: ${BASKET_CATALOG_L1_TTL_SECONDS:3600}
   catalog:
     write-token: ${BASKET_CATALOG_WRITE_TOKEN:}
+  opportunities:
+    discover-fast-path-enabled: ${BASKET_DISCOVER_FAST_PATH_ENABLED:true}
 
 market-data:
   client:

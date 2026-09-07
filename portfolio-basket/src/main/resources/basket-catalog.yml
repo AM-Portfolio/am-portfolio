@@ -2,6 +2,12 @@ defaultThemeIds:
   - nifty-50
   - bank
   - it
+  - auto
+  - metal
+  - fmcg
+  - pharma
+  - gold
+  - psu-bank
 themes:
   - id: nifty-50
     label: Nifty 50
@@ -26,28 +32,28 @@ themes:
       - NIFTY IT
   - id: auto
     label: Auto
-    query: NIFTY AUTO
+    query: AUTOBEES
     featured: true
     indexAliases:
       - nifty auto
       - NIFTY AUTO
   - id: metal
     label: Metal
-    query: NIFTY METAL
+    query: METALIETF
     featured: true
     indexAliases:
       - nifty metal
       - NIFTY METAL
   - id: fmcg
     label: FMCG
-    query: NIFTY FMCG
+    query: CONSUMBEES
     featured: true
     indexAliases:
       - nifty fmcg
       - NIFTY FMCG
   - id: pharma
     label: Pharma
-    query: NIFTY PHARMA
+    query: PHARMABEES
     featured: true
     indexAliases:
       - nifty pharma
@@ -61,7 +67,7 @@ themes:
       - GOLD
   - id: psu-bank
     label: PSU Bank
-    query: NIFTY PSU BANK
+    query: PSUBNKBEES
     featured: true
     indexAliases:
       - nifty psu bank

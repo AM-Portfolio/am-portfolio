@@ -1,6 +1,7 @@
 package com.portfolio.basket.service;
 
 import com.portfolio.basket.model.BasketOpportunity;
+import com.portfolio.basket.model.OpportunityMode;
 import com.portfolio.model.portfolio.EquityHoldings;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -17,7 +18,12 @@ public class BasketEngineFacade {
     private final BasketEngineService basketEngineService;
 
     public List<BasketOpportunity> findOpportunities(List<EquityHoldings> userHoldings, String etfQuery) {
-        return basketEngineService.findOpportunities(userHoldings, etfQuery);
+        return findOpportunities(userHoldings, etfQuery, OpportunityMode.FULL);
+    }
+
+    public List<BasketOpportunity> findOpportunities(
+            List<EquityHoldings> userHoldings, String etfQuery, OpportunityMode mode) {
+        return basketEngineService.findOpportunities(userHoldings, etfQuery, mode);
     }
 
     public BasketOpportunity getPreview(String etfIsin, List<EquityHoldings> userHoldings) {

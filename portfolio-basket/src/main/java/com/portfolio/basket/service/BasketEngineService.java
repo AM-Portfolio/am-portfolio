@@ -12,6 +12,7 @@ import com.portfolio.basket.model.BasketOpportunity;
 import com.portfolio.basket.engine.overlap.SectorProfile;
 import com.portfolio.basket.model.EtfData;
 import com.portfolio.basket.model.EtfHolding;
+import com.portfolio.basket.model.OpportunityMode;
 import com.portfolio.basket.model.SubstituteAssignment;
 import com.portfolio.basket.util.BasketUtils;
 import com.portfolio.basket.util.SectorNormalizer;
@@ -51,6 +52,13 @@ public class BasketEngineService {
     }
 
     public List<BasketOpportunity> findOpportunities(List<EquityHoldings> userHoldings, String etfQuery) {
+        return findOpportunities(userHoldings, etfQuery, OpportunityMode.FULL);
+    }
+
+    public List<BasketOpportunity> findOpportunities(
+            List<EquityHoldings> userHoldings, String etfQuery, OpportunityMode mode) {
+        OpportunityMode effective = mode != null ? mode : OpportunityMode.FULL;
+        long t0 = System.nanoTime();
         BasketUtils.calculateUserWeights(userHoldings);
 
         double totalValue = userHoldings.stream()
@@ -100,8 +108,8 @@ public class BasketEngineService {
             return Collections.emptyList();
         }
 
-        log.info("Processing {} ETFs for matching", allQueries.size());
-        List<BasketOpportunity> opportunities = findOpportunitiesInternal(userHoldings, allQueries);
+        log.info("Processing {} ETFs for matching mode={}", allQueries.size(), effective);
+        List<BasketOpportunity> opportunities = findOpportunitiesInternal(userHoldings, allQueries, effective);
 
         opportunities.forEach(op -> {
             op.setTotalPortfolioValue(totalValue);
@@ -110,7 +118,26 @@ public class BasketEngineService {
 
         opportunities.sort(Comparator.comparingDouble(BasketOpportunity::getMatchScore).reversed());
 
+        if (effective.isDiscover()) {
+            // Discover UI only needs summary + sparkline; composition/buyList dominate ~2MB JSON.
+            for (BasketOpportunity op : opportunities) {
+                slimForDiscover(op);
+            }
+        }
+
+        log.info("basket.opp.stage=total mode={} etfCount={} durationMs={}",
+                effective, allQueries.size(), (System.nanoTime() - t0) / 1_000_000L);
         return opportunities;
+    }
+
+    /** Drop heavy line-item payloads unused by Discover list/cards. */
+    static void slimForDiscover(BasketOpportunity op) {
+        if (op == null) {
+            return;
+        }
+        op.setComposition(null);
+        op.setBuyList(null);
+        op.setEtfConstituentIsins(null);
     }
 
     private void resolveDiscoveryToken(String token, Set<String> out) {
@@ -142,7 +169,8 @@ public class BasketEngineService {
         return value.matches("^[A-Za-z0-9._-]+$") && value.length() <= 24;
     }
 
-    private List<BasketOpportunity> findOpportunitiesInternal(List<EquityHoldings> userHoldings, Set<String> etfQueries) {
+    private List<BasketOpportunity> findOpportunitiesInternal(
+            List<EquityHoldings> userHoldings, Set<String> etfQueries, OpportunityMode mode) {
         Map<String, EquityHoldings> userMap = userHoldings.stream()
                 .collect(Collectors.toMap(EquityHoldings::getIsin, h -> h, (a, b) -> a));
 
@@ -152,27 +180,41 @@ public class BasketEngineService {
                 .collect(Collectors.groupingBy(h -> SectorNormalizer.normalizeFine(h.getSector())));
 
         List<BasketOpportunity> opportunities = new ArrayList<>();
-        Map<String, EtfData> etfDataByInput = enrichedEtfService.getEnrichedEtfsBatch(new ArrayList<>(etfQueries));
+        long tEtf = System.nanoTime();
+        Map<String, EtfData> etfDataByInput = enrichedEtfService.getEnrichedEtfsBatch(
+                new ArrayList<>(etfQueries), mode.isDiscover());
+        log.info("basket.opp.stage=etf_batch mode={} size={} durationMs={}",
+                mode, etfQueries.size(), (System.nanoTime() - tEtf) / 1_000_000L);
 
-        Set<String> symbolsToFetch = new HashSet<>();
-        for (EquityHoldings h : userHoldings) {
-            if (h.getSymbol() != null && !h.getSymbol().isBlank()) {
-                symbolsToFetch.add(h.getSymbol());
-            }
-        }
-        for (EtfData etf : etfDataByInput.values()) {
-            if (etf == null || etf.getHoldings() == null) {
-                continue;
-            }
-            for (EtfHolding holding : etf.getHoldings()) {
-                if (holding.getSymbol() != null && !holding.getSymbol().isBlank()) {
-                    symbolsToFetch.add(holding.getSymbol());
+        Map<String, Double> sharedPrices = Collections.emptyMap();
+        boolean skipPriceFetch = mode.isDiscover();
+        if (!skipPriceFetch) {
+            Set<String> symbolsToFetch = new HashSet<>();
+            for (EquityHoldings h : userHoldings) {
+                if (h.getSymbol() != null && !h.getSymbol().isBlank()) {
+                    symbolsToFetch.add(h.getSymbol());
                 }
             }
+            for (EtfData etf : etfDataByInput.values()) {
+                if (etf == null || etf.getHoldings() == null) {
+                    continue;
+                }
+                for (EtfHolding holding : etf.getHoldings()) {
+                    if (holding.getSymbol() != null && !holding.getSymbol().isBlank()) {
+                        symbolsToFetch.add(holding.getSymbol());
+                    }
+                }
+            }
+            long tPrices = System.nanoTime();
+            sharedPrices = basketPriceResolver.fetchPricesWithHoldingsFallback(symbolsToFetch, userHoldings);
+            log.info("basket.opp.stage=prices mode={} symbols={} durationMs={}",
+                    mode, symbolsToFetch.size(), (System.nanoTime() - tPrices) / 1_000_000L);
+            log.info("Opportunities shared price map size={} for {} ETF queries", sharedPrices.size(), etfQueries.size());
+        } else {
+            log.info("basket.opp.stage=prices mode=DISCOVER skipped=true durationMs=0");
         }
-        Map<String, Double> sharedPrices = basketPriceResolver.fetchPricesWithHoldingsFallback(symbolsToFetch, userHoldings);
-        log.info("Opportunities shared price map size={} for {} ETF queries", sharedPrices.size(), etfQueries.size());
 
+        long tOverlap = System.nanoTime();
         for (String etfQuery : etfQueries) {
             EtfData etf = etfDataByInput.get(etfQuery);
             if (etf == null) {
@@ -183,9 +225,12 @@ public class BasketEngineService {
             SectorProfile sectorProfile = overlapCalculator.detectSectorProfile(etf);
 
             BasketOpportunity opportunity = overlapCalculator.calculateOverlap(
-                    etfQuery, etf, userMap, userSectorMap, userHoldings, sectorProfile, sharedPrices);
+                    etfQuery, etf, userMap, userSectorMap, userHoldings, sectorProfile,
+                    sharedPrices, skipPriceFetch);
             opportunities.add(opportunity);
         }
+        log.info("basket.opp.stage=overlap mode={} count={} durationMs={}",
+                mode, opportunities.size(), (System.nanoTime() - tOverlap) / 1_000_000L);
 
         return opportunities;
     }
