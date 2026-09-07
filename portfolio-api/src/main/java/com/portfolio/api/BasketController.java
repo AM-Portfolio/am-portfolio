@@ -1,10 +1,12 @@
 package com.portfolio.api;
 
 import com.portfolio.basket.model.BasketOpportunity;
+import com.portfolio.basket.model.OpportunityMode;
 import com.portfolio.basket.service.BasketAllocationService;
 import com.portfolio.basket.service.BasketCatalogService;
 import com.portfolio.basket.service.BasketEngineFacade;
 import com.portfolio.basket.service.BasketEngineService;
+import com.portfolio.basket.service.EnrichedEtfService;
 import com.portfolio.basket.service.HoldingSectorEnricher;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.service.basket.AllocationLedgerService;
@@ -41,6 +43,7 @@ public class BasketController {
     private final BasketEngineFacade basketEngineFacade;
     private final BasketAllocationService basketAllocationService;
     private final BasketCatalogService basketCatalogService;
+    private final EnrichedEtfService enrichedEtfService;
     private final PortfolioHoldingsService portfolioHoldingsService;
     private final HoldingSectorEnricher holdingSectorEnricher;
     private final BasketPortfolioCreateService basketPortfolioCreateService;
@@ -51,6 +54,9 @@ public class BasketController {
 
     @Value("${basket.catalog.write-token:}")
     private String catalogWriteToken;
+
+    @Value("${basket.opportunities.discover-fast-path-enabled:true}")
+    private boolean discoverFastPathEnabled;
 
     @Operation(summary = "Get basket catalog", description = "Returns curated basket themes and default ETF query", operationId = "getBasketCatalog")
     @GetMapping("/catalog")
@@ -70,7 +76,16 @@ public class BasketController {
                 && (catalogToken == null || !expected.equals(catalogToken))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Catalog write unauthorized");
         }
-        return basketCatalogService.upsertCatalog(body);
+        var response = basketCatalogService.upsertCatalog(body);
+        try {
+            var top = basketCatalogService.getTopEtfSymbols();
+            if (top != null && !top.isEmpty()) {
+                enrichedEtfService.getEnrichedEtfsBatch(top, true);
+            }
+        } catch (Exception e) {
+            log.warn("ETF warm after catalog upsert failed (non-fatal): {}", e.getMessage());
+        }
+        return response;
     }
 
     @Operation(summary = "Get /my", description = "Endpoint to getMyBaskets", operationId = "getMyBaskets")
@@ -83,14 +98,23 @@ public class BasketController {
     @Operation(summary = "Post /opportunities", description = "Endpoint to getOpportunities", operationId = "getOpportunities")
     @PostMapping("/opportunities")
     public List<BasketOpportunity> getOpportunities(@RequestBody OpportunityRequest request) {
-        log.info("Received Basket Opportunities Request - User: {}, Portfolio: {}, Query: {}",
-                request.getUserId(), request.getPortfolioId(), request.getEtfQuery());
+        log.info("Received Basket Opportunities Request - User: {}, Portfolio: {}, Query: {}, Mode: {}",
+                request.getUserId(), request.getPortfolioId(), request.getEtfQuery(), request.getMode());
 
+        long tHoldings = System.nanoTime();
+        OpportunityMode mode = OpportunityMode.from(request.getMode());
+        if (mode.isDiscover() && !discoverFastPathEnabled) {
+            log.info("discover-fast-path-enabled=false — forcing FULL");
+            mode = OpportunityMode.FULL;
+        }
+        // Discover: skip holding sector market enrich (often 1–3s); match is ISIN-based.
         List<EquityHoldings> userHoldings = resolveUserHoldings(request.getUserId(),
-                request.getPortfolioId(), request.getUserHoldings(), false);
+                request.getPortfolioId(), request.getUserHoldings(), false, mode.isDiscover());
+        log.info("basket.opp.stage=holdings durationMs={} count={} skipSectorEnrich={}",
+                (System.nanoTime() - tHoldings) / 1_000_000L, userHoldings.size(), mode.isDiscover());
 
-        log.info("Generating opportunities for {} holdings", userHoldings.size());
-        return basketEngineFacade.findOpportunities(userHoldings, request.getEtfQuery());
+        log.info("Generating opportunities for {} holdings mode={}", userHoldings.size(), mode);
+        return basketEngineFacade.findOpportunities(userHoldings, request.getEtfQuery(), mode);
     }
 
     @Operation(summary = "Post /exposure", description = "Endpoint to endpoint", operationId = "getBasketExposure")
@@ -325,7 +349,7 @@ public class BasketController {
 
     private List<EquityHoldings> resolveUserHoldings(String userId, String portfolioId,
             List<EquityHoldings> manualHoldings) {
-        return resolveUserHoldings(userId, portfolioId, manualHoldings, false);
+        return resolveUserHoldings(userId, portfolioId, manualHoldings, false, false);
     }
 
     /**
@@ -335,6 +359,11 @@ public class BasketController {
      */
     private List<EquityHoldings> resolveUserHoldings(String userId, String portfolioId,
             List<EquityHoldings> manualHoldings, boolean includeFullyAllocated) {
+        return resolveUserHoldings(userId, portfolioId, manualHoldings, includeFullyAllocated, false);
+    }
+
+    private List<EquityHoldings> resolveUserHoldings(String userId, String portfolioId,
+            List<EquityHoldings> manualHoldings, boolean includeFullyAllocated, boolean skipSectorEnrich) {
         List<EquityHoldings> holdings;
         if (manualHoldings != null && !manualHoldings.isEmpty()) {
             log.info("Using manual holdings provided in request. Count: {}", manualHoldings.size());
@@ -366,6 +395,9 @@ public class BasketController {
                     .filter(h -> h.getAvailableQuantity() == null || h.getAvailableQuantity() > 0)
                     .collect(java.util.stream.Collectors.toList());
         }
+        if (skipSectorEnrich) {
+            return holdings;
+        }
         return holdingSectorEnricher.enrich(holdings);
     }
 
@@ -393,6 +425,8 @@ public class BasketController {
         private String portfolioId;
         private String etfQuery;
         private String etfIsin;
+        /** DISCOVER | FULL — default FULL when null/blank. */
+        private String mode;
         private List<EquityHoldings> userHoldings;
     }
 

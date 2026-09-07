@@ -15,6 +15,8 @@ import java.util.List;
 public class BasketOpportunity {
     private String etfIsin;
     private String etfName;
+    private String etfSymbol;
+    private String categoryLabel;
     private double matchScore;
     private double replicaScore; // Score based on weight alignment
     private boolean readyToReplicate; // true if replicaScore >= 90
@@ -28,6 +30,11 @@ public class BasketOpportunity {
     private Double heldMatchScore;
     private Double substituteMatchScore;
     private Double missingMatchScore;
+    private Double return1Y;
+    private Double return3Y;
+    private Double return5Y;
+    private String returnsAsOf;
+    private List<Double> sparklineCloses;
 
     // --- New fields returned from calculateBasketQuantities ---
     private List<String> excludedSymbols;   // symbols the user excluded — echoed back so UI stays in sync

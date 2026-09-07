@@ -118,6 +118,29 @@ class EnrichedEtfServiceTest {
         verify(etfApiClient, times(1)).enrichHoldings(any());
     }
 
+    @Test
+    void copyEtf_preservesDiscoverPerformanceFields() {
+        EtfData src = sampleEtf("NIFTYBEES");
+        src.setCategoryLabel("Large cap · Equity");
+        src.setReturn1Y(-1.01);
+        src.setReturn3Y(27.5);
+        src.setReturn5Y(43.9);
+        src.setReturnsAsOf("2026-08-31");
+        src.setSparklineCloses(List.of(100.0, 110.0, 105.0));
+
+        EtfData copy = EnrichedEtfService.copyEtf(src);
+
+        assertEquals("Large cap · Equity", copy.getCategoryLabel());
+        assertEquals(-1.01, copy.getReturn1Y());
+        assertEquals(27.5, copy.getReturn3Y());
+        assertEquals(43.9, copy.getReturn5Y());
+        assertEquals("2026-08-31", copy.getReturnsAsOf());
+        assertEquals(List.of(100.0, 110.0, 105.0), copy.getSparklineCloses());
+        // defensive copy
+        copy.getSparklineCloses().set(0, 1.0);
+        assertEquals(100.0, src.getSparklineCloses().get(0));
+    }
+
     private static EtfData sampleEtf(String symbol) {
         EtfData data = new EtfData();
         data.setSymbol(symbol);

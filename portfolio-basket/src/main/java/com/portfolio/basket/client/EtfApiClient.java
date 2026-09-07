@@ -1,6 +1,7 @@
 package com.portfolio.basket.client;
 
 import com.portfolio.basket.util.SectorNormalizer;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.portfolio.basket.model.EtfData;
 import com.portfolio.basket.model.EtfHolding;
@@ -120,18 +121,18 @@ public class EtfApiClient {
     }
 
     /**
-     * POST /v1/etf/holdings — primary contract (symbol, ISIN, or name query per item).
+     * POST /v2/funds/holdings — primary contract (symbol, ISIN, or name query per item).
      */
     public HoldingsLookupResponse lookupHoldings(List<String> items) {
         if (items == null || items.isEmpty()) {
             return new HoldingsLookupResponse(items, 0, Collections.emptyList(), Collections.emptyList());
         }
-        String url = apiUrl + "/v1/etf/holdings";
+        String url = apiUrl + "/v2/funds/holdings";
         HoldingsLookupRequest request = new HoldingsLookupRequest(items);
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         HttpEntity<HoldingsLookupRequest> entity = new HttpEntity<>(request, headers);
-        log.info("POST ETF holdings lookup: {} items -> {}", items.size(), url);
+        log.info("POST fund holdings lookup: {} items -> {}", items.size(), url);
         return etfRestTemplate.postForObject(url, entity, HoldingsLookupResponse.class);
     }
 
@@ -204,7 +205,7 @@ public class EtfApiClient {
         
         try {
             String encoded = URLEncoder.encode(upperSymbol, StandardCharsets.UTF_8);
-            String searchUrl = apiUrl + "/v1/etf/search?query=" + encoded + "&limit=10";
+            String searchUrl = apiUrl + "/v2/funds/search?query=" + encoded + "&limit=10&productTypes=ETF";
             EtfSearchResponse response = etfRestTemplate.getForObject(searchUrl, EtfSearchResponse.class);
             
             boolean isEtf = false;
@@ -227,7 +228,7 @@ public class EtfApiClient {
     /**
      * Batch lookup for index names, symbols, or ISINs.
      * Direct keys (ISIN / ticker) go straight to holdings lookup — no per-item
-     * {@code /v1/etf/search} (that N+1 was ~20–30s on exposure). Index / free-text
+     * {@code /v2/funds/search} (that N+1 was ~20–30s on exposure). Index / free-text
      * names still resolve via search once, then one holdings POST.
      */
     public Map<String, EtfData> fetchEtfHoldingsBatch(List<String> items) {
@@ -340,8 +341,8 @@ public class EtfApiClient {
     public String resolveQueryToSymbol(String query) {
         try {
             String encoded = URLEncoder.encode(query, StandardCharsets.UTF_8);
-            String url = apiUrl + "/v1/etf/search?query=" + encoded + "&limit=20";
-            log.info("ETF search: {}", url);
+            String url = apiUrl + "/v2/funds/search?query=" + encoded + "&limit=20&productTypes=ETF";
+            log.info("Fund search: {}", url);
             EtfSearchResponse response = etfRestTemplate.getForObject(url, EtfSearchResponse.class);
             if (response == null || response.getEtfs() == null || response.getEtfs().isEmpty()) {
                 log.warn("ETF search returned no results for '{}'", query);
@@ -510,6 +511,12 @@ public class EtfApiClient {
         EtfData data = new EtfData();
         data.setName(response.getName());
         data.setSymbol(response.getSymbol());
+        data.setCategoryLabel(firstNonBlank(response.getCategoryLabel(), response.getMarketCapCategory(), response.getAssetClass()));
+        data.setReturn1Y(response.getReturn1Y());
+        data.setReturn3Y(response.getReturn3Y());
+        data.setReturn5Y(response.getReturn5Y());
+        data.setReturnsAsOf(response.getReturnsAsOf());
+        data.setSparklineCloses(response.getSparklineCloses());
 
         List<EtfHolding> holdings = response.getHoldings().stream()
                 .map(h -> {
@@ -529,6 +536,18 @@ public class EtfApiClient {
                 response.getIsin(),
                 holdings.size());
         return data;
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String v : values) {
+            if (v != null && !v.isBlank()) {
+                return v;
+            }
+        }
+        return null;
     }
 
     public List<String> searchEtfs(String query) {
@@ -853,9 +872,11 @@ public class EtfApiClient {
     @Data
     public static class HoldingsLookupRequest {
         private List<String> items;
+        private List<String> productTypes = List.of("ETF");
 
         public HoldingsLookupRequest(List<String> items) {
             this.items = new ArrayList<>(items);
+            this.productTypes = List.of("ETF");
         }
     }
 
@@ -863,9 +884,13 @@ public class EtfApiClient {
     public static class HoldingsLookupResponse {
         private List<String> items;
         @JsonProperty("total_found")
+        @JsonAlias("totalFound")
         private Integer totalFound;
+        @JsonProperty("etfs")
+        @JsonAlias("funds")
         private List<EtfApiResponse> etfs;
         @JsonProperty("not_found")
+        @JsonAlias("notFound")
         private List<String> notFound;
 
         public HoldingsLookupResponse() {
@@ -943,6 +968,8 @@ public class EtfApiClient {
 
     @Data
     private static class EtfSearchResponse {
+        @JsonProperty("etfs")
+        @JsonAlias("funds")
         private List<EtfInfo> etfs;
     }
 
@@ -951,34 +978,48 @@ public class EtfApiClient {
         private String isin;
         private String symbol;
         private String name;
+        private String productType;
     }
 
     @Data
     public static class EtfApiResponse {
+        private String productType;
         private String symbol;
         private String name;
         private String isin;
         @JsonProperty("asset_class")
+        @JsonAlias("assetClass")
         private String assetClass;
         @JsonProperty("market_cap_category")
+        @JsonAlias("marketCapCategory")
         private String marketCapCategory;
+        private String categoryLabel;
         private List<ApiHolding> holdings;
         @JsonProperty("holdings_count")
+        @JsonAlias("holdingsCount")
         private Integer holdingsCount;
         private String message;
+        private Double return1Y;
+        private Double return3Y;
+        private Double return5Y;
+        private String returnsAsOf;
+        private List<Double> sparklineCloses;
     }
 
     @Data
     private static class ApiHolding {
         @JsonProperty("stock_name")
+        @JsonAlias("stockName")
         private String stockName;
 
         @JsonProperty("isin_code")
+        @JsonAlias("isinCode")
         private String isinCode;
 
         private Double percentage;
 
         @JsonProperty("market_value")
+        @JsonAlias("marketValue")
         private Double marketValue;
 
         private Double quantity;

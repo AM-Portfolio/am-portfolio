@@ -118,6 +118,13 @@ public class EnrichedEtfService {
      * Batch resolve + enrich with global ISIN enrichment dedup and L1/L2 reuse.
      */
     public Map<String, EtfData> getEnrichedEtfsBatch(List<String> queries) {
+        return getEnrichedEtfsBatch(queries, false);
+    }
+
+    /**
+     * @param discoverFastPath when true, skip market enrichHoldings if ≥95% holdings have valid ISINs.
+     */
+    public Map<String, EtfData> getEnrichedEtfsBatch(List<String> queries, boolean discoverFastPath) {
         Map<String, EtfData> out = new LinkedHashMap<>();
         if (queries == null || queries.isEmpty()) {
             return out;
@@ -165,9 +172,19 @@ public class EnrichedEtfService {
                 allHoldings.addAll(data.getHoldings());
             }
         }
+        long enrichStart = System.currentTimeMillis();
+        boolean ranEnrich = false;
         if (!allHoldings.isEmpty()) {
-            etfApiClient.enrichHoldings(allHoldings);
+            if (discoverFastPath && isinCoverage(allHoldings) >= 0.95) {
+                log.info("basket.opp.stage=enrich skipped=true reason=isinCoverage discoverFastPath=true holdings={}",
+                        allHoldings.size());
+            } else {
+                etfApiClient.enrichHoldings(allHoldings);
+                ranEnrich = true;
+            }
         }
+        log.info("basket.opp.stage=enrich ran={} durationMs={} discoverFastPath={}",
+                ranEnrich, System.currentTimeMillis() - enrichStart, discoverFastPath);
 
         for (String q : misses) {
             EtfData data = liveBatch.get(q);
@@ -177,9 +194,22 @@ public class EnrichedEtfService {
             store(normalizeKey(q), data);
             out.put(q, copyEtf(data));
         }
-        log.info("enrichment.cache=MISS batchSize={} resolved={} durationMs={}",
-                misses.size(), liveBatch.size(), System.currentTimeMillis() - start);
+        log.info("enrichment.cache=MISS batchSize={} resolved={} durationMs={} discoverFastPath={}",
+                misses.size(), liveBatch.size(), System.currentTimeMillis() - start, discoverFastPath);
         return out;
+    }
+
+    static double isinCoverage(List<EtfHolding> holdings) {
+        if (holdings == null || holdings.isEmpty()) {
+            return 0.0;
+        }
+        int ok = 0;
+        for (EtfHolding h : holdings) {
+            if (h.getIsin() != null && h.getIsin().length() >= 10 && !"-".equals(h.getIsin())) {
+                ok++;
+            }
+        }
+        return (double) ok / holdings.size();
     }
 
     private void store(String key, EtfData data) {
@@ -212,6 +242,13 @@ public class EnrichedEtfService {
         CachedEtfData cached = new CachedEtfData();
         cached.setSymbol(data.getSymbol());
         cached.setName(data.getName());
+        cached.setCategoryLabel(data.getCategoryLabel());
+        cached.setReturn1Y(data.getReturn1Y());
+        cached.setReturn3Y(data.getReturn3Y());
+        cached.setReturn5Y(data.getReturn5Y());
+        cached.setReturnsAsOf(data.getReturnsAsOf());
+        cached.setSparklineCloses(
+                data.getSparklineCloses() != null ? new ArrayList<>(data.getSparklineCloses()) : null);
         List<CachedEtfHolding> holdings = new ArrayList<>();
         if (data.getHoldings() != null) {
             for (EtfHolding h : data.getHoldings()) {
@@ -233,6 +270,13 @@ public class EnrichedEtfService {
         EtfData data = new EtfData();
         data.setSymbol(cached.getSymbol());
         data.setName(cached.getName());
+        data.setCategoryLabel(cached.getCategoryLabel());
+        data.setReturn1Y(cached.getReturn1Y());
+        data.setReturn3Y(cached.getReturn3Y());
+        data.setReturn5Y(cached.getReturn5Y());
+        data.setReturnsAsOf(cached.getReturnsAsOf());
+        data.setSparklineCloses(
+                cached.getSparklineCloses() != null ? new ArrayList<>(cached.getSparklineCloses()) : null);
         List<EtfHolding> holdings = new ArrayList<>();
         if (cached.getHoldings() != null) {
             for (CachedEtfHolding ch : cached.getHoldings()) {
