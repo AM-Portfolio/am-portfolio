@@ -222,6 +222,40 @@ public class BasketEngineServiceTest {
     }
 
     @Test
+    void findOpportunities_discoverSkipsSharedPriceFetchAndSlimesPayload() {
+        List<EquityHoldings> userHoldings = new ArrayList<>();
+        EquityHoldings holding = new EquityHoldings();
+        holding.setIsin("US0378331005");
+        holding.setSymbol("AAPL");
+        holding.setQuantity(10.0);
+        holding.setCurrentValue(1500.0);
+        userHoldings.add(holding);
+
+        EtfData etfData = new EtfData();
+        etfData.setName("Tech ETF");
+        etfData.setSymbol("TECHETF");
+        EtfHolding etfHolding = new EtfHolding();
+        etfHolding.setSymbol("AAPL");
+        etfHolding.setIsin("US0378331005");
+        etfHolding.setWeight(100.0);
+        etfData.setHoldings(List.of(etfHolding));
+
+        when(enrichedEtfService.getEnrichedEtfsBatch(anyList(), anyBoolean()))
+                .thenReturn(Map.of("IE00B53SZB19", etfData));
+
+        List<BasketOpportunity> result = basketEngineService.findOpportunities(
+                userHoldings, "IE00B53SZB19,", com.portfolio.basket.model.OpportunityMode.DISCOVER);
+
+        assertEquals(1, result.size());
+        assertNull(result.get(0).getComposition());
+        assertNull(result.get(0).getBuyList());
+        assertEquals(50000.0, result.get(0).getMinimumInvestmentAmount());
+        verify(enrichedEtfService, times(1)).getEnrichedEtfsBatch(anyList(), eq(true));
+        verify(basketPriceResolver, never()).fetchPricesWithHoldingsFallback(anySet(), anyList());
+        verify(basketPriceResolver, never()).fetchResolvedPrices(anySet(), anyList());
+    }
+
+    @Test
     void testFindOpportunities_KeywordTokenUsesSearch() {
         List<EquityHoldings> userHoldings = new ArrayList<>();
         EquityHoldings holding = new EquityHoldings();
