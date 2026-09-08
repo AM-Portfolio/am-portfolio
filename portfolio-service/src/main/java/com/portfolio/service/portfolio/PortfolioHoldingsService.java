@@ -280,9 +280,13 @@ public class PortfolioHoldingsService {
                 cachedHoldings = portfolioHoldingsRedisService.getLatestHoldings(userId, interval, portfolioId);
             }
             if (cachedHoldings.isPresent()) {
-                log.info("Serving portfolio holdings from Redis cache - User: {}, Interval: {}",
-                        userId, interval != null ? interval.getCode() : "null");
-                return cachedHoldings;
+                List<EquityHoldings> redisList = cachedHoldings.get().getEquityHoldings();
+                if (redisList != null && !redisList.isEmpty()) {
+                    log.info("Serving portfolio holdings from Redis cache - User: {}, Interval: {}",
+                            userId, interval != null ? interval.getCode() : "null");
+                    return cachedHoldings;
+                }
+                log.warn("Redis holdings cache is empty for user: {} — ignoring and falling through", userId);
             }
         }
 
@@ -291,10 +295,10 @@ public class PortfolioHoldingsService {
         if (cachedHoldings.isPresent()) {
             List<EquityHoldings> cachedList = cachedHoldings.get().getEquityHoldings();
             boolean hasLivePrices = cachedList != null
-                && (cachedList.isEmpty()
-                    || cachedList.stream()
+                && !cachedList.isEmpty()
+                && cachedList.stream()
                         .filter(h -> h.getCurrentPrice() != null && h.getCurrentPrice() > 0)
-                        .count() >= cachedList.size() * 0.5);
+                        .count() >= cachedList.size() * 0.5;
             
             LocalDateTime cutoff = LocalDateTime.now().minusMinutes(15);
             boolean isStale = cachedHoldings.get().getLastUpdated() == null || cachedHoldings.get().getLastUpdated().isBefore(cutoff);
@@ -302,6 +306,12 @@ public class PortfolioHoldingsService {
             if (hasLivePrices && !isStale) {
                 log.info("Serving valid and fresh portfolio holdings from MongoDB cache - User: {}", userId);
                 return cachedHoldings;  // ✅ real data
+            }
+
+            // Empty CREATE snapshots must not SWR — caller rebuilds from the live book
+            if (cachedList == null || cachedList.isEmpty()) {
+                log.warn("MongoDB holdings cache is empty for user: {} — forcing sync rebuild", userId);
+                return Optional.empty();
             }
             
             log.warn("MongoDB holdings cache has stale prices or is older than 15 mins for User: {} — triggering async rebuild", userId);

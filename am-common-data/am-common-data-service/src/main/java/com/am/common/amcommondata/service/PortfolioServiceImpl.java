@@ -71,6 +71,16 @@ public class PortfolioServiceImpl implements PortfolioService {
                 log.warn("Refusing trade update on BASKET portfolio id={}", doc.getId());
                 return portfolioMapper.toModel(doc);
             }
+            if (PortfolioKind.isPaper(portfolioModel.getPortfolioKind())
+                    && !PortfolioKind.isPaper(doc.getPortfolioKind())) {
+                log.warn("Refusing PAPER TRADE_SYNC on non-PAPER portfolio id={}", doc.getId());
+                return portfolioMapper.toModel(doc);
+            }
+            if (!PortfolioKind.isPaper(portfolioModel.getPortfolioKind())
+                    && PortfolioKind.isPaper(doc.getPortfolioKind())) {
+                log.warn("Refusing non-PAPER TRADE_SYNC on PAPER portfolio id={}", doc.getId());
+                return portfolioMapper.toModel(doc);
+            }
             // Update name if the incoming model has a valid name that isn't just the ID
             if (portfolioModel.getName() != null && !portfolioModel.getName().equals(doc.getId())) {
                 doc.setName(portfolioModel.getName());
@@ -83,7 +93,8 @@ public class PortfolioServiceImpl implements PortfolioService {
             }
             doc.setOwner(owner);
             doc.setBrokerType(brokerType);
-            doc.setPortfolioKind(PortfolioKind.BROKER);
+            doc.setPortfolioKind(portfolioModel.getPortfolioKind() != null
+                    ? portfolioModel.getPortfolioKind() : PortfolioKind.BROKER);
             doc.setName(portfolioModel.getName() != null && !portfolioModel.getName().equals(portfolioModel.getId() != null ? portfolioModel.getId().toString() : "") ? portfolioModel.getName() : (brokerType != null ? brokerType.getCode() : "Other"));
             doc.setStatus(com.am.common.amcommondata.model.enums.DocumentStatus.ACTIVE);
             com.am.common.amcommondata.document.common.AuditMetadata audit = new com.am.common.amcommondata.document.common.AuditMetadata();
