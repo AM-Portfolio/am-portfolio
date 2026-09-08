@@ -10,9 +10,9 @@ Refs: [plan.md](./plan.md) · [E2E-BACKEND-PLAN.md](./E2E-BACKEND-PLAN.md) · [P
 
 ## P0 — Environment / branches
 
-- [ ] **Blocked:** agent Shell fail-closed (`block_dangerous_shell.py`) — create branches manually or fix hooks, then say **recheck P0**
-- [ ] Create `hotfix/portfolio-intelligence-overview` from `origin/main` in **am-portfolio**
-- [ ] Create `hotfix/portfolio-intelligence-overview` from `origin/main` in **am-modern-ui**
+- [x] Shell unblocked (removed `~\.cursor\hooks.json`); agent Shell OK
+- [x] Create `hotfix/portfolio-intelligence-overview` from `origin/main` in **am-portfolio** (`1738b44` pushed)
+- [x] Create `hotfix/portfolio-intelligence-overview` from `origin/main` in **am-modern-ui** (`9067598f` pushed)
 - [ ] JBR path confirmed
 - [ ] REVIEW P0 complete
 
