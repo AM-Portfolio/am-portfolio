@@ -110,6 +110,7 @@ public class PortfolioMapperv1 {
                 .name(tradeEvent.getPortfolioId() != null ? tradeEvent.getPortfolioId() : tradeEvent.getId())
                 .owner(tradeEvent.getUserId())
                 .brokerType(brokerType)
+                .portfolioKind(parseKind(tradeEvent.getPortfolioKind()))
                 .fundType(FundType.DEFAULT)
                 .status("Active")
                 .createdBy(tradeEvent.getUserId())
@@ -317,6 +318,17 @@ public class PortfolioMapperv1 {
         } catch (IllegalArgumentException ignored) {
             BrokerType fromCode = BrokerType.fromCode(raw.trim());
             return fromCode;
+        }
+    }
+
+    private com.am.common.amcommondata.model.enums.PortfolioKind parseKind(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return com.am.common.amcommondata.model.enums.PortfolioKind.BROKER;
+        }
+        try {
+            return com.am.common.amcommondata.model.enums.PortfolioKind.valueOf(raw.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return com.am.common.amcommondata.model.enums.PortfolioKind.BROKER;
         }
     }
 }

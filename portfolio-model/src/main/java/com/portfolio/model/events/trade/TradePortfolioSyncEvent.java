@@ -29,6 +29,7 @@ public class TradePortfolioSyncEvent {
     private String userId;
     private String action;
     private Boolean deleteAllTrades;
+    private String portfolioKind;
     private List<TradeEquityPosition> equities;
     private Object timestamp;
 }
