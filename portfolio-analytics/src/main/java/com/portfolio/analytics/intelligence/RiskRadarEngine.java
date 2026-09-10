@@ -17,7 +17,9 @@ public class RiskRadarEngine {
 
     public static final double TOP1_HIGH_PCT = 25.0;
     public static final double SECTOR_HIGH_PCT = 30.0;
+    public static final double SECTOR_MEDIUM_PCT = 20.0;
     public static final double BETA_HIGH = 1.3;
+    public static final double BETA_MEDIUM = 1.1;
 
     public RiskDto compute(PortfolioIntelligenceSnapshot snapshot) {
         int concHealth = roundInt(HealthScoreEngine.concentration(snapshot));
@@ -55,15 +57,28 @@ public class RiskRadarEngine {
                     .label(String.format(Locale.ROOT, "%s %.1f%%", name, snapshot.getMaxSectorPct()))
                     .severity("HIGH")
                     .build());
-        }
-        if (snapshot.getHistoryPoints() >= MIN_HISTORY_POINTS
-                && snapshot.getBeta() != null
-                && snapshot.getBeta() > BETA_HIGH) {
+        } else if (snapshot.getMaxSectorPct() >= SECTOR_MEDIUM_PCT) {
+            String name = snapshot.getMaxSectorName() != null ? snapshot.getMaxSectorName() : "Sector";
             findings.add(RiskDto.RiskFindingDto.builder()
-                    .code("BETA_HIGH")
-                    .label(String.format(Locale.ROOT, "Beta %.2f", snapshot.getBeta()))
-                    .severity("HIGH")
+                    .code("SECTOR_MEDIUM")
+                    .label(String.format(Locale.ROOT, "%s %.1f%%", name, snapshot.getMaxSectorPct()))
+                    .severity("MEDIUM")
                     .build());
+        }
+        if (snapshot.getHistoryPoints() >= MIN_HISTORY_POINTS && snapshot.getBeta() != null) {
+            if (snapshot.getBeta() > BETA_HIGH) {
+                findings.add(RiskDto.RiskFindingDto.builder()
+                        .code("BETA_HIGH")
+                        .label(String.format(Locale.ROOT, "Beta %.2f", snapshot.getBeta()))
+                        .severity("HIGH")
+                        .build());
+            } else if (snapshot.getBeta() > BETA_MEDIUM) {
+                findings.add(RiskDto.RiskFindingDto.builder()
+                        .code("BETA_MEDIUM")
+                        .label(String.format(Locale.ROOT, "Beta %.2f", snapshot.getBeta()))
+                        .severity("MEDIUM")
+                        .build());
+            }
         }
 
         return RiskDto.builder().axes(axes).findings(findings).build();

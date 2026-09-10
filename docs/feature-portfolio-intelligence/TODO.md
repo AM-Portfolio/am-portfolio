@@ -1,7 +1,9 @@
 # Portfolio Intelligence — TODO (execution cockpit)
 
-**Current phase:** `DEPLOY` (code complete P2–P9/P11 locally; awaiting preprod/prod deploy + live REVIEW stamps)  
+**Current phase:** `UI-PARITY` (Overview density pass landed on am-modern-ui; dogfood via `AM_INTEL_FORCE_ON` / GrowthBook)  
 **PRE env:** `https://am-preprod.asrax.in/portfolio`  
+**PROD env:** `https://am.asrax.in/portfolio`  
+**Golden portfolioId (prod dogfood):** `afe250bc-38d3-4165-888e-d1bd620c5016`  
 **Golden portfolioId (preprod):** `c7ef8e22-9d98-44fd-a500-b7bf770597b5`  
 **Rule:** Mark `[x]` only after [REVIEW.md](./REVIEW.md) signed for that phase.
 
@@ -9,7 +11,8 @@
 
 **Refs:** [plan.md](./plan.md) · [UI_SPEC.md](./UI_SPEC.md) · [API-CONTRACTS.md](./API-CONTRACTS.md) · [E2E-BACKEND-PLAN.md](./E2E-BACKEND-PLAN.md) · [final-overview-page.png](./final-overview-page.png)
 
-**Flags (D15):** `portfolio-intelligence-overview-v1` · `portfolio-intel-health-v1` · `portfolio-intel-risk-v1` · `portfolio-intel-xray-v1` · `portfolio-intel-stress-v1` · `portfolio-intel-whatif-v1`
+**Flags (D15):** `portfolio-intelligence-overview-v1` · `portfolio-intel-health-v1` · `portfolio-intel-risk-v1` · `portfolio-intel-xray-v1` · `portfolio-intel-stress-v1` · `portfolio-intel-whatif-v1`  
+**Local dogfood:** `npm run run:app:9000:prod:intel` (`AM_INTEL_FORCE_ON=true`, debug only)
 
 ---
 
@@ -89,22 +92,24 @@
 
 ---
 
-## P7 — UI web + flags — DONE (local)
+## P7 — UI web + flags — DONE (local) + UI parity pass
 
 - [x] D15 keys + fail-closed providers in `am_common`  
 - [x] API clients intelligence / stress / what-if  
 - [x] Health / Risk / X-Ray / Stress / What-If widgets  
-- [x] Web ≥1100 layout per UI_SPEC  
+- [x] Web ≥1100 layout per UI_SPEC (X-Ray\|Risk mid; compact Movers + Stress + What-If)  
 - [x] Master OFF → Allocation + no intel fetches  
+- [x] UI parity: X-Ray donut+legend (Sector/Industry/Cap only), Stress multi-preset table, Health N/100 grid, Risk spider|findings/axes, What-If deltas, compact Movers, intel skeleton  
+- [x] Debug force: `AM_INTEL_FORCE_ON` + `run:app:9000:prod:intel`  
 - [ ] GrowthBook flags created in console (ops)  
-- [x] REVIEW P7 code; **visual @1280 after flags ON + BE deploy**  
+- [x] REVIEW P7 code; **visual @1280 after flags ON / force-on**  
 
 ---
 
 ## P8 — UI tablet + phone — DONE (local)
 
-- [x] Tablet 600–1099 2-col  
-- [x] Phone &lt;600 stack + collapsed Stress/What-If  
+- [x] Tablet 600–1099: Chart\|Health + X-Ray\|Risk + Movers full + Stress\|What-If  
+- [x] Phone &lt;600: Chart → Health → X-Ray → Risk → compact Movers → Stress/What-If collapsed  
 - [x] Drill-down sheets stubs  
 - [ ] Verify @768 / @390 on device/browser  
 - [x] REVIEW P8 code; **device stamp open**  
@@ -157,3 +162,15 @@
 | am-portfolio | CHANGE (engines + APIs) |
 | am-modern-ui | CHANGE (P7–P8 UI + flags) |
 | am-market / am-core-services / am-trade-management | NO CHANGE |
+
+---
+
+## Deferred (post second-pass polish — not blocking UI density)
+
+- [ ] A11y: Semantics / keyboard focus on X-Ray & Movers tabs  
+- [ ] Perf: Stress 5× parallel POSTs → lazy/batch / “on Run”  
+- [ ] Perf: Slim advanced when Allocation hidden (movers-only path)  
+- [ ] Architecture: Analytics cubit emit guard on rapid portfolio switch  
+- [ ] UX: GrowthBook late-adopt legacy→intel flash  
+- [ ] Backend: Populate `historyPoints` for VOL/BETA risk axes + confidence  
+- [ ] Docs: Intelligence endpoint latency guidance  

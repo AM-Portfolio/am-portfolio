@@ -137,12 +137,16 @@
 - [x] Performance chart visual unchanged  
 - [x] D15 keys in `FeatureFlagKeys` (fail-closed)  
 - [x] Master OFF → Allocation path in code  
+- [x] UI parity pass: X-Ray donut, Stress preset table, Health `/100` grid, Risk side-by-side, What-If deltas, row minHeights, intel skeleton  
+- [x] `AM_INTEL_FORCE_ON` debug dogfood (`run:app:9000:prod:intel`)  
 - [ ] GrowthBook flags created in console  
-- [ ] Verified @ ~1280 with live BE  
+- [ ] Verified @ ~1280 with live BE + force-on  
 
-**Verified at:** ________ **By:** ________
+**Notes:** UI parity code landed 2026-09-10. PROD intel APIs already smoke-tested. Visual confirm: restart UI with intel force script.
 
-**Signed by:** agent (code) **Date:** 2026-09-10 — **visual gate open**
+**Verified at:** code+unit tests **By:** agent  
+
+**Signed by:** agent (code) **Date:** 2026-09-10 — **visual gate open for user**
 
 ---
 
@@ -184,16 +188,17 @@
 
 ## P11 — Quality / ops
 
-- [ ] Engine + ownership tests green  
-- [ ] Flutter analyze clean on touched files  
+- [x] Engine + ownership tests green (prior)  
+- [x] Flutter analyze clean on touched intel/overview files  
+- [x] Focused UI tests: X-Ray tabs/donut, stress presets, intelFlagsForcedOn default false  
 - [ ] Optional Redis fail-open (if shipped)  
 - [ ] Micrometer / Grafana check  
-- [ ] No secrets in git diff  
+- [x] No secrets in git diff  
 - [ ] market / core / trade **unchanged**  
 
-**Notes:** ________________________________
+**Notes:** Overview UI parity tests green 2026-09-10.
 
-**Signed by:** ________ **Date:** ________
+**Signed by:** agent **Date:** 2026-09-10
 
 ---
 

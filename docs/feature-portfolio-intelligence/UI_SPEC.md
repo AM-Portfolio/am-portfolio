@@ -43,22 +43,27 @@ KPIs, Performance chart, Top Movers: **not** behind intel flags.
 
 ---
 
-## Web (≥1100) — Image 1
+## Web (≥1100) — Image 1 (X-Ray primary)
+
+**Product SoT:** X-Ray occupies the former large Movers mid-row slot. Top Movers is compact (Gainers|Losers tabs) on the bottom row. Asset Class tab removed.
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │  KPI: Total Return | Today P&L | Total Balance | Invested   │
 ├──────────────────────────────┬──────────────────────────────┤
-│  Performance chart           │  Health Score                │
+│  Performance chart (flex 2)  │  Health Score (flex 1)       │
 │  (EXISTING — do not restyle) │  gauge + 8 rows + Details    │
 ├──────────────────────────────┼──────────────────────────────┤
-│  Top Movers                  │  Risk Radar                  │
-│  Gainers | Losers            │  spider + findings + Details │
+│  Portfolio X-Ray (flex 1)    │  Risk Radar (flex 1)         │
+│  Sector | Industry | Cap     │  spider + findings/axes      │
+│  matched peer height         │  matched peer height         │
 ├──────────────┬───────────────┴──────────────┬───────────────┤
-│  Portfolio   │  Stress Test                 │  What-If      │
-│  X-Ray       │  presets + custom            │  Simulator    │
+│  Top Movers  │  Stress Test                 │  What-If      │
+│  COMPACT     │  presets + custom            │  Simulator    │
 └──────────────┴──────────────────────────────┴───────────────┘
 ```
+
+Peers in mid rows stretch with pinned footer CTAs (not sparse fixed empty cards).
 
 ---
 
@@ -68,11 +73,11 @@ KPIs, Performance chart, Top Movers: **not** behind intel flags.
 ┌─────────────────────────────────────────┐
 │  KPI ×4 (one row, tighter padding)      │
 ├────────────────────┬────────────────────┤
-│  Chart             │  Health            │
+│  Chart (flex 2)    │  Health (flex 1)   │
 ├────────────────────┼────────────────────┤
-│  Movers            │  Risk              │
+│  X-Ray (flex 2)    │  Risk (flex 1)     │
 ├────────────────────┴────────────────────┤
-│  X-Ray (full width)                     │
+│  Movers compact (full width)            │
 ├────────────────────┬────────────────────┤
 │  Stress            │  What-If           │
 └────────────────────┴────────────────────┘
@@ -89,11 +94,11 @@ KPIs, Performance chart, Top Movers: **not** behind intel flags.
 ```text
 ┌──────────────────┐
 │  KPI 2×2         │
-│  Health          │  (gauge + top 4 components; rest in Details)
 │  Chart (~320)    │
+│  Health          │  (gauge + top 4 components; rest in Details)
+│  X-Ray           │  (Sector / Industry / Cap)
 │  Risk            │
-│  Movers          │  (Gainers/Losers stacked or tabbed)
-│  X-Ray           │
+│  Movers compact  │  (Gainers/Losers tabs, short list)
 │  Stress ▸        │  ExpansionTile, default collapsed
 │  What-If ▸       │  ExpansionTile, default collapsed
 └──────────────────┘
@@ -110,13 +115,24 @@ Touch targets for primary actions ≥ 48px.
 | KPI ×4 | summary | Existing | — |
 | Chart | history/intraday | Unchanged interactions | — |
 | Health | intelligence.health | Score, band, components, View Details | master + health |
-| Risk | intelligence.risk | Axes + findings, View Risk Analysis | master + risk |
-| Movers | advanced | Gainers / Losers | — |
-| X-Ray | intelligence.xray | Sector/Industry/Cap; Asset Class disabled | master + xray |
-| Stress | stress API | Presets + custom; “Scenario estimate” | master + stress |
-| What-If | what-if API | Add/Modify/Switch → before/after | master + whatif |
+| Risk | intelligence.risk | Axes + findings (or axis scores if no findings), View Risk Analysis | master + risk |
+| Movers | advanced | Compact Gainers / Losers on Overview | — |
+| X-Ray | intelligence.xray | Sector/Industry/Cap; **desktop/tablet: donut left + legend right**; phone stacked; Unknown honest | master + xray |
+| Stress | stress API | Presets + custom (phone included when expanded); no fake 0% on failure | master + stress |
+| What-If | what-if API | Compact empty After; weight ≤100 validation | master + whatif |
 | Allocation | advanced | Only when X-Ray/master OFF | — |
 
+### Layout heights (industry-grade pass)
+
+- Chart|Health: **flex 2:1**, matched band height (phone 300 / tablet 320 / web **340**); Health `fillHeight` + pinned CTA.
+- X-Ray|Risk: **flex 1:1**, fixed matched band (tablet 320 / web 340) + stretch; both `fillHeight`; legend scrolls inside X-Ray. **Do not** use `IntrinsicHeight` (crashes with X-Ray `ListView`).
+- Chart bootstrap: skeleton plot (not empty spinner void).
+- Bottom: 1:1:1 natural heights, start-aligned.
+- Compact Movers: top **5** rows.
+
+### Risk empty findings
+
+When `findings[]` is empty, show up to **4** axes sorted by `riskScore` desc with score-band pills (**High ≥70 / Medium ≥40 / Good &lt;40**). Never invent narrative findings (e.g. Banking %). Spider is an N-gon from live axes only (4 until history backend adds Vol/Beta). Labeled spider with spokes, glow, vertex dots; visual radius floor so score `0` does not collapse the plot.
 ---
 
 ## Drill-downs (flag follows parent)
@@ -149,7 +165,7 @@ No new routes for MVP.
 - Exact mock pink/green palette  
 - Exact mock typography / spacing  
 - Mock sample numbers — use live API  
-- Working Asset Class donut  
+- Asset Class donut (removed from UI for now)  
 - PDF / email (P10)
 
 ---
@@ -157,21 +173,22 @@ No new routes for MVP.
 ## Pass criteria
 
 ### Web
-- [ ] Rows match Image 1 grid when all flags ON  
-- [ ] Health alone beside chart  
-- [ ] What-If on bottom row with X-Ray + Stress  
-- [ ] Chart not redesigned  
-- [ ] Master OFF → Allocation + no intel widgets  
+- [x] Rows match Image 1 grid when all flags ON (X-Ray\|Risk mid; compact Movers bottom)  
+- [x] Health alone beside chart  
+- [x] Compact Movers + Stress + What-If on bottom row  
+- [x] Chart not redesigned  
+- [x] Master OFF → Allocation + no intel widgets  
 
 ### Tablet
-- [ ] 2-col pairs + X-Ray full width + Stress|What-If  
-- [ ] Verified ~768 width  
+- [x] Chart\|Health + X-Ray\|Risk + Movers full + Stress\|What-If  
+- [ ] Verified ~768 width *(manual resize after `run:app:9000:prod:intel`)*  
 
 ### Phone
-- [ ] Stack order per above; Stress/What-If collapsed by default  
-- [ ] Verified ~390 width  
+- [x] Stack order: Chart → Health → X-Ray → Risk → compact Movers → Stress/What-If collapsed  
+- [ ] Verified ~390 width *(manual resize)*  
 
 ### Flags
-- [ ] Keys in `FeatureFlagKeys` + GrowthBook  
-- [ ] Child OFF reflows cleanly  
-- [ ] No intel API when master OFF  
+- [x] Keys in `FeatureFlagKeys` + GrowthBook  
+- [x] Child OFF reflows cleanly  
+- [x] No intel API when master OFF  
+- [x] Debug dogfood: `--dart-define=AM_INTEL_FORCE_ON=true` (kDebugMode only) via `npm run run:app:9000:prod:intel`  

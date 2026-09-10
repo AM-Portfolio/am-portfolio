@@ -208,25 +208,43 @@ public class PortfolioIntelligenceSnapshotFactory {
     }
 
     private static String resolveSector(EquityModel eq, SecurityModel sec) {
-        if (eq.getSector() != null && !eq.getSector().isBlank() && !"-".equals(eq.getSector().trim())) {
-            return eq.getSector().trim();
+        String fromEq = usableMeta(eq.getSector());
+        if (fromEq != null) {
+            return fromEq;
         }
-        if (sec != null && sec.getMetadata() != null && sec.getMetadata().getSector() != null
-                && !sec.getMetadata().getSector().isBlank() && !"-".equals(sec.getMetadata().getSector().trim())) {
-            return sec.getMetadata().getSector().trim();
+        if (sec != null && sec.getMetadata() != null) {
+            String fromSec = usableMeta(sec.getMetadata().getSector());
+            if (fromSec != null) {
+                return fromSec;
+            }
         }
         return "Unknown";
     }
 
     private static String resolveIndustry(EquityModel eq, SecurityModel sec) {
-        if (eq.getIndustry() != null && !eq.getIndustry().isBlank() && !"-".equals(eq.getIndustry().trim())) {
-            return eq.getIndustry().trim();
+        String fromEq = usableMeta(eq.getIndustry());
+        if (fromEq != null) {
+            return fromEq;
         }
-        if (sec != null && sec.getMetadata() != null && sec.getMetadata().getIndustry() != null
-                && !sec.getMetadata().getIndustry().isBlank()) {
-            return sec.getMetadata().getIndustry().trim();
+        if (sec != null && sec.getMetadata() != null) {
+            String fromSec = usableMeta(sec.getMetadata().getIndustry());
+            if (fromSec != null) {
+                return fromSec;
+            }
         }
         return "Unknown";
+    }
+
+    /** Blank, dash, or literal Unknown → treat as missing so security meta can enrich. */
+    static String usableMeta(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String t = raw.trim();
+        if (t.isEmpty() || "-".equals(t) || "Unknown".equalsIgnoreCase(t)) {
+            return null;
+        }
+        return t;
     }
 
     private static String resolveMarketCap(EquityModel eq, SecurityModel sec) {
