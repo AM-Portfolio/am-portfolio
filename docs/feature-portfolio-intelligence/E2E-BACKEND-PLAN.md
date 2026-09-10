@@ -2,7 +2,7 @@
 
 **Audience:** Backend / full-stack developers  
 **Purpose:** Understand **every Health section**, what it means, and **exact backend math** (no “maybe”).  
-**Related:** [plan.md](./plan.md) · [architecture.drawio](./architecture.drawio) (page 2) · [TODO.md](./TODO.md)
+**Related:** [plan.md](./plan.md) · [API-CONTRACTS.md](./API-CONTRACTS.md) · [UI_SPEC.md](./UI_SPEC.md) · [architecture.drawio](./architecture.drawio) (page 2) · [TODO.md](./TODO.md) · [REVIEW.md](./REVIEW.md)
 
 **Status:** MVP scoring constants locked in this file for implementation (`HealthScoreConstants`).  
 **Engine home:** `am-portfolio` → `portfolio-analytics` → `HealthScoreEngine` (not built yet).  

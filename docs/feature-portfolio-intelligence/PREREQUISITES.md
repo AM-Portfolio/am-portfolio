@@ -1,11 +1,12 @@
-# Prerequisites — before Portfolio Intelligence code
+# Prerequisites — before Portfolio Intelligence BE (P1+)
 
-**Gate:** Do not start P0 until the **Must-pass** section is green.  
-**Fallbacks** are OK when MCP is down (Postman desktop + `.am` Grafana probes).
+**Gate:** Do not start **P1** until the **Must-pass** section is green (P0 branches already exist).  
+**Fallbacks** are OK when MCP is down (Postman desktop + `.am` Grafana probes).  
+**Related:** [TODO.md](./TODO.md) · [REVIEW.md](./REVIEW.md) · [plan.md](./plan.md) D15 flags.
 
 ---
 
-## Must-pass (P0 ready)
+## Must-pass (P-PRE / P1 ready)
 
 ### Docs
 
@@ -78,10 +79,10 @@ Checked Cursor dynamic MCP namespaces:
 
 ---
 
-## Exit → P0
+## Exit → P1
 
 When Must-pass Postman smoke + log path are checked:
 
 1. Sign **PRE** in [REVIEW.md](./REVIEW.md)  
-2. Tick P-PRE in [TODO.md](./TODO.md)  
-3. Start **P0 — Owner assert** on analytics `{portfolioId}`
+2. Tick P-PRE in [TODO.md](./TODO.md); set Current phase → `P1`  
+3. Start **P1 — Owner assert** on analytics `{portfolioId}`

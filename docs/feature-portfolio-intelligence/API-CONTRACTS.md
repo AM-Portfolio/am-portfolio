@@ -3,7 +3,8 @@
 **Base (PROD):** `https://am.asrax.in/portfolio`  
 **Auth:** `Authorization: Bearer <JWT>` (owner of `portfolioId`)  
 **Calc:** [E2E-BACKEND-PLAN.md](./E2E-BACKEND-PLAN.md)  
-**Plan:** [plan.md](./plan.md)
+**Plan:** [plan.md](./plan.md) · **TODO:** [TODO.md](./TODO.md) · **UI:** [UI_SPEC.md](./UI_SPEC.md)  
+**Note:** UI only calls these when GrowthBook intel flags are ON (plan D15).
 
 Use these shapes for OpenAPI + Postman goldens. Field names may use camelCase in JSON.
 
