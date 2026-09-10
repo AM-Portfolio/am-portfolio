@@ -17,26 +17,28 @@
 
 - [x] Engines live in **am-portfolio** only (Dashboard/core do not own Health/Risk/Stress/What-If)
 
-### Build / deploy
-
-- [x] `am-portfolio/deploy-prod.ps1` exists
-- [x] Use Android Studio JBR for Maven: `C:\Program Files\Android\Android Studio\jbr`
-- [ ] Operator confirms: will use **user confirm → deploy-prod.ps1** (not `am deploy` if auth fails)
-
-### Postman / PROD API loop
+### Postman / API loop (P-PRE)
 
 | Asset | Path |
 |-------|------|
 | Overview collection | `postman/AMPortfolio_Overview_Dev.postman_collection.json` |
 | PROD env | `postman/AM_Basket_PROD.postman_environment.json` (`portfolioBase=https://am.asrax.in/portfolio`) |
+| **PRE smoke base (this workstream)** | `https://am-preprod.asrax.in/portfolio` |
+| **Golden portfolioId (preprod)** | `c7ef8e22-9d98-44fd-a500-b7bf770597b5` |
 
-- [ ] Import collection + PROD env (Postman app **or** MCP when healthy)
-- [ ] Fresh **Bearer JWT** (replace expired tokens)
-- [ ] Golden `portfolioId` (owner = JWT user)
-- [ ] PROD smoke OK:
-  - [ ] `GET .../v1/portfolios/summary?portfolioId=…`
-  - [ ] `POST .../v1/analytics/portfolio/{id}/advanced`
-- [ ] Empty Postman folder ready: `Portfolio Intelligence PROD` (for new APIs later)
+- [x] Fresh **Bearer JWT** (preprod realm) — never commit  
+- [x] Golden `portfolioId` (owner = JWT `sub`)  
+- [x] Preprod smoke OK (2026-09-10):
+  - [x] `GET .../v1/portfolios/summary?portfolioId=…` → 200  
+  - [x] `POST .../v1/analytics/portfolio/{id}/advanced` → 200  
+- [ ] Empty Postman folder ready: `Portfolio Intelligence PREPROD` (for new APIs later)
+- [ ] Operator confirms: will use **user confirm → deploy-prod.ps1** for **prod** loops (not `am deploy` if auth fails) — standing rule accepted for P-PRE
+
+### Build / deploy
+
+- [x] `am-portfolio/deploy-prod.ps1` exists
+- [x] Use Android Studio JBR for Maven: `C:\Program Files\Android\Android Studio\jbr`
+- [x] Operator confirms: will use **user confirm → deploy script** (prod = `deploy-prod.ps1`)
 
 ### Logs / Grafana (for PROD fix loops)
 
@@ -47,8 +49,8 @@
 | Probes | `.am/probe-prom-only.js`, `.am/probe-prod-deep.js` |
 | Wrapper | `.am/mcp-grafana-wrapper.js` |
 
-- [ ] `observability.env` present on laptop
-- [ ] At least one log path works today: **Loki via Grafana** OR `kubectl -n am-apps-prod logs … portfolio`
+- [x] `observability.env` present on laptop
+- [x] At least one log path works today: **Loki via Grafana** (`.am` probes 2026-09-10). kubectl context optional.
 
 ---
 

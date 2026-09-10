@@ -1,6 +1,15 @@
 package com.portfolio.api;
 
+import com.portfolio.analytics.intelligence.PortfolioIntelligenceService;
 import com.portfolio.analytics.service.providers.portfolio.PortfolioAnalyticsFacade;
+import com.portfolio.api.security.PortfolioOwnerAssert;
+import com.portfolio.model.analytics.intelligence.PortfolioIntelligenceResponse;
+import com.portfolio.model.analytics.intelligence.ReportPreviewRequest;
+import com.portfolio.model.analytics.intelligence.ReportPreviewResponse;
+import com.portfolio.model.analytics.intelligence.StressRequest;
+import com.portfolio.model.analytics.intelligence.StressResponse;
+import com.portfolio.model.analytics.intelligence.WhatIfRequest;
+import com.portfolio.model.analytics.intelligence.WhatIfResponse;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.analytics.response.AdvancedAnalyticsResponse;
 
@@ -28,29 +37,34 @@ public class PortfolioAnalyticsController {
 
     private final PortfolioAnalyticsFacade portfolioAnalyticsFacade;
     private final com.portfolio.service.PortfolioDashboardService portfolioDashboardService;
+    private final PortfolioOwnerAssert portfolioOwnerAssert;
+    private final PortfolioIntelligenceService portfolioIntelligenceService;
 
     /**
      * Advanced analytics endpoint that combines multiple analytics features with
      * timeframe support
-     * 
+     *
      * @param portfolioId The portfolio ID to analyze
      * @param request     The advanced analytics request parameters
      * @return Combined analytics data based on requested components
      */
-    @Operation(summary = "Get advanced portfolio analytics", description = "Retrieves comprehensive analytics for a portfolio with customizable components and timeframes")
+    @Operation(summary = "Get advanced portfolio analytics", description = "Retrieves comprehensive analytics for a portfolio with customizable components and timeframes. Requires portfolio ownership.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Analytics data retrieved successfully", content = @Content(mediaType = "application/json", schema = @Schema(implementation = AdvancedAnalyticsResponse.class))),
             @ApiResponse(responseCode = "400", description = "Invalid request parameters"),
+            @ApiResponse(responseCode = "403", description = "Caller is not the portfolio owner"),
             @ApiResponse(responseCode = "404", description = "Portfolio not found")
     })
     @PostMapping("/{portfolioId}/advanced")
     public ResponseEntity<AdvancedAnalyticsResponse> getAdvancedAnalytics(
             @PathVariable String portfolioId,
-            @RequestBody AdvancedAnalyticsRequest request) {
+            @RequestBody(required = false) AdvancedAnalyticsRequest request) {
         if (portfolioId == null || portfolioId.equals("undefined") || portfolioId.equals("null")) {
             log.warn("REST request for advanced analytics on invalid portfolio: {}", portfolioId);
             return ResponseEntity.badRequest().build();
         }
+
+        portfolioOwnerAssert.requireOwner(portfolioId);
 
         if (request == null) {
             request = new AdvancedAnalyticsRequest();
@@ -59,15 +73,13 @@ public class PortfolioAnalyticsController {
             request.setCoreIdentifiers(new com.portfolio.model.analytics.request.CoreIdentifiers());
         }
 
-        // portfolioId can be a MongoDB ObjectId or an external ID, so we don't enforce UUID parsing here.
-
         log.info("REST request for advanced analytics on portfolio: {} with timeframe: {} to {}",
                 portfolioId, request.getTimeFrame());
 
         request.getCoreIdentifiers().setPortfolioId(portfolioId);
 
         AdvancedAnalyticsResponse response = portfolioAnalyticsFacade.calculateAdvancedAnalytics(request);
-        
+
         if (response.getSummary() == null) {
             try {
                 String userId = com.am.security.context.UserContext.getUserIdOrThrow();
@@ -75,13 +87,13 @@ public class PortfolioAnalyticsController {
                 if (request.getTimeFrame() != null) {
                     interval = com.portfolio.model.TimeInterval.fromCode(request.getTimeFrame().name());
                 }
-                com.portfolio.model.portfolio.v1.PortfolioSummaryV1 summary = portfolioDashboardService.overviewPortfolio(userId, portfolioId, interval);
+                com.portfolio.model.portfolio.v1.PortfolioSummaryV1 summary =
+                        portfolioDashboardService.overviewPortfolio(userId, portfolioId, interval);
                 if (summary != null) {
-                    // Clear heavy nested arrays to prevent frontend browser freezing
                     summary.setMarketCapHoldings(null);
                     summary.setSectorialHoldings(null);
                     summary.setBrokerPortfolios(null);
-                    
+
                     response.setSummary(summary);
                 }
             } catch (Exception e) {
@@ -90,5 +102,81 @@ public class PortfolioAnalyticsController {
         }
 
         return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Portfolio intelligence", description = "Health, Risk, and X-Ray summary. Requires portfolio ownership.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Intelligence computed", content = @Content(mediaType = "application/json", schema = @Schema(implementation = PortfolioIntelligenceResponse.class))),
+            @ApiResponse(responseCode = "403", description = "Caller is not the portfolio owner"),
+            @ApiResponse(responseCode = "404", description = "Portfolio not found")
+    })
+    @PostMapping("/{portfolioId}/intelligence")
+    public ResponseEntity<PortfolioIntelligenceResponse> getIntelligence(
+            @PathVariable String portfolioId,
+            @RequestBody(required = false) Object ignored) {
+        if (invalidPortfolioId(portfolioId)) {
+            return ResponseEntity.badRequest().build();
+        }
+        portfolioOwnerAssert.requireOwner(portfolioId);
+        log.info("REST request for intelligence on portfolio: {}", portfolioId);
+        return ResponseEntity.ok(portfolioIntelligenceService.intelligence(portfolioId));
+    }
+
+    @Operation(summary = "Stress scenarios", description = "Scenario estimate shocks. Requires portfolio ownership. No Mongo writes.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Stress estimate", content = @Content(mediaType = "application/json", schema = @Schema(implementation = StressResponse.class))),
+            @ApiResponse(responseCode = "403", description = "Caller is not the portfolio owner"),
+            @ApiResponse(responseCode = "404", description = "Portfolio not found")
+    })
+    @PostMapping("/{portfolioId}/stress")
+    public ResponseEntity<StressResponse> runStress(
+            @PathVariable String portfolioId,
+            @RequestBody(required = false) StressRequest request) {
+        if (invalidPortfolioId(portfolioId)) {
+            return ResponseEntity.badRequest().build();
+        }
+        portfolioOwnerAssert.requireOwner(portfolioId);
+        log.info("REST request for stress on portfolio: {}", portfolioId);
+        return ResponseEntity.ok(portfolioIntelligenceService.stress(portfolioId, request));
+    }
+
+    @Operation(summary = "What-if simulation", description = "Stateless before/after health and weights. Requires portfolio ownership. No Mongo writes.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "What-if result", content = @Content(mediaType = "application/json", schema = @Schema(implementation = WhatIfResponse.class))),
+            @ApiResponse(responseCode = "403", description = "Caller is not the portfolio owner"),
+            @ApiResponse(responseCode = "404", description = "Portfolio not found")
+    })
+    @PostMapping("/{portfolioId}/what-if")
+    public ResponseEntity<WhatIfResponse> runWhatIf(
+            @PathVariable String portfolioId,
+            @RequestBody WhatIfRequest request) {
+        if (invalidPortfolioId(portfolioId)) {
+            return ResponseEntity.badRequest().build();
+        }
+        portfolioOwnerAssert.requireOwner(portfolioId);
+        log.info("REST request for what-if on portfolio: {}", portfolioId);
+        return ResponseEntity.ok(portfolioIntelligenceService.whatIf(portfolioId, request));
+    }
+
+    @Operation(summary = "Report preview", description = "Weekly/monthly JSON payload for future PDF. Requires portfolio ownership. No PDF/email.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Report preview", content = @Content(mediaType = "application/json", schema = @Schema(implementation = ReportPreviewResponse.class))),
+            @ApiResponse(responseCode = "403", description = "Caller is not the portfolio owner"),
+            @ApiResponse(responseCode = "404", description = "Portfolio not found")
+    })
+    @PostMapping("/{portfolioId}/report/preview")
+    public ResponseEntity<ReportPreviewResponse> reportPreview(
+            @PathVariable String portfolioId,
+            @RequestBody(required = false) ReportPreviewRequest request) {
+        if (invalidPortfolioId(portfolioId)) {
+            return ResponseEntity.badRequest().build();
+        }
+        portfolioOwnerAssert.requireOwner(portfolioId);
+        log.info("REST request for report preview on portfolio: {}", portfolioId);
+        return ResponseEntity.ok(portfolioIntelligenceService.reportPreview(portfolioId, request));
+    }
+
+    private static boolean invalidPortfolioId(String portfolioId) {
+        return portfolioId == null || portfolioId.equals("undefined") || portfolioId.equals("null");
     }
 }

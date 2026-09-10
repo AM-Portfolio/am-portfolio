@@ -196,3 +196,5 @@ Custom (optional):
 ## Owner test
 
 Non-owner JWT + victim `portfolioId` → **403** on all of the above.
+
+**Implementation (P1):** `com.portfolio.api.security.PortfolioOwnerAssert#requireOwner` — call at the start of every `/v1/analytics/portfolio/{portfolioId}/**` handler. Advanced wired; intelligence / stress / what-if must reuse the same helper.
