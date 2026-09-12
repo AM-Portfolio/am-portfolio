@@ -7,15 +7,22 @@ import com.am.common.amcommondata.model.security.SecurityModel;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.analytics.service.utils.AllocationUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
+import com.portfolio.marketdata.model.FilterType;
+import com.portfolio.marketdata.model.HistoricalDataRequest;
+import com.portfolio.marketdata.model.InstrumentType;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.market.MarketData;
+import com.portfolio.model.market.TimeFrame;
 import com.portfolio.model.util.SymbolResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -24,26 +31,37 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
- * Builds {@link PortfolioIntelligenceSnapshot} from portfolio holdings + live prices.
- * History/vol/beta omitted when series unavailable ({@code historyPoints = 0}).
+ * Builds {@link PortfolioIntelligenceSnapshot} from portfolio holdings + live prices + optional history.
+ * History/vol/beta/performance omitted when series unavailable or timed out ({@code historyPoints < 20}).
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class PortfolioIntelligenceSnapshotFactory {
 
+    public static final String NIFTY_SYMBOL = "NIFTY 50";
+    public static final int HISTORY_LOOKBACK_DAYS = 90;
+    public static final long HISTORY_TIMEOUT_MS = 2500L;
+
     private final PortfolioService portfolioService;
     private final MarketDataService marketDataService;
     private final SecurityDetailsService securityDetailsService;
 
     public PortfolioIntelligenceSnapshot build(String portfolioId) {
-        UUID id = UUID.fromString(portfolioId);
+        UUID id;
+        try {
+            id = UUID.fromString(portfolioId);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid portfolioId");
+        }
         PortfolioModelV1 portfolio = portfolioService.getPortfolioById(id);
         if (portfolio == null) {
-            throw new IllegalArgumentException("Portfolio not found: " + portfolioId);
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Portfolio not found: " + portfolioId);
         }
         return buildFromPortfolio(portfolio);
     }
@@ -100,6 +118,8 @@ public class PortfolioIntelligenceSnapshotFactory {
         }
 
         List<PortfolioIntelligenceSnapshot.Holding> holdings = new ArrayList<>();
+        Map<String, Double> quantities = new HashMap<>();
+        int droppedNoPrice = 0;
         for (EquityModel eq : equities) {
             if (eq == null || eq.getSymbol() == null || eq.getSymbol().isBlank()) {
                 continue;
@@ -114,6 +134,7 @@ public class PortfolioIntelligenceSnapshotFactory {
                 price = eq.getAvgBuyingPrice();
             }
             if (price <= 0) {
+                droppedNoPrice++;
                 continue;
             }
             double value = price * eq.getQuantity();
@@ -130,9 +151,121 @@ public class PortfolioIntelligenceSnapshotFactory {
                     .industry(industry)
                     .marketCap(marketCap)
                     .build());
+            quantities.put(sym, eq.getQuantity());
         }
 
-        return finalizeSnapshot(portfolioId, holdings, 0, null, null, null, null);
+        if (droppedNoPrice > 0) {
+            log.warn("Intel snapshot portfolioId={} dropped {} holdings with no usable price",
+                    portfolioId, droppedNoPrice);
+        }
+
+        HistoryFields history = loadHistoryMetrics(symbols, quantities);
+        return finalizeSnapshot(
+                portfolioId,
+                holdings,
+                history.historyPoints,
+                history.portRetPct,
+                history.niftyRetPct,
+                history.dailyVolPct,
+                history.beta,
+                history.portfolioDailyReturns,
+                history.niftyDailyReturns);
+    }
+
+    private HistoryFields loadHistoryMetrics(List<String> symbols, Map<String, Double> quantities) {
+        if (symbols == null || symbols.isEmpty() || quantities == null || quantities.isEmpty()) {
+            return HistoryFields.empty();
+        }
+        try {
+            return CompletableFuture.supplyAsync(() -> fetchHistory(symbols, quantities))
+                    .orTimeout(HISTORY_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                    .exceptionally(ex -> {
+                        log.warn("Intel history timed out or failed after {}ms: {}",
+                                HISTORY_TIMEOUT_MS, ex.getMessage());
+                        return HistoryFields.empty();
+                    })
+                    .join();
+        } catch (Exception e) {
+            log.warn("Intel history load failed: {}", e.getMessage());
+            return HistoryFields.empty();
+        }
+    }
+
+    private HistoryFields fetchHistory(List<String> symbols, Map<String, Double> quantities) {
+        LocalDate to = LocalDate.now();
+        LocalDate from = to.minusDays(HISTORY_LOOKBACK_DAYS);
+        List<String> histSymbols = new ArrayList<>(symbols);
+        String nifty = SymbolResolver.normalize(NIFTY_SYMBOL);
+        if (histSymbols.stream().noneMatch(s -> s.equalsIgnoreCase(nifty) || s.equalsIgnoreCase("NIFTY 50"))) {
+            histSymbols.add(NIFTY_SYMBOL);
+        }
+
+        HistoricalDataRequest histReq = HistoricalDataRequest.builder()
+                .symbols(String.join(",", histSymbols))
+                .fromDate(from.toString())
+                .toDate(to.toString())
+                .filterType(FilterType.ALL.getValue())
+                .instrumentType(InstrumentType.EQ.getValue())
+                .continuous(false)
+                .interval(TimeFrame.DAY.getValue())
+                .build();
+
+        Map<String, MarketData> raw = marketDataService.getHistoricalData(histReq);
+        Map<String, MarketData> normalized = new HashMap<>();
+        if (raw != null) {
+            for (Map.Entry<String, MarketData> entry : raw.entrySet()) {
+                if (entry.getValue() != null) {
+                    String key = entry.getKey().contains(":")
+                            ? entry.getKey().substring(entry.getKey().indexOf(':') + 1)
+                            : entry.getKey();
+                    normalized.put(SymbolResolver.normalize(key), entry.getValue());
+                }
+            }
+        }
+
+        String niftyKey = resolveNiftyKey(normalized);
+        IntelligenceHistoryMetrics.Result metrics =
+                IntelligenceHistoryMetrics.compute(normalized, quantities, niftyKey);
+        return new HistoryFields(
+                metrics.historyPoints(),
+                metrics.portRetPct(),
+                metrics.niftyRetPct(),
+                metrics.dailyVolPct(),
+                metrics.beta(),
+                metrics.portfolioDailyReturns(),
+                metrics.niftyDailyReturns());
+    }
+
+    private static String resolveNiftyKey(Map<String, MarketData> normalized) {
+        for (String candidate : List.of(
+                SymbolResolver.normalize(NIFTY_SYMBOL),
+                SymbolResolver.normalize("NIFTY50"),
+                "NIFTY 50",
+                "NIFTY50")) {
+            if (normalized.containsKey(candidate)) {
+                return candidate;
+            }
+            for (String key : normalized.keySet()) {
+                if (key != null && key.toUpperCase(Locale.ROOT).contains("NIFTY")
+                        && key.toUpperCase(Locale.ROOT).contains("50")) {
+                    return key;
+                }
+            }
+        }
+        return SymbolResolver.normalize(NIFTY_SYMBOL);
+    }
+
+    private record HistoryFields(
+            int historyPoints,
+            Double portRetPct,
+            Double niftyRetPct,
+            Double dailyVolPct,
+            Double beta,
+            List<Double> portfolioDailyReturns,
+            List<Double> niftyDailyReturns) {
+        static HistoryFields empty() {
+            return new HistoryFields(0, null, null, null, null, null, null);
+        }
     }
 
     /**
@@ -146,6 +279,20 @@ public class PortfolioIntelligenceSnapshotFactory {
             Double niftyRetPct,
             Double dailyVolPct,
             Double beta) {
+        return finalizeSnapshot(portfolioId, holdings, historyPoints, portRetPct, niftyRetPct,
+                dailyVolPct, beta, null, null);
+    }
+
+    public static PortfolioIntelligenceSnapshot finalizeSnapshot(
+            String portfolioId,
+            List<PortfolioIntelligenceSnapshot.Holding> holdings,
+            int historyPoints,
+            Double portRetPct,
+            Double niftyRetPct,
+            Double dailyVolPct,
+            Double beta,
+            List<Double> portfolioDailyReturns,
+            List<Double> niftyDailyReturns) {
 
         double total = holdings.stream().mapToDouble(PortfolioIntelligenceSnapshot.Holding::getValue).sum();
         for (PortfolioIntelligenceSnapshot.Holding h : holdings) {
@@ -196,6 +343,8 @@ public class PortfolioIntelligenceSnapshotFactory {
                 .niftyRetPct(niftyRetPct)
                 .dailyVolPct(dailyVolPct)
                 .beta(beta)
+                .portfolioDailyReturns(portfolioDailyReturns)
+                .niftyDailyReturns(niftyDailyReturns)
                 .build();
     }
 

@@ -1,6 +1,8 @@
 # Portfolio Intelligence — TODO (execution cockpit)
 
-**Current phase:** `UI-PARITY` (Overview density pass landed on am-modern-ui; dogfood via `AM_INTEL_FORCE_ON` / GrowthBook)  
+**Current phase:** `WS6-PREPROD-LOOP` (preprod deploy + Postman/Grafana accuracy loop — see WS6 cockpit below)  
+**BE industry-grade track:** [BACKEND-IMPROVEMENT-PLAN-v1.md](./BACKEND-IMPROVEMENT-PLAN-v1.md)  
+**UI note:** Overview density (`UI-PARITY`) remains on am-modern-ui; dogfood via `AM_INTEL_FORCE_ON` / GrowthBook after BE deploy.  
 **PRE env:** `https://am-preprod.asrax.in/portfolio`  
 **PROD env:** `https://am.asrax.in/portfolio`  
 **Golden portfolioId (prod dogfood):** `afe250bc-38d3-4165-888e-d1bd620c5016`  
@@ -9,7 +11,7 @@
 
 **Branches:** `hotfix/portfolio-intelligence-overview` on **am-portfolio** + **am-modern-ui**
 
-**Refs:** [plan.md](./plan.md) · [UI_SPEC.md](./UI_SPEC.md) · [API-CONTRACTS.md](./API-CONTRACTS.md) · [E2E-BACKEND-PLAN.md](./E2E-BACKEND-PLAN.md) · [final-overview-page.png](./final-overview-page.png)
+**Refs:** [BACKEND-IMPROVEMENT-PLAN-v1.md](./BACKEND-IMPROVEMENT-PLAN-v1.md) · [plan.md](./plan.md) · [UI_SPEC.md](./UI_SPEC.md) · [API-CONTRACTS.md](./API-CONTRACTS.md) · [E2E-BACKEND-PLAN.md](./E2E-BACKEND-PLAN.md) · [final-overview-page.png](./final-overview-page.png)
 
 **Flags (D15):** `portfolio-intelligence-overview-v1` · `portfolio-intel-health-v1` · `portfolio-intel-risk-v1` · `portfolio-intel-xray-v1` · `portfolio-intel-stress-v1` · `portfolio-intel-whatif-v1`  
 **Local dogfood:** `npm run run:app:9000:prod:intel` (`AM_INTEL_FORCE_ON=true`, debug only)
@@ -168,9 +170,70 @@
 ## Deferred (post second-pass polish — not blocking UI density)
 
 - [ ] A11y: Semantics / keyboard focus on X-Ray & Movers tabs  
-- [ ] Perf: Stress 5× parallel POSTs → lazy/batch / “on Run”  
+- [x] Perf: Stress batch presets API (WS7) — UI may still fire 5× until client adopts batch  
 - [ ] Perf: Slim advanced when Allocation hidden (movers-only path)  
 - [ ] Architecture: Analytics cubit emit guard on rapid portfolio switch  
 - [ ] UX: GrowthBook late-adopt legacy→intel flash  
-- [ ] Backend: Populate `historyPoints` for VOL/BETA risk axes + confidence  
-- [ ] Docs: Intelligence endpoint latency guidance  
+- [x] Backend: Populate `historyPoints` for VOL/BETA (WS1 — live stamp after deploy)  
+- [x] Docs: Intelligence endpoint latency guidance (BACKEND-IMPROVEMENT-PLAN-v1 §5)  
+
+## BE-IMPROVE-v1 checklist (code)
+
+- [x] WS0 Postman Intelligence folder (git; import to desktop; set access_token on AM-preprod)  
+- [x] WS1 History wiring + omit Performance when missing  
+- [x] WS2 Validation (unknown preset 400, custom shockPct, sector aliases)  
+- [x] WS3 Pass owned portfolio into engines (single Mongo read for intel path)  
+- [x] WS4 Stress unit tests + controller 403 stress/what-if; Micrometer timers  
+- [x] WS5 What-If ADD meta enrich; SWITCH uses UNKNOWN not LARGE_CAP  
+- [x] WS7 Redis fail-open intel cache + history timeout + batch stress + single-flight  
+- [ ] WS6 Preprod deploy + Postman live + REVIEW stamps — **see cockpit below**
+
+---
+
+## WS6 — Preprod deploy + accuracy loop
+
+### W6.0 MCP + auth
+
+- [x] user-asrax mcp_auth attempted — **timeout / discovery still error** (2026-09-11)  
+- [x] user-asrax-preprod mcp_auth attempted — same  
+- [x] Postman tools **not** available via Cursor MCP → **Newman/curl fallback** (collection in `postman/AMPortfolio_Complete.postman_collection.json`)  
+- [ ] Grafana/Loki query path green (try grafana-mcp launcher / .am probes after deploy)  
+
+### W6.1 Deploy
+
+- [ ] On branch hotfix/portfolio-intelligence-overview, working tree ready  
+- [ ] am deploy doctor --env preprod  
+- [ ] am deploy --env preprod (via helm per .am.yaml)  
+- [ ] Pod ready; image tag recorded; /actuator health 200  
+
+### W6.2 Token + portfolio
+
+- [ ] Fresh preprod Bearer (not in git)  
+- [ ] Discover owned portfolioId via GET /v1/portfolios/list  
+- [ ] Foreign golden c7ef8e22-… used only for 403  
+
+### W6.3 Postman / API asserts (pass all)
+
+- [ ] 01–04 Overview legacy 200  
+- [ ] 05 Intelligence: score 0–100, band enum, sector sum ~100±0.5  
+- [ ] historyPoints / confidence coherent (0.55 omit vs 0.9 wired)  
+- [ ] no invented Performance when historyPoints < 20  
+- [ ] 07 Stress batch 5 scenarios; unknown preset 400  
+- [ ] 08 What-If ADD after present; Mongo unchanged  
+- [ ] 09 Report WEEKLY health ±1 vs intelligence  
+- [ ] 10 AuthZ 403  
+- [ ] Latency soft: intelligence warm p95 guidance from BACKEND-IMPROVEMENT-PLAN-v1 §5  
+
+### W6.4 Fail → Grafana → fix → redeploy (max 5 loops)
+
+- [ ] Loop N: capture failing assert + response JSON  
+- [ ] Query Grafana/Loki for portfolioId + durationMs + historyPoints  
+- [ ] Root-cause + code fix on hotfix branch  
+- [ ] Redeploy preprod + re-run W6.3  
+- [ ] Stop when W6.3 all green OR loop 5 with REVIEW notes  
+
+### W6.5 Sign-off
+
+- [ ] REVIEW P3–P6/P9/P11 live stamps  
+- [ ] BE-IMPROVE-v1 DoD checklist updated  
+- [ ] Current phase → DONE (or UI dogfood)  

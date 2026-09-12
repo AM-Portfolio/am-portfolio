@@ -1,8 +1,11 @@
 package com.portfolio.analytics.intelligence;
 
+import com.am.common.amcommondata.model.security.SecurityModel;
+import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.model.analytics.intelligence.HealthDto;
 import com.portfolio.model.analytics.intelligence.WhatIfRequest;
 import com.portfolio.model.analytics.intelligence.WhatIfResponse;
+import com.portfolio.model.util.SymbolResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -26,6 +29,7 @@ public class WhatIfEngine {
     public static final String MODE_SWITCH = "SWITCH_ALLOCATION";
 
     private final HealthScoreEngine healthScoreEngine;
+    private final SecurityDetailsService securityDetailsService;
 
     public WhatIfResponse simulate(PortfolioIntelligenceSnapshot original, WhatIfRequest request) {
         if (request == null || request.getMode() == null || request.getMode().isBlank()) {
@@ -74,13 +78,42 @@ public class WhatIfEngine {
         if (existing != null) {
             existing.setValue(existing.getValue() + request.getAmountInr());
         } else {
+            String sector = "Unknown";
+            String industry = "Unknown";
+            String marketCap = "UNKNOWN";
+            try {
+                Map<String, SecurityModel> details =
+                        securityDetailsService.getSecurityDetails(List.of(SymbolResolver.normalize(symbol)));
+                SecurityModel sec = details != null ? details.get(SymbolResolver.normalize(symbol)) : null;
+                if (sec == null && details != null) {
+                    for (Map.Entry<String, SecurityModel> e : details.entrySet()) {
+                        if (e.getKey() != null && e.getKey().equalsIgnoreCase(symbol)) {
+                            sec = e.getValue();
+                            break;
+                        }
+                    }
+                }
+                if (sec != null && sec.getMetadata() != null) {
+                    if (PortfolioIntelligenceSnapshotFactory.usableMeta(sec.getMetadata().getSector()) != null) {
+                        sector = sec.getMetadata().getSector().trim();
+                    }
+                    if (PortfolioIntelligenceSnapshotFactory.usableMeta(sec.getMetadata().getIndustry()) != null) {
+                        industry = sec.getMetadata().getIndustry().trim();
+                    }
+                    if (sec.getMetadata().getMarketCapType() != null) {
+                        marketCap = sec.getMetadata().getMarketCapType().getName();
+                    }
+                }
+            } catch (Exception ignored) {
+                // fail-open: Unknown meta
+            }
             snap.getHoldings().add(PortfolioIntelligenceSnapshot.Holding.builder()
                     .symbol(symbol)
                     .value(request.getAmountInr())
                     .weightPct(0)
-                    .sector("Unknown")
-                    .industry("Unknown")
-                    .marketCap("UNKNOWN")
+                    .sector(sector)
+                    .industry(industry)
+                    .marketCap(marketCap)
                     .build());
         }
     }
@@ -162,7 +195,7 @@ public class WhatIfEngine {
                     .weightPct(0)
                     .sector(request.getToSector())
                     .industry(request.getToSector())
-                    .marketCap("LARGE_CAP")
+                    .marketCap("UNKNOWN")
                     .build());
         } else {
             double toTotal = to.stream().mapToDouble(PortfolioIntelligenceSnapshot.Holding::getValue).sum();

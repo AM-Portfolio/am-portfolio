@@ -107,6 +107,8 @@ public class PortfolioAnalyticsController {
     @Operation(summary = "Portfolio intelligence", description = "Health, Risk, and X-Ray summary. Requires portfolio ownership.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Intelligence computed", content = @Content(mediaType = "application/json", schema = @Schema(implementation = PortfolioIntelligenceResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Invalid portfolioId"),
+            @ApiResponse(responseCode = "401", description = "Unauthenticated"),
             @ApiResponse(responseCode = "403", description = "Caller is not the portfolio owner"),
             @ApiResponse(responseCode = "404", description = "Portfolio not found")
     })
@@ -117,14 +119,16 @@ public class PortfolioAnalyticsController {
         if (invalidPortfolioId(portfolioId)) {
             return ResponseEntity.badRequest().build();
         }
-        portfolioOwnerAssert.requireOwner(portfolioId);
+        var portfolio = portfolioOwnerAssert.requireOwner(portfolioId);
         log.info("REST request for intelligence on portfolio: {}", portfolioId);
-        return ResponseEntity.ok(portfolioIntelligenceService.intelligence(portfolioId));
+        return ResponseEntity.ok(portfolioIntelligenceService.intelligence(portfolioId, portfolio));
     }
 
-    @Operation(summary = "Stress scenarios", description = "Scenario estimate shocks. Requires portfolio ownership. No Mongo writes.")
+    @Operation(summary = "Stress scenarios", description = "Scenario estimate shocks. Requires portfolio ownership. No Mongo writes. Supports single preset or presets[] batch.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Stress estimate", content = @Content(mediaType = "application/json", schema = @Schema(implementation = StressResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Invalid preset or custom shock"),
+            @ApiResponse(responseCode = "401", description = "Unauthenticated"),
             @ApiResponse(responseCode = "403", description = "Caller is not the portfolio owner"),
             @ApiResponse(responseCode = "404", description = "Portfolio not found")
     })
@@ -135,14 +139,16 @@ public class PortfolioAnalyticsController {
         if (invalidPortfolioId(portfolioId)) {
             return ResponseEntity.badRequest().build();
         }
-        portfolioOwnerAssert.requireOwner(portfolioId);
+        var portfolio = portfolioOwnerAssert.requireOwner(portfolioId);
         log.info("REST request for stress on portfolio: {}", portfolioId);
-        return ResponseEntity.ok(portfolioIntelligenceService.stress(portfolioId, request));
+        return ResponseEntity.ok(portfolioIntelligenceService.stress(portfolioId, request, portfolio));
     }
 
     @Operation(summary = "What-if simulation", description = "Stateless before/after health and weights. Requires portfolio ownership. No Mongo writes.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "What-if result", content = @Content(mediaType = "application/json", schema = @Schema(implementation = WhatIfResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Invalid mode or parameters"),
+            @ApiResponse(responseCode = "401", description = "Unauthenticated"),
             @ApiResponse(responseCode = "403", description = "Caller is not the portfolio owner"),
             @ApiResponse(responseCode = "404", description = "Portfolio not found")
     })
@@ -153,14 +159,16 @@ public class PortfolioAnalyticsController {
         if (invalidPortfolioId(portfolioId)) {
             return ResponseEntity.badRequest().build();
         }
-        portfolioOwnerAssert.requireOwner(portfolioId);
+        var portfolio = portfolioOwnerAssert.requireOwner(portfolioId);
         log.info("REST request for what-if on portfolio: {}", portfolioId);
-        return ResponseEntity.ok(portfolioIntelligenceService.whatIf(portfolioId, request));
+        return ResponseEntity.ok(portfolioIntelligenceService.whatIf(portfolioId, request, portfolio));
     }
 
     @Operation(summary = "Report preview", description = "Weekly/monthly JSON payload for future PDF. Requires portfolio ownership. No PDF/email.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Report preview", content = @Content(mediaType = "application/json", schema = @Schema(implementation = ReportPreviewResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Invalid period"),
+            @ApiResponse(responseCode = "401", description = "Unauthenticated"),
             @ApiResponse(responseCode = "403", description = "Caller is not the portfolio owner"),
             @ApiResponse(responseCode = "404", description = "Portfolio not found")
     })
@@ -171,9 +179,9 @@ public class PortfolioAnalyticsController {
         if (invalidPortfolioId(portfolioId)) {
             return ResponseEntity.badRequest().build();
         }
-        portfolioOwnerAssert.requireOwner(portfolioId);
+        var portfolio = portfolioOwnerAssert.requireOwner(portfolioId);
         log.info("REST request for report preview on portfolio: {}", portfolioId);
-        return ResponseEntity.ok(portfolioIntelligenceService.reportPreview(portfolioId, request));
+        return ResponseEntity.ok(portfolioIntelligenceService.reportPreview(portfolioId, request, portfolio));
     }
 
     private static boolean invalidPortfolioId(String portfolioId) {

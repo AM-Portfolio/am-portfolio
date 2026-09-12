@@ -2,13 +2,16 @@ package com.portfolio.analytics.intelligence;
 
 import com.portfolio.model.analytics.intelligence.StressRequest;
 import com.portfolio.model.analytics.intelligence.StressResponse;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Scenario stress estimates: {@code Σ weightPct/100 * shockPct * betaProxy}.
@@ -25,6 +28,13 @@ public class StressEngine {
     public static final String PRESET_IT_DOWN_15 = "IT_DOWN_15";
     public static final String PRESET_CRASH_2008 = "CRASH_2008";
 
+    public static final Set<String> KNOWN_PRESETS = Set.of(
+            PRESET_NIFTY_DOWN_10,
+            PRESET_NIFTY_DOWN_20,
+            PRESET_BANKING_DOWN_20,
+            PRESET_IT_DOWN_15,
+            PRESET_CRASH_2008);
+
     /** CRASH_2008 pack (API-CONTRACTS). */
     public static final double CRASH_BANKING_SHOCK = -35.0;
     public static final double CRASH_IT_SHOCK = -30.0;
@@ -32,18 +42,31 @@ public class StressEngine {
 
     public StressResponse run(PortfolioIntelligenceSnapshot snapshot, StressRequest request) {
         List<StressResponse.ScenarioImpactDto> scenarios = new ArrayList<>();
-        String id;
+
         if (request != null && request.getCustom() != null
                 && request.getCustom().getSector() != null
                 && !request.getCustom().getSector().isBlank()) {
-            id = "CUSTOM_" + request.getCustom().getSector().replaceAll("\\s+", "_").toUpperCase(Locale.ROOT);
-            scenarios.add(impact(id, applySectorShock(snapshot, request.getCustom().getSector(),
-                    request.getCustom().getShockPct())));
+            Double shockPct = request.getCustom().getShockPct();
+            if (shockPct == null || !Double.isFinite(shockPct) || shockPct == 0.0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "custom.shockPct is required and must be non-zero");
+            }
+            String id = "CUSTOM_" + request.getCustom().getSector().replaceAll("\\s+", "_").toUpperCase(Locale.ROOT);
+            scenarios.add(impact(id, applySectorShock(snapshot, request.getCustom().getSector(), shockPct)));
+        } else if (request != null && request.getPresets() != null && !request.getPresets().isEmpty()) {
+            for (String raw : request.getPresets()) {
+                if (raw == null || raw.isBlank()) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "presets contains blank id");
+                }
+                String preset = raw.trim().toUpperCase(Locale.ROOT);
+                requireKnownPreset(preset);
+                scenarios.add(impact(preset, applyPreset(snapshot, preset)));
+            }
         } else {
-            String preset = request != null && request.getPreset() != null
-                    ? request.getPreset()
+            String preset = request != null && request.getPreset() != null && !request.getPreset().isBlank()
+                    ? request.getPreset().trim().toUpperCase(Locale.ROOT)
                     : PRESET_NIFTY_DOWN_10;
-            id = preset;
+            requireKnownPreset(preset);
             scenarios.add(impact(preset, applyPreset(snapshot, preset)));
         }
 
@@ -54,6 +77,12 @@ public class StressEngine {
                 .build();
     }
 
+    private static void requireKnownPreset(String preset) {
+        if (!KNOWN_PRESETS.contains(preset)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown stress preset: " + preset);
+        }
+    }
+
     private double applyPreset(PortfolioIntelligenceSnapshot snapshot, String preset) {
         double betaProxy = betaProxy(snapshot);
         return switch (preset) {
@@ -62,7 +91,7 @@ public class StressEngine {
             case PRESET_BANKING_DOWN_20 -> applySectorShock(snapshot, "Banking", -20.0);
             case PRESET_IT_DOWN_15 -> applySectorShock(snapshot, "IT", -15.0);
             case PRESET_CRASH_2008 -> applyCrash2008(snapshot);
-            default -> applyUniformShock(snapshot, -10.0, betaProxy);
+            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown stress preset: " + preset);
         };
     }
 
@@ -120,32 +149,42 @@ public class StressEngine {
         if (holdingSector == null || target == null) {
             return false;
         }
-        String h = holdingSector.toLowerCase(Locale.ROOT);
-        String t = target.toLowerCase(Locale.ROOT);
         if (matchesBanking(target) && matchesBanking(holdingSector)) {
             return true;
         }
         if (matchesIt(target) && matchesIt(holdingSector)) {
             return true;
         }
+        String h = holdingSector.toLowerCase(Locale.ROOT);
+        String t = target.toLowerCase(Locale.ROOT);
         return h.equals(t) || h.contains(t) || t.contains(h);
     }
 
-    private static boolean matchesBanking(String sector) {
+    /** Banking / Financial Services / Finance aliases aligned with X-Ray labels. */
+    static boolean matchesBanking(String sector) {
         if (sector == null) {
             return false;
         }
         String s = sector.toLowerCase(Locale.ROOT);
-        return s.contains("bank") || s.contains("financial");
+        return s.contains("bank")
+                || s.contains("financial")
+                || s.contains("finance")
+                || s.equals("bfsi");
     }
 
-    private static boolean matchesIt(String sector) {
+    /** IT / Information Technology / Software aliases. */
+    static boolean matchesIt(String sector) {
         if (sector == null) {
             return false;
         }
         String s = sector.toLowerCase(Locale.ROOT);
-        return s.equals("it") || s.contains("information technology") || s.contains(" technol")
-                || s.startsWith("it ") || s.endsWith(" it") || s.contains("software");
+        return s.equals("it")
+                || s.contains("information technology")
+                || s.contains(" technol")
+                || s.startsWith("it ")
+                || s.endsWith(" it")
+                || s.contains("software")
+                || s.contains("computer");
     }
 
     private StressResponse.ScenarioImpactDto impact(String id, double pctImpact) {
@@ -165,7 +204,6 @@ public class StressEngine {
                 .build();
     }
 
-    /** Fill absImpact using snapshot total value. */
     public StressResponse finalizeAbs(StressResponse response, double totalValue) {
         if (response.getScenarios() == null) {
             return response;
@@ -178,7 +216,6 @@ public class StressEngine {
         return response;
     }
 
-    /** Available preset catalog for docs / debugging. */
     public static Map<String, String> presetCatalog() {
         Map<String, String> m = new LinkedHashMap<>();
         m.put(PRESET_NIFTY_DOWN_10, "Uniform -10% * betaProxy");

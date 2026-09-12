@@ -52,8 +52,9 @@ Use these shapes for OpenAPI + Postman goldens. Field names may use camelCase in
     ]
   },
   "xray": {
+    "totalValue": 0.0,
     "sectorWeights": [
-      { "name": "Financial Services", "weightPct": 0.0 }
+      { "name": "Financial Services", "weightPct": 0.0, "value": 0.0 }
     ],
     "industryWeights": [],
     "marketCapWeights": []
@@ -61,7 +62,7 @@ Use these shapes for OpenAPI + Postman goldens. Field names may use camelCase in
 }
 ```
 
-**Asserts:** `health.score` in 0–100; `band` one of Critical\|Watch\|Healthy\|Strong; sector `weightPct` sum ≈ 100 (±0.5).
+**Asserts:** `health.score` in 0–100; `band` one of Critical\|Watch\|Healthy\|Strong; sector `weightPct` sum ≈ 100 (±0.5); slice `value` sums ≈ `xray.totalValue` (±0.02 after round2); `totalValue` is snapshot book NAV (INR).
 
 ---
 
@@ -77,6 +78,16 @@ Use these shapes for OpenAPI + Postman goldens. Field names may use camelCase in
 ```
 
 Presets: `NIFTY_DOWN_10`, `NIFTY_DOWN_20`, `BANKING_DOWN_20`, `IT_DOWN_15`, `CRASH_2008`.
+
+**Batch (preferred for Overview):**
+
+```json
+{
+  "presets": ["NIFTY_DOWN_10", "NIFTY_DOWN_20", "BANKING_DOWN_20", "IT_DOWN_15", "CRASH_2008"]
+}
+```
+
+Unknown preset → **400**. Custom requires non-zero `shockPct`.
 
 Custom (optional):
 

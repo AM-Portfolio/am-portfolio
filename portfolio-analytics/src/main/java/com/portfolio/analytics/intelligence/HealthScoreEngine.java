@@ -27,23 +27,28 @@ public class HealthScoreEngine {
         scored.put(ID_CONCENTRATION, new ScoredComponent(conc, MIX_CONCENTRATION,
                 "Top1 " + snapshot.getTop1Pct() + "%, max sector " + snapshot.getMaxSectorPct() + "%"));
 
-        double portRet = snapshot.getPortRetPct() != null ? snapshot.getPortRetPct() : 0.0;
-        double niftyRet = snapshot.getNiftyRetPct() != null ? snapshot.getNiftyRetPct() : 0.0;
-        int perf = roundInt(performance(portRet, niftyRet));
-        scored.put(ID_PERFORMANCE, new ScoredComponent(perf, MIX_PERFORMANCE,
-                "Port " + portRet + "% vs NIFTY " + niftyRet + "%"));
-
-        boolean includeVolBeta = snapshot.getHistoryPoints() >= MIN_HISTORY_POINTS;
+        boolean historyOk = snapshot.getHistoryPoints() >= MIN_HISTORY_POINTS;
+        boolean includePerf = historyOk
+                && snapshot.getPortRetPct() != null
+                && snapshot.getNiftyRetPct() != null;
+        if (includePerf) {
+            double portRet = snapshot.getPortRetPct();
+            double niftyRet = snapshot.getNiftyRetPct();
+            int perf = roundInt(performance(portRet, niftyRet));
+            scored.put(ID_PERFORMANCE, new ScoredComponent(perf, MIX_PERFORMANCE,
+                    "Port " + portRet + "% vs NIFTY " + niftyRet + "%"));
+        }
 
         Integer volScore = null;
         Integer betaScore = null;
-        if (includeVolBeta) {
-            double dailyVol = snapshot.getDailyVolPct() != null ? snapshot.getDailyVolPct() : 0.0;
+        if (historyOk && snapshot.getDailyVolPct() != null) {
+            double dailyVol = snapshot.getDailyVolPct();
             volScore = roundInt(volatility(dailyVol));
             scored.put(ID_VOLATILITY, new ScoredComponent(volScore, MIX_VOLATILITY,
                     "Daily vol " + dailyVol + "%"));
-
-            double beta = snapshot.getBeta() != null ? snapshot.getBeta() : 1.0;
+        }
+        if (historyOk && snapshot.getBeta() != null) {
+            double beta = snapshot.getBeta();
             betaScore = roundInt(betaScore(beta));
             scored.put(ID_BETA, new ScoredComponent(betaScore, MIX_BETA, "Beta " + beta));
         }

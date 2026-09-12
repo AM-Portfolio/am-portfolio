@@ -1,22 +1,23 @@
 # Feature: Portfolio Intelligence (Overview)
 
-**Status:** FINAL docs pack — **P0 branches done**. Next: follow [TODO.md](./TODO.md) **Current phase** (`P-PRE`).  
+**Status:** FINAL docs pack. Cockpit: [TODO.md](./TODO.md) **Current phase** (`WS6-PREPROD-LOOP`). Backend industry-grade track: [BACKEND-IMPROVEMENT-PLAN-v1.md](./BACKEND-IMPROVEMENT-PLAN-v1.md).  
 **SoT folder:** `am-portfolio/docs/feature-portfolio-intelligence/`  
 **Branches:** `hotfix/portfolio-intelligence-overview` on **am-portfolio** + **am-modern-ui**
 
 ## How to implement
 
-1. Open [TODO.md](./TODO.md) → work **only** the Current phase.  
-2. Implement using [plan.md](./plan.md) + linked calc/API/UI specs.  
+1. Open [TODO.md](./TODO.md) → work **only** the Current phase (UI) **or** follow [BACKEND-IMPROVEMENT-PLAN-v1.md](./BACKEND-IMPROVEMENT-PLAN-v1.md) WS0–WS7 for BE industry-grade.  
+2. Implement using [plan.md](./plan.md) + linked calc/API/UI specs + v1 improvement plan for gaps.  
 3. Complete [REVIEW.md](./REVIEW.md) for that phase.  
 4. Mark TODO `[x]`, advance Current phase, commit.  
-5. Never start UI (P7) until P3–P6 PROD REVIEW is signed.  
+5. Never start UI (P7) until P3–P6 PROD REVIEW is signed (historical rule; UI already landed locally — live BE stamps still required).  
 6. All **new** widgets are GrowthBook-gated (plan D15 / [UI_SPEC.md](./UI_SPEC.md)).
 
 ## Files
 
 | File | Purpose |
 |------|---------|
+| [BACKEND-IMPROVEMENT-PLAN-v1.md](./BACKEND-IMPROVEMENT-PLAN-v1.md) | **v1 BE industry-grade** — per-API audit, gaps, latency SLOs, WS0–WS7 |
 | [plan.md](./plan.md) | **FINAL** phase plan, flags, layout, PROD loop |
 | [TODO.md](./TODO.md) | **Execution cockpit** — update after every phase |
 | [REVIEW.md](./REVIEW.md) | **Mandatory gate** — sign after every phase |

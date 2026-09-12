@@ -26,6 +26,7 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -133,7 +134,7 @@ class PortfolioAnalyticsControllerTest {
                         .content("{}"))
                 .andExpect(status().isForbidden());
 
-        verify(portfolioIntelligenceService, never()).intelligence(anyString());
+        verify(portfolioIntelligenceService, never()).intelligence(anyString(), any());
     }
 
     @Test
@@ -146,7 +147,7 @@ class PortfolioAnalyticsControllerTest {
         portfolio.setId(portfolioId);
         portfolio.setOwner(owner);
         when(portfolioService.getPortfolioById(portfolioId)).thenReturn(portfolio);
-        when(portfolioIntelligenceService.intelligence(portfolioId.toString()))
+        when(portfolioIntelligenceService.intelligence(eq(portfolioId.toString()), any()))
                 .thenReturn(PortfolioIntelligenceResponse.builder().portfolioId(portfolioId.toString()).build());
 
         mockMvc.perform(post("/v1/analytics/portfolio/{portfolioId}/intelligence", portfolioId)
@@ -154,6 +155,42 @@ class PortfolioAnalyticsControllerTest {
                         .content("{}"))
                 .andExpect(status().isOk());
 
-        verify(portfolioIntelligenceService).intelligence(portfolioId.toString());
+        verify(portfolioIntelligenceService).intelligence(eq(portfolioId.toString()), any());
+    }
+
+    @Test
+    void stress_nonOwner_returns403() throws Exception {
+        UUID portfolioId = UUID.randomUUID();
+        UserContext.setUserId("caller-user");
+
+        PortfolioModelV1 portfolio = new PortfolioModelV1();
+        portfolio.setId(portfolioId);
+        portfolio.setOwner("other-owner");
+        when(portfolioService.getPortfolioById(portfolioId)).thenReturn(portfolio);
+
+        mockMvc.perform(post("/v1/analytics/portfolio/{portfolioId}/stress", portfolioId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"preset\":\"NIFTY_DOWN_10\"}"))
+                .andExpect(status().isForbidden());
+
+        verify(portfolioIntelligenceService, never()).stress(anyString(), any(), any());
+    }
+
+    @Test
+    void whatIf_nonOwner_returns403() throws Exception {
+        UUID portfolioId = UUID.randomUUID();
+        UserContext.setUserId("caller-user");
+
+        PortfolioModelV1 portfolio = new PortfolioModelV1();
+        portfolio.setId(portfolioId);
+        portfolio.setOwner("other-owner");
+        when(portfolioService.getPortfolioById(portfolioId)).thenReturn(portfolio);
+
+        mockMvc.perform(post("/v1/analytics/portfolio/{portfolioId}/what-if", portfolioId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"mode\":\"ADD_INVESTMENT\",\"symbol\":\"TCS\",\"amountInr\":1000}"))
+                .andExpect(status().isForbidden());
+
+        verify(portfolioIntelligenceService, never()).whatIf(anyString(), any(), any());
     }
 }

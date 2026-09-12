@@ -152,7 +152,7 @@ Health = round( Σ score_i × mixWeight_i )
 
 **Amber “area to focus”:** component `score < 70`.
 
-**Omit rule:** if `historyPoints < 20` → **omit Volatility and Beta**, then **renormalize** remaining mix weights so they sum to 1.0. Never invent vol/beta.
+**Omit rule:** if `historyPoints < 20` **or** return/vol/beta series unavailable → **omit Volatility, Beta, and Performance**, then **renormalize** remaining mix weights so they sum to 1.0. Never invent vol/beta/performance.
 
 ---
 

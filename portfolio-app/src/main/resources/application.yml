@@ -66,6 +66,9 @@ spring:
       portfolio-holdings:
         ttl: 900 # 15 minutes in seconds
         key-prefix: "portfolio:holdings:"
+      portfolio-intel:
+        ttl: 90 # seconds — Overview intelligence warm cache (fail-open)
+        key-prefix: "portfolio:intel:v1:"
       basket-etf:
         ttl: 86400 # 24 hours — enriched ETF constituents
         key-prefix: "basket:etf:enriched:"

@@ -17,6 +17,8 @@ public class XRayDto {
     private List<WeightSliceDto> sectorWeights;
     private List<WeightSliceDto> industryWeights;
     private List<WeightSliceDto> marketCapWeights;
+    /** Portfolio book NAV used as X-Ray denominator (INR). */
+    private Double totalValue;
 
     @Data
     @Builder
@@ -26,5 +28,7 @@ public class XRayDto {
     public static class WeightSliceDto {
         private String name;
         private double weightPct;
+        /** Absolute INR exposure for this slice. */
+        private Double value;
     }
 }

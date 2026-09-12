@@ -33,13 +33,14 @@ public class RiskRadarEngine {
         axes.add(axis("LIQUIDITY", 100 - liqHealth));
 
         if (snapshot.getHistoryPoints() >= MIN_HISTORY_POINTS) {
-            double dailyVol = snapshot.getDailyVolPct() != null ? snapshot.getDailyVolPct() : 0.0;
-            int volHealth = roundInt(HealthScoreEngine.volatility(dailyVol));
-            axes.add(axis("VOLATILITY", 100 - volHealth));
-
-            double beta = snapshot.getBeta() != null ? snapshot.getBeta() : 1.0;
-            int betaHealth = roundInt(HealthScoreEngine.betaScore(beta));
-            axes.add(axis("BETA", 100 - betaHealth));
+            if (snapshot.getDailyVolPct() != null) {
+                int volHealth = roundInt(HealthScoreEngine.volatility(snapshot.getDailyVolPct()));
+                axes.add(axis("VOLATILITY", 100 - volHealth));
+            }
+            if (snapshot.getBeta() != null) {
+                int betaHealth = roundInt(HealthScoreEngine.betaScore(snapshot.getBeta()));
+                axes.add(axis("BETA", 100 - betaHealth));
+            }
         }
 
         List<RiskDto.RiskFindingDto> findings = new ArrayList<>();

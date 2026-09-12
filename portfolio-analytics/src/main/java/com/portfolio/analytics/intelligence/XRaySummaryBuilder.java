@@ -20,6 +20,7 @@ public class XRaySummaryBuilder {
                 .sectorWeights(groupWeights(snapshot, PortfolioIntelligenceSnapshot.Holding::getSector))
                 .industryWeights(groupWeights(snapshot, PortfolioIntelligenceSnapshot.Holding::getIndustry))
                 .marketCapWeights(groupWeights(snapshot, PortfolioIntelligenceSnapshot.Holding::getMarketCap))
+                .totalValue(PortfolioIntelligenceSnapshotFactory.round2(snapshot.getTotalValue()))
                 .build();
     }
 
@@ -27,21 +28,25 @@ public class XRaySummaryBuilder {
             PortfolioIntelligenceSnapshot snapshot,
             java.util.function.Function<PortfolioIntelligenceSnapshot.Holding, String> keyFn) {
 
-        Map<String, Double> sums = new HashMap<>();
+        Map<String, Double> weightSums = new HashMap<>();
+        Map<String, Double> valueSums = new HashMap<>();
         if (snapshot.getHoldings() != null) {
             for (PortfolioIntelligenceSnapshot.Holding h : snapshot.getHoldings()) {
                 String key = keyFn.apply(h);
                 if (key == null || key.isBlank()) {
                     key = "Unknown";
                 }
-                sums.merge(key, h.getWeightPct(), Double::sum);
+                weightSums.merge(key, h.getWeightPct(), Double::sum);
+                valueSums.merge(key, h.getValue(), Double::sum);
             }
         }
         List<XRayDto.WeightSliceDto> slices = new ArrayList<>();
-        for (Map.Entry<String, Double> e : sums.entrySet()) {
+        for (Map.Entry<String, Double> e : weightSums.entrySet()) {
             slices.add(XRayDto.WeightSliceDto.builder()
                     .name(e.getKey())
                     .weightPct(PortfolioIntelligenceSnapshotFactory.round2(e.getValue()))
+                    .value(PortfolioIntelligenceSnapshotFactory.round2(
+                            valueSums.getOrDefault(e.getKey(), 0.0)))
                     .build());
         }
         slices.sort(Comparator.comparingDouble(XRayDto.WeightSliceDto::getWeightPct).reversed());

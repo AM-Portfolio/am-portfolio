@@ -68,7 +68,7 @@ class HealthScoreEngineTest {
     }
 
     @Test
-    void omitVolAndBeta_whenHistoryBelow20_renormalizes() {
+    void omitVolBetaAndPerf_whenHistoryBelow20_renormalizes() {
         PortfolioIntelligenceSnapshot snapshot = PortfolioIntelligenceSnapshot.builder()
                 .portfolioId("fixture")
                 .holdings(List.of(holding("A", 100, 100, "X", "LARGE_CAP")))
@@ -89,6 +89,7 @@ class HealthScoreEngineTest {
 
         assertTrue(!ids.contains(HealthScoreConstants.ID_VOLATILITY));
         assertTrue(!ids.contains(HealthScoreConstants.ID_BETA));
+        assertTrue(!ids.contains(HealthScoreConstants.ID_PERFORMANCE));
         assertTrue(ids.contains(HealthScoreConstants.ID_DIVERSIFICATION));
         assertTrue(health.getScore() >= 0 && health.getScore() <= 100);
     }
