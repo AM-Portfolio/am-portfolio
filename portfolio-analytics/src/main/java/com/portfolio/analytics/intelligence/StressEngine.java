@@ -24,15 +24,25 @@ public class StressEngine {
 
     public static final String PRESET_NIFTY_DOWN_10 = "NIFTY_DOWN_10";
     public static final String PRESET_NIFTY_DOWN_20 = "NIFTY_DOWN_20";
+    public static final String PRESET_SENSEX_DOWN_10 = "SENSEX_DOWN_10";
+    public static final String PRESET_SENSEX_DOWN_20 = "SENSEX_DOWN_20";
     public static final String PRESET_BANKING_DOWN_20 = "BANKING_DOWN_20";
     public static final String PRESET_IT_DOWN_15 = "IT_DOWN_15";
+    public static final String PRESET_AUTO_DOWN_20 = "AUTO_DOWN_20";
+    public static final String PRESET_PHARMA_DOWN_15 = "PHARMA_DOWN_15";
+    public static final String PRESET_ENERGY_DOWN_20 = "ENERGY_DOWN_20";
     public static final String PRESET_CRASH_2008 = "CRASH_2008";
 
     public static final Set<String> KNOWN_PRESETS = Set.of(
             PRESET_NIFTY_DOWN_10,
             PRESET_NIFTY_DOWN_20,
+            PRESET_SENSEX_DOWN_10,
+            PRESET_SENSEX_DOWN_20,
             PRESET_BANKING_DOWN_20,
             PRESET_IT_DOWN_15,
+            PRESET_AUTO_DOWN_20,
+            PRESET_PHARMA_DOWN_15,
+            PRESET_ENERGY_DOWN_20,
             PRESET_CRASH_2008);
 
     /** CRASH_2008 pack (API-CONTRACTS). */
@@ -86,10 +96,13 @@ public class StressEngine {
     private double applyPreset(PortfolioIntelligenceSnapshot snapshot, String preset) {
         double betaProxy = betaProxy(snapshot);
         return switch (preset) {
-            case PRESET_NIFTY_DOWN_10 -> applyUniformShock(snapshot, -10.0, betaProxy);
-            case PRESET_NIFTY_DOWN_20 -> applyUniformShock(snapshot, -20.0, betaProxy);
+            case PRESET_NIFTY_DOWN_10, PRESET_SENSEX_DOWN_10 -> applyUniformShock(snapshot, -10.0, betaProxy);
+            case PRESET_NIFTY_DOWN_20, PRESET_SENSEX_DOWN_20 -> applyUniformShock(snapshot, -20.0, betaProxy);
             case PRESET_BANKING_DOWN_20 -> applySectorShock(snapshot, "Banking", -20.0);
             case PRESET_IT_DOWN_15 -> applySectorShock(snapshot, "IT", -15.0);
+            case PRESET_AUTO_DOWN_20 -> applySectorShock(snapshot, "Auto", -20.0);
+            case PRESET_PHARMA_DOWN_15 -> applySectorShock(snapshot, "Pharma", -15.0);
+            case PRESET_ENERGY_DOWN_20 -> applySectorShock(snapshot, "Energy", -20.0);
             case PRESET_CRASH_2008 -> applyCrash2008(snapshot);
             default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown stress preset: " + preset);
         };
@@ -220,8 +233,13 @@ public class StressEngine {
         Map<String, String> m = new LinkedHashMap<>();
         m.put(PRESET_NIFTY_DOWN_10, "Uniform -10% * betaProxy");
         m.put(PRESET_NIFTY_DOWN_20, "Uniform -20% * betaProxy");
+        m.put(PRESET_SENSEX_DOWN_10, "Uniform -10% * betaProxy (Sensex label)");
+        m.put(PRESET_SENSEX_DOWN_20, "Uniform -20% * betaProxy (Sensex label)");
         m.put(PRESET_BANKING_DOWN_20, "Banking/Financial -20%");
         m.put(PRESET_IT_DOWN_15, "IT -15%");
+        m.put(PRESET_AUTO_DOWN_20, "Auto -20%");
+        m.put(PRESET_PHARMA_DOWN_15, "Pharma -15%");
+        m.put(PRESET_ENERGY_DOWN_20, "Energy -20%");
         m.put(PRESET_CRASH_2008, "Banking -35%, IT -30%, residual -25%");
         return m;
     }

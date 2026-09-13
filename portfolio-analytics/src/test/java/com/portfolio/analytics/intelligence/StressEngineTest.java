@@ -55,6 +55,18 @@ class StressEngineTest {
     }
 
     @Test
+    void sensexAndSectorPresets_apply() {
+        PortfolioIntelligenceSnapshot snap = snapshot(
+                holding("MARUTI", 100, 40, "Auto"),
+                holding("SUNPHARMA", 100, 30, "Pharma"),
+                holding("RELIANCE", 100, 30, "Energy"));
+        StressResponse sensex = engine.run(snap, StressRequest.builder().preset("SENSEX_DOWN_10").build());
+        assertTrue(sensex.getScenarios().get(0).getPctImpact() < 0);
+        StressResponse auto = engine.run(snap, StressRequest.builder().preset("AUTO_DOWN_20").build());
+        assertEquals(-8.0, auto.getScenarios().get(0).getPctImpact(), 0.01);
+    }
+
+    @Test
     void financialServices_matchesBankingShock() {
         PortfolioIntelligenceSnapshot snap = snapshot(holding("HDFC", 100, 100, "Financial Services"));
         StressResponse res = engine.run(snap, StressRequest.builder().preset("BANKING_DOWN_20").build());

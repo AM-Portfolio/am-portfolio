@@ -62,26 +62,50 @@ public class PortfolioIntelligenceService {
                 return cached.get();
             }
 
-            CompletableFuture<PortfolioIntelligenceResponse> future = inFlight.computeIfAbsent(portfolioId, id ->
-                    CompletableFuture.supplyAsync(() -> {
-                        PortfolioIntelligenceSnapshot snapshot = ownedPortfolio != null
-                                ? snapshotFactory.buildFromPortfolio(ownedPortfolio)
-                                : snapshotFactory.build(id);
-                        PortfolioIntelligenceResponse response = toIntelligenceResponse(snapshot);
-                        intelligenceRedisService.put(id, response);
-                        return response;
-                    }));
+            CompletableFuture<PortfolioIntelligenceResponse> created = new CompletableFuture<>();
+            CompletableFuture<PortfolioIntelligenceResponse> existing =
+                    inFlight.putIfAbsent(portfolioId, created);
+            if (existing == null) {
+                try {
+                    PortfolioIntelligenceSnapshot snapshot = ownedPortfolio != null
+                            ? snapshotFactory.buildFromPortfolio(ownedPortfolio)
+                            : snapshotFactory.build(portfolioId);
+                    PortfolioIntelligenceResponse response = toIntelligenceResponse(snapshot);
+                    intelligenceRedisService.put(portfolioId, response);
+                    created.complete(response);
+                    return response;
+                } catch (Throwable t) {
+                    created.completeExceptionally(t);
+                    throw unwrapStatus(t);
+                } finally {
+                    inFlight.remove(portfolioId, created);
+                }
+            }
 
             try {
-                return future.join();
-            } finally {
-                inFlight.remove(portfolioId, future);
+                return existing.join();
+            } catch (java.util.concurrent.CompletionException e) {
+                throw unwrapStatus(e);
             }
         } finally {
             sample.stop(Timer.builder("portfolio.intel.intelligence")
                     .tag("cache", cacheHit ? "hit" : "miss")
                     .register(meterRegistry));
         }
+    }
+
+    private static RuntimeException unwrapStatus(Throwable t) {
+        Throwable cur = t;
+        while (cur instanceof java.util.concurrent.CompletionException && cur.getCause() != null) {
+            cur = cur.getCause();
+        }
+        if (cur instanceof ResponseStatusException rse) {
+            return rse;
+        }
+        if (cur instanceof RuntimeException re) {
+            return re;
+        }
+        return new RuntimeException(cur);
     }
 
     public StressResponse stress(String portfolioId, StressRequest request) {

@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 
 import java.util.List;
 
+/** Health score payload; fields score/band/components match API-CONTRACTS. */
 @Data
 @Builder
 @NoArgsConstructor

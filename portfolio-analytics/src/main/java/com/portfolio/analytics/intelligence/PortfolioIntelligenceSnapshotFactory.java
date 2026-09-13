@@ -16,6 +16,7 @@ import com.portfolio.model.market.TimeFrame;
 import com.portfolio.model.util.SymbolResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -44,13 +45,29 @@ import java.util.stream.Collectors;
 @Slf4j
 public class PortfolioIntelligenceSnapshotFactory {
 
+    /** Default primary benchmark; override via portfolio.intelligence.primary-benchmark-symbol (e.g. SENSEX). */
     public static final String NIFTY_SYMBOL = "NIFTY 50";
     public static final int HISTORY_LOOKBACK_DAYS = 90;
     public static final long HISTORY_TIMEOUT_MS = 2500L;
 
+    @Value("${portfolio.intelligence.primary-benchmark-symbol:NIFTY 50}")
+    private String primaryBenchmarkSymbol;
+
+    @Value("${portfolio.intelligence.history-lookback-days:90}")
+    private int historyLookbackDays;
+
+    @Value("${portfolio.intelligence.history-timeout-ms:2500}")
+    private long historyTimeoutMs;
+
     private final PortfolioService portfolioService;
     private final MarketDataService marketDataService;
     private final SecurityDetailsService securityDetailsService;
+
+    private String benchmarkSymbol() {
+        return (primaryBenchmarkSymbol == null || primaryBenchmarkSymbol.isBlank())
+                ? NIFTY_SYMBOL
+                : primaryBenchmarkSymbol.trim();
+    }
 
     public PortfolioIntelligenceSnapshot build(String portfolioId) {
         UUID id;
@@ -177,11 +194,12 @@ public class PortfolioIntelligenceSnapshotFactory {
             return HistoryFields.empty();
         }
         try {
+            long timeoutMs = historyTimeoutMs > 0 ? historyTimeoutMs : HISTORY_TIMEOUT_MS;
             return CompletableFuture.supplyAsync(() -> fetchHistory(symbols, quantities))
-                    .orTimeout(HISTORY_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                    .orTimeout(timeoutMs, TimeUnit.MILLISECONDS)
                     .exceptionally(ex -> {
                         log.warn("Intel history timed out or failed after {}ms: {}",
-                                HISTORY_TIMEOUT_MS, ex.getMessage());
+                                timeoutMs, ex.getMessage());
                         return HistoryFields.empty();
                     })
                     .join();
@@ -193,11 +211,14 @@ public class PortfolioIntelligenceSnapshotFactory {
 
     private HistoryFields fetchHistory(List<String> symbols, Map<String, Double> quantities) {
         LocalDate to = LocalDate.now();
-        LocalDate from = to.minusDays(HISTORY_LOOKBACK_DAYS);
+        int lookback = historyLookbackDays > 0 ? historyLookbackDays : HISTORY_LOOKBACK_DAYS;
+        LocalDate from = to.minusDays(lookback);
         List<String> histSymbols = new ArrayList<>(symbols);
-        String nifty = SymbolResolver.normalize(NIFTY_SYMBOL);
-        if (histSymbols.stream().noneMatch(s -> s.equalsIgnoreCase(nifty) || s.equalsIgnoreCase("NIFTY 50"))) {
-            histSymbols.add(NIFTY_SYMBOL);
+        String benchmark = benchmarkSymbol();
+        String benchmarkNorm = SymbolResolver.normalize(benchmark);
+        if (histSymbols.stream().noneMatch(s ->
+                s.equalsIgnoreCase(benchmarkNorm) || s.equalsIgnoreCase(benchmark))) {
+            histSymbols.add(benchmark);
         }
 
         HistoricalDataRequest histReq = HistoricalDataRequest.builder()
@@ -223,9 +244,9 @@ public class PortfolioIntelligenceSnapshotFactory {
             }
         }
 
-        String niftyKey = resolveNiftyKey(normalized);
+        String benchmarkKey = resolveBenchmarkKey(normalized);
         IntelligenceHistoryMetrics.Result metrics =
-                IntelligenceHistoryMetrics.compute(normalized, quantities, niftyKey);
+                IntelligenceHistoryMetrics.compute(normalized, quantities, benchmarkKey);
         return new HistoryFields(
                 metrics.historyPoints(),
                 metrics.portRetPct(),
@@ -236,23 +257,41 @@ public class PortfolioIntelligenceSnapshotFactory {
                 metrics.niftyDailyReturns());
     }
 
-    private static String resolveNiftyKey(Map<String, MarketData> normalized) {
-        for (String candidate : List.of(
-                SymbolResolver.normalize(NIFTY_SYMBOL),
-                SymbolResolver.normalize("NIFTY50"),
-                "NIFTY 50",
-                "NIFTY50")) {
+    private String resolveBenchmarkKey(Map<String, MarketData> normalized) {
+        String configured = benchmarkSymbol();
+        String configuredNorm = SymbolResolver.normalize(configured);
+        List<String> candidates = new ArrayList<>();
+        candidates.add(configuredNorm);
+        candidates.add(configured);
+        String upper = configured.toUpperCase(Locale.ROOT);
+        if (upper.contains("NIFTY")) {
+            candidates.add(SymbolResolver.normalize("NIFTY50"));
+            candidates.add("NIFTY 50");
+            candidates.add("NIFTY50");
+        }
+        if (upper.contains("SENSEX") || upper.contains("BSE")) {
+            candidates.add(SymbolResolver.normalize("SENSEX"));
+            candidates.add("SENSEX");
+            candidates.add("BSE SENSEX");
+        }
+        for (String candidate : candidates) {
             if (normalized.containsKey(candidate)) {
                 return candidate;
             }
-            for (String key : normalized.keySet()) {
-                if (key != null && key.toUpperCase(Locale.ROOT).contains("NIFTY")
-                        && key.toUpperCase(Locale.ROOT).contains("50")) {
-                    return key;
-                }
+        }
+        for (String key : normalized.keySet()) {
+            if (key == null) {
+                continue;
+            }
+            String ku = key.toUpperCase(Locale.ROOT);
+            if (upper.contains("SENSEX") && ku.contains("SENSEX")) {
+                return key;
+            }
+            if (upper.contains("NIFTY") && ku.contains("NIFTY") && ku.contains("50")) {
+                return key;
             }
         }
-        return SymbolResolver.normalize(NIFTY_SYMBOL);
+        return configuredNorm;
     }
 
     private record HistoryFields(

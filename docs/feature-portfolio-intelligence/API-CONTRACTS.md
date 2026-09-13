@@ -77,13 +77,13 @@ Use these shapes for OpenAPI + Postman goldens. Field names may use camelCase in
 }
 ```
 
-Presets: `NIFTY_DOWN_10`, `NIFTY_DOWN_20`, `BANKING_DOWN_20`, `IT_DOWN_15`, `CRASH_2008`.
+Presets: `NIFTY_DOWN_10`, `NIFTY_DOWN_20`, `SENSEX_DOWN_10`, `SENSEX_DOWN_20`, `BANKING_DOWN_20`, `IT_DOWN_15`, `AUTO_DOWN_20`, `PHARMA_DOWN_15`, `ENERGY_DOWN_20`, `CRASH_2008`.
 
 **Batch (preferred for Overview):**
 
 ```json
 {
-  "presets": ["NIFTY_DOWN_10", "NIFTY_DOWN_20", "BANKING_DOWN_20", "IT_DOWN_15", "CRASH_2008"]
+  "presets": ["NIFTY_DOWN_10", "NIFTY_DOWN_20", "SENSEX_DOWN_10", "BANKING_DOWN_20", "IT_DOWN_15", "AUTO_DOWN_20", "PHARMA_DOWN_15", "ENERGY_DOWN_20", "CRASH_2008"]
 }
 ```
 

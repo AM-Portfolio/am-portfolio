@@ -1,6 +1,7 @@
 package com.portfolio.analytics.intelligence;
 
 import com.portfolio.model.analytics.intelligence.RiskDto;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -20,6 +21,21 @@ public class RiskRadarEngine {
     public static final double SECTOR_MEDIUM_PCT = 20.0;
     public static final double BETA_HIGH = 1.3;
     public static final double BETA_MEDIUM = 1.1;
+
+    @Value("${portfolio.intelligence.risk.top1-high-pct:25.0}")
+    private double top1HighPct;
+
+    @Value("${portfolio.intelligence.risk.sector-high-pct:30.0}")
+    private double sectorHighPct;
+
+    @Value("${portfolio.intelligence.risk.sector-medium-pct:20.0}")
+    private double sectorMediumPct;
+
+    @Value("${portfolio.intelligence.risk.beta-high:1.3}")
+    private double betaHigh;
+
+    @Value("${portfolio.intelligence.risk.beta-medium:1.1}")
+    private double betaMedium;
 
     public RiskDto compute(PortfolioIntelligenceSnapshot snapshot) {
         int concHealth = roundInt(HealthScoreEngine.concentration(snapshot));
@@ -44,21 +60,21 @@ public class RiskRadarEngine {
         }
 
         List<RiskDto.RiskFindingDto> findings = new ArrayList<>();
-        if (snapshot.getTop1Pct() >= TOP1_HIGH_PCT) {
+        if (snapshot.getTop1Pct() >= top1HighPct) {
             findings.add(RiskDto.RiskFindingDto.builder()
                     .code("TOP1_HIGH")
                     .label(String.format(Locale.ROOT, "Top holding %.1f%%", snapshot.getTop1Pct()))
                     .severity("HIGH")
                     .build());
         }
-        if (snapshot.getMaxSectorPct() >= SECTOR_HIGH_PCT) {
+        if (snapshot.getMaxSectorPct() >= sectorHighPct) {
             String name = snapshot.getMaxSectorName() != null ? snapshot.getMaxSectorName() : "Sector";
             findings.add(RiskDto.RiskFindingDto.builder()
                     .code("SECTOR_HIGH")
                     .label(String.format(Locale.ROOT, "%s %.1f%%", name, snapshot.getMaxSectorPct()))
                     .severity("HIGH")
                     .build());
-        } else if (snapshot.getMaxSectorPct() >= SECTOR_MEDIUM_PCT) {
+        } else if (snapshot.getMaxSectorPct() >= sectorMediumPct) {
             String name = snapshot.getMaxSectorName() != null ? snapshot.getMaxSectorName() : "Sector";
             findings.add(RiskDto.RiskFindingDto.builder()
                     .code("SECTOR_MEDIUM")
@@ -67,13 +83,13 @@ public class RiskRadarEngine {
                     .build());
         }
         if (snapshot.getHistoryPoints() >= MIN_HISTORY_POINTS && snapshot.getBeta() != null) {
-            if (snapshot.getBeta() > BETA_HIGH) {
+            if (snapshot.getBeta() > betaHigh) {
                 findings.add(RiskDto.RiskFindingDto.builder()
                         .code("BETA_HIGH")
                         .label(String.format(Locale.ROOT, "Beta %.2f", snapshot.getBeta()))
                         .severity("HIGH")
                         .build());
-            } else if (snapshot.getBeta() > BETA_MEDIUM) {
+            } else if (snapshot.getBeta() > betaMedium) {
                 findings.add(RiskDto.RiskFindingDto.builder()
                         .code("BETA_MEDIUM")
                         .label(String.format(Locale.ROOT, "Beta %.2f", snapshot.getBeta()))

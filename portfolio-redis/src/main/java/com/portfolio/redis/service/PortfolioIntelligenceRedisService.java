@@ -1,7 +1,6 @@
 package com.portfolio.redis.service;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -27,7 +26,7 @@ public class PortfolioIntelligenceRedisService {
     private String keyPrefix;
 
     @Value("${spring.data.redis.portfolio-intel.ttl:90}")
-    private Integer ttlSeconds;
+    private int ttlSeconds;
 
     private final RedisTemplate<String, PortfolioIntelligenceResponse> portfolioIntelligenceRedisTemplate;
 
@@ -59,7 +58,8 @@ public class PortfolioIntelligenceRedisService {
         }
         String key = buildKey(portfolioId);
         try {
-            portfolioIntelligenceRedisTemplate.opsForValue().set(key, response, Duration.ofSeconds(ttlSeconds));
+            portfolioIntelligenceRedisTemplate.opsForValue().set(
+                    key, response, Duration.ofSeconds(Math.max(1, ttlSeconds)));
             log.debug("Intel L2 put key={} ttl={}s", key, ttlSeconds);
         } catch (Exception e) {
             log.warn("Intel L2 put failed key={} — fail-open: {}", key, e.getMessage());
@@ -70,9 +70,8 @@ public class PortfolioIntelligenceRedisService {
         return isRedisEnabled && portfolioIntelligenceRedisTemplate != null;
     }
 
-    /** Minute bucket keeps warm TTL meaningful without over-sharing across buckets. */
+    /** Stable key; Redis TTL alone invalidates stale entries. */
     private String buildKey(String portfolioId) {
-        long minuteBucket = Instant.now().getEpochSecond() / Math.max(1, ttlSeconds);
-        return keyPrefix + portfolioId + ":" + minuteBucket;
+        return keyPrefix + portfolioId;
     }
 }
