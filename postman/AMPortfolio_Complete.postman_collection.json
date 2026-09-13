@@ -1,8 +1,8 @@
 {
   "info": {
-    "_postman_id": "am-portfolio-dev-overview-collection",
-    "name": "AM Portfolio - Dev Overview Page & 4 Metric Cards",
-    "description": "Comprehensive Postman collection for Dev environment testing of all Overview Page endpoints, 4 metric cards, holdings, and timeframes.",
+    "_postman_id": "am-portfolio-overview-intelligence",
+    "name": "AM Portfolio - Overview & Intelligence (PROD)",
+    "description": "Overview + Portfolio Intelligence against PROD.\n\nbase_url=https://am.asrax.in/portfolio\nportfolioId / userId are collection variables.\nSet access_token to the Bearer JWT from browser DevTools (Authorization header, without the word Bearer). Never commit tokens.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -10,160 +10,282 @@
     "bearer": [
       {
         "key": "token",
-        "value": "{{authToken}}",
+        "value": "{{access_token}}",
         "type": "string"
       }
     ]
   },
   "variable": [
     {
-      "key": "baseUrl",
-      "value": "https://am-dev.asrax.in/portfolio",
+      "key": "base_url",
+      "value": "https://am.asrax.in/portfolio",
       "type": "string"
     },
     {
       "key": "portfolioId",
-      "value": "7b43596e-12ef-4ddf-bff6-01c17c2f059a",
+      "value": "c23e49ac-d461-412a-9f34-958788fad699",
       "type": "string"
     },
     {
-      "key": "authToken",
-      "value": "167Iff2jQ59CNshqWdscumBrzo_G4oYcpRv4b1t5nstTGp-SZT-tRTzaY24nmbCBqLdK7mflavUgVG-YzaLVQY0Riql2C22rydqIz9JE-EXsfjGbeXs1poB5yiM1QrO24YuODegMUaPvxoY9gxaze6jnno1-Ro9dlT2BkrOj0YdREgULeFJP34E46S8pz3bGVvWsdr6ZxtgBksWXbVqXn9-GzLQfeu4WV77h5TRH3bh-xIUQ4Scsz4NHSDTJMJ8GwVgItFZfq_Dun157BxhYFz7MFE8zMeFYzT_BUwvsBr8X8VAmmSKcl-aPiqjyiNbcgO-uGiwfZWxlwKA",
+      "key": "userId",
+      "value": "d8509e8c-967c-4a9e-86f0-7bca6658b936",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "golden_foreign_portfolioId",
+      "value": "c7ef8e22-9d98-44fd-a500-b7bf770597b5",
       "type": "string"
     }
   ],
   "item": [
     {
-      "name": "Overview Page & 4 Metric Cards",
+      "name": "Portfolio Intelligence",
       "item": [
         {
-          "name": "1. Get Portfolio Details (Card 1: Total Value & Holdings)",
+          "name": "00 Discover portfolios",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('List 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const list = Array.isArray(body) ? body : (body.portfolios || body.data || body.content || []);",
+                  "if (list.length > 0) {",
+                  "  const id = list[0].id || list[0].portfolioId;",
+                  "  if (id) { pm.collectionVariables.set('portfolioId', id); pm.environment.set('portfolioId', id); }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
+              { "key": "Accept", "value": "application/json" },
+              { "key": "X-User-Id", "value": "{{userId}}", "disabled": true }
             ],
             "url": {
-              "raw": "{{baseUrl}}/v1/portfolios/{{portfolioId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "portfolios", "{{portfolioId}}"]
-            },
-            "description": "Retrieves complete 111 equity holdings, total investment value (₹854,184.61), and asset count for Card 1."
+              "raw": "{{base_url}}/v1/portfolios/list",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "portfolios", "list"]
+            }
           }
         },
         {
-          "name": "2. Get Portfolio Summary (Card 2: Gain/Loss 4 Metric Cards)",
+          "name": "01 Summary",
           "request": {
             "method": "GET",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
+            "header": [{ "key": "Accept", "value": "application/json" }],
             "url": {
-              "raw": "{{baseUrl}}/v1/portfolios/summary?portfolioId={{portfolioId}}",
-              "host": ["{{baseUrl}}"],
+              "raw": "{{base_url}}/v1/portfolios/summary?portfolioId={{portfolioId}}",
+              "host": ["{{base_url}}"],
               "path": ["v1", "portfolios", "summary"],
-              "query": [
-                {
-                  "key": "portfolioId",
-                  "value": "{{portfolioId}}"
-                }
-              ]
-            },
-            "description": "Retrieves totalGainLoss, totalGainLossPercentage, todayGainLoss, todayGainLossPercentage, and asset counts."
+              "query": [{ "key": "portfolioId", "value": "{{portfolioId}}" }]
+            }
           }
         },
         {
-          "name": "3. Get Portfolio History (Card 3: 1D Chart Timeframe)",
+          "name": "02 Holdings",
           "request": {
             "method": "GET",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
+            "header": [{ "key": "Accept", "value": "application/json" }],
             "url": {
-              "raw": "{{baseUrl}}/v1/portfolios/{{portfolioId}}/history?interval=1D",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "portfolios", "{{portfolioId}}", "history"],
-              "query": [
-                {
-                  "key": "interval",
-                  "value": "1D"
-                }
-              ]
-            },
-            "description": "Retrieves 1-Day timeframe points for the chart card."
+              "raw": "{{base_url}}/v1/portfolios/holdings?portfolioId={{portfolioId}}",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "portfolios", "holdings"],
+              "query": [{ "key": "portfolioId", "value": "{{portfolioId}}" }]
+            }
           }
         },
         {
-          "name": "4. Get Portfolio History (Card 3: ALL-Timeframe Return Stability)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/portfolios/{{portfolioId}}/history?interval=ALL",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "portfolios", "{{portfolioId}}", "history"],
-              "query": [
-                {
-                  "key": "interval",
-                  "value": "ALL"
-                }
-              ]
-            },
-            "description": "Retrieves All-Time history points ensuring Card 1 total return stays fixed without jumping to 0."
-          }
-        },
-        {
-          "name": "5. Get Portfolio Intraday (Card 4: Live Realtime Tracker)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/portfolios/{{portfolioId}}/intraday",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "portfolios", "{{portfolioId}}", "intraday"]
-            },
-            "description": "Retrieves live intraday ticks for real-time portfolio updates on the Overview Page."
-          }
-        },
-        {
-          "name": "6. Get Advanced Overview Analytics (Sector & MarketCap Allocation)",
+          "name": "03 Advanced allocations",
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"timeFrame\": \"1D\",\n  \"requestedComponents\": [\"SUMMARY\", \"BENCHMARK_COMPARISON\", \"ASSET_ALLOCATION\"]\n}"
+              "raw": "{\n  \"coreIdentifiers\": { \"portfolioId\": \"{{portfolioId}}\" },\n  \"featureToggles\": {\n    \"includeHeatmap\": false,\n    \"includeMovers\": false,\n    \"includeSectorAllocation\": true,\n    \"includeMarketCapAllocation\": true\n  }\n}"
             },
             "url": {
-              "raw": "{{baseUrl}}/v1/analytics/portfolio/{{portfolioId}}/advanced",
-              "host": ["{{baseUrl}}"],
+              "raw": "{{base_url}}/v1/analytics/portfolio/{{portfolioId}}/advanced",
+              "host": ["{{base_url}}"],
               "path": ["v1", "analytics", "portfolio", "{{portfolioId}}", "advanced"]
+            }
+          }
+        },
+        {
+          "name": "04 Advanced full",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coreIdentifiers\": { \"portfolioId\": \"{{portfolioId}}\" },\n  \"featureToggles\": {\n    \"includeHeatmap\": true,\n    \"includeMovers\": true,\n    \"includeSectorAllocation\": true,\n    \"includeMarketCapAllocation\": true\n  },\n  \"featureConfiguration\": { \"moversLimit\": 10 }\n}"
             },
-            "description": "Retrieves advanced sectorial and market-cap breakdown for Overview analytics."
+            "url": {
+              "raw": "{{base_url}}/v1/analytics/portfolio/{{portfolioId}}/advanced",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "analytics", "portfolio", "{{portfolioId}}", "advanced"]
+            }
+          }
+        },
+        {
+          "name": "05 Intelligence",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Intelligence 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('health.score 0-100', () => { pm.expect(b.health.score).to.be.within(0, 100); });",
+                  "pm.test('band enum', () => { pm.expect(['Critical','Watch','Healthy','Strong']).to.include(b.health.band); });",
+                  "if (b.xray && b.xray.sectorWeights) {",
+                  "  const sum = b.xray.sectorWeights.reduce((a,s)=>a+(s.weightPct||0),0);",
+                  "  pm.test('sector weights ~100', () => pm.expect(sum).to.be.within(99.5, 100.5));",
+                  "}",
+                  "console.log('durationMs', pm.response.responseTime);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": {
+              "raw": "{{base_url}}/v1/analytics/portfolio/{{portfolioId}}/intelligence",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "analytics", "portfolio", "{{portfolioId}}", "intelligence"]
+            }
+          }
+        },
+        {
+          "name": "06 Stress single NIFTY_DOWN_10",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"preset\": \"NIFTY_DOWN_10\",\n  \"custom\": null\n}" },
+            "url": {
+              "raw": "{{base_url}}/v1/analytics/portfolio/{{portfolioId}}/stress",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "analytics", "portfolio", "{{portfolioId}}", "stress"]
+            }
+          }
+        },
+        {
+          "name": "07 Stress batch 5 presets",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Stress batch 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('5 scenarios', () => pm.expect(b.scenarios.length).to.eql(5));",
+                  "console.log('durationMs', pm.response.responseTime);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"presets\": [\n    \"NIFTY_DOWN_10\",\n    \"NIFTY_DOWN_20\",\n    \"BANKING_DOWN_20\",\n    \"IT_DOWN_15\",\n    \"CRASH_2008\"\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/analytics/portfolio/{{portfolioId}}/stress",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "analytics", "portfolio", "{{portfolioId}}", "stress"]
+            }
+          }
+        },
+        {
+          "name": "08 What-If ADD",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mode\": \"ADD_INVESTMENT\",\n  \"symbol\": \"RELIANCE\",\n  \"amountInr\": 100000\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/analytics/portfolio/{{portfolioId}}/what-if",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "analytics", "portfolio", "{{portfolioId}}", "what-if"]
+            }
+          }
+        },
+        {
+          "name": "09 Report preview WEEKLY",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"period\": \"WEEKLY\"\n}" },
+            "url": {
+              "raw": "{{base_url}}/v1/analytics/portfolio/{{portfolioId}}/report/preview",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "analytics", "portfolio", "{{portfolioId}}", "report", "preview"]
+            }
+          }
+        },
+        {
+          "name": "10 AuthZ 403 foreign portfolio",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Expect 403 for non-owner golden', () => pm.response.to.have.status(403));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": {
+              "raw": "{{base_url}}/v1/analytics/portfolio/{{golden_foreign_portfolioId}}/intelligence",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "analytics", "portfolio", "{{golden_foreign_portfolioId}}", "intelligence"]
+            }
+          }
+        },
+        {
+          "name": "11 Stress unknown preset 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Unknown preset 400', () => pm.response.to.have.status(400));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"preset\": \"NOT_A_REAL_PRESET\"\n}" },
+            "url": {
+              "raw": "{{base_url}}/v1/analytics/portfolio/{{portfolioId}}/stress",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "analytics", "portfolio", "{{portfolioId}}", "stress"]
+            }
           }
         }
       ]

@@ -31,6 +31,9 @@ vault:
         SPRING_DATA_REDIS_HOST: "host"
         SPRING_DATA_REDIS_PASSWORD: "password"
         SPRING_DATA_REDIS_PORT: "port"
+        REDIS_HOSTNAME: "host"
+        REDIS_PASSWORD: "password"
+        REDIS_PORT: "port"
     identity-oidc:
       mappings:
         OIDC_JWKS_URI: "OIDC_JWKS_URL"
