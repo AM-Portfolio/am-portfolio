@@ -125,27 +125,21 @@ public class PortfolioOverviewService {
             }
             
             log.info("Cache miss for specific portfolio summary - User: {}, Portfolio: {}, fetching from source", userId, portfolioId);
-        var portfolios = portfolioService.getPortfoliosByUserId(userId);
-        log.info("Retrieved {} portfolios for user: {}",
-                portfolios != null ? portfolios.size() : 0, userId);
-
-        if (portfolios == null || portfolios.isEmpty()) {
-            log.warn("No portfolios found for user: {}", userId);
+        java.util.UUID id;
+        try {
+            id = java.util.UUID.fromString(portfolioId);
+        } catch (IllegalArgumentException ex) {
+            log.warn("Invalid portfolioId for overview: {}", portfolioId);
             return null;
         }
-
-        // Filter for the specific portfolio
-        var filteredPortfolios = portfolios.stream()
-                .filter(portfolio -> portfolio.getId() != null && portfolio.getId().toString().equals(portfolioId))
-                .collect(java.util.stream.Collectors.toList());
-
-        if (filteredPortfolios.isEmpty()) {
+        PortfolioModelV1 portfolio = portfolioService.getPortfolioById(id);
+        if (portfolio == null || portfolio.getOwner() == null || !portfolio.getOwner().equals(userId)) {
             log.warn("No portfolio found with ID: {} for user: {}", portfolioId, userId);
             return null;
         }
+        var filteredPortfolios = java.util.List.of(portfolio);
 
-        log.info("Found {} matching portfolio(s) for ID: {} and user: {}",
-                filteredPortfolios.size(), portfolioId, userId);
+        log.info("Found portfolio {} for user: {}", portfolioId, userId);
 
         PortfolioSummaryV1 finalSummary = buildPortfolioSummary(filteredPortfolios, userId, portfolioId, interval);
         return finalSummary;

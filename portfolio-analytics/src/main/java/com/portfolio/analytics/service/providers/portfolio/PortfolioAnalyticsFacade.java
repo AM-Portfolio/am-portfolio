@@ -256,8 +256,20 @@ public class PortfolioAnalyticsFacade {
             analyticsBuilder.heatmap(heatmapFuture.getNow(null));
         }
         
-        if (moversFuture != null && moversFuture.isDone() && !moversFuture.isCompletedExceptionally()) {
-            analyticsBuilder.movers(moversFuture.getNow(null));
+        // Movers get an isolated extra wait so a slow heatmap/allocation does not null them out
+        if (moversFuture != null) {
+            try {
+                if (!moversFuture.isDone()) {
+                    moversFuture.get(12, java.util.concurrent.TimeUnit.SECONDS);
+                }
+                if (moversFuture.isDone() && !moversFuture.isCompletedExceptionally()) {
+                    analyticsBuilder.movers(moversFuture.getNow(null));
+                }
+            } catch (java.util.concurrent.TimeoutException e) {
+                log.warn("[AdvancedAnalytics] Movers still running after extra wait — leaving null for client fallback");
+            } catch (Exception e) {
+                log.warn("[AdvancedAnalytics] Movers future error: {}", e.getMessage());
+            }
         }
         
         if (sectorAllocationFuture != null && sectorAllocationFuture.isDone() && !sectorAllocationFuture.isCompletedExceptionally()) {

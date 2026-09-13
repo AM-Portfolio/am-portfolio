@@ -754,9 +754,9 @@ public class MarketDataService {
                     waitFor.values().toArray(new CompletableFuture[0])
                 );
                 try {
-                    allWaiting.get(90, java.util.concurrent.TimeUnit.SECONDS);
+                    allWaiting.get(35, java.util.concurrent.TimeUnit.SECONDS);
                 } catch (java.util.concurrent.TimeoutException e) {
-                    log.warn("[InFlight] Coalesced futures timed out at 90s");
+                    log.warn("[InFlight] Coalesced futures timed out at 35s");
                 } catch (Exception e) {
                     log.warn("[InFlight] Error waiting for coalesced futures", e);
                 }

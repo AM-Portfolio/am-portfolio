@@ -17,22 +17,20 @@ class TopMoverUtilsTest {
         return m;
     }
 
-    @Test void shouldExcludeStockFromGainersWhenPreviousCloseIsMissing() {
-        // Given: Stock with no previousClose, only ohlc.open
+    @Test void shouldUseOhlcOpenWhenPreviousCloseIsMissing() {
         MarketData data = MarketData.builder()
-            .symbol("BROKEN")
+            .symbol("OPENONLY")
             .lastPrice(425.0)
             .ohlc(OhlcData.builder().open(420.0).close(425.0).build())
-            // NO previousClose set
             .build();
-        
+
         Map<String, Double> symbolToPerformance = new HashMap<>();
         Map<String, Double> symbolToChangePercent = new HashMap<>();
         TopMoverUtils.calculatePerformanceMetrics(
-            List.of("BROKEN"), Map.of("BROKEN", data), symbolToPerformance, symbolToChangePercent);
-        
-        // Then: Stock must NOT appear in any performance map (excluded, not defaulted to 0)
-        assertFalse(symbolToPerformance.containsKey("BROKEN"));
+            List.of("OPENONLY"), Map.of("OPENONLY", data), symbolToPerformance, symbolToChangePercent);
+
+        assertTrue(symbolToPerformance.containsKey("OPENONLY"));
+        assertEquals((425.0 - 420.0) / 420.0 * 100.0, symbolToChangePercent.get("OPENONLY"), 0.01);
     }
 
     @Test void shouldCorrectlyClassifyLoserWithGapDownOpenAndIntradayRecovery() {

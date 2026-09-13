@@ -21,11 +21,19 @@ public class PortfolioHoldings {
     private String portfolioId;
     private List<EquityHoldings> equityHoldings;
     private LocalDateTime lastUpdated;
+    /** Newest price timestamp used when serving (overlay or cold enrich). */
+    private LocalDateTime asOf;
+    /** LIVE when asOf is within cash-hours freshness policy; else AS_OF. */
+    private String priceFreshness;
+    /** TICK | OHLC | CACHE — how prices were primarily resolved. */
+    private String priceSource;
 
     public static PortfolioHoldings empty() {
         return PortfolioHoldings.builder()
             .equityHoldings(java.util.Collections.emptyList())
             .lastUpdated(LocalDateTime.now())
+            .asOf(LocalDateTime.now())
+            .priceFreshness("AS_OF")
             .build();
     }
 }

@@ -45,32 +45,12 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
         int limit = moversLimit != null ? moversLimit : 
                     (request.getPagination().isReturnAllData() ? DEFAULT_LIMIT : request.getPagination().getSize());
         
-        log.info("Generating top {} movers for portfolio {} with time frame, pagination, and feature configuration", 
+        log.info("Generating top {} movers for portfolio {} (always live day change)", 
                 limit, portfolioId);
         
-        // Before calling processPortfolioData, explicitly clear prefetched 
-        // live market data if a historical timeframe is requested.
-        // This forces AbstractPortfolioAnalyticsProvider to fetch historical data.
+        // Always use live market data for Overview day movers — ignore chart timeframe
+        // so historical candle open is never mistaken for previousClose.
         AdvancedAnalyticsRequest effectiveRequest = request;
-        if (request.getTimeFrameRequest() != null && request.getPrefetchedMarketData() != null) {
-            // Prefetched data is live; clear it so historical fetch is triggered
-            effectiveRequest = AdvancedAnalyticsRequest.builder()
-                .coreIdentifiers(request.getCoreIdentifiers())
-                .pagination(request.getPagination())
-                .featureToggles(request.getFeatureToggles())
-                .featureConfiguration(request.getFeatureConfiguration())
-                .prefetchedPortfolio(request.getPrefetchedPortfolio())
-                .prefetchAttempted(request.isPrefetchAttempted())
-                // Intentionally omit prefetchedMarketData
-                .prefetchedMarketData(null)
-                // Copy prefetched security details to avoid redundant lookups
-                .prefetchedSecurityDetails(request.getPrefetchedSecurityDetails())
-                // Copy timeframe data
-                .fromDate(request.getFromDate())
-                .toDate(request.getToDate())
-                .timeFrame(request.getTimeFrame())
-                .build();
-        }
         
         // Use the common portfolio data processing method
         return processPortfolioData(

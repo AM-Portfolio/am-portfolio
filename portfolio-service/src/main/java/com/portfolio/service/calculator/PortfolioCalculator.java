@@ -112,21 +112,44 @@ public class PortfolioCalculator {
         
         final Map<String, MarketData> finalApiDataForEnrich = (apiData == null) ? Map.of() : apiData;
 
-        // Market Cap bounded wait (1.5 seconds) to ensure UI gets data on cold starts
+        // Market Cap: do not block holdings first paint (apply when already done)
         Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> finalMarketCapMapTemp = Map.of();
-        if (marketCapFuture != null) {
+        if (marketCapFuture != null && marketCapFuture.isDone() && !marketCapFuture.isCompletedExceptionally()) {
             try {
-                finalMarketCapMapTemp = marketCapFuture.get(1500, java.util.concurrent.TimeUnit.MILLISECONDS);
-            } catch (java.util.concurrent.TimeoutException e) {
-                log.warn("Market cap fetch timed out at 1.5s wait. Proceeding without it.");
+                finalMarketCapMapTemp = marketCapFuture.getNow(Map.of());
             } catch (Exception e) {
-                log.error("Error waiting for market cap data", e);
+                log.debug("Market cap future not ready for holdings paint: {}", e.getMessage());
             }
         }
         final Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> finalMarketCapMap = finalMarketCapMapTemp;
 
         return equityHoldings.stream()
                 .map(holding -> enrichHolding(holding, finalApiDataForEnrich, finalMarketCapMap, cachedMarketCap))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Re-apply LTP / prevClose from MarketDataService onto an existing holdings structure
+     * (cache hit path). Skips market-cap and ETF HTTP so warm path stays fast.
+     */
+    public List<EquityHoldings> repriceHoldings(List<EquityHoldings> equityHoldings) {
+        if (equityHoldings == null || equityHoldings.isEmpty()) {
+            return equityHoldings;
+        }
+        List<String> symbols = equityHoldings.stream()
+                .map(EquityHoldings::getSymbol)
+                .filter(symbol -> symbol != null)
+                .filter(symbol -> !symbol.endsWith("-F"))
+                .collect(Collectors.toList());
+        Map<String, MarketData> apiData = Map.of();
+        try {
+            apiData = marketDataService.getMarketData(symbols);
+        } catch (Exception e) {
+            log.error("MarketDataService reprice failed: {}", e.getMessage());
+        }
+        final Map<String, MarketData> finalApiData = (apiData == null) ? Map.of() : apiData;
+        return equityHoldings.stream()
+                .map(holding -> enrichHolding(holding, finalApiData, Map.of(), Map.of()))
                 .collect(Collectors.toList());
     }
 
@@ -182,9 +205,9 @@ public class PortfolioCalculator {
             }
         }
 
-        // Fallback for ETFs if sector is missing
+        // Heuristic only on request path — never sync HTTP to funds search
         if (holding.getSector() == null || holding.getSector().trim().isEmpty() || holding.getSector().equalsIgnoreCase("Unknown")) {
-            if (etfApiClient.isEtf(symbol)) {
+            if (looksLikeEtf(symbol)) {
                 holding.setSector("Exchange Traded Funds (ETFs)");
                 if (holding.getIndustry() == null || holding.getIndustry().trim().isEmpty() || holding.getIndustry().equalsIgnoreCase("Unknown")) {
                     holding.setIndustry("ETFs & Index Funds");
@@ -396,7 +419,14 @@ public class PortfolioCalculator {
         return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).doubleValue();
     }
 
-    // Removed static isEtf and ETF_PATTERN in favor of dynamic EtfApiClient checks
+    /** Request-path ETF hint only — never blocks on funds HTTP search. */
+    static boolean looksLikeEtf(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            return false;
+        }
+        String u = symbol.toUpperCase(java.util.Locale.ROOT);
+        return u.endsWith("BEES") || u.contains("ETF") || u.endsWith("IETF") || u.endsWith("GOLD") && u.length() <= 12;
+    }
 
     private String cleanSymbol(String symbol) {
         if (symbol == null || symbol.isEmpty()) {

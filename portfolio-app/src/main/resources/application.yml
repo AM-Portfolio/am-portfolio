@@ -64,7 +64,7 @@ spring:
         key-prefix: "portfolio:mktdata:"
         # Note: TTL is computed dynamically by PortfolioMarketDataRedisService.computeSmartTtl()
       portfolio-holdings:
-        ttl: 900 # 15 minutes in seconds
+        ttl: 900 # off-hours max; cash hours use smart 90s TTL in PortfolioHoldingsRedisService
         key-prefix: "portfolio:holdings:"
       portfolio-intel:
         ttl: 90 # seconds — Overview intelligence warm cache (fail-open)
@@ -238,14 +238,17 @@ market-data:
     historical-charts-endpoint: /v1/analysis/historical-charts
     securities-endpoint: /v1/securities
     nse-indices-endpoint: /v1/indices
-    read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:32000}
+    read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:10000}
     connection-timeout: 3000
     max-retry-attempts: 0
+    batch:
+      chunk-size: ${MARKET_DATA_BATCH_CHUNK_SIZE:50}
+      parallel-batching-enabled: ${MARKET_DATA_PARALLEL_BATCHING:true}
+      max-parallel-chunks: ${MARKET_DATA_MAX_PARALLEL_CHUNKS:4}
   batch:
-    chunk-size: ${MARKET_DATA_BATCH_CHUNK_SIZE:20}
+    chunk-size: ${MARKET_DATA_BATCH_CHUNK_SIZE:50}
     parallel-batching-enabled: ${MARKET_DATA_PARALLEL_BATCHING:true}
-    # Cap concurrent OHLC chunks so one advanced page cannot stampede Upstox
-    max-parallel-chunks: ${MARKET_DATA_MAX_PARALLEL_CHUNKS:2}
+    max-parallel-chunks: ${MARKET_DATA_MAX_PARALLEL_CHUNKS:4}
 
 # OpenAPI Documentation
 springdoc:

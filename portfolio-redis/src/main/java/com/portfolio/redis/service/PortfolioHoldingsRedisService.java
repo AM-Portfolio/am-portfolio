@@ -1,9 +1,13 @@
 package com.portfolio.redis.service;
 
 import java.util.Collections;
+import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
@@ -45,11 +49,7 @@ private final RedisTemplate<String, PortfolioHoldings> portfolioHoldingsRedisTem
         if (!isRedisEnabled) return java.util.concurrent.CompletableFuture.completedFuture(null);
         String key = buildKey(userId, interval, portfolioId);
         try {
-            // For short intervals, use the interval duration as TTL
-            Duration ttl = interval != null && interval.getDuration() != null && 
-                          interval.getDuration().compareTo(Duration.ofSeconds(portfolioHoldingTtl)) < 0 
-                          ? interval.getDuration() 
-                          : Duration.ofSeconds(portfolioHoldingTtl);
+            Duration ttl = computeHoldingsTtl(interval);
             
             portfolioHoldingsRedisTemplate.opsForValue().set(key, holdings, ttl);
             log.debug("Cached portfolio holdings for key: {} with TTL: {} seconds", key, ttl.getSeconds());
@@ -57,6 +57,29 @@ private final RedisTemplate<String, PortfolioHoldings> portfolioHoldingsRedisTem
             log.error("Error caching portfolio holdings for key {}: {}", key, e.getMessage(), e);
         }
         return CompletableFuture.completedFuture(null);
+    }
+
+    /**
+     * Cash hours (IST 09:15–15:30 weekdays): short TTL so structure refresh is frequent;
+     * prices are always overlaid from mktdata on read. Off hours: longer TTL.
+     */
+    Duration computeHoldingsTtl(TimeInterval interval) {
+        ZoneId ist = ZoneId.of("Asia/Kolkata");
+        ZonedDateTime now = ZonedDateTime.now(ist);
+        LocalTime t = now.toLocalTime();
+        DayOfWeek day = now.getDayOfWeek();
+        boolean cashOpen = day.getValue() < 6
+                && !t.isBefore(LocalTime.of(9, 15))
+                && t.isBefore(LocalTime.of(15, 30));
+        if (cashOpen) {
+            return Duration.ofSeconds(90);
+        }
+        if (interval != null && interval.getDuration() != null
+                && interval.getDuration().compareTo(Duration.ofSeconds(portfolioHoldingTtl)) < 0) {
+            return interval.getDuration();
+        }
+        int offHours = portfolioHoldingTtl != null && portfolioHoldingTtl > 0 ? portfolioHoldingTtl : 900;
+        return Duration.ofSeconds(Math.min(offHours, 1800));
     }
 
     public Optional<PortfolioHoldings> getLatestHoldings(String userId, TimeInterval interval) {
