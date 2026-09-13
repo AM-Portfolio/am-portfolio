@@ -116,8 +116,8 @@ public class PortfolioIntelligenceService {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             PortfolioIntelligenceSnapshot snapshot = ownedPortfolio != null
-                    ? snapshotFactory.buildFromPortfolio(ownedPortfolio)
-                    : snapshotFactory.build(portfolioId);
+                    ? snapshotFactory.buildFromPortfolio(ownedPortfolio, false)
+                    : snapshotFactory.build(portfolioId, false);
             StressResponse response = stressEngine.run(snapshot, request != null ? request : new StressRequest());
             return stressEngine.finalizeAbs(response, snapshot.getTotalValue());
         } finally {
@@ -133,8 +133,8 @@ public class PortfolioIntelligenceService {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             PortfolioIntelligenceSnapshot snapshot = ownedPortfolio != null
-                    ? snapshotFactory.buildFromPortfolio(ownedPortfolio)
-                    : snapshotFactory.build(portfolioId);
+                    ? snapshotFactory.buildFromPortfolio(ownedPortfolio, false)
+                    : snapshotFactory.build(portfolioId, false);
             return whatIfEngine.simulate(snapshot, request);
         } finally {
             sample.stop(Timer.builder("portfolio.intel.whatif").register(meterRegistry));

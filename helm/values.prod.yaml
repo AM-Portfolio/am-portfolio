@@ -54,6 +54,8 @@ ingress:
 
 env:
   SPRING_PROFILES_ACTIVE: "prod,security"
+  REDIS_CACHE_ENABLED: "true"
+  PORTFOLIO_REDIS_ENABLED: "true"
 
 resources:
   limits:

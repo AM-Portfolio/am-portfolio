@@ -7,6 +7,7 @@ import com.portfolio.analytics.intelligence.PortfolioIntelligenceService;
 import com.portfolio.analytics.service.providers.portfolio.PortfolioAnalyticsFacade;
 import com.portfolio.api.PortfolioAnalyticsController;
 import com.portfolio.api.exception.GlobalExceptionHandler;
+import com.portfolio.api.exception.ResponseStatusExceptionAdvice;
 import com.portfolio.api.security.PortfolioOwnerAssert;
 import com.portfolio.model.analytics.intelligence.PortfolioIntelligenceResponse;
 import com.portfolio.model.analytics.response.AdvancedAnalyticsResponse;
@@ -40,6 +41,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ContextConfiguration(classes = {
         PortfolioAnalyticsController.class,
         GlobalExceptionHandler.class,
+        ResponseStatusExceptionAdvice.class,
         PortfolioOwnerAssert.class
 })
 @AutoConfigureMockMvc(addFilters = false)

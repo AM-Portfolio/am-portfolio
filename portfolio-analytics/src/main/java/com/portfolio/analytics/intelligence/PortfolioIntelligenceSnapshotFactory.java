@@ -70,6 +70,10 @@ public class PortfolioIntelligenceSnapshotFactory {
     }
 
     public PortfolioIntelligenceSnapshot build(String portfolioId) {
+        return build(portfolioId, true);
+    }
+
+    public PortfolioIntelligenceSnapshot build(String portfolioId, boolean includeHistory) {
         UUID id;
         try {
             id = UUID.fromString(portfolioId);
@@ -80,10 +84,14 @@ public class PortfolioIntelligenceSnapshotFactory {
         if (portfolio == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Portfolio not found: " + portfolioId);
         }
-        return buildFromPortfolio(portfolio);
+        return buildFromPortfolio(portfolio, includeHistory);
     }
 
     public PortfolioIntelligenceSnapshot buildFromPortfolio(PortfolioModelV1 portfolio) {
+        return buildFromPortfolio(portfolio, true);
+    }
+
+    public PortfolioIntelligenceSnapshot buildFromPortfolio(PortfolioModelV1 portfolio, boolean includeHistory) {
         String portfolioId = portfolio.getId() != null ? portfolio.getId().toString() : null;
         List<EquityModel> equities = portfolio.getEquityModels();
         if (equities == null || equities.isEmpty()) {
@@ -176,7 +184,9 @@ public class PortfolioIntelligenceSnapshotFactory {
                     portfolioId, droppedNoPrice);
         }
 
-        HistoryFields history = loadHistoryMetrics(symbols, quantities);
+        HistoryFields history = includeHistory
+                ? loadHistoryMetrics(symbols, quantities)
+                : HistoryFields.empty();
         return finalizeSnapshot(
                 portfolioId,
                 holdings,
