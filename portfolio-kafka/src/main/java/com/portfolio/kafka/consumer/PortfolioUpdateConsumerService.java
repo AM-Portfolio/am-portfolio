@@ -61,6 +61,7 @@ public class PortfolioUpdateConsumerService {
     private final PortfolioHoldingsRedisService portfolioHoldingsRedisService;
     private final com.portfolio.redis.service.PortfolioSummaryRedisService portfolioSummaryRedisService;
     private final com.portfolio.redis.service.ActiveMarketSymbolPublisher activeMarketSymbolPublisher;
+    private final com.portfolio.service.portfolio.PortfolioHoldingsMongoService portfolioHoldingsMongoService;
     private final StringRedisTemplate           stringRedisTemplate;
 
     @Value("${app.kafka.portfolio.consumer.id:am-portfolio-consumer-group}")
@@ -160,7 +161,7 @@ public class PortfolioUpdateConsumerService {
         PortfolioModelV1 saved = portfolioService.upsertDocumentPortfolio(portfolioModel);
         if (saved != null && saved.getOwner() != null) {
             String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
-            portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
+            evictHoldingsCaches(saved.getOwner(), portfolioId);
             portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
             activeMarketSymbolPublisher.publishFromPortfolio(saved);
         }
@@ -201,11 +202,19 @@ public class PortfolioUpdateConsumerService {
         PortfolioModelV1 saved = portfolioService.updateTradePortfolio(portfolioModel);
         if (saved != null && saved.getOwner() != null) {
             String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
-            portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
+            evictHoldingsCaches(saved.getOwner(), portfolioId);
             portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
             activeMarketSymbolPublisher.publishFromPortfolio(saved);
         }
         publishUpdate(saved, "TRADE", event.getId());
+    }
+
+    private void evictHoldingsCaches(String owner, String portfolioId) {
+        portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioId);
+        for (com.portfolio.model.TimeInterval interval : com.portfolio.model.TimeInterval.values()) {
+            portfolioHoldingsMongoService.deleteCache(owner, interval, portfolioId);
+            portfolioHoldingsMongoService.deleteCache(owner, interval, null);
+        }
     }
 
     private void publishUpdate(PortfolioModelV1 saved, String source, String originalId) {

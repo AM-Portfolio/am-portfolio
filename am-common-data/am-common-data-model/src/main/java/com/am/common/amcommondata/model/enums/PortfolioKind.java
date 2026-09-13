@@ -6,6 +6,7 @@ package com.am.common.amcommondata.model.enums;
 public enum PortfolioKind {
     BROKER,
     BASKET,
+    PAPER,
     DELETED;
 
     public static PortfolioKind orBroker(PortfolioKind kind) {
@@ -14,6 +15,10 @@ public enum PortfolioKind {
 
     public static boolean isBasket(PortfolioKind kind) {
         return kind == BASKET;
+    }
+
+    public static boolean isPaper(PortfolioKind kind) {
+        return kind == PAPER;
     }
 
     public static boolean isBroker(PortfolioKind kind) {
