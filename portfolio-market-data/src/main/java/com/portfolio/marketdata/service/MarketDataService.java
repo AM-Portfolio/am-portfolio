@@ -830,11 +830,13 @@ public class MarketDataService {
                 continue;
             }
             Double cached = priorCloseCache.getIfPresent(e.getKey());
-            if (cached != null && cached > 0
-                    && (md.getLastPrice() == null
-                        || Math.abs(cached - md.getLastPrice()) / md.getLastPrice() >= 0.0001)) {
-                md.setPreviousClose(cached);
-                localCache.put(e.getKey(), md);
+            if (cached != null && cached > 0) {
+                // Cached prior (or attempt marker). Apply when it differs; otherwise leave as-is.
+                if (md.getLastPrice() == null
+                        || Math.abs(cached - md.getLastPrice()) / md.getLastPrice() >= 0.0001) {
+                    md.setPreviousClose(cached);
+                    localCache.put(e.getKey(), md);
+                }
                 fromCache++;
             } else {
                 needsPrior.add(e.getKey());
@@ -857,6 +859,14 @@ public class MarketDataService {
                     .build();
             Map<String, MarketData> hist = getHistoricalData(request);
             if (hist == null || hist.isEmpty()) {
+                for (String symbol : needsPrior) {
+                    MarketData live = result.get(symbol);
+                    if (live != null && live.getLastPrice() != null && live.getLastPrice() > 0) {
+                        Double mark = live.getPreviousClose() != null && live.getPreviousClose() > 0
+                                ? live.getPreviousClose() : live.getLastPrice();
+                        priorCloseCache.put(symbol, mark);
+                    }
+                }
                 return;
             }
             int repaired = 0;
@@ -866,15 +876,23 @@ public class MarketDataService {
                 if (h == null) {
                     h = hist.get(cleanSymbol(symbol));
                 }
-                if (live == null || h == null) {
+                if (live == null) {
                     continue;
                 }
-                Double prior = resolvePriorCloseFromHistorical(h, live.getLastPrice());
+                Double prior = h != null ? resolvePriorCloseFromHistorical(h, live.getLastPrice()) : null;
                 if (prior != null && prior > 0) {
                     live.setPreviousClose(prior);
                     priorCloseCache.put(symbol, prior);
                     localCache.put(symbol, live);
                     repaired++;
+                } else {
+                    // Mark attempted so we do not re-hit historical every request
+                    Double fallback = live.getPreviousClose() != null && live.getPreviousClose() > 0
+                            ? live.getPreviousClose()
+                            : live.getLastPrice();
+                    if (fallback != null && fallback > 0) {
+                        priorCloseCache.put(symbol, fallback);
+                    }
                 }
             }
             log.info("[MarketData] Repaired previousClose hist={}/{} cacheHit={}",

@@ -30,7 +30,8 @@ public class MarketCalendarClient {
     public MarketCalendarClient(WebClient.Builder webClientBuilder, MarketDataApiConfig config) {
         this.config = config;
         this.timeout = Duration.ofMillis(Math.max(50, config.getCalendarTimeoutMs()));
-        this.webClient = webClientBuilder
+        // Dedicated client — avoid shared builder filters delaying short calendar GETs
+        this.webClient = WebClient.builder()
                 .baseUrl(config.getBaseUrl())
                 .build();
     }

@@ -23,6 +23,7 @@ public class DefaultCashSessionClock implements CashSessionClock {
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
     private static final String EXCHANGE = "NSE";
     private static final Duration STATUS_TTL = Duration.ofSeconds(60);
+    private static final Duration STATUS_NEGATIVE_TTL = Duration.ofSeconds(15);
     private static final int MAX_LOOKBACK_DAYS = 14;
 
     private final MarketCalendarClient calendarClient;
@@ -89,7 +90,7 @@ public class DefaultCashSessionClock implements CashSessionClock {
     }
 
     private CachedStatus cacheFailClosed(Instant now) {
-        CachedStatus closed = new CachedStatus(false, "CALENDAR_UNAVAILABLE", now.plus(STATUS_TTL));
+        CachedStatus closed = new CachedStatus(false, "CALENDAR_UNAVAILABLE", now.plus(STATUS_NEGATIVE_TTL));
         statusCache.set(closed);
         return closed;
     }

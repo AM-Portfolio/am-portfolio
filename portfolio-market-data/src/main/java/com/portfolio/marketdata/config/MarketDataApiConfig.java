@@ -55,7 +55,7 @@ public class MarketDataApiConfig {
     /**
      * Calendar HTTP timeout (ms). In-cluster status can exceed 200ms under load.
      */
-    private int calendarTimeoutMs = 1500;
+    private int calendarTimeoutMs = 5000;
 
     /**
      * Connection timeout in milliseconds.
