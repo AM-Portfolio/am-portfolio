@@ -233,6 +233,8 @@ market-data:
     read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:32000}
   api:
     base-url: ${MARKET_DATA_API_URL:http://am-market-data:8080}
+    # Calendar must hit in-cluster market-data; public MARKET_DATA_API_URL gateway strips paths.
+    calendar-base-url: ${MARKET_DATA_CALENDAR_BASE_URL:http://am-market-data:8080}
     ohlc-endpoint: /v1/market-data/ohlc
     historical-data-endpoint: /v1/market-data/historical-data
     historical-charts-endpoint: /v1/analysis/historical-charts

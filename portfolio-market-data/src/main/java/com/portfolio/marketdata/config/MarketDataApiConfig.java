@@ -18,6 +18,12 @@ public class MarketDataApiConfig {
     private String baseUrl;
 
     /**
+     * Optional override for calendar APIs (prefer in-cluster market-data service).
+     * When empty, falls back to {@link #baseUrl}.
+     */
+    private String calendarBaseUrl;
+
+    /**
      * API path for OHLC data.
      */
     private String ohlcEndpoint;

@@ -30,10 +30,13 @@ public class MarketCalendarClient {
     public MarketCalendarClient(WebClient.Builder webClientBuilder, MarketDataApiConfig config) {
         this.config = config;
         this.timeout = Duration.ofMillis(Math.max(50, config.getCalendarTimeoutMs()));
-        // Dedicated client — avoid shared builder filters delaying short calendar GETs
+        String calendarBase = (config.getCalendarBaseUrl() != null && !config.getCalendarBaseUrl().isBlank())
+                ? config.getCalendarBaseUrl().trim()
+                : config.getBaseUrl();
         this.webClient = WebClient.builder()
-                .baseUrl(config.getBaseUrl())
+                .baseUrl(calendarBase)
                 .build();
+        log.info("[MarketCalendar] client baseUrl={}", calendarBase);
     }
 
     public Mono<MarketCalendarStatus> getStatus(String exchange) {
