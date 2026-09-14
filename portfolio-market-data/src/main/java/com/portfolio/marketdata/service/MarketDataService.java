@@ -557,15 +557,16 @@ public class MarketDataService {
             .filter(s -> !result.containsKey(s))
             .collect(Collectors.toList());
 
+        boolean cashOpen = marketDataRedisService != null && marketDataRedisService.isCashMarketHours();
+
         if (missing.isEmpty()) {
             log.debug("[MarketData] All {} symbols served from L1", result.size());
-            return result;
+            return finalizeMarketData(result, cashOpen);
         }
 
         // Cash-open: prefer fresh last-trade caches.
         // Cash-closed: still use Redis/Mongo previousClose/lastPrice for basket APIs (avoid OHLC waves),
         // then fall through to OHLC only for true misses.
-        boolean cashOpen = marketDataRedisService != null && marketDataRedisService.isCashMarketHours();
         if (!cashOpen) {
             log.info("[MarketData] Cash session closed — using Redis/Mongo close prices before OHLC for {} missing",
                     missing.size());
@@ -596,7 +597,7 @@ public class MarketDataService {
         }
 
         if (missing.isEmpty()) {
-            return result;
+            return finalizeMarketData(result, cashOpen);
         }
 
         // 3. MongoDB cache (Kafka live stream / prior OHLC writes)
@@ -660,7 +661,7 @@ public class MarketDataService {
 
         if (missing.isEmpty()) {
             log.info("[MarketData] All {} symbols served from caches.", result.size());
-            return result;
+            return finalizeMarketData(result, cashOpen);
         }
 
         // 4. Fetch missing from OHLC API with in-flight deduplication to prevent cache stampedes
@@ -796,7 +797,101 @@ public class MarketDataService {
         // ─────────────────────────────────────────────────────────────────────────────
 
         log.info("[MarketData] Result: {}/{} symbols returned.", result.size(), symbols.size());
+        return finalizeMarketData(result, cashOpen);
+    }
+
+    private Map<String, MarketData> finalizeMarketData(Map<String, MarketData> result, boolean cashOpen) {
+        if (!cashOpen) {
+            repairCollapsedPreviousClose(result);
+        }
         return result;
+    }
+
+    /**
+     * When session is closed, lastPrice often equals rolled previousClose → day% collapses to ~0.
+     * Restore prior-session close via historical lookback for those symbols.
+     */
+    void repairCollapsedPreviousClose(Map<String, MarketData> result) {
+        if (result == null || result.isEmpty()) {
+            return;
+        }
+        List<String> needsPrior = result.entrySet().stream()
+                .filter(e -> needsPriorSessionClose(e.getValue()))
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList());
+        if (needsPrior.isEmpty()) {
+            return;
+        }
+        try {
+            LocalDate to = LocalDate.now(IST);
+            LocalDate from = to.minusDays(14);
+            HistoricalDataRequest request = HistoricalDataRequest.builder()
+                    .symbols(String.join(",", needsPrior))
+                    .fromDate(from.toString())
+                    .toDate(to.toString())
+                    .interval("day")
+                    .build();
+            Map<String, MarketData> hist = getHistoricalData(request);
+            if (hist == null || hist.isEmpty()) {
+                return;
+            }
+            for (String symbol : needsPrior) {
+                MarketData live = result.get(symbol);
+                MarketData h = hist.get(symbol);
+                if (h == null) {
+                    h = hist.get(cleanSymbol(symbol));
+                }
+                if (live == null || h == null) {
+                    continue;
+                }
+                Double prior = resolvePriorCloseFromHistorical(h, live.getLastPrice());
+                if (prior != null && prior > 0) {
+                    live.setPreviousClose(prior);
+                    localCache.put(symbol, live);
+                }
+            }
+            log.info("[MarketData] Repaired previousClose for {}/{} collapsed closed-session symbols",
+                    needsPrior.size(), result.size());
+        } catch (Exception e) {
+            log.warn("[MarketData] prior-close repair failed: {}", e.getMessage());
+        }
+    }
+
+    private static boolean needsPriorSessionClose(MarketData md) {
+        if (md == null) {
+            return false;
+        }
+        Double last = md.getLastPrice();
+        if (last == null || last <= 0) {
+            return false;
+        }
+        Double prev = md.getPreviousClose();
+        if (prev == null || prev <= 0) {
+            return true;
+        }
+        return Math.abs(last - prev) / prev < 0.0001;
+    }
+
+    private static Double resolvePriorCloseFromHistorical(MarketData historical, Double sessionClose) {
+        if (historical == null) {
+            return null;
+        }
+        List<MarketData.MarketDataPoint> points = historical.getDataPoints();
+        if (points != null && points.size() >= 2) {
+            MarketData.MarketDataPoint prior = points.get(points.size() - 2);
+            if (prior != null && prior.getOhlcData() != null && prior.getOhlcData().getClose() > 0) {
+                double close = prior.getOhlcData().getClose();
+                if (sessionClose == null || Math.abs(close - sessionClose) / sessionClose >= 0.0001) {
+                    return close;
+                }
+            }
+        }
+        if (historical.getPreviousClose() != null && historical.getPreviousClose() > 0
+                && (sessionClose == null
+                    || Math.abs(historical.getPreviousClose() - sessionClose) / sessionClose >= 0.0001)) {
+            return historical.getPreviousClose();
+        }
+        return null;
     }
 
     /**

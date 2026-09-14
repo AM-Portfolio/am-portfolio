@@ -38,4 +38,13 @@ public class BasePortfolioSummay {
     
     private LocalDateTime lastUpdated;
     private DataStatus dataStatus;
+
+    /** Newest price timestamp used when serving (overlay or cold). */
+    private LocalDateTime asOf;
+    /** LIVE when open and tick age ≤60s; else AS_OF. */
+    private String priceFreshness;
+    /** TICK | OHLC | CACHE */
+    private String priceSource;
+    /** NSE session date for prices shown. */
+    private java.time.LocalDate sessionDate;
 }

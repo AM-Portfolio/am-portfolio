@@ -66,8 +66,8 @@ public class PortfolioOverviewService {
         try (var span = flowLogger.start("overviewPortfolio", "user", userId, "interval", interval != null ? interval.getCode() : "null")) {
         Optional<PortfolioSummaryV1> cachedSummary = getCachedSummary(userId, interval);
         if (cachedSummary.isPresent()) {
-            log.info("Returning cached portfolio summary for user: {}", userId);
-            return cachedSummary.get();
+            log.info("Returning cached portfolio summary for user: {} (with price overlay)", userId);
+            return repriceCachedSummary(cachedSummary.get(), userId, null, interval);
         }
 
         log.info("Cache miss for portfolio summary - User: {}, fetching from source", userId);
@@ -120,8 +120,9 @@ public class PortfolioOverviewService {
             }
             Optional<PortfolioSummaryV1> cachedSummary = getCachedSummary(userId, interval, portfolioId);
             if (cachedSummary.isPresent()) {
-                log.info("Returning cached portfolio summary for user: {} and portfolio: {}", userId, portfolioId);
-                return cachedSummary.get();
+                log.info("Returning cached portfolio summary for user: {} and portfolio: {} (with price overlay)",
+                        userId, portfolioId);
+                return repriceCachedSummary(cachedSummary.get(), userId, portfolioId, interval);
             }
             
             log.info("Cache miss for specific portfolio summary - User: {}, Portfolio: {}, fetching from source", userId, portfolioId);
@@ -218,7 +219,9 @@ public class PortfolioOverviewService {
         if (portfolioSummaryRedisService != null) {
             portfolioSummaryRedisService.cachePortfolioSummary(finalSummary, userId, interval, portfolioId);
         }
-        portfolioSummaryMongoService.cachePortfolioSummary(finalSummary, userId, interval, portfolioId);
+        if (portfolioSummaryMongoService != null) {
+            portfolioSummaryMongoService.cachePortfolioSummary(finalSummary, userId, interval, portfolioId);
+        }
 
         log.info("Completed overviewPortfolio for user: {}", userId);
         return finalSummary;
@@ -229,11 +232,14 @@ public class PortfolioOverviewService {
         log.debug("Calculating total portfolio value from {} portfolios", portfolios.size());
 
         List<com.portfolio.model.portfolio.EquityHoldings> equityHoldings = null;
+        com.portfolio.model.portfolio.PortfolioHoldings pricedHoldings = null;
         if (userId != null) {
             try {
-                com.portfolio.model.portfolio.PortfolioHoldings ph = portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, interval, true);
-                if (ph != null && ph.getEquityHoldings() != null) {
-                    equityHoldings = ph.getEquityHoldings();
+                pricedHoldings = (portfolioId == null || portfolioId.isBlank())
+                        ? portfolioHoldingsService.getPortfolioHoldings(userId, interval, true)
+                        : portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, interval, true);
+                if (pricedHoldings != null && pricedHoldings.getEquityHoldings() != null) {
+                    equityHoldings = pricedHoldings.getEquityHoldings();
                 }
             } catch (Exception e) {
                 log.warn("Failed to get cached portfolio holdings in getPortfolioSummary: {}", e.getMessage());
@@ -250,7 +256,51 @@ public class PortfolioOverviewService {
         // Use calculator to generate the summary
         PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(equityHoldings, investmentValue);
         summary.setInvestmentValue(investmentValue);
+        if (pricedHoldings != null) {
+            summary.setAsOf(pricedHoldings.getAsOf());
+            summary.setPriceFreshness(pricedHoldings.getPriceFreshness());
+            summary.setPriceSource(pricedHoldings.getPriceSource());
+            summary.setSessionDate(pricedHoldings.getSessionDate());
+        }
         return summary;
+    }
+
+    private PortfolioSummaryV1 repriceCachedSummary(
+            PortfolioSummaryV1 cached, String userId, String portfolioId, TimeInterval interval) {
+        try {
+            com.portfolio.model.portfolio.PortfolioHoldings ph = portfolioId == null
+                    ? portfolioHoldingsService.getPortfolioHoldings(userId, interval, true)
+                    : portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, interval, true);
+            if (ph == null || ph.getEquityHoldings() == null || ph.getEquityHoldings().isEmpty()) {
+                return cached;
+            }
+            double investmentValue = cached.getInvestmentValue() != null
+                    ? cached.getInvestmentValue()
+                    : ph.getEquityHoldings().stream()
+                            .mapToDouble(h -> h.getInvestmentCost() != null ? h.getInvestmentCost() : 0.0)
+                            .sum();
+            PortfolioSummaryV1 live = portfolioCalculator.calculateSummary(ph.getEquityHoldings(), investmentValue);
+            cached.setInvestmentValue(investmentValue);
+            cached.setCurrentValue(live.getCurrentValue());
+            cached.setTotalGainLoss(live.getTotalGainLoss());
+            cached.setTotalGainLossPercentage(live.getTotalGainLossPercentage());
+            cached.setTodayGainLoss(live.getTodayGainLoss());
+            cached.setTodayGainLossPercentage(live.getTodayGainLossPercentage());
+            cached.setTotalAssets(live.getTotalAssets());
+            cached.setGainersCount(live.getGainersCount());
+            cached.setLosersCount(live.getLosersCount());
+            cached.setTodayGainersCount(live.getTodayGainersCount());
+            cached.setTodayLosersCount(live.getTodayLosersCount());
+            cached.setAsOf(ph.getAsOf());
+            cached.setPriceFreshness(ph.getPriceFreshness());
+            cached.setPriceSource(ph.getPriceSource());
+            cached.setSessionDate(ph.getSessionDate());
+            cached.setLastUpdated(java.time.LocalDateTime.now(ZoneId.of("Asia/Kolkata")));
+            return cached;
+        } catch (Exception e) {
+            log.warn("Summary price overlay failed; serving cached KPIs: {}", e.getMessage());
+            return cached;
+        }
     }
 
     private Optional<PortfolioSummaryV1> getCachedSummary(String userId, TimeInterval interval) {
@@ -278,11 +328,13 @@ public class PortfolioOverviewService {
         }
         
         // Tier 2: Mongo
-        cachedSummary = portfolioSummaryMongoService.getLatestFreshSummary(userId, interval, portfolioId);
-        if (cachedSummary.isPresent()) {
-            log.info("Serving portfolio summary from Mongo cache - User: {}, Interval: {}",
-                    userId, interval != null ? interval.getCode() : "null");
-            return cachedSummary;
+        if (portfolioSummaryMongoService != null) {
+            cachedSummary = portfolioSummaryMongoService.getLatestFreshSummary(userId, interval, portfolioId);
+            if (cachedSummary.isPresent()) {
+                log.info("Serving portfolio summary from Mongo cache - User: {}, Interval: {}",
+                        userId, interval != null ? interval.getCode() : "null");
+                return cachedSummary;
+            }
         }
 
         log.debug("No cached summary found for user: {}", userId);

@@ -27,6 +27,8 @@ public class PortfolioHoldings {
     private String priceFreshness;
     /** TICK | OHLC | CACHE — how prices were primarily resolved. */
     private String priceSource;
+    /** NSE session date for the prices shown (last session when AS_OF). */
+    private java.time.LocalDate sessionDate;
 
     public static PortfolioHoldings empty() {
         return PortfolioHoldings.builder()

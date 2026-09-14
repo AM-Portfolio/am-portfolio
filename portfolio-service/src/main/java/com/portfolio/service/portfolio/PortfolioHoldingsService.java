@@ -21,6 +21,7 @@ import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
+import com.portfolio.redis.session.CashSessionClock;
 import com.portfolio.service.calculator.PortfolioCalculator;
 
 import io.micrometer.observation.annotation.Observed;
@@ -31,6 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 public class PortfolioHoldingsService {
 
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+    private static final long LIVE_MAX_AGE_SECONDS = 60;
 
     private final PortfolioService portfolioService;
     private final PortfolioHoldingsMapper portfolioHoldingsMapper;
@@ -39,6 +41,8 @@ public class PortfolioHoldingsService {
     private final PortfolioCalculator portfolioCalculator;
     private final PortfolioHoldingsMongoService portfolioHoldingsMongoService;
     private final java.util.concurrent.Executor taskExecutor;
+    @Nullable
+    private final CashSessionClock cashSessionClock;
 
     public PortfolioHoldingsService(
             PortfolioService portfolioService,
@@ -48,13 +52,15 @@ public class PortfolioHoldingsService {
             PortfolioHoldingsMongoService portfolioHoldingsMongoService,
             @Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
             // kept for Spring wiring / future use — allocation applied in mapper only
-            com.portfolio.service.basket.AllocationLedgerService allocationLedgerService) {
+            com.portfolio.service.basket.AllocationLedgerService allocationLedgerService,
+            @Nullable CashSessionClock cashSessionClock) {
         this.portfolioService = portfolioService;
         this.portfolioHoldingsMapper = portfolioHoldingsMapper;
         this.portfolioHoldingsRedisService = portfolioHoldingsRedisService;
         this.portfolioCalculator = portfolioCalculator;
         this.portfolioHoldingsMongoService = portfolioHoldingsMongoService;
         this.taskExecutor = taskExecutor;
+        this.cashSessionClock = cashSessionClock;
     }
 
     @Value("${portfolio.redis.enabled:true}")
@@ -155,10 +161,30 @@ public class PortfolioHoldingsService {
     private void stampFreshness(PortfolioHoldings holdings, String priceSource) {
         LocalDateTime now = LocalDateTime.now(IST);
         holdings.setLastUpdated(now);
-        holdings.setAsOf(now);
         holdings.setPriceSource(priceSource != null ? priceSource : "CACHE");
-        boolean cashOpen = isCashOpenIst(now);
-        holdings.setPriceFreshness(cashOpen ? "LIVE" : "AS_OF");
+
+        LocalDateTime maxTick = null;
+        if (holdings.getEquityHoldings() != null) {
+            for (EquityHoldings h : holdings.getEquityHoldings()) {
+                if (h.getPriceAsOf() != null && (maxTick == null || h.getPriceAsOf().isAfter(maxTick))) {
+                    maxTick = h.getPriceAsOf();
+                }
+            }
+        }
+        holdings.setAsOf(maxTick != null ? maxTick : now);
+
+        boolean cashOpen = cashSessionClock != null ? cashSessionClock.isCashOpen() : isCashOpenIst(now);
+        boolean freshEnough = maxTick != null
+                && java.time.Duration.between(maxTick, now).getSeconds() <= LIVE_MAX_AGE_SECONDS;
+        holdings.setPriceFreshness(cashOpen && freshEnough ? "LIVE" : "AS_OF");
+
+        if (cashSessionClock != null) {
+            holdings.setSessionDate(cashSessionClock.sessionDate());
+        } else if (!cashOpen) {
+            holdings.setSessionDate(now.toLocalDate().minusDays(now.getDayOfWeek().getValue() >= 6 ? 2 : 0));
+        } else {
+            holdings.setSessionDate(now.toLocalDate());
+        }
     }
 
     static boolean isCashOpenIst(LocalDateTime nowIst) {

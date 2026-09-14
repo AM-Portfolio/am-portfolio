@@ -44,6 +44,12 @@ class PortfolioOverviewServiceTest {
     private PortfolioCalculator portfolioCalculator;
 
     @Mock
+    private PortfolioSummaryMongoService portfolioSummaryMongoService;
+
+    @Mock
+    private com.am.common.amcommondata.service.PortfolioSnapshotService portfolioSnapshotService;
+
+    @Mock
     private FlowLogger flowLogger;
 
     @InjectMocks
@@ -52,15 +58,44 @@ class PortfolioOverviewServiceTest {
     @Test
     void overviewPortfolio_FromCache() {
         String userId = "user-1";
-        PortfolioSummaryV1 cached = PortfolioSummaryV1.builder().build();
+        PortfolioSummaryV1 cached = PortfolioSummaryV1.builder()
+                .investmentValue(1000.0)
+                .currentValue(1100.0)
+                .todayGainLoss(0.0)
+                .build();
+        com.portfolio.model.portfolio.PortfolioHoldings holdings =
+                com.portfolio.model.portfolio.PortfolioHoldings.builder()
+                        .equityHoldings(List.of(
+                                com.portfolio.model.portfolio.EquityHoldings.builder()
+                                        .symbol("TCS")
+                                        .investmentCost(1000.0)
+                                        .currentValue(1110.0)
+                                        .todayGainLoss(10.0)
+                                        .todayGainLossPercentage(0.9)
+                                        .build()))
+                        .asOf(java.time.LocalDateTime.now())
+                        .priceFreshness("AS_OF")
+                        .sessionDate(java.time.LocalDate.of(2026, 9, 12))
+                        .build();
 
         when(portfolioSummaryRedisService.getLatestSummary(userId, TimeInterval.ONE_DAY))
                 .thenReturn(Optional.of(cached));
+        when(portfolioHoldingsService.getPortfolioHoldings(userId, TimeInterval.ONE_DAY, true))
+                .thenReturn(holdings);
+        when(portfolioCalculator.calculateSummary(anyList(), anyDouble()))
+                .thenReturn(PortfolioSummaryV1.builder()
+                        .currentValue(1110.0)
+                        .todayGainLoss(10.0)
+                        .todayGainLossPercentage(0.9)
+                        .build());
         lenient().when(flowLogger.start(anyString(), any())).thenReturn(mock(FlowSpan.class));
 
         PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, TimeInterval.ONE_DAY);
 
         assertNotNull(result);
+        assertEquals(10.0, result.getTodayGainLoss());
+        assertEquals("AS_OF", result.getPriceFreshness());
+        verify(portfolioHoldingsService).getPortfolioHoldings(userId, TimeInterval.ONE_DAY, true);
         verifyNoInteractions(portfolioService);
     }
 
@@ -91,9 +126,15 @@ class PortfolioOverviewServiceTest {
         UUID portId = UUID.randomUUID();
         PortfolioModelV1 p1 = new PortfolioModelV1();
         p1.setId(portId);
+        p1.setOwner(userId);
+        p1.setBrokerType(BrokerType.ZERODHA);
         p1.setTotalValue(500.0);
 
-        when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(List.of(p1));
+        when(portfolioService.getPortfolioById(portId)).thenReturn(p1);
+        when(portfolioHoldingsService.getPortfolioHoldings(eq(userId), eq(portId.toString()), any(), eq(true)))
+                .thenReturn(com.portfolio.model.portfolio.PortfolioHoldings.builder()
+                        .equityHoldings(List.of())
+                        .build());
         when(portfolioCalculator.calculateSummary(anyList(), anyDouble())).thenReturn(PortfolioSummaryV1.builder().build());
         when(portfolioMapper.toPortfolioModelV1(any(PortfolioModelV1.class))).thenReturn(com.portfolio.model.portfolio.v1.BrokerPortfolioSummary.builder().build());
         lenient().when(flowLogger.start(anyString(), any())).thenReturn(mock(FlowSpan.class));

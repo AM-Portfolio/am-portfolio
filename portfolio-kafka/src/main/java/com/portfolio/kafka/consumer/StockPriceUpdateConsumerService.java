@@ -1,6 +1,5 @@
 package com.portfolio.kafka.consumer;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -27,7 +26,6 @@ import java.util.concurrent.Executor;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 @ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = false)
 public class StockPriceUpdateConsumerService {
 
@@ -38,7 +36,27 @@ public class StockPriceUpdateConsumerService {
     @Qualifier("historyWriterExecutor")
     private final Executor historyWriterExecutor;
 
+    private final org.springframework.beans.factory.ObjectProvider<com.portfolio.redis.session.CashSessionClock> cashSessionClock;
+
+    public StockPriceUpdateConsumerService(
+            ObjectMapper objectMapper,
+            StockPriceMongoService stockPriceMongoService,
+            com.am.common.amcommondata.service.price.StockPriceHistoryMongoService stockPriceHistoryMongoService,
+            @Qualifier("historyWriterExecutor") Executor historyWriterExecutor,
+            org.springframework.beans.factory.ObjectProvider<com.portfolio.redis.session.CashSessionClock> cashSessionClock) {
+        this.objectMapper = objectMapper;
+        this.stockPriceMongoService = stockPriceMongoService;
+        this.stockPriceHistoryMongoService = stockPriceHistoryMongoService;
+        this.historyWriterExecutor = historyWriterExecutor;
+        this.cashSessionClock = cashSessionClock;
+    }
+
     private boolean isMarketHours() {
+        com.portfolio.redis.session.CashSessionClock clock =
+                cashSessionClock != null ? cashSessionClock.getIfAvailable() : null;
+        if (clock != null) {
+            return clock.isCashOpen();
+        }
         return PortfolioMarketDataRedisService.isCashMarketHours(
                 ZonedDateTime.now(ZoneId.of("Asia/Kolkata")));
     }

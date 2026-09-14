@@ -43,6 +43,21 @@ public class MarketDataApiConfig {
     private String nseIndicesEndpoint;
 
     /**
+     * Live market open/closed status.
+     */
+    private String statusEndpoint = "/v1/market-calendar/status";
+
+    /**
+     * Session timings for a date.
+     */
+    private String timingsEndpoint = "/v1/market-calendar/timings";
+
+    /**
+     * Calendar HTTP timeout (ms). Keep short so holdings warm path cannot stall.
+     */
+    private int calendarTimeoutMs = 200;
+
+    /**
      * Connection timeout in milliseconds.
      */
     private int connectionTimeout = 10000;

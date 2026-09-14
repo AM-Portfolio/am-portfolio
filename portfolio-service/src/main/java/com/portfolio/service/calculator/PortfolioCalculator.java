@@ -246,6 +246,10 @@ public class PortfolioCalculator {
                 } else {
                     log.warn("[Holdings] {} excluded from Today's P&L — no prevClose or openPrice.", symbol);
                 }
+
+                if (apiItem.getTimestamp() != null) {
+                    holding.setPriceAsOf(LocalDateTime.ofInstant(apiItem.getTimestamp(), java.time.ZoneId.of("Asia/Kolkata")));
+                }
             }
         }
 
