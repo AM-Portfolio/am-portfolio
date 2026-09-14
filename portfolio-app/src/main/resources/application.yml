@@ -243,7 +243,8 @@ market-data:
     status-endpoint: /v1/market-calendar/status
     timings-endpoint: /v1/market-calendar/timings
     calendar-timeout-ms: ${MARKET_DATA_CALENDAR_TIMEOUT_MS:5000}
-    read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:10000}
+    # Hist START_END batches often need 5–8s; 10s was too tight under load.
+    read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:45000}
     connection-timeout: 3000
     max-retry-attempts: 0
     batch:

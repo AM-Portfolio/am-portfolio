@@ -1,0 +1,430 @@
+<mxfile host="app.diagrams.net" agent="am-architecture-drawio">
+  <diagram id="context" name="Context">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="ctx_title" value="Portfolio BE industry-grade — Context" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1A1A2E;fontColor=#FFFFFF;fontStyle=1;align=left;spacingLeft=12;fontSize=14;strokeColor=#1A1A2E;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1080" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="ctx_purpose" value="Purpose: actors and systems for portfolio enrichment over market-data (day + period prices to UI)." style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="40" y="64" width="900" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="ctx_actor" value="Investor&#10;(web / mobile UI)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#08427B;fontColor=#FFFFFF;strokeColor=#08427B;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="220" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="ctx_sys" value="AM Portfolio&#10;am-portfolio&#10;(enrichment + book)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1168BD;fontColor=#FFFFFF;strokeColor=#0B4F8A;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="320" y="200" width="220" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="ctx_mkt" value="AM Market Data&#10;am-market-data&#10;(OHLC / hist / calendar)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1168BD;fontColor=#FFFFFF;strokeColor=#0B4F8A;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="620" y="200" width="220" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="ctx_ext" value="External&#10;Upstox / exchange&#10;Keycloak" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=#F5F5F5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="920" y="210" width="180" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="ctx_e1" value="HTTPS Bearer" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#82B366;strokeWidth=2;fontColor=#2E7D32;" edge="1" parent="1" source="ctx_actor" target="ctx_sys">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ctx_e2" value="POST ohlc / historical-data&#10;GET calendar" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#82B366;strokeWidth=2;fontColor=#2E7D32;" edge="1" parent="1" source="ctx_sys" target="ctx_mkt">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ctx_e3" value="vendor quotes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;dashed=1;strokeColor=#D79B00;strokeWidth=2;fontColor=#B45F06;" edge="1" parent="1" source="ctx_mkt" target="ctx_ext">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ctx_legend" value="Legend: navy person · #1168BD AM system · green store (other sheets) · dashed gray external · solid green happy · gold dashed async · red reject" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;align=left;spacingLeft=10;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="760" width="1080" height="36" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="business" name="BusinessFlow">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="bf_title" value="Portfolio BE industry-grade — BusinessFlow" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1A1A2E;fontColor=#FFFFFF;fontStyle=1;align=left;spacingLeft=12;fontSize=14;strokeColor=#1A1A2E;" vertex="1" parent="1">
+          <mxGeometry x="40" y="16" width="1520" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="bf_purpose" value="Purpose: user opens portfolio → day prices + heatmap TF → correct % from market contracts." style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="40" y="58" width="900" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="lane_user" value="User" style="swimlane;fontStyle=1;startSize=32;horizontal=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontColor=#08427B;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="280" height="620" as="geometry" />
+        </mxCell>
+        <mxCell id="bf_u1" value="Opens Holdings / Overview" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#08427B;fontColor=#FFFFFF;strokeColor=#08427B;" vertex="1" parent="lane_user">
+          <mxGeometry x="20" y="50" width="240" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="bf_u2" value="Opens Heatmap; picks 1W–1Y" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#08427B;fontColor=#FFFFFF;strokeColor=#08427B;" vertex="1" parent="lane_user">
+          <mxGeometry x="20" y="200" width="240" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="bf_u3" value="Sees period % tiles + movers" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#08427B;fontColor=#FFFFFF;strokeColor=#08427B;" vertex="1" parent="lane_user">
+          <mxGeometry x="20" y="360" width="240" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="bf_u4" value="Sees empty / flat % (bug today)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;fontColor=#333333;strokeColor=#B85450;" vertex="1" parent="lane_user">
+          <mxGeometry x="20" y="500" width="240" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="lane_ui" value="UI" style="swimlane;fontStyle=1;startSize=32;horizontal=1;fillColor=#BBDEFB;strokeColor=#1168BD;fontColor=#08427B;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="90" width="300" height="620" as="geometry" />
+        </mxCell>
+        <mxCell id="bf_ui1" value="GET holdings / POST advanced live" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;" vertex="1" parent="lane_ui">
+          <mxGeometry x="20" y="50" width="260" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="bf_ui2" value="POST advanced timeFrame+dates&#10;includeHeatmap=true" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;" vertex="1" parent="lane_ui">
+          <mxGeometry x="20" y="200" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="bf_ui3" value="Render treemap / list / cards" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;" vertex="1" parent="lane_ui">
+          <mxGeometry x="20" y="360" width="260" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="lane_svc" value="am-portfolio" style="swimlane;fontStyle=1;startSize=32;horizontal=1;fillColor=#E1F5FE;strokeColor=#0288D1;fontColor=#08427B;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="660" y="90" width="340" height="620" as="geometry" />
+        </mxCell>
+        <mxCell id="bf_s1" value="Prefetch live OHLC stack&#10;Redis→Mongo→ohlc 1D" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;" vertex="1" parent="lane_svc">
+          <mxGeometry x="20" y="45" width="300" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="bf_s2" value="Hist START_END interval=1D&#10;(large batch preferred)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;" vertex="1" parent="lane_svc">
+          <mxGeometry x="20" y="195" width="300" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="bf_s3" value="Heatmap + movers providers&#10;day≠period baselines" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;" vertex="1" parent="lane_svc">
+          <mxGeometry x="20" y="350" width="300" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="bf_s4" value="Empty hist → live fallback&#10;(wrong period % today)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;fontColor=#333333;strokeColor=#B85450;" vertex="1" parent="lane_svc">
+          <mxGeometry x="20" y="490" width="300" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="lane_ext" value="am-market-data" style="swimlane;fontStyle=1;startSize=32;horizontal=1;fillColor=#FFF3E0;strokeColor=#EF6C00;fontColor=#E65100;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="90" width="340" height="620" as="geometry" />
+        </mxCell>
+        <mxCell id="bf_e1" value="POST /v1/market-data/ohlc" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=#F5F5F5;strokeColor=#666666;" vertex="1" parent="lane_ext">
+          <mxGeometry x="20" y="50" width="300" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="bf_e2" value="POST /v1/market-data/historical-data&#10;START_END + 1D" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=#F5F5F5;strokeColor=#666666;" vertex="1" parent="lane_ext">
+          <mxGeometry x="20" y="200" width="300" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="bf_e3" value="GET /v1/analysis/movers&#10;(index UI only)" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=#F5F5F5;strokeColor=#666666;" vertex="1" parent="lane_ext">
+          <mxGeometry x="20" y="360" width="300" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="bf_legend" value="Legend: navy user · blue UI/service · dashed gray market · red = current failure path" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;align=left;spacingLeft=10;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="740" width="1320" height="36" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="containers" name="Containers">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="c_title" value="Portfolio BE industry-grade — Containers" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1A1A2E;fontColor=#FFFFFF;fontStyle=1;align=left;spacingLeft=12;fontSize=14;strokeColor=#1A1A2E;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1320" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="c_purpose" value="Purpose: services and stores; every edge labeled with method+path." style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="800" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="c_ui" value="am-modern-ui&#10;Flutter web" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="120" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="c_pf" value="am-portfolio&#10;Facade + providers&#10;MarketDataService" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="320" y="110" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="c_md" value="am-market-data&#10;OHLC + hist + calendar" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="620" y="120" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="c_redis" value="Redis&#10;mktdata + heatmap&#10;basket catalog" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#FFFFFF;strokeColor=#1B5E20;" vertex="1" parent="1">
+          <mxGeometry x="320" y="280" width="160" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="c_mongo" value="Mongo&#10;portfolios&#10;stock_prices_cache&#10;basket catalog" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#FFFFFF;strokeColor=#1B5E20;" vertex="1" parent="1">
+          <mxGeometry x="520" y="280" width="180" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="c_kafka" value="Kafka ticks&#10;→ price cache" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=#F5F5F5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="760" y="300" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="c_e1" value="POST /v1/analytics/.../advanced&#10;GET holdings" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#82B366;strokeWidth=2;fontColor=#2E7D32;" edge="1" parent="1" source="c_ui" target="c_pf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="c_e2" value="POST /v1/market-data/ohlc&#10;POST /v1/market-data/historical-data" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#82B366;strokeWidth=2;fontColor=#2E7D32;" edge="1" parent="1" source="c_pf" target="c_md">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="c_e3" value="GET/SET cache" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#82B366;strokeWidth=2;" edge="1" parent="1" source="c_pf" target="c_redis">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="c_e4" value="read book + prices" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#82B366;strokeWidth=2;" edge="1" parent="1" source="c_pf" target="c_mongo">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="c_e5" value="async price updates" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;dashed=1;strokeColor=#D79B00;strokeWidth=2;fontColor=#B45F06;" edge="1" parent="1" source="c_kafka" target="c_mongo">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="c_legend" value="Legend: blue containers · green stores · gold dashed Kafka · green solid HTTP" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;align=left;spacingLeft=10;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="820" width="1320" height="36" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="sequence" name="Sequence">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="sq_title" value="Portfolio BE industry-grade — Sequence (advanced heatmap TF)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1A1A2E;fontColor=#FFFFFF;fontStyle=1;align=left;spacingLeft=12;fontSize=14;strokeColor=#1A1A2E;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1320" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="sq_purpose" value="Purpose: numbered happy path for period heatmap; reject = empty hist convert." style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="900" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="lif_ui" value="UI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#08427B;fontColor=#FFFFFF;strokeColor=#08427B;" vertex="1" parent="1">
+          <mxGeometry x="80" y="100" width="100" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="lif_fac" value="Facade" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;" vertex="1" parent="1">
+          <mxGeometry x="280" y="100" width="100" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="lif_mds" value="MarketData&#10;Service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;" vertex="1" parent="1">
+          <mxGeometry x="480" y="100" width="110" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="lif_mkt" value="am-market-data" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#F5F5F5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="700" y="100" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="lif_hm" value="Heatmap&#10;Provider" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;" vertex="1" parent="1">
+          <mxGeometry x="920" y="100" width="110" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="sq1" value="1 POST advanced TF+dates" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeColor=#82B366;strokeWidth=2;" edge="1" parent="1" source="lif_ui" target="lif_fac">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="130" y="200" as="sourcePoint" /><mxPoint x="330" y="200" as="targetPoint" /></mxGeometry>
+        </mxCell>
+        <mxCell id="sq2" value="2 prefetch live OHLC" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeColor=#82B366;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="330" y="260" as="sourcePoint" /><mxPoint x="530" y="260" as="targetPoint" /></mxGeometry>
+        </mxCell>
+        <mxCell id="sq3" value="3 POST ohlc timeFrame=1D" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeColor=#82B366;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="535" y="320" as="sourcePoint" /><mxPoint x="760" y="320" as="targetPoint" /></mxGeometry>
+        </mxCell>
+        <mxCell id="sq4" value="4 POST historical-data START_END 1D (large batch)" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeColor=#82B366;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="535" y="400" as="sourcePoint" /><mxPoint x="760" y="400" as="targetPoint" /></mxGeometry>
+        </mxCell>
+        <mxCell id="sq5" value="5 convert → MarketData map" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeColor=#82B366;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="530" y="480" as="sourcePoint" /><mxPoint x="330" y="480" as="targetPoint" /></mxGeometry>
+        </mxCell>
+        <mxCell id="sq6" value="6 build sectors period %" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeColor=#82B366;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="330" y="560" as="sourcePoint" /><mxPoint x="970" y="560" as="targetPoint" /></mxGeometry>
+        </mxCell>
+        <mxCell id="sq7" value="7 JSON heatmap to UI" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeColor=#82B366;strokeWidth=2;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="330" y="640" as="sourcePoint" /><mxPoint x="130" y="640" as="targetPoint" /></mxGeometry>
+        </mxCell>
+        <mxCell id="sq_rej" value="REJECT today: HTTP OK but convert 0 → Merged 0/N → live fallback (red)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="80" y="720" width="960" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="sq_legend" value="Legend: green happy arrows · red box = current production failure" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;align=left;spacingLeft=10;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="820" width="1320" height="36" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="p0" name="Problem-P0-HistHeatmap">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="p0_title" value="Problem P0 — Hist heatmap empty after HTTP success" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1A1A2E;fontColor=#FFFFFF;fontStyle=1;align=left;spacingLeft=12;fontSize=14;strokeColor=#1A1A2E;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1080" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="p0_purpose" value="Purpose: market returns candles; portfolio Merged 0/N; UI gets live % labeled as period." style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="40" y="64" width="900" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="p0_a" value="am-market-data&#10;START_END JSON OK&#10;~1–6s / batch" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;" vertex="1" parent="1">
+          <mxGeometry x="80" y="140" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="p0_b" value="WebClient decode&#10;HistoricalDataResponseWrapper&#10;Completed successfully" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;" vertex="1" parent="1">
+          <mxGeometry x="360" y="140" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="p0_c" value="Convert → MarketData&#10;pts=0 / null&#10;Merged 0/111" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;fontColor=#333333;strokeColor=#B85450;" vertex="1" parent="1">
+          <mxGeometry x="660" y="140" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="p0_d" value="Facade live fallback&#10;tiles OK, period %=day %" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;fontColor=#333333;strokeColor=#B85450;" vertex="1" parent="1">
+          <mxGeometry x="360" y="300" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p0_fix" value="FIX: contract test flat dataPoints; sort bars; large batch 1D; cache non-empty only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#FFFFFF;strokeColor=#1B5E20;" vertex="1" parent="1">
+          <mxGeometry x="80" y="420" width="780" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p0_e1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeColor=#82B366;strokeWidth=2;" edge="1" parent="1" source="p0_a" target="p0_b"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="p0_e2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeColor=#B85450;strokeWidth=2;dashed=1;" edge="1" parent="1" source="p0_b" target="p0_c"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="p0_e3" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeColor=#B85450;strokeWidth=2;dashed=1;" edge="1" parent="1" source="p0_c" target="p0_d"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="p0_legend" value="Evidence: Loki Merged 0/111 + in-cluster curl 200 with dataPoints. See PROBLEMS.md P0." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;align=left;spacingLeft=10;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="760" width="1080" height="36" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="p1" name="Problem-P1-Movers">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="p1_title" value="Problem P1 — Movers perfect on market UI, wrong on portfolio" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1A1A2E;fontColor=#FFFFFF;fontStyle=1;align=left;spacingLeft=12;fontSize=14;strokeColor=#1A1A2E;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1080" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_purpose" value="Purpose: day % must use previousClose from OHLC; market movers API is index-scoped." style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="40" y="64" width="900" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_mkt" value="Market UI&#10;GET /v1/analysis/movers&#10;LTP vs previousClose" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#FFFFFF;strokeColor=#1B5E20;" vertex="1" parent="1">
+          <mxGeometry x="80" y="140" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_pf" value="Portfolio movers&#10;getMarketData + TopMoverUtils&#10;fallback ohlc.open (bug)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;fontColor=#333333;strokeColor=#B85450;" vertex="1" parent="1">
+          <mxGeometry x="420" y="140" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_rule" value="Target: same math as market day quotes&#10;(lastPrice − previousClose) / previousClose&#10;OHLC timeFrame=1D only; never hist open" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;" vertex="1" parent="1">
+          <mxGeometry x="80" y="300" width="580" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="p1_legend" value="See PROBLEMS.md P1. Portfolio book ≠ NIFTY movers list; compare symbol-level OHLC." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;align=left;spacingLeft=10;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="760" width="1080" height="36" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="p2" name="Problem-P2-AfterHours">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="p2_title" value="Problem P2 — After-hours last session price inconsistent" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1A1A2E;fontColor=#FFFFFF;fontStyle=1;align=left;spacingLeft=12;fontSize=14;strokeColor=#1A1A2E;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1080" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_purpose" value="Purpose: one SessionPriceResolver for holdings, movers, summary, live heatmap." style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="40" y="64" width="900" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_cal" value="CashSessionClock&#10;calendar status/timings" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;" vertex="1" parent="1">
+          <mxGeometry x="80" y="160" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_open" value="OPEN&#10;live LTP + previousClose" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#FFFFFF;strokeColor=#1B5E20;" vertex="1" parent="1">
+          <mxGeometry x="360" y="120" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_closed" value="CLOSED&#10;last session LTP&#10;repair collapsed prevClose" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#FFFFFF;strokeColor=#1B5E20;" vertex="1" parent="1">
+          <mxGeometry x="360" y="220" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_bug" value="Today: some call sites skip finalize/repair → 0% or mixed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;fontColor=#333333;strokeColor=#B85450;" vertex="1" parent="1">
+          <mxGeometry x="660" y="160" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_legend" value="See PROBLEMS.md P2 + feature-portfolio-session-pricing." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;align=left;spacingLeft=10;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="760" width="1080" height="36" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="p3" name="Problem-P3-Latency">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="p3_title" value="Problem P3 — Latency: prefer large market batches" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1A1A2E;fontColor=#FFFFFF;fontStyle=1;align=left;spacingLeft=12;fontSize=14;strokeColor=#1A1A2E;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1080" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_purpose" value="Purpose: stop serial 12×10 hist waves; market can take large START_END requests." style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="40" y="64" width="900" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_bad" value="BAD today&#10;12 serial chunks × ~6s&#10;≈ 70s cold hist" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;fontColor=#333333;strokeColor=#B85450;" vertex="1" parent="1">
+          <mxGeometry x="80" y="160" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_good" value="TARGET&#10;1–2 large hist calls&#10;timeout 45–60s&#10;Redis heatmap warm ≤3s" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#FFFFFF;strokeColor=#1B5E20;" vertex="1" parent="1">
+          <mxGeometry x="400" y="160" width="240" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_slo" value="SLOs: holdings ≤3s/1s · advanced live ≤8s/2s · hist ≤15s/3s · basket ≤2s/0.5s" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;" vertex="1" parent="1">
+          <mxGeometry x="80" y="320" width="560" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_legend" value="See PROBLEMS.md P3. Grafana tech-am-portfolio for golden signals." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;align=left;spacingLeft=10;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="760" width="1080" height="36" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="p4" name="Problem-P4-BasketN3">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="p4_title" value="Problem P4 — Basket Explorer shows only 3" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1A1A2E;fontColor=#FFFFFF;fontStyle=1;align=left;spacingLeft=12;fontSize=14;strokeColor=#1A1A2E;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1080" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_purpose" value="Purpose: opportunity count = catalog.defaultQuery length; PROD Mongo seed-on-empty stuck at 3." style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="40" y="64" width="900" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_yml" value="Classpath seed&#10;9 defaultThemeIds" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#FFFFFF;strokeColor=#1B5E20;" vertex="1" parent="1">
+          <mxGeometry x="80" y="150" width="180" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_mongo" value="PROD Mongo catalog&#10;old 3 themes&#10;(seed skipped)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;fontColor=#333333;strokeColor=#B85450;" vertex="1" parent="1">
+          <mxGeometry x="340" y="150" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_ui" value="Explorer opportunities&#10;N = defaultQuery symbols&#10;Top picks UI still shows 3 cards" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#438DD5;fontColor=#FFFFFF;strokeColor=#2E6DA4;" vertex="1" parent="1">
+          <mxGeometry x="620" y="150" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_fix" value="FIX: PUT catalog upsert + versioned seed; remove .limit(3) fallback; All baskets = full list" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#FFFFFF;strokeColor=#1B5E20;" vertex="1" parent="1">
+          <mxGeometry x="80" y="300" width="780" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_legend" value="See PROBLEMS.md P4 + docs/feature-basket-discover." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;align=left;spacingLeft=10;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="760" width="1080" height="36" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="p6" name="Problem-P6-BasketPreview">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="p6_title" value="Problem P6 — Basket Preview slow (FULL path)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1A1A2E;fontColor=#FFFFFF;fontStyle=1;align=left;spacingLeft=12;fontSize=14;strokeColor=#1A1A2E;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1080" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="p6_purpose" value="Purpose: Discover slim strips composition → every Preview pays FULL enrich + bulk prices." style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="40" y="64" width="1000" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="p6_a" value="Discover&#10;slimForDiscover&#10;composition=null" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;fontColor=#333333;strokeColor=#B85450;" vertex="1" parent="1">
+          <mxGeometry x="60" y="120" width="180" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p6_b" value="FE seed miss&#10;POST /v1/basket/preview" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;fontColor=#333333;strokeColor=#B85450;" vertex="1" parent="1">
+          <mxGeometry x="300" y="120" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p6_c" value="FULL path serial&#10;sector enrich → ETF enrich&#10;→ prices 50–150 syms" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;fontColor=#333333;strokeColor=#B85450;" vertex="1" parent="1">
+          <mxGeometry x="560" y="110" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="p6_fix" value="FIX: skip sector when coverage high · warm ETF L2 · one price union · no hist on Preview · optional PREVIEW_LITE&#10;SLO warm ≤800ms p95 · cold ≤2s p95" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#FFFFFF;strokeColor=#1B5E20;" vertex="1" parent="1">
+          <mxGeometry x="60" y="280" width="720" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p6_e1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeColor=#B85450;strokeWidth=2;dashed=1;" edge="1" parent="1" source="p6_a" target="p6_b"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="p6_e2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeColor=#B85450;strokeWidth=2;dashed=1;" edge="1" parent="1" source="p6_b" target="p6_c"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="p6_legend" value="See PROBLEMS.md P6 + feature-basket-discover/plan-v2-latency.md" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;align=left;spacingLeft=10;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="760" width="1080" height="36" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="failures" name="Failures">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="f_title" value="Portfolio BE industry-grade — Failures" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1A1A2E;fontColor=#FFFFFF;fontStyle=1;align=left;spacingLeft=12;fontSize=14;strokeColor=#1A1A2E;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1080" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="f_purpose" value="Purpose: Trigger → system → user-sees for each P0–P4 failure mode." style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="40" y="64" width="900" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="f1" value="Trigger: hist convert 0&#10;System: Merged 0 + live fallback&#10;User: period % = today %" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="110" width="320" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="f2" value="Trigger: previousClose missing&#10;System: use ohlc.open&#10;User: wrong movers/holdings %" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="110" width="320" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="f3" value="Trigger: session closed + no repair&#10;System: LTP≈prevClose&#10;User: flat day change" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="780" y="110" width="300" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="f4" value="Trigger: 12 serial hist waves&#10;System: 60–90s advanced&#10;User: spinner / timeout feel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="240" width="320" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="f5" value="Trigger: stale basket catalog&#10;System: defaultQuery 3 ETFs&#10;User: Explorer only 3 baskets" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="240" width="320" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="f6" value="Trigger: CB OPEN on ohlc/hist&#10;System: empty prefetch&#10;User: sparse tiles / wrong %" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="780" y="240" width="300" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="f_legend" value="Legend: each card is Trigger → system → user-sees. Fix order A1→A2→B1→B2→C1→D1." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;align=left;spacingLeft=10;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="760" width="1080" height="36" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

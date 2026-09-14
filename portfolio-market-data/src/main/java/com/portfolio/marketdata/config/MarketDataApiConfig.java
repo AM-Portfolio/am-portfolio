@@ -69,9 +69,10 @@ public class MarketDataApiConfig {
     private int connectionTimeout = 10000;
 
     /**
-     * Read timeout in milliseconds.
+     * Read timeout in milliseconds. Hist START_END often needs 5–15s+ under load;
+     * 10s default caused Merged 0/N and live-as-period fallback on PROD.
      */
-    private int readTimeout = 10000;
+    private int readTimeout = 45000;
 
     /**
      * Maximum number of retry attempts.

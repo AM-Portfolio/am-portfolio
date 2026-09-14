@@ -204,52 +204,127 @@ public class MarketDataService {
                 validSymbols.size(), request.getFromDate(), request.getToDate(),
                 request.getInterval(), request.getFilterType());
 
-        List<List<String>> chunks = partitionSymbols(validSymbols);
+        // Hist START_END: modest chunks + limited parallel to stay under WebClient timeout.
+        List<List<String>> chunks = new ArrayList<>();
+        final int histChunkSize = 15;
+        for (int i = 0; i < validSymbols.size(); i += histChunkSize) {
+            chunks.add(validSymbols.subList(i, Math.min(i + histChunkSize, validSymbols.size())));
+        }
+        return fetchHistoricalChunks(chunks, request);
+    }
 
-        List<java.util.concurrent.CompletableFuture<Map<String, MarketData>>> futures = chunks.stream()
-            .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-                try {
-                    HistoricalDataRequest chunkRequest = HistoricalDataRequest.builder()
-                            .symbols(String.join(",", chunk))
-                            .fromDate(request.getFromDate())
-                            .toDate(request.getToDate())
-                            .interval(request.getInterval())
-                            .filterType(request.getFilterType())
-                            .instrumentType(request.getInstrumentType())
-                            .filterFrequency(request.getFilterFrequency())
-                            .continuous(request.getContinuous())
-                            .forceRefresh(request.getForceRefresh())
-                            .additionalParams(request.getAdditionalParams())
-                            .build();
+    /**
+     * Bounded parallel hist waves so market-data stays healthy without serializing 12× timeouts.
+     */
+    private Map<String, MarketData> fetchHistoricalChunks(
+            List<List<String>> chunks, HistoricalDataRequest request) {
+        Map<String, MarketData> merged = new HashMap<>();
+        if (chunks.isEmpty()) {
+            return merged;
+        }
 
-                    HistoricalDataResponseWrapper response = marketDataApiClient.getHistoricalData(chunkRequest).block();
+        int maxParallel = 3;
+        int readTimeoutMs = (config != null && config.getReadTimeout() > 0) ? config.getReadTimeout() : 45_000;
+        // Wave budget must exceed WebClient read timeout so we never getNow(empty) on in-flight OK work.
+        long waveTimeoutMs = Math.max(readTimeoutMs + 5_000L, 50_000L);
 
-                    if (response == null || response.getData() == null) {
-                        return java.util.Collections.<String, MarketData>emptyMap();
-                    }
+        for (int i = 0; i < chunks.size(); i += maxParallel) {
+            List<List<String>> wave = chunks.subList(i, Math.min(i + maxParallel, chunks.size()));
+            List<CompletableFuture<Map<String, MarketData>>> futures = wave.stream()
+                    .map(chunk -> CompletableFuture.supplyAsync(() -> {
+                        try {
+                            HistoricalDataRequest chunkRequest = HistoricalDataRequest.builder()
+                                    .symbols(String.join(",", chunk))
+                                    .fromDate(request.getFromDate())
+                                    .toDate(request.getToDate())
+                                    .interval(request.getInterval())
+                                    .filterType(request.getFilterType())
+                                    .instrumentType(request.getInstrumentType())
+                                    .filterFrequency(request.getFilterFrequency())
+                                    .continuous(request.getContinuous())
+                                    .forceRefresh(request.getForceRefresh())
+                                    .additionalParams(request.getAdditionalParams())
+                                    .build();
 
-                    Map<String, MarketData> chunkResult = new HashMap<>();
-                    for (Map.Entry<String, HistoricalDataResponse> entry : response.getData().entrySet()) {
-                        chunkResult.put(entry.getKey(), MarketDataConverter.fromHistoricalDataResponse(entry.getValue()));
-                    }
-                    return chunkResult;
-                } catch (Exception e) {
-                    log.warn("[HistoricalData chunk] Failed for chunk of {}: {}", chunk.size(), e.getMessage());
-                    return java.util.Collections.<String, MarketData>emptyMap();
+                            HistoricalDataResponseWrapper response =
+                                    marketDataApiClient.getHistoricalData(chunkRequest).block();
+                            if (response == null || response.getData() == null) {
+                                log.warn("[HistoricalData chunk] null/empty wrapper for {} symbols", chunk.size());
+                                return Collections.<String, MarketData>emptyMap();
+                            }
+                            Map<String, MarketData> chunkResult = new HashMap<>();
+                            int skipped = 0;
+                            for (Map.Entry<String, HistoricalDataResponse> entry : response.getData().entrySet()) {
+                                HistoricalDataResponse raw = entry.getValue();
+                                MarketData converted =
+                                        MarketDataConverter.fromHistoricalDataResponse(raw);
+                                if (converted != null) {
+                                    chunkResult.put(entry.getKey(), converted);
+                                } else {
+                                    skipped++;
+                                    if (skipped <= 2) {
+                                        int pts = raw == null ? -1 : raw.effectiveDataPoints().size();
+                                        log.warn(
+                                                "[HistoricalData chunk] convert null for {} (rawNull={}, pts={})",
+                                                entry.getKey(),
+                                                raw == null,
+                                                pts);
+                                    }
+                                }
+                            }
+                            if (chunkResult.isEmpty() && !response.getData().isEmpty()) {
+                                log.warn(
+                                        "[HistoricalData chunk] API returned {} symbols but 0 converted",
+                                        response.getData().size());
+                            }
+                            return chunkResult;
+                        } catch (Exception e) {
+                            log.warn("[HistoricalData chunk] Failed for chunk of {}: {}", chunk.size(), e.getMessage());
+                            return Collections.<String, MarketData>emptyMap();
+                        }
+                    }, externalApiExecutor))
+                    .collect(Collectors.toList());
+
+            long deadlineNanos = System.nanoTime()
+                    + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(waveTimeoutMs);
+            int incomplete = 0;
+            int convertedThisWave = 0;
+            for (CompletableFuture<Map<String, MarketData>> future : futures) {
+                long remainingMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+                        deadlineNanos - System.nanoTime());
+                if (remainingMs <= 0) {
+                    incomplete++;
+                    future.cancel(true);
+                    continue;
                 }
-            }, externalApiExecutor))
-            .collect(Collectors.toList());
+                try {
+                    Map<String, MarketData> part = future.get(
+                            remainingMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    if (part != null && !part.isEmpty()) {
+                        merged.putAll(part);
+                        convertedThisWave += part.size();
+                    }
+                } catch (java.util.concurrent.TimeoutException te) {
+                    incomplete++;
+                    future.cancel(true);
+                    log.warn("[HistoricalData] Chunk still incomplete after wave budget — cancelled");
+                } catch (Exception e) {
+                    incomplete++;
+                    log.warn("[HistoricalData] Chunk join failed: {}", e.getMessage());
+                }
+            }
+            log.info(
+                    "[HistoricalData] Wave done: converted={} incomplete={} waveSize={}",
+                    convertedThisWave,
+                    incomplete,
+                    wave.size());
+        }
 
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-            // Align with OHLC client timeout (32s) + small buffer
-            .orTimeout(35, java.util.concurrent.TimeUnit.SECONDS)
-            .exceptionally(e -> null)
-            .join();
-        Map<String, MarketData> merged = new java.util.HashMap<>();
-        futures.stream()
-            .filter(f -> !f.isCompletedExceptionally())
-            .forEach(f -> merged.putAll(f.getNow(java.util.Collections.emptyMap())));
-        
+        log.info("[HistoricalData] Merged {}/{} symbols across {} chunk(s) (maxParallel={})",
+                merged.size(),
+                chunks.stream().mapToInt(List::size).sum(),
+                chunks.size(),
+                maxParallel);
         return merged;
     }
 

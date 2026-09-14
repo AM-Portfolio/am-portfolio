@@ -305,29 +305,39 @@ public class HeatmapUtils {
         if (data == null || data.getOhlc() == null) {
             return null;
         }
-        
-        // Create StockDetail with basic information
+
+        double resolvedLastPrice = 0.0;
+        if (data.getLastPrice() != null && data.getLastPrice() > 0) {
+            resolvedLastPrice = data.getLastPrice();
+        } else if (data.getOhlc().getClose() > 0) {
+            resolvedLastPrice = data.getOhlc().getClose();
+        }
+        if (resolvedLastPrice <= 0) {
+            return null;
+        }
+
         Heatmap.StockDetail stockDetail = Heatmap.StockDetail.builder()
             .symbol(symbol)
-            .name(symbol) // Use symbol as name if company name not available
-            .price(BigDecimal.valueOf(data.getLastPrice()))
+            .name(symbol)
+            .price(BigDecimal.valueOf(resolvedLastPrice))
             .quantity(BigDecimal.valueOf(quantity))
             .build();
-        
-        // Use domain methods to calculate values
-        double previousCloseVal = (data.getPreviousClose() != null && data.getPreviousClose() > 0) 
-                ? data.getPreviousClose() : (data.getOhlc() != null ? data.getOhlc().getClose() : 0.0);
+
+        // Align with sector metrics: previousClose else open (period baseline).
+        double previousCloseVal = (data.getPreviousClose() != null && data.getPreviousClose() > 0)
+                ? data.getPreviousClose()
+                : (data.getOhlc().getOpen() > 0 ? data.getOhlc().getOpen() : 0.0);
         BigDecimal previousPrice = BigDecimal.valueOf(previousCloseVal);
         stockDetail.calculateChange(previousPrice)
                   .calculateChangePercent(previousPrice)
                   .calculateValue();
-                  
+
         if (changePercentOverride != null) {
             stockDetail.setChangePercent(changePercentOverride);
         }
-        
+
         stockDetail.updateColor();
-        
+
         return stockDetail;
     }
     

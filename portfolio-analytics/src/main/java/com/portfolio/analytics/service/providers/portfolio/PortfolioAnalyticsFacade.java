@@ -121,11 +121,13 @@ public class PortfolioAnalyticsFacade {
         log.info("Calculating advanced analytics for portfolio: {} from {} to {}", 
                 request.getCoreIdentifiers().getPortfolioId(), request.getFromDate(), request.getToDate());
         
-        // Generate a cache key based on the request parameters
-        String cacheKey = String.format("%s|%s|%s|H:%b|M:%b|S:%b|C:%b",
+        // Generate a cache key based on the request parameters (include TF enum)
+        String tfCode = request.getTimeFrame() != null ? request.getTimeFrame().getValue() : "live";
+        String cacheKey = String.format("%s|%s|%s|%s|H:%b|M:%b|S:%b|C:%b",
                 request.getCoreIdentifiers().getPortfolioId(),
                 request.getFromDate(),
                 request.getToDate(),
+                tfCode,
                 request.getFeatureToggles().isIncludeHeatmap(),
                 request.getFeatureToggles().isIncludeMovers(),
                 request.getFeatureToggles().isIncludeSectorAllocation(),
@@ -164,41 +166,51 @@ public class PortfolioAnalyticsFacade {
                     
                     if (!symbols.isEmpty()) {
                         log.info("[Optimization] Prefetching market data once for {} symbols", symbols.size());
-                        request.setPrefetchAttempted(true);
-                        Map<String, MarketData> prefetched = null;
-                        if (request.getTimeFrameRequest() != null) {
-                            // Historical timeframe selected — fetch period-start prices
-                            com.portfolio.marketdata.model.HistoricalDataRequest histReq = com.portfolio.marketdata.model.HistoricalDataRequest.builder()
-                                .symbols(String.join(",", symbols))
-                                .fromDate(request.getFromDate() != null ? request.getFromDate().toString() : null)
-                                .toDate(request.getToDate() != null ? request.getToDate().toString() : null)
-                                .filterType(com.portfolio.marketdata.model.FilterType.START_END.getValue())
-                                .instrumentType(com.portfolio.marketdata.model.InstrumentType.EQ.getValue())
-                                .continuous(false)
-                                .interval(request.getTimeFrame() != null ? request.getTimeFrame().getValue() : com.portfolio.model.market.TimeFrame.DAY.getValue())
-                                .build();
-                            prefetched = marketDataService.getHistoricalData(histReq);
-                        } else {
-                            // Live data (1D)
-                            prefetched = marketDataService.getMarketData(symbols);
-                        }
-                        if (prefetched != null) {
-                            // Ensure normalized keys so analytics providers can look them up successfully
-                            Map<String, MarketData> normalizedPrefetch = new java.util.HashMap<>();
-                            for (Map.Entry<String, MarketData> entry : prefetched.entrySet()) {
-                                if (entry.getValue() != null) {
-                                    String cleaned = com.portfolio.model.util.SymbolResolver.normalize(
-                                            entry.getKey().contains(":") ? entry.getKey().substring(entry.getKey().indexOf(':') + 1) : entry.getKey()
-                                    );
-                                    normalizedPrefetch.put(cleaned, entry.getValue());
-                                }
+                        boolean needsHist = request.getTimeFrameRequest() != null
+                                && (request.getFeatureToggles().isIncludeHeatmap()
+                                    || request.getFeatureToggles().isIncludeSectorAllocation()
+                                    || request.getFeatureToggles().isIncludeMarketCapAllocation());
+                        // Live always: movers day%, summary today%, and live/1D primary path.
+                        Map<String, MarketData> livePrefetch = marketDataService.getMarketData(symbols);
+                        Map<String, MarketData> periodPrefetch = null;
+
+                        if (needsHist) {
+                            var tfr = request.getTimeFrameRequest();
+                            if (com.portfolio.marketdata.util.HistoricalDataRequestFactory.isSameDayLiveWindow(tfr)) {
+                                log.info("[SmartRoute] Same-day hist window — using live for period prefetch");
+                                periodPrefetch = livePrefetch;
+                            } else {
+                                var histReq = com.portfolio.marketdata.util.HistoricalDataRequestFactory
+                                        .forPeriodEndpoints(symbols, tfr);
+                                periodPrefetch = marketDataService.getHistoricalData(histReq);
                             }
-                            request.setPrefetchedMarketData(normalizedPrefetch);
+                        }
+
+                        Map<String, MarketData> primary = needsHist ? periodPrefetch : livePrefetch;
+                        Map<String, MarketData> normalizedPrimary = normalizePrefetch(primary);
+                        Map<String, MarketData> normalizedLive = normalizePrefetch(livePrefetch);
+
+                        // Never put live into period primary — that makes period % = day %.
+                        // Live stays on prefetchedLiveMarketData for movers / summary / structure paint.
+                        if (needsHist && (normalizedPrimary == null || normalizedPrimary.isEmpty())) {
+                            log.warn(
+                                    "[Optimization] Hist prefetch empty — not using live as period primary "
+                                            + "(providers may fan out; live kept for movers/summary only)");
+                            request.setPrefetchAttempted(false);
+                        } else if (normalizedPrimary != null && !normalizedPrimary.isEmpty()) {
+                            request.setPrefetchAttempted(true);
+                            request.setPrefetchedMarketData(normalizedPrimary);
+                        } else {
+                            request.setPrefetchAttempted(false);
+                            log.warn("[Optimization] Primary prefetch empty — providers may fan out with corrected requests");
+                        }
+                        if (normalizedLive != null && !normalizedLive.isEmpty()) {
+                            request.setPrefetchedLiveMarketData(normalizedLive);
                         }
 
                         // --- PREFETCH SECURITY DETAILS ONCE ---
                         log.info("[Optimization] Prefetching security details once for {} symbols", symbols.size());
-                        Map<String, com.am.common.amcommondata.model.security.SecurityModel> prefetchedSecurities = 
+                        Map<String, com.am.common.amcommondata.model.security.SecurityModel> prefetchedSecurities =
                             securityDetailsService.getSecurityDetails(symbols);
                         request.setPrefetchedSecurityDetails(prefetchedSecurities);
                     }
@@ -244,7 +256,7 @@ public class PortfolioAnalyticsFacade {
         try {
             if (!allFutures.isEmpty()) {
                 CompletableFuture.allOf(allFutures.toArray(new CompletableFuture[0]))
-                    .get(15, java.util.concurrent.TimeUnit.SECONDS);
+                    .get(60, java.util.concurrent.TimeUnit.SECONDS);
             }
         } catch (java.util.concurrent.TimeoutException e) {
             log.warn("[AdvancedAnalytics] Partial timeout after 15s — returning completed components only");
@@ -287,7 +299,10 @@ public class PortfolioAnalyticsFacade {
         if (request.getPrefetchedPortfolio() != null) {
             try {
                 PortfolioModelV1 portfolio = request.getPrefetchedPortfolio();
-                Map<String, MarketData> mdMap = request.getPrefetchedMarketData();
+                Map<String, MarketData> mdMap = request.getPrefetchedLiveMarketData() != null
+                        && !request.getPrefetchedLiveMarketData().isEmpty()
+                    ? request.getPrefetchedLiveMarketData()
+                    : request.getPrefetchedMarketData();
                 double totalInvested = 0.0;
                 double totalCurrent = 0.0;
                 double todayGainLoss = 0.0;
@@ -358,8 +373,35 @@ public class PortfolioAnalyticsFacade {
         }
         
         AdvancedAnalyticsResponse finalResponse = responseBuilder.build();
-        fastCache.put(cacheKey, new CachedResponse(finalResponse));
-        
+        // Never L1-cache empty heatmap/allocation — CB/timeouts must not poison 60s.
+        boolean emptyHeatmap = finalResponse.getAnalytics() == null
+                || finalResponse.getAnalytics().getHeatmap() == null
+                || finalResponse.getAnalytics().getHeatmap().getSectors() == null
+                || finalResponse.getAnalytics().getHeatmap().getSectors().isEmpty();
+        if (!emptyHeatmap) {
+            fastCache.put(cacheKey, new CachedResponse(finalResponse));
+        } else {
+            log.warn("[Optimization] Skipping L1 cache for empty heatmap key={}", cacheKey);
+        }
+
         return finalResponse;
+    }
+
+    private static Map<String, MarketData> normalizePrefetch(Map<String, MarketData> prefetched) {
+        if (prefetched == null || prefetched.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<String, MarketData> normalized = new java.util.HashMap<>();
+        for (Map.Entry<String, MarketData> entry : prefetched.entrySet()) {
+            if (entry.getValue() == null) {
+                continue;
+            }
+            String cleaned = com.portfolio.model.util.SymbolResolver.normalize(
+                    entry.getKey().contains(":")
+                            ? entry.getKey().substring(entry.getKey().indexOf(':') + 1)
+                            : entry.getKey());
+            normalized.put(cleaned, entry.getValue());
+        }
+        return normalized;
     }
 }

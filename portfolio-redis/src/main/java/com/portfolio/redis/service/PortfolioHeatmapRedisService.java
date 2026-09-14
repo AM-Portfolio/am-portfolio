@@ -35,6 +35,10 @@ private final RedisTemplate<String, Heatmap> portfolioHeatmapRedisTemplate;
     @Async("taskExecutor")
     public CompletableFuture<Void> cacheHeatmap(Heatmap heatmap, String portfolioId, TimeFrameRequest interval) {
         if (!isRedisEnabled) return java.util.concurrent.CompletableFuture.completedFuture(null);
+        if (heatmap == null || heatmap.getSectors() == null || heatmap.getSectors().isEmpty()) {
+            log.debug("Skipping cache of empty heatmap for portfolio: {}", portfolioId);
+            return CompletableFuture.completedFuture(null);
+        }
         log.info("Starting async caching of portfolio heatmap - Portfolio: {}, Interval: {}", 
             portfolioId, interval != null ? interval.getTimeFrame() : "null");
         
@@ -65,7 +69,7 @@ private final RedisTemplate<String, Heatmap> portfolioHeatmapRedisTemplate;
         try {
             Heatmap heatmap = portfolioHeatmapRedisTemplate.opsForValue().get(key);
             
-            if (heatmap != null) {
+            if (heatmap != null && heatmap.getSectors() != null && !heatmap.getSectors().isEmpty()) {
                 log.info("Found portfolio heatmap in cache - Portfolio: {}, Key: {}", portfolioId, key);
                 return Optional.of(heatmap);
             } else {
