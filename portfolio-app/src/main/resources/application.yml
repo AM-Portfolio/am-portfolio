@@ -240,7 +240,7 @@ market-data:
     nse-indices-endpoint: /v1/indices
     status-endpoint: /v1/market-calendar/status
     timings-endpoint: /v1/market-calendar/timings
-    calendar-timeout-ms: ${MARKET_DATA_CALENDAR_TIMEOUT_MS:200}
+    calendar-timeout-ms: ${MARKET_DATA_CALENDAR_TIMEOUT_MS:1500}
     read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:10000}
     connection-timeout: 3000
     max-retry-attempts: 0

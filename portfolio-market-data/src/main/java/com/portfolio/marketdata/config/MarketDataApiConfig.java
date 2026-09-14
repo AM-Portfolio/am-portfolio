@@ -53,9 +53,9 @@ public class MarketDataApiConfig {
     private String timingsEndpoint = "/v1/market-calendar/timings";
 
     /**
-     * Calendar HTTP timeout (ms). Keep short so holdings warm path cannot stall.
+     * Calendar HTTP timeout (ms). In-cluster status can exceed 200ms under load.
      */
-    private int calendarTimeoutMs = 200;
+    private int calendarTimeoutMs = 1500;
 
     /**
      * Connection timeout in milliseconds.

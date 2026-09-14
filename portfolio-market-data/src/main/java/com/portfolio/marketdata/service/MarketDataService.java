@@ -66,6 +66,13 @@ public class MarketDataService {
             .maximumSize(20000)
             .build();
 
+    /** Prior-session closes for closed-market day% (avoid historical on every holdings hit). */
+    private final com.github.benmanes.caffeine.cache.Cache<String, Double> priorCloseCache =
+            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+            .expireAfterWrite(18, java.util.concurrent.TimeUnit.HOURS)
+            .maximumSize(20000)
+            .build();
+
     private final com.github.benmanes.caffeine.cache.Cache<String, com.portfolio.marketdata.model.HistoricalData> chartCache = 
             com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
             .expireAfterWrite(3, java.util.concurrent.TimeUnit.MINUTES)
@@ -809,17 +816,34 @@ public class MarketDataService {
 
     /**
      * When session is closed, lastPrice often equals rolled previousClose → day% collapses to ~0.
-     * Restore prior-session close via historical lookback for those symbols.
+     * Prefer cached prior closes; historical lookback only for cache misses (once per symbol / 18h).
      */
     void repairCollapsedPreviousClose(Map<String, MarketData> result) {
         if (result == null || result.isEmpty()) {
             return;
         }
-        List<String> needsPrior = result.entrySet().stream()
-                .filter(e -> needsPriorSessionClose(e.getValue()))
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toList());
+        List<String> needsPrior = new ArrayList<>();
+        int fromCache = 0;
+        for (Map.Entry<String, MarketData> e : result.entrySet()) {
+            MarketData md = e.getValue();
+            if (!needsPriorSessionClose(md)) {
+                continue;
+            }
+            Double cached = priorCloseCache.getIfPresent(e.getKey());
+            if (cached != null && cached > 0
+                    && (md.getLastPrice() == null
+                        || Math.abs(cached - md.getLastPrice()) / md.getLastPrice() >= 0.0001)) {
+                md.setPreviousClose(cached);
+                localCache.put(e.getKey(), md);
+                fromCache++;
+            } else {
+                needsPrior.add(e.getKey());
+            }
+        }
         if (needsPrior.isEmpty()) {
+            if (fromCache > 0) {
+                log.debug("[MarketData] Applied {} priorClose values from cache", fromCache);
+            }
             return;
         }
         try {
@@ -835,6 +859,7 @@ public class MarketDataService {
             if (hist == null || hist.isEmpty()) {
                 return;
             }
+            int repaired = 0;
             for (String symbol : needsPrior) {
                 MarketData live = result.get(symbol);
                 MarketData h = hist.get(symbol);
@@ -847,11 +872,13 @@ public class MarketDataService {
                 Double prior = resolvePriorCloseFromHistorical(h, live.getLastPrice());
                 if (prior != null && prior > 0) {
                     live.setPreviousClose(prior);
+                    priorCloseCache.put(symbol, prior);
                     localCache.put(symbol, live);
+                    repaired++;
                 }
             }
-            log.info("[MarketData] Repaired previousClose for {}/{} collapsed closed-session symbols",
-                    needsPrior.size(), result.size());
+            log.info("[MarketData] Repaired previousClose hist={}/{} cacheHit={}",
+                    repaired, needsPrior.size(), fromCache);
         } catch (Exception e) {
             log.warn("[MarketData] prior-close repair failed: {}", e.getMessage());
         }

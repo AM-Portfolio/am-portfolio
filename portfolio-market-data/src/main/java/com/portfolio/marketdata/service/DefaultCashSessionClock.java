@@ -49,11 +49,19 @@ public class DefaultCashSessionClock implements CashSessionClock {
         if (status.open) {
             return today;
         }
+        // Avoid timings fan-out when calendar HTTP already failed (each call burns the timeout).
+        if ("CALENDAR_UNAVAILABLE".equals(status.reason)) {
+            return weekdayFallback(today.minusDays(1));
+        }
         return findLastOpenSessionOnOrBefore(today.minusDays(1));
     }
 
     @Override
     public LocalDate priorSessionDate() {
+        CachedStatus status = resolveStatus();
+        if ("CALENDAR_UNAVAILABLE".equals(status.reason)) {
+            return weekdayFallback(sessionDate().minusDays(1));
+        }
         return findLastOpenSessionOnOrBefore(sessionDate().minusDays(1));
     }
 
