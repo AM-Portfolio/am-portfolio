@@ -1,6 +1,6 @@
 # Portfolio session pricing — TODO (execution cockpit)
 
-**Current phase:** `D-DONE` (iter 4 gates mostly green on holiday)  
+**Current phase:** `U` (modern-ui As-of + gate 1D)  
 **Plan rating:** 10/10 — [plan.md](./plan.md)  
 **Branch:** `hotfix/portfolio-session-pricing`  
 **Live image:** `ghcr.io/sahim99/am-portfolio:local-9992026`
@@ -39,9 +39,9 @@
 
 ## U — modern-ui
 
-- [ ] sessionDate DTO/mapper; As of `{date} HH:mm`
-- [ ] Overview freshness
-- [ ] Gate 1D chart poll
+- [x] sessionDate DTO/mapper; As of `{date} HH:mm`
+- [x] Overview freshness
+- [x] Gate 1D chart poll
 - [ ] PR
 
 ---
