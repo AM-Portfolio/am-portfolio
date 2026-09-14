@@ -1,9 +1,11 @@
 # Portfolio session pricing — TODO (execution cockpit)
 
-**Current phase:** `U` (modern-ui As-of + gate 1D)  
+**Current phase:** `DONE`  
 **Plan rating:** 10/10 — [plan.md](./plan.md)  
 **Branch:** `hotfix/portfolio-session-pricing`  
 **Live image:** `ghcr.io/sahim99/am-portfolio:local-9992026`
+
+**PRs:** [am-portfolio #67](https://github.com/AM-Portfolio/am-portfolio/pull/67) · [am-modern-ui #135](https://github.com/AM-Portfolio/am-modern-ui/pull/135)
 
 **PROD:** `https://am.asrax.in/portfolio`  
 **Golden portfolioId:** `f969745c-f492-4b86-88ed-6588e9f28bb3`  
@@ -42,10 +44,10 @@
 - [x] sessionDate DTO/mapper; As of `{date} HH:mm`
 - [x] Overview freshness
 - [x] Gate 1D chart poll
-- [ ] PR
+- [x] PR — https://github.com/AM-Portfolio/am-modern-ui/pull/135
 
 ---
 
 ## X — Exit
 
-- [ ] PRs linked; Current phase = `DONE`
+- [x] PRs linked; Current phase = `DONE` (backend https://github.com/AM-Portfolio/am-portfolio/pull/67)
