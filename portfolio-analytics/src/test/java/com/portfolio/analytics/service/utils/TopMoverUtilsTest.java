@@ -17,7 +17,7 @@ class TopMoverUtilsTest {
         return m;
     }
 
-    @Test void shouldUseOhlcOpenWhenPreviousCloseIsMissing() {
+    @Test void shouldSkipWhenPreviousCloseIsMissing() {
         MarketData data = MarketData.builder()
             .symbol("OPENONLY")
             .lastPrice(425.0)
@@ -29,8 +29,8 @@ class TopMoverUtilsTest {
         TopMoverUtils.calculatePerformanceMetrics(
             List.of("OPENONLY"), Map.of("OPENONLY", data), symbolToPerformance, symbolToChangePercent);
 
-        assertTrue(symbolToPerformance.containsKey("OPENONLY"));
-        assertEquals((425.0 - 420.0) / 420.0 * 100.0, symbolToChangePercent.get("OPENONLY"), 0.01);
+        assertFalse(symbolToPerformance.containsKey("OPENONLY"));
+        assertTrue(symbolToChangePercent.isEmpty());
     }
 
     @Test void shouldCorrectlyClassifyLoserWithGapDownOpenAndIntradayRecovery() {

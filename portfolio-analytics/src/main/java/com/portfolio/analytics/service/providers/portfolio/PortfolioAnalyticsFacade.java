@@ -259,7 +259,7 @@ public class PortfolioAnalyticsFacade {
                     .get(60, java.util.concurrent.TimeUnit.SECONDS);
             }
         } catch (java.util.concurrent.TimeoutException e) {
-            log.warn("[AdvancedAnalytics] Partial timeout after 15s — returning completed components only");
+            log.warn("[AdvancedAnalytics] Partial timeout after 60s — returning completed components only");
         } catch (Exception e) {
             log.error("[AdvancedAnalytics] Error joining futures", e);
         }

@@ -251,10 +251,6 @@ market-data:
       chunk-size: ${MARKET_DATA_BATCH_CHUNK_SIZE:50}
       parallel-batching-enabled: ${MARKET_DATA_PARALLEL_BATCHING:true}
       max-parallel-chunks: ${MARKET_DATA_MAX_PARALLEL_CHUNKS:4}
-  batch:
-    chunk-size: ${MARKET_DATA_BATCH_CHUNK_SIZE:50}
-    parallel-batching-enabled: ${MARKET_DATA_PARALLEL_BATCHING:true}
-    max-parallel-chunks: ${MARKET_DATA_MAX_PARALLEL_CHUNKS:4}
 
 # OpenAPI Documentation
 springdoc:
