@@ -73,21 +73,35 @@ public class MarketDataConverter {
      * @return A new MarketData instance
      */
     public static MarketData fromHistoricalDataResponse(HistoricalDataResponse response) {
-        if (response == null || response.getData() == null || 
-            response.getData().getDataPoints() == null || 
-            response.getData().getDataPoints().isEmpty()) {
+        if (response == null) {
             return null;
         }
-        
+        List<OHLCVTPoint> sourcePoints = response.effectiveDataPoints();
+        if (sourcePoints.isEmpty()) {
+            return null;
+        }
+
+        // Chronological order so first=period start and last=period end (START_END / unsorted binds).
+        List<OHLCVTPoint> ordered = new ArrayList<>(sourcePoints);
+        ordered.sort((a, b) -> {
+            if (a == null || a.getTime() == null) {
+                return (b == null || b.getTime() == null) ? 0 : 1;
+            }
+            if (b == null || b.getTime() == null) {
+                return -1;
+            }
+            return a.getTime().compareTo(b.getTime());
+        });
+
         // Convert interval string to TimeFrame enum
         TimeFrame timeFrame = null;
         if (response.getInterval() != null) {
             timeFrame = TimeFrame.fromValue(response.getInterval());
         }
-        
+
         // Convert data points
         List<MarketData.MarketDataPoint> dataPoints = new ArrayList<>();
-        for (OHLCVTPoint point : response.getData().getDataPoints()) {
+        for (OHLCVTPoint point : ordered) {
             dataPoints.add(MarketData.MarketDataPoint.builder()
                 .timestamp(point.getTime() != null ? point.getTime().atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant() : Instant.now())
                 .ohlcData(OhlcData.builder()
@@ -99,9 +113,9 @@ public class MarketDataConverter {
                 .volume(point.getVolume())
                 .build());
         }
-        
+
         MarketDataBuilder builder = MarketData.builder()
-            .symbol(response.getSymbol())
+            .symbol(response.effectiveSymbol())
             .fromDate(response.getFromDate())
             .toDate(response.getToDate())
             .timeFrame(timeFrame)
@@ -116,11 +130,12 @@ public class MarketDataConverter {
             if (latestPoint.getOhlcData() != null) {
                 builder.lastPrice(latestPoint.getOhlcData().getClose());
             }
-            if (dataPoints.size() >= 2) {
-                if (firstPoint.getOhlcData() != null && latestPoint.getOhlcData() != null && latestPoint.getOhlcData().getClose() > 0) {
-                    // Set previousClose to the first point's open price to correctly reflect the timeframe
-                    builder.previousClose(firstPoint.getOhlcData().getOpen());
-                }
+            // Period baseline: first bar open (START_END may return 1 or 2 points).
+            if (firstPoint.getOhlcData() != null
+                    && firstPoint.getOhlcData().getOpen() > 0
+                    && latestPoint.getOhlcData() != null
+                    && latestPoint.getOhlcData().getClose() > 0) {
+                builder.previousClose(firstPoint.getOhlcData().getOpen());
             }
         }
         

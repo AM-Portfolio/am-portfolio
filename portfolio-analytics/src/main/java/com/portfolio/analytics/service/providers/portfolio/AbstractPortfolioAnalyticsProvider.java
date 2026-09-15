@@ -142,9 +142,9 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
         // Use prefetched market data if available, otherwise fetch it.
         // If the facade already attempted prefetch and got nothing, do NOT fan out
         // another full-symbol OHLC storm (that caused 30–90s advanced latency).
-        Map<String, MarketData> marketData = (request != null) ? request.getPrefetchedMarketData() : null;
+        Map<String, MarketData> marketData = resolvePrefetchedMarketData(request);
         if (marketData == null || marketData.isEmpty()) {
-            if (request != null && request.isPrefetchAttempted()) {
+            if (request != null && request.isPrefetchAttempted() && !allowsPrefetchFanOut()) {
                 log.warn("Prefetch already attempted with empty result — skipping individual OHLC fan-out for {}",
                         this.getClass().getSimpleName());
                 return emptyResultSupplier.get();
@@ -162,6 +162,21 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
         return resultProcessor.process(portfolio, portfolioSymbols, marketData);
     }
     
+    /**
+     * Prefetch map used by this provider. Override to prefer live day data (movers).
+     */
+    protected Map<String, MarketData> resolvePrefetchedMarketData(AdvancedAnalyticsRequest request) {
+        return request != null ? request.getPrefetchedMarketData() : null;
+    }
+
+    /**
+     * When false (default), empty successful prefetch skips per-provider fan-out.
+     * Period providers may fan out after a failed hist prefetch (attempted=false).
+     */
+    protected boolean allowsPrefetchFanOut() {
+        return false;
+    }
+
     /**
      * Retrieves security details, preferring the prefetched map in the request if available.
      * @param symbols List of symbols

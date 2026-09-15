@@ -40,7 +40,13 @@ public class BasketPriceResolver {
 
     public Map<String, Double> fetchPricesWithHoldingsFallback(
             Set<String> symbolsToFetch, List<EquityHoldings> allUserHoldings) {
-        Map<String, ResolvedPrice> resolved = fetchResolvedPrices(symbolsToFetch, allUserHoldings);
+        return fetchPricesWithHoldingsFallback(symbolsToFetch, allUserHoldings, false);
+    }
+
+    public Map<String, Double> fetchPricesWithHoldingsFallback(
+            Set<String> symbolsToFetch, List<EquityHoldings> allUserHoldings, boolean skipHistRepair) {
+        Map<String, ResolvedPrice> resolved =
+                fetchResolvedPrices(symbolsToFetch, allUserHoldings, skipHistRepair);
         Map<String, Double> prices = new HashMap<>();
         for (Map.Entry<String, ResolvedPrice> e : resolved.entrySet()) {
             if (e.getValue() != null && e.getValue().getPrice() != null && e.getValue().getPrice() > 0) {
@@ -52,13 +58,19 @@ public class BasketPriceResolver {
 
     public Map<String, ResolvedPrice> fetchResolvedPrices(
             Set<String> symbolsToFetch, List<EquityHoldings> allUserHoldings) {
+        return fetchResolvedPrices(symbolsToFetch, allUserHoldings, false);
+    }
+
+    public Map<String, ResolvedPrice> fetchResolvedPrices(
+            Set<String> symbolsToFetch, List<EquityHoldings> allUserHoldings, boolean skipHistRepair) {
         Map<String, ResolvedPrice> resolved = new HashMap<>();
         if (symbolsToFetch == null || symbolsToFetch.isEmpty()) {
             return resolved;
         }
         try {
-            log.info("basket.prices.fetch symbols={}", symbolsToFetch.size());
-            Map<String, MarketData> market = marketDataService.getMarketData(new ArrayList<>(symbolsToFetch));
+            log.info("basket.prices.fetch symbols={} skipHistRepair={}", symbolsToFetch.size(), skipHistRepair);
+            Map<String, MarketData> market =
+                    marketDataService.getMarketData(new ArrayList<>(symbolsToFetch), skipHistRepair);
             if (market != null) {
                 for (Map.Entry<String, MarketData> entry : market.entrySet()) {
                     ResolvedPrice rp = fromMarketData(entry.getValue());

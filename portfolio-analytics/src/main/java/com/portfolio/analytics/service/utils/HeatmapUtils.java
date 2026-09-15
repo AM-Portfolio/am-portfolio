@@ -80,8 +80,9 @@ public class HeatmapUtils {
                     log.debug("Skipping stock - null lastPrice in calculateSectorMetrics");
                     continue;
                 }
-                double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0) 
-                        ? stock.getPreviousClose() : (stock.getOhlc() != null ? stock.getOhlc().getOpen() : 0.0);
+                // Day/period %: previousClose only (never OHLC open — open is session open, not prior close).
+                double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0)
+                        ? stock.getPreviousClose() : 0.0;
                 
                 if (previousClose > 0) {
                     // Calculate change percentage relative to previous close (acts as baseline for timeframe)
@@ -177,8 +178,8 @@ public class HeatmapUtils {
             // Only add to total value if the stock has valid data
             totalValue += value;
             
-            double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0) 
-                    ? stock.getPreviousClose() : (stock.getOhlc() != null ? stock.getOhlc().getOpen() : 0.0);
+            double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0)
+                    ? stock.getPreviousClose() : 0.0;
             
             if (previousClose > 0) {
                 // Calculate timeframe change percentage based on previous close
@@ -302,32 +303,46 @@ public class HeatmapUtils {
      * Convert market data to stock detail object with optional override
      */
     public static Heatmap.StockDetail convertToStockDetail(String symbol, MarketData data, double quantity, Double changePercentOverride) {
-        if (data == null || data.getOhlc() == null) {
+        if (data == null) {
             return null;
         }
-        
-        // Create StockDetail with basic information
+
+        double resolvedLastPrice = 0.0;
+        if (data.getLastPrice() != null && data.getLastPrice() > 0) {
+            resolvedLastPrice = data.getLastPrice();
+        } else if (data.getOhlc() != null && data.getOhlc().getClose() > 0) {
+            resolvedLastPrice = data.getOhlc().getClose();
+        } else if (data.getPreviousClose() != null && data.getPreviousClose() > 0) {
+            resolvedLastPrice = data.getPreviousClose();
+        }
+        if (resolvedLastPrice <= 0) {
+            return null;
+        }
+
         Heatmap.StockDetail stockDetail = Heatmap.StockDetail.builder()
             .symbol(symbol)
-            .name(symbol) // Use symbol as name if company name not available
-            .price(BigDecimal.valueOf(data.getLastPrice()))
+            .name(symbol)
+            .price(BigDecimal.valueOf(resolvedLastPrice))
             .quantity(BigDecimal.valueOf(quantity))
             .build();
-        
-        // Use domain methods to calculate values
-        double previousCloseVal = (data.getPreviousClose() != null && data.getPreviousClose() > 0) 
-                ? data.getPreviousClose() : (data.getOhlc() != null ? data.getOhlc().getClose() : 0.0);
-        BigDecimal previousPrice = BigDecimal.valueOf(previousCloseVal);
-        stockDetail.calculateChange(previousPrice)
-                  .calculateChangePercent(previousPrice)
-                  .calculateValue();
-                  
+
+        // previousClose only for day/period % (never OHLC open). Still compute value when LTP exists.
+        double previousCloseVal = (data.getPreviousClose() != null && data.getPreviousClose() > 0)
+                ? data.getPreviousClose()
+                : 0.0;
+        if (previousCloseVal > 0) {
+            BigDecimal previousPrice = BigDecimal.valueOf(previousCloseVal);
+            stockDetail.calculateChange(previousPrice)
+                      .calculateChangePercent(previousPrice);
+        }
+        stockDetail.calculateValue();
+
         if (changePercentOverride != null) {
             stockDetail.setChangePercent(changePercentOverride);
         }
-        
+
         stockDetail.updateColor();
-        
+
         return stockDetail;
     }
     

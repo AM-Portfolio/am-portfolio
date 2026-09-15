@@ -30,6 +30,12 @@ public class AdvancedAnalyticsRequest extends TimeFrameRequest {
     @com.fasterxml.jackson.annotation.JsonIgnore
     private transient java.util.Map<String, com.portfolio.model.market.MarketData> prefetchedMarketData;
 
+    /**
+     * Live OHLC/ticks for day movers and summary today%. Separate from period hist prefetch.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private transient java.util.Map<String, com.portfolio.model.market.MarketData> prefetchedLiveMarketData;
+
     @com.fasterxml.jackson.annotation.JsonIgnore
     private transient java.util.Map<String, com.am.common.amcommondata.model.security.SecurityModel> prefetchedSecurityDetails;
 
@@ -46,8 +52,12 @@ public class AdvancedAnalyticsRequest extends TimeFrameRequest {
         this.featureConfiguration = new FeatureConfiguration();
     }
 
+    /**
+     * Period analytics when a timeframe is set. Dates may be null; callers resolve via
+     * {@code HistoricalDataRequestFactory.resolveWindow}.
+     */
     public TimeFrameRequest getTimeFrameRequest() {
-        if (this.getFromDate() == null || this.getToDate() == null || this.getTimeFrame () == null) {
+        if (this.getTimeFrame() == null) {
             return null;
         }
         return TimeFrameRequest.builder()

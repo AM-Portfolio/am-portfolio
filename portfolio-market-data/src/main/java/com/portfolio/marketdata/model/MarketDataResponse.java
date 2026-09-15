@@ -57,16 +57,20 @@ public class MarketDataResponse {
      * @return A new MarketDataResponse with historical context
      */
     public static MarketDataResponse fromHistoricalData(HistoricalDataResponse historicalResponse, int latestPointIndex) {
-        if (historicalResponse == null || historicalResponse.getData() == null || 
-            historicalResponse.getData().getDataPoints() == null || 
-            historicalResponse.getData().getDataPoints().isEmpty() ||
-            latestPointIndex >= historicalResponse.getData().getDataPoints().size()) {
+        if (historicalResponse == null) {
             return null;
         }
-        
-        var dataPoints = historicalResponse.getData().getDataPoints();
+        var dataPoints = historicalResponse.effectiveDataPoints();
+        if (dataPoints.isEmpty() || latestPointIndex >= dataPoints.size()) {
+            return null;
+        }
+
         var latestPoint = dataPoints.get(latestPointIndex);
-        
+        String interval = historicalResponse.getInterval();
+        if (interval == null && historicalResponse.getData() != null) {
+            interval = historicalResponse.getData().getInterval();
+        }
+
         // Create the main response with the latest point as current data
         MarketDataResponse response = MarketDataResponse.builder()
             .instrumentToken(0) // Default value
@@ -79,8 +83,7 @@ public class MarketDataResponse {
                 .build())
             .historical(true)
             .timestamp(Instant.now())
-            .timeFrame(historicalResponse.getData().getInterval() != null ? 
-                      TimeFrame.valueOf(historicalResponse.getData().getInterval().toUpperCase()) : null)
+            .timeFrame(interval != null ? TimeFrame.fromValue(interval) : null)
             .build();
         
         // Add all historical data points
@@ -109,13 +112,13 @@ public class MarketDataResponse {
      * @return A new MarketDataResponse with historical context
      */
     public static MarketDataResponse fromHistoricalData(HistoricalDataResponse historicalResponse) {
-        if (historicalResponse == null || historicalResponse.getData() == null || 
-            historicalResponse.getData().getDataPoints() == null || 
-            historicalResponse.getData().getDataPoints().isEmpty()) {
+        if (historicalResponse == null) {
             return null;
         }
-        
-        var dataPoints = historicalResponse.getData().getDataPoints();
+        var dataPoints = historicalResponse.effectiveDataPoints();
+        if (dataPoints.isEmpty()) {
+            return null;
+        }
         return fromHistoricalData(historicalResponse, dataPoints.size() - 1);
     }
 }

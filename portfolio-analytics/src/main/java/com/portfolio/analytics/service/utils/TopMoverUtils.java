@@ -54,7 +54,8 @@ public class TopMoverUtils {
                 if (data.getPreviousClose() != null && data.getPreviousClose() > 0) {
                     refPrice = data.getPreviousClose();
                 } else {
-                    log.trace("No reference price for {}. Skipping from movers.", symbol);
+                    // Day % must use previousClose only (never OHLC open as a proxy).
+                    log.trace("No previousClose for {}. Skipping from movers.", symbol);
                     continue;
                 }
                 

@@ -66,6 +66,13 @@ public class MarketDataService {
             .maximumSize(20000)
             .build();
 
+    /** Prior-session closes for closed-market day% (avoid historical on every holdings hit). */
+    private final com.github.benmanes.caffeine.cache.Cache<String, Double> priorCloseCache =
+            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+            .expireAfterWrite(18, java.util.concurrent.TimeUnit.HOURS)
+            .maximumSize(20000)
+            .build();
+
     private final com.github.benmanes.caffeine.cache.Cache<String, com.portfolio.marketdata.model.HistoricalData> chartCache = 
             com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
             .expireAfterWrite(3, java.util.concurrent.TimeUnit.MINUTES)
@@ -197,52 +204,127 @@ public class MarketDataService {
                 validSymbols.size(), request.getFromDate(), request.getToDate(),
                 request.getInterval(), request.getFilterType());
 
-        List<List<String>> chunks = partitionSymbols(validSymbols);
+        // A2: prefer fewer larger START_END batches (cold 1Y SLO); wave still bounded.
+        List<List<String>> chunks = new ArrayList<>();
+        final int histChunkSize = 50;
+        for (int i = 0; i < validSymbols.size(); i += histChunkSize) {
+            chunks.add(validSymbols.subList(i, Math.min(i + histChunkSize, validSymbols.size())));
+        }
+        return fetchHistoricalChunks(chunks, request);
+    }
 
-        List<java.util.concurrent.CompletableFuture<Map<String, MarketData>>> futures = chunks.stream()
-            .map(chunk -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-                try {
-                    HistoricalDataRequest chunkRequest = HistoricalDataRequest.builder()
-                            .symbols(String.join(",", chunk))
-                            .fromDate(request.getFromDate())
-                            .toDate(request.getToDate())
-                            .interval(request.getInterval())
-                            .filterType(request.getFilterType())
-                            .instrumentType(request.getInstrumentType())
-                            .filterFrequency(request.getFilterFrequency())
-                            .continuous(request.getContinuous())
-                            .forceRefresh(request.getForceRefresh())
-                            .additionalParams(request.getAdditionalParams())
-                            .build();
+    /**
+     * Bounded parallel hist waves so market-data stays healthy without serializing 12× timeouts.
+     */
+    private Map<String, MarketData> fetchHistoricalChunks(
+            List<List<String>> chunks, HistoricalDataRequest request) {
+        Map<String, MarketData> merged = new HashMap<>();
+        if (chunks.isEmpty()) {
+            return merged;
+        }
 
-                    HistoricalDataResponseWrapper response = marketDataApiClient.getHistoricalData(chunkRequest).block();
+        int maxParallel = 4;
+        int readTimeoutMs = (config != null && config.getReadTimeout() > 0) ? config.getReadTimeout() : 45_000;
+        // Wave budget must exceed WebClient read timeout so we never getNow(empty) on in-flight OK work.
+        long waveTimeoutMs = Math.max(readTimeoutMs + 5_000L, 50_000L);
 
-                    if (response == null || response.getData() == null) {
-                        return java.util.Collections.<String, MarketData>emptyMap();
-                    }
+        for (int i = 0; i < chunks.size(); i += maxParallel) {
+            List<List<String>> wave = chunks.subList(i, Math.min(i + maxParallel, chunks.size()));
+            List<CompletableFuture<Map<String, MarketData>>> futures = wave.stream()
+                    .map(chunk -> CompletableFuture.supplyAsync(() -> {
+                        try {
+                            HistoricalDataRequest chunkRequest = HistoricalDataRequest.builder()
+                                    .symbols(String.join(",", chunk))
+                                    .fromDate(request.getFromDate())
+                                    .toDate(request.getToDate())
+                                    .interval(request.getInterval())
+                                    .filterType(request.getFilterType())
+                                    .instrumentType(request.getInstrumentType())
+                                    .filterFrequency(request.getFilterFrequency())
+                                    .continuous(request.getContinuous())
+                                    .forceRefresh(request.getForceRefresh())
+                                    .additionalParams(request.getAdditionalParams())
+                                    .build();
 
-                    Map<String, MarketData> chunkResult = new HashMap<>();
-                    for (Map.Entry<String, HistoricalDataResponse> entry : response.getData().entrySet()) {
-                        chunkResult.put(entry.getKey(), MarketDataConverter.fromHistoricalDataResponse(entry.getValue()));
-                    }
-                    return chunkResult;
-                } catch (Exception e) {
-                    log.warn("[HistoricalData chunk] Failed for chunk of {}: {}", chunk.size(), e.getMessage());
-                    return java.util.Collections.<String, MarketData>emptyMap();
+                            HistoricalDataResponseWrapper response =
+                                    marketDataApiClient.getHistoricalData(chunkRequest).block();
+                            if (response == null || response.getData() == null) {
+                                log.warn("[HistoricalData chunk] null/empty wrapper for {} symbols", chunk.size());
+                                return Collections.<String, MarketData>emptyMap();
+                            }
+                            Map<String, MarketData> chunkResult = new HashMap<>();
+                            int skipped = 0;
+                            for (Map.Entry<String, HistoricalDataResponse> entry : response.getData().entrySet()) {
+                                HistoricalDataResponse raw = entry.getValue();
+                                MarketData converted =
+                                        MarketDataConverter.fromHistoricalDataResponse(raw);
+                                if (converted != null) {
+                                    chunkResult.put(entry.getKey(), converted);
+                                } else {
+                                    skipped++;
+                                    if (skipped <= 2) {
+                                        int pts = raw == null ? -1 : raw.effectiveDataPoints().size();
+                                        log.warn(
+                                                "[HistoricalData chunk] convert null for {} (rawNull={}, pts={})",
+                                                entry.getKey(),
+                                                raw == null,
+                                                pts);
+                                    }
+                                }
+                            }
+                            if (chunkResult.isEmpty() && !response.getData().isEmpty()) {
+                                log.warn(
+                                        "[HistoricalData chunk] API returned {} symbols but 0 converted",
+                                        response.getData().size());
+                            }
+                            return chunkResult;
+                        } catch (Exception e) {
+                            log.warn("[HistoricalData chunk] Failed for chunk of {}: {}", chunk.size(), e.getMessage());
+                            return Collections.<String, MarketData>emptyMap();
+                        }
+                    }, externalApiExecutor))
+                    .collect(Collectors.toList());
+
+            long deadlineNanos = System.nanoTime()
+                    + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(waveTimeoutMs);
+            int incomplete = 0;
+            int convertedThisWave = 0;
+            for (CompletableFuture<Map<String, MarketData>> future : futures) {
+                long remainingMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+                        deadlineNanos - System.nanoTime());
+                if (remainingMs <= 0) {
+                    incomplete++;
+                    future.cancel(true);
+                    continue;
                 }
-            }, externalApiExecutor))
-            .collect(Collectors.toList());
+                try {
+                    Map<String, MarketData> part = future.get(
+                            remainingMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    if (part != null && !part.isEmpty()) {
+                        merged.putAll(part);
+                        convertedThisWave += part.size();
+                    }
+                } catch (java.util.concurrent.TimeoutException te) {
+                    incomplete++;
+                    future.cancel(true);
+                    log.warn("[HistoricalData] Chunk still incomplete after wave budget — cancelled");
+                } catch (Exception e) {
+                    incomplete++;
+                    log.warn("[HistoricalData] Chunk join failed: {}", e.getMessage());
+                }
+            }
+            log.info(
+                    "[HistoricalData] Wave done: converted={} incomplete={} waveSize={}",
+                    convertedThisWave,
+                    incomplete,
+                    wave.size());
+        }
 
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-            // Align with OHLC client timeout (32s) + small buffer
-            .orTimeout(35, java.util.concurrent.TimeUnit.SECONDS)
-            .exceptionally(e -> null)
-            .join();
-        Map<String, MarketData> merged = new java.util.HashMap<>();
-        futures.stream()
-            .filter(f -> !f.isCompletedExceptionally())
-            .forEach(f -> merged.putAll(f.getNow(java.util.Collections.emptyMap())));
-        
+        log.info("[HistoricalData] Merged {}/{} symbols across {} chunk(s) (maxParallel={})",
+                merged.size(),
+                chunks.stream().mapToInt(List::size).sum(),
+                chunks.size(),
+                maxParallel);
         return merged;
     }
 
@@ -536,6 +618,14 @@ public class MarketDataService {
     }
 
     public Map<String, MarketData> getMarketData(List<String> symbols) {
+        return getMarketData(symbols, false);
+    }
+
+    /**
+     * @param skipHistRepair when true (e.g. basket Preview), skip after-hours prior-close
+     *                       hist repair — Preview tables need LTP/close, not day%.
+     */
+    public Map<String, MarketData> getMarketData(List<String> symbols, boolean skipHistRepair) {
         if (symbols == null || symbols.isEmpty()) {
             return Collections.emptyMap();
         }
@@ -557,15 +647,16 @@ public class MarketDataService {
             .filter(s -> !result.containsKey(s))
             .collect(Collectors.toList());
 
+        boolean cashOpen = marketDataRedisService != null && marketDataRedisService.isCashMarketHours();
+
         if (missing.isEmpty()) {
             log.debug("[MarketData] All {} symbols served from L1", result.size());
-            return result;
+            return finalizeMarketData(result, cashOpen, skipHistRepair);
         }
 
         // Cash-open: prefer fresh last-trade caches.
         // Cash-closed: still use Redis/Mongo previousClose/lastPrice for basket APIs (avoid OHLC waves),
         // then fall through to OHLC only for true misses.
-        boolean cashOpen = marketDataRedisService != null && marketDataRedisService.isCashMarketHours();
         if (!cashOpen) {
             log.info("[MarketData] Cash session closed — using Redis/Mongo close prices before OHLC for {} missing",
                     missing.size());
@@ -596,7 +687,7 @@ public class MarketDataService {
         }
 
         if (missing.isEmpty()) {
-            return result;
+            return finalizeMarketData(result, cashOpen, skipHistRepair);
         }
 
         // 3. MongoDB cache (Kafka live stream / prior OHLC writes)
@@ -630,19 +721,25 @@ public class MarketDataService {
                             ? doc.getPreviousClose()
                             : null;
 
+                        double openPx = (doc.getOpenPrice() != null && doc.getOpenPrice() > 0)
+                                ? doc.getOpenPrice()
+                                : (previousClose != null ? previousClose : usable);
+                        double highPx = (doc.getHighPrice() != null && doc.getHighPrice() > 0)
+                                ? doc.getHighPrice() : Math.max(openPx, usable);
+                        double lowPx = (doc.getLowPrice() != null && doc.getLowPrice() > 0)
+                                ? doc.getLowPrice() : Math.min(openPx, usable);
                         MarketData md = MarketData.builder()
                             .symbol(doc.getSymbol())
                             .lastPrice(usable)
                             .previousClose(previousClose)
                             .timestamp(java.time.Instant.ofEpochMilli(doc.getTimestamp() != null ? doc.getTimestamp() : System.currentTimeMillis()))
-                            .ohlc(doc.getOpenPrice() != null && doc.getOpenPrice() > 0 
-                                ? com.portfolio.model.market.OhlcData.builder()
-                                    .open(doc.getOpenPrice())
-                                    .high(doc.getHighPrice())
-                                    .low(doc.getLowPrice())
+                            // Always attach OHLC when LTP exists so live heatmap never drops tick-only symbols.
+                            .ohlc(com.portfolio.model.market.OhlcData.builder()
+                                    .open(openPx)
+                                    .high(highPx)
+                                    .low(lowPx)
                                     .close(usable)
-                                    .build()
-                                : null)
+                                    .build())
                             .build();
                         result.put(doc.getSymbol(), md);
                         localCache.put(doc.getSymbol(), md);
@@ -660,7 +757,7 @@ public class MarketDataService {
 
         if (missing.isEmpty()) {
             log.info("[MarketData] All {} symbols served from caches.", result.size());
-            return result;
+            return finalizeMarketData(result, cashOpen, skipHistRepair);
         }
 
         // 4. Fetch missing from OHLC API with in-flight deduplication to prevent cache stampedes
@@ -754,9 +851,9 @@ public class MarketDataService {
                     waitFor.values().toArray(new CompletableFuture[0])
                 );
                 try {
-                    allWaiting.get(90, java.util.concurrent.TimeUnit.SECONDS);
+                    allWaiting.get(35, java.util.concurrent.TimeUnit.SECONDS);
                 } catch (java.util.concurrent.TimeoutException e) {
-                    log.warn("[InFlight] Coalesced futures timed out at 90s");
+                    log.warn("[InFlight] Coalesced futures timed out at 35s");
                 } catch (Exception e) {
                     log.warn("[InFlight] Error waiting for coalesced futures", e);
                 }
@@ -796,7 +893,144 @@ public class MarketDataService {
         // ─────────────────────────────────────────────────────────────────────────────
 
         log.info("[MarketData] Result: {}/{} symbols returned.", result.size(), symbols.size());
+        return finalizeMarketData(result, cashOpen, skipHistRepair);
+    }
+
+    private Map<String, MarketData> finalizeMarketData(Map<String, MarketData> result, boolean cashOpen) {
+        return finalizeMarketData(result, cashOpen, false);
+    }
+
+    private Map<String, MarketData> finalizeMarketData(
+            Map<String, MarketData> result, boolean cashOpen, boolean skipHistRepair) {
+        if (!cashOpen && !skipHistRepair) {
+            repairCollapsedPreviousClose(result);
+        }
         return result;
+    }
+
+    /**
+     * When session is closed, lastPrice often equals rolled previousClose → day% collapses to ~0.
+     * Prefer cached prior closes; historical lookback only for cache misses (once per symbol / 18h).
+     */
+    void repairCollapsedPreviousClose(Map<String, MarketData> result) {
+        if (result == null || result.isEmpty()) {
+            return;
+        }
+        List<String> needsPrior = new ArrayList<>();
+        int fromCache = 0;
+        for (Map.Entry<String, MarketData> e : result.entrySet()) {
+            MarketData md = e.getValue();
+            if (!needsPriorSessionClose(md)) {
+                continue;
+            }
+            Double cached = priorCloseCache.getIfPresent(e.getKey());
+            if (cached != null && cached > 0) {
+                // Cached prior (or attempt marker). Apply when it differs; otherwise leave as-is.
+                if (md.getLastPrice() == null
+                        || Math.abs(cached - md.getLastPrice()) / md.getLastPrice() >= 0.0001) {
+                    md.setPreviousClose(cached);
+                    localCache.put(e.getKey(), md);
+                }
+                fromCache++;
+            } else {
+                needsPrior.add(e.getKey());
+            }
+        }
+        if (needsPrior.isEmpty()) {
+            if (fromCache > 0) {
+                log.debug("[MarketData] Applied {} priorClose values from cache", fromCache);
+            }
+            return;
+        }
+        try {
+            LocalDate to = LocalDate.now(IST);
+            LocalDate from = to.minusDays(14);
+            HistoricalDataRequest request = HistoricalDataRequest.builder()
+                    .symbols(String.join(",", needsPrior))
+                    .fromDate(from.toString())
+                    .toDate(to.toString())
+                    .interval("day")
+                    .build();
+            Map<String, MarketData> hist = getHistoricalData(request);
+            if (hist == null || hist.isEmpty()) {
+                for (String symbol : needsPrior) {
+                    MarketData live = result.get(symbol);
+                    if (live != null && live.getLastPrice() != null && live.getLastPrice() > 0) {
+                        Double mark = live.getPreviousClose() != null && live.getPreviousClose() > 0
+                                ? live.getPreviousClose() : live.getLastPrice();
+                        priorCloseCache.put(symbol, mark);
+                    }
+                }
+                return;
+            }
+            int repaired = 0;
+            for (String symbol : needsPrior) {
+                MarketData live = result.get(symbol);
+                MarketData h = hist.get(symbol);
+                if (h == null) {
+                    h = hist.get(cleanSymbol(symbol));
+                }
+                if (live == null) {
+                    continue;
+                }
+                Double prior = h != null ? resolvePriorCloseFromHistorical(h, live.getLastPrice()) : null;
+                if (prior != null && prior > 0) {
+                    live.setPreviousClose(prior);
+                    priorCloseCache.put(symbol, prior);
+                    localCache.put(symbol, live);
+                    repaired++;
+                } else {
+                    // Mark attempted so we do not re-hit historical every request
+                    Double fallback = live.getPreviousClose() != null && live.getPreviousClose() > 0
+                            ? live.getPreviousClose()
+                            : live.getLastPrice();
+                    if (fallback != null && fallback > 0) {
+                        priorCloseCache.put(symbol, fallback);
+                    }
+                }
+            }
+            log.info("[MarketData] Repaired previousClose hist={}/{} cacheHit={}",
+                    repaired, needsPrior.size(), fromCache);
+        } catch (Exception e) {
+            log.warn("[MarketData] prior-close repair failed: {}", e.getMessage());
+        }
+    }
+
+    private static boolean needsPriorSessionClose(MarketData md) {
+        if (md == null) {
+            return false;
+        }
+        Double last = md.getLastPrice();
+        if (last == null || last <= 0) {
+            return false;
+        }
+        Double prev = md.getPreviousClose();
+        if (prev == null || prev <= 0) {
+            return true;
+        }
+        return Math.abs(last - prev) / prev < 0.0001;
+    }
+
+    private static Double resolvePriorCloseFromHistorical(MarketData historical, Double sessionClose) {
+        if (historical == null) {
+            return null;
+        }
+        List<MarketData.MarketDataPoint> points = historical.getDataPoints();
+        if (points != null && points.size() >= 2) {
+            MarketData.MarketDataPoint prior = points.get(points.size() - 2);
+            if (prior != null && prior.getOhlcData() != null && prior.getOhlcData().getClose() > 0) {
+                double close = prior.getOhlcData().getClose();
+                if (sessionClose == null || Math.abs(close - sessionClose) / sessionClose >= 0.0001) {
+                    return close;
+                }
+            }
+        }
+        if (historical.getPreviousClose() != null && historical.getPreviousClose() > 0
+                && (sessionClose == null
+                    || Math.abs(historical.getPreviousClose() - sessionClose) / sessionClose >= 0.0001)) {
+            return historical.getPreviousClose();
+        }
+        return null;
     }
 
     /**

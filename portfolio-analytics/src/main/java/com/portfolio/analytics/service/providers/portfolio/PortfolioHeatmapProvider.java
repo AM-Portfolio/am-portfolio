@@ -65,24 +65,43 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 // Retrieve market cap and sector data using the new helper
                 Map<String, com.am.common.amcommondata.model.security.SecurityModel> securityDetails = getSecurityDetails(portfolioSymbols, request);
                 
-                // Group stocks by sector directly from portfolio data
-                Map<String, List<String>> sectorToStocks = new HashMap<>();
+                // Align with sector allocation: group by security metadata sectors.
+                Map<String, List<String>> sectorToStocks = securityDetailsService
+                    .groupSymbolsBySector(portfolioSymbols, securityDetails);
+
+                // Equity holding sector fills gaps when security metadata is Unknown.
                 if (portfolio.getEquityModels() != null) {
                     for (EquityModel model : portfolio.getEquityModels()) {
                         String symbol = model.getSymbol();
-                        if (symbol != null && !symbol.trim().isEmpty()) {
-                            String sector = (model.getSector() != null && !model.getSector().trim().isEmpty() && !model.getSector().trim().equals("-"))
-                                ? model.getSector().trim() : "Unknown";
-                                
-                            // Fallback to security details if sector is missing in portfolio holdings
-                            if ("Unknown".equals(sector) && securityDetails != null && securityDetails.containsKey(symbol)) {
-                                com.am.common.amcommondata.model.security.SecurityModel security = securityDetails.get(symbol);
-                                if (security != null && security.getMetadata() != null && security.getMetadata().getSector() != null && !security.getMetadata().getSector().trim().isEmpty() && !security.getMetadata().getSector().trim().equals("-")) {
-                                    sector = security.getMetadata().getSector().trim();
+                        if (symbol == null || symbol.trim().isEmpty()) {
+                            continue;
+                        }
+                        String equitySector = (model.getSector() != null
+                                && !model.getSector().trim().isEmpty()
+                                && !model.getSector().trim().equals("-"))
+                            ? model.getSector().trim()
+                            : null;
+                        if (equitySector == null) {
+                            continue;
+                        }
+
+                        String currentSector = null;
+                        for (Map.Entry<String, List<String>> entry : sectorToStocks.entrySet()) {
+                            if (entry.getValue().contains(symbol)) {
+                                currentSector = entry.getKey();
+                                break;
+                            }
+                        }
+                        if (currentSector == null
+                                || "Unknown".equalsIgnoreCase(currentSector)
+                                || "-".equals(currentSector)) {
+                            if (currentSector != null) {
+                                sectorToStocks.get(currentSector).remove(symbol);
+                                if (sectorToStocks.get(currentSector).isEmpty()) {
+                                    sectorToStocks.remove(currentSector);
                                 }
                             }
-                                
-                            sectorToStocks.computeIfAbsent(sector, k -> new ArrayList<>()).add(symbol);
+                            sectorToStocks.computeIfAbsent(equitySector, k -> new ArrayList<>()).add(symbol);
                         }
                     }
                 }
@@ -93,9 +112,10 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 double[] totalPortfolioValue = {0.0};
                 groupMarketDataBySector(marketData, sectorToStocks, symbolToQuantity, sectorMarketDataMap, sectorQuantitiesMap, totalPortfolioValue);
                 
-                // Create map for change percent overrides from portfolio holdings
+                // Day/% live override only for 1D / live requests. Historical TF uses
+                // HeatmapUtils period return from hist previousClose → lastPrice.
                 Map<String, Double> symbolToChangePercent = new HashMap<>();
-                if (portfolio.getEquityModels() != null) {
+                if (shouldApplyTodayChangeOverride(request) && portfolio.getEquityModels() != null) {
                     for (EquityModel model : portfolio.getEquityModels()) {
                         if (model.getSymbol() != null && model.getTodayProfitLossPercentage() != null) {
                             symbolToChangePercent.put(model.getSymbol(), model.getTodayProfitLossPercentage());
@@ -118,7 +138,9 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 
                 log.info("Generated heatmap with {} sectors for portfolio: {}", sectorPerformances.size(), portfolioId);
                 
-                if (heatmapRedisService != null) {
+                if (heatmapRedisService != null
+                        && heatmap.getSectors() != null
+                        && !heatmap.getSectors().isEmpty()) {
                     heatmapRedisService.cacheHeatmap(heatmap, portfolioId, request);
                 }
                 
@@ -132,10 +154,21 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
      */
     private Heatmap createEmptyResult() {
         return Heatmap.builder()
-        
             .timestamp(Instant.now())
             .sectors(Collections.emptyList())
             .build();
+    }
+
+    /**
+     * Holdings day P&amp;L override applies only for live / 1D heatmap.
+     * Non-1D requests must use hist period returns from market data.
+     */
+    static boolean shouldApplyTodayChangeOverride(AdvancedAnalyticsRequest request) {
+        if (request == null || request.getTimeFrameRequest() == null) {
+            return true;
+        }
+        com.portfolio.model.market.TimeFrame tf = request.getTimeFrame();
+        return tf == null || tf == com.portfolio.model.market.TimeFrame.DAY;
     }
     
     /**

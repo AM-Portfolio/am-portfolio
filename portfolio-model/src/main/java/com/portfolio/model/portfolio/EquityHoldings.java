@@ -45,10 +45,12 @@ public class EquityHoldings {
 
    // Stock price metrics
    private Double averageBuyingPrice;
-   private Double currentPrice;
-   private Double percentageChange; // Stock price percentage change
+    private Double currentPrice;
+    private Double percentageChange; // Stock price percentage change
+    /** Newest tick/OHLC timestamp used for this holding's current price. */
+    private java.time.LocalDateTime priceAsOf;
 
-   /** Raw broker quantity (Kafka truth). */
+    /** Raw broker quantity (Kafka truth). */
    private Double rawQuantity;
    /** Sum of qty reserved into baskets. */
    private Double allocatedQuantity;

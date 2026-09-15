@@ -18,6 +18,12 @@ public class MarketDataApiConfig {
     private String baseUrl;
 
     /**
+     * Optional override for calendar APIs (prefer in-cluster market-data service).
+     * When empty, falls back to {@link #baseUrl}.
+     */
+    private String calendarBaseUrl;
+
+    /**
      * API path for OHLC data.
      */
     private String ohlcEndpoint;
@@ -43,14 +49,30 @@ public class MarketDataApiConfig {
     private String nseIndicesEndpoint;
 
     /**
+     * Live market open/closed status.
+     */
+    private String statusEndpoint = "/v1/market-calendar/status";
+
+    /**
+     * Session timings for a date.
+     */
+    private String timingsEndpoint = "/v1/market-calendar/timings";
+
+    /**
+     * Calendar HTTP timeout (ms). In-cluster status can exceed 200ms under load.
+     */
+    private int calendarTimeoutMs = 5000;
+
+    /**
      * Connection timeout in milliseconds.
      */
     private int connectionTimeout = 10000;
 
     /**
-     * Read timeout in milliseconds.
+     * Read timeout in milliseconds. Hist START_END often needs 5–15s+ under load;
+     * 10s default caused Merged 0/N and live-as-period fallback on PROD.
      */
-    private int readTimeout = 10000;
+    private int readTimeout = 45000;
 
     /**
      * Maximum number of retry attempts.
