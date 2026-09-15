@@ -505,7 +505,12 @@ public class EtfApiClient {
     }
 
     private EtfData toEtfData(EtfApiResponse response) {
-        if (response == null || response.getHoldings() == null) {
+        if (response == null) {
+            return null;
+        }
+        // Discover still needs a symbol stub when holdings are temporarily unavailable
+        // so performance (1Y/3Y/5Y) can be filled from market history.
+        if (response.getSymbol() == null && response.getName() == null && response.getHoldings() == null) {
             return null;
         }
         EtfData data = new EtfData();
@@ -518,7 +523,9 @@ public class EtfApiClient {
         data.setReturnsAsOf(response.getReturnsAsOf());
         data.setSparklineCloses(response.getSparklineCloses());
 
-        List<EtfHolding> holdings = response.getHoldings().stream()
+        List<EtfHolding> holdings = response.getHoldings() == null
+                ? List.of()
+                : response.getHoldings().stream()
                 .map(h -> {
                     EtfHolding holding = new EtfHolding();
                     holding.setIsin(h.getIsinCode());

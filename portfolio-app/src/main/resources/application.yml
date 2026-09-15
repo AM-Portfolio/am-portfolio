@@ -71,7 +71,7 @@ spring:
         key-prefix: "portfolio:intel:v1:"
       basket-etf:
         ttl: 86400 # 24 hours — enriched ETF constituents
-        key-prefix: "basket:etf:enriched:"
+        key-prefix: "basket:etf:enriched:v6:"
       basket-secmatch:
         ttl: 21600 # 6 hours — security name→ISIN matches
         key-prefix: "basket:secmatch:"
