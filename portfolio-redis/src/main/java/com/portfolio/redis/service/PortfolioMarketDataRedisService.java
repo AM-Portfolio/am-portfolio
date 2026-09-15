@@ -2,7 +2,6 @@ package com.portfolio.redis.service;
 
 import java.util.Collections;
 import com.portfolio.model.market.MarketData;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -15,13 +14,13 @@ import io.micrometer.observation.annotation.Observed;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class PortfolioMarketDataRedisService {
 
     
     @org.springframework.beans.factory.annotation.Value("${cache.redis.enabled:true}")
     private boolean isRedisEnabled;
 private final RedisTemplate<String, MarketData> portfolioMarketDataRedisTemplate;
+    private final org.springframework.beans.factory.ObjectProvider<com.portfolio.redis.session.CashSessionClock> cashSessionClock;
 
     @Value("${spring.data.redis.portfolio-market-data.key-prefix:portfolio:mktdata:}")
     private String keyPrefix;
@@ -29,6 +28,13 @@ private final RedisTemplate<String, MarketData> portfolioMarketDataRedisTemplate
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
     private static final LocalTime MARKET_OPEN  = LocalTime.of(9, 15);
     private static final LocalTime MARKET_CLOSE = LocalTime.of(15, 30);
+
+    public PortfolioMarketDataRedisService(
+            RedisTemplate<String, MarketData> portfolioMarketDataRedisTemplate,
+            org.springframework.beans.factory.ObjectProvider<com.portfolio.redis.session.CashSessionClock> cashSessionClock) {
+        this.portfolioMarketDataRedisTemplate = portfolioMarketDataRedisTemplate;
+        this.cashSessionClock = cashSessionClock;
+    }
 
     /**
      * Cache a batch of market data with smart TTL based on IST market hours.
@@ -89,10 +95,15 @@ private final RedisTemplate<String, MarketData> portfolioMarketDataRedisTemplate
     }
 
     /**
-     * NSE cash session: weekday 09:15–15:30 IST. Same clock {@link #computeSmartTtl()} already used.
-     * Last-trade Redis/Mongo is only valid in this window.
+     * NSE cash session via {@link com.portfolio.redis.session.CashSessionClock} when available;
+     * otherwise weekday 09:15–15:30 IST fallback.
      */
     public boolean isCashMarketHours() {
+        com.portfolio.redis.session.CashSessionClock clock =
+                cashSessionClock != null ? cashSessionClock.getIfAvailable() : null;
+        if (clock != null) {
+            return clock.isCashOpen();
+        }
         return isCashMarketHours(ZonedDateTime.now(IST));
     }
 
@@ -121,7 +132,7 @@ private final RedisTemplate<String, MarketData> portfolioMarketDataRedisTemplate
 
         // Short TTL while cash is open so holdings stay near dashboard quotes.
         // After close, keep until next open — caller must skip last-trade cache first.
-        if (isCashMarketHours(nowIst)) {
+        if (isCashMarketHours()) {
             ttl = Duration.ofMinutes(2);
         } else if (ttl.toMinutes() < 5) {
             ttl = Duration.ofMinutes(5);

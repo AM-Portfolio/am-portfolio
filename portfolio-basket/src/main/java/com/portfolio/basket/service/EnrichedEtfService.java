@@ -105,7 +105,13 @@ public class EnrichedEtfService {
             log.info("enrichment.cache=MISS key={} live=null durationMs={}", key, System.currentTimeMillis() - start);
             return null;
         }
-        etfApiClient.enrichHoldings(live.getHoldings());
+        if (live.getHoldings() != null && !live.getHoldings().isEmpty()
+                && isinCoverage(live.getHoldings()) >= 0.95) {
+            log.info("basket.preview.stage=enrich skipped=true reason=isinCoverage key={} holdings={}",
+                    key, live.getHoldings().size());
+        } else if (live.getHoldings() != null && !live.getHoldings().isEmpty()) {
+            etfApiClient.enrichHoldings(live.getHoldings());
+        }
         store(key, live);
         log.info("enrichment.cache=MISS key={} holdings={} durationMs={}",
                 key,

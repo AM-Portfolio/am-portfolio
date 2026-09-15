@@ -6,10 +6,13 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 
+import com.portfolio.marketdata.client.MarketCalendarClient;
 import com.portfolio.marketdata.client.MarketDataApiClient;
 import com.portfolio.marketdata.client.NseIndicesApiClient;
+import com.portfolio.marketdata.service.DefaultCashSessionClock;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
+import com.portfolio.redis.session.CashSessionClock;
 
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -25,6 +28,12 @@ public class MarketDataAutoConfiguration {
     @ConditionalOnMissingBean
     public MarketDataApiClient marketDataApiClient(WebClient.Builder webClientBuilder, MarketDataApiConfig config) {
         return new MarketDataApiClient(webClientBuilder, config);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(CashSessionClock.class)
+    public CashSessionClock cashSessionClock(MarketCalendarClient marketCalendarClient) {
+        return new DefaultCashSessionClock(marketCalendarClient);
     }
     
     @Bean

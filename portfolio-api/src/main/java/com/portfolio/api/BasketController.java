@@ -164,14 +164,18 @@ public class BasketController {
         log.info("Received Basket Preview Request - ETF: {}, User: {}, Portfolio: {}",
                 request.getEtfIsin(), request.getUserId(), request.getPortfolioId());
 
+        long t0 = System.nanoTime();
+        // Preview match is ISIN-based; skip sector enrich when holdings already well labeled.
         List<EquityHoldings> userHoldings = resolveUserHoldings(request.getUserId(),
-                request.getPortfolioId(), request.getUserHoldings());
-
-        log.info("Fetch User Holdings complete. Count: {}", userHoldings.size());
+                request.getPortfolioId(), request.getUserHoldings(), false, true);
+        log.info("basket.preview.stage=holdings durationMs={} count={} skipSectorEnrich=true",
+                (System.nanoTime() - t0) / 1_000_000L, userHoldings.size());
 
         try {
+            long tPreview = System.nanoTime();
             BasketOpportunity opportunity = basketEngineFacade.getPreview(request.getEtfIsin(), userHoldings);
-            log.info("Basket Preview generated successfully for ETF: {}", request.getEtfIsin());
+            log.info("basket.preview.stage=total durationMs={} etf={}",
+                    (System.nanoTime() - tPreview) / 1_000_000L, request.getEtfIsin());
             return opportunity;
         } catch (Exception e) {
             log.error("Error generating Basket Preview for ETF: " + request.getEtfIsin(), e);

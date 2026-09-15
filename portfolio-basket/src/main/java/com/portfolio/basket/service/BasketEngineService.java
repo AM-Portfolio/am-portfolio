@@ -268,7 +268,7 @@ public class BasketEngineService {
         }
         Set<String> symbolsToFetch = basketPriceResolver.unionSymbols(etfSymbols, userHoldings);
         Map<String, Double> prefetchedPrices =
-                basketPriceResolver.fetchPricesWithHoldingsFallback(symbolsToFetch, userHoldings);
+                basketPriceResolver.fetchPricesWithHoldingsFallback(symbolsToFetch, userHoldings, true);
 
         BasketOpportunity opp = overlapCalculator.calculateOverlap(
                 etfIsin, etf, ctx.getUserMap(), ctx.getUserSectorMap(), ctx.getAllUserHoldings(),

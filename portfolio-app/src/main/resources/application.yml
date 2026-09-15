@@ -64,7 +64,7 @@ spring:
         key-prefix: "portfolio:mktdata:"
         # Note: TTL is computed dynamically by PortfolioMarketDataRedisService.computeSmartTtl()
       portfolio-holdings:
-        ttl: 900 # 15 minutes in seconds
+        ttl: 900 # off-hours max; cash hours use smart 90s TTL in PortfolioHoldingsRedisService
         key-prefix: "portfolio:holdings:"
       portfolio-intel:
         ttl: 90 # seconds — Overview intelligence warm cache (fail-open)
@@ -233,19 +233,24 @@ market-data:
     read-timeout-ms: ${MARKET_DATA_READ_TIMEOUT_MS:32000}
   api:
     base-url: ${MARKET_DATA_API_URL:http://am-market-data:8080}
+    # Calendar must hit in-cluster market-data; public MARKET_DATA_API_URL gateway strips paths.
+    calendar-base-url: ${MARKET_DATA_CALENDAR_BASE_URL:http://am-market-data:8080}
     ohlc-endpoint: /v1/market-data/ohlc
     historical-data-endpoint: /v1/market-data/historical-data
     historical-charts-endpoint: /v1/analysis/historical-charts
     securities-endpoint: /v1/securities
     nse-indices-endpoint: /v1/indices
-    read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:32000}
+    status-endpoint: /v1/market-calendar/status
+    timings-endpoint: /v1/market-calendar/timings
+    calendar-timeout-ms: ${MARKET_DATA_CALENDAR_TIMEOUT_MS:5000}
+    # Hist START_END batches often need 5–8s; 10s was too tight under load.
+    read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:45000}
     connection-timeout: 3000
     max-retry-attempts: 0
-  batch:
-    chunk-size: ${MARKET_DATA_BATCH_CHUNK_SIZE:20}
-    parallel-batching-enabled: ${MARKET_DATA_PARALLEL_BATCHING:true}
-    # Cap concurrent OHLC chunks so one advanced page cannot stampede Upstox
-    max-parallel-chunks: ${MARKET_DATA_MAX_PARALLEL_CHUNKS:2}
+    batch:
+      chunk-size: ${MARKET_DATA_BATCH_CHUNK_SIZE:50}
+      parallel-batching-enabled: ${MARKET_DATA_PARALLEL_BATCHING:true}
+      max-parallel-chunks: ${MARKET_DATA_MAX_PARALLEL_CHUNKS:4}
 
 # OpenAPI Documentation
 springdoc:

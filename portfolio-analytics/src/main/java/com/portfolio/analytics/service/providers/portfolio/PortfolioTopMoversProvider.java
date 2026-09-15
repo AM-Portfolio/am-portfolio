@@ -45,42 +45,17 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
         int limit = moversLimit != null ? moversLimit : 
                     (request.getPagination().isReturnAllData() ? DEFAULT_LIMIT : request.getPagination().getSize());
         
-        log.info("Generating top {} movers for portfolio {} with time frame, pagination, and feature configuration", 
+        log.info("Generating top {} movers for portfolio {} (always live day change)", 
                 limit, portfolioId);
         
-        // Before calling processPortfolioData, explicitly clear prefetched 
-        // live market data if a historical timeframe is requested.
-        // This forces AbstractPortfolioAnalyticsProvider to fetch historical data.
-        AdvancedAnalyticsRequest effectiveRequest = request;
-        if (request.getTimeFrameRequest() != null && request.getPrefetchedMarketData() != null) {
-            // Prefetched data is live; clear it so historical fetch is triggered
-            effectiveRequest = AdvancedAnalyticsRequest.builder()
-                .coreIdentifiers(request.getCoreIdentifiers())
-                .pagination(request.getPagination())
-                .featureToggles(request.getFeatureToggles())
-                .featureConfiguration(request.getFeatureConfiguration())
-                .prefetchedPortfolio(request.getPrefetchedPortfolio())
-                .prefetchAttempted(request.isPrefetchAttempted())
-                // Intentionally omit prefetchedMarketData
-                .prefetchedMarketData(null)
-                // Copy prefetched security details to avoid redundant lookups
-                .prefetchedSecurityDetails(request.getPrefetchedSecurityDetails())
-                // Copy timeframe data
-                .fromDate(request.getFromDate())
-                .toDate(request.getToDate())
-                .timeFrame(request.getTimeFrame())
-                .build();
-        }
-        
-        // Use the common portfolio data processing method
+        // Always use live market data for Overview day movers — ignore chart timeframe
+        // so historical candle open is never mistaken for previousClose.
         return processPortfolioData(
             portfolioId,
-            effectiveRequest,
+            request,
             this::createEmptyResponse,
             (portfolio, portfolioSymbols, marketData) -> {
-                // Get sector and quantity information for symbols directly from portfolio data
                 Map<String, String> symbolSectors = new HashMap<>();
-                Map<String, Double> symbolToQuantity = new HashMap<>();
                 if (portfolio.getEquityModels() != null) {
                     for (com.am.common.amcommondata.model.asset.equity.EquityModel model : portfolio.getEquityModels()) {
                         String symbol = model.getSymbol();
@@ -88,16 +63,23 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
                             String sector = (model.getSector() != null && !model.getSector().trim().isEmpty() && !model.getSector().trim().equals("-"))
                                 ? model.getSector().trim() : "Unknown";
                             symbolSectors.put(symbol, sector);
-                            
-                            // Quantity is no longer needed for Top Movers
                         }
                     }
                 }
                 
-                // Calculate top movers using the determined limit and include sector information
                 return TopMoverUtils.buildTopMoversResponse(portfolioSymbols, marketData, limit, portfolioId, true, symbolSectors);
             }
         );
+    }
+
+    @Override
+    protected Map<String, com.portfolio.model.market.MarketData> resolvePrefetchedMarketData(AdvancedAnalyticsRequest request) {
+        if (request != null
+                && request.getPrefetchedLiveMarketData() != null
+                && !request.getPrefetchedLiveMarketData().isEmpty()) {
+            return request.getPrefetchedLiveMarketData();
+        }
+        return super.resolvePrefetchedMarketData(request);
     }
 
     

@@ -1,6 +1,7 @@
 package com.portfolio.service.portfolio;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Service;
 import com.am.common.amcommondata.service.PortfolioSnapshotService;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.redis.service.PortfolioIntradayRedisService;
+import com.portfolio.redis.session.CashSessionClock;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.IntradayDataPoint;
 import com.portfolio.model.portfolio.PortfolioHoldings;
@@ -36,17 +38,22 @@ public class PortfolioIntradayService {
     
     private final PortfolioDocumentRepository portfolioDocumentRepository;
 
+    @org.springframework.lang.Nullable
+    private final CashSessionClock cashSessionClock;
+
     public PortfolioIntradayService(
             PortfolioSnapshotService snapshotService,
             PortfolioHoldingsService holdingsService,
             MarketDataService marketDataService,
             @org.springframework.lang.Nullable PortfolioIntradayRedisService intradayRedisService,
-            PortfolioDocumentRepository portfolioDocumentRepository) {
+            PortfolioDocumentRepository portfolioDocumentRepository,
+            @org.springframework.lang.Nullable CashSessionClock cashSessionClock) {
         this.snapshotService = snapshotService;
         this.holdingsService = holdingsService;
         this.marketDataService = marketDataService;
         this.intradayRedisService = intradayRedisService;
         this.portfolioDocumentRepository = portfolioDocumentRepository;
+        this.cashSessionClock = cashSessionClock;
     }
 
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
@@ -56,7 +63,9 @@ public class PortfolioIntradayService {
     public List<IntradayDataPoint> getIntraday(String userId, String portfolioId) {
         LocalDate today = LocalDate.now(IST);
         LocalTime nowIST = LocalTime.now(IST);
-        boolean marketOpen = !nowIST.isBefore(MARKET_OPEN) && !nowIST.isAfter(MARKET_CLOSE);
+        boolean marketOpen = cashSessionClock != null
+                ? cashSessionClock.isCashOpen()
+                : (!nowIST.isBefore(MARKET_OPEN) && !nowIST.isAfter(MARKET_CLOSE));
 
         // ── CACHE CHECK ───────────────────────────────────────────────────────────
         Optional<List<IntradayDataPoint>> cached = Optional.empty();
@@ -139,9 +148,13 @@ public class PortfolioIntradayService {
         java.time.DayOfWeek dayOfWeek = today.getDayOfWeek();
         boolean isWeekend = dayOfWeek == java.time.DayOfWeek.SATURDAY || dayOfWeek == java.time.DayOfWeek.SUNDAY;
         boolean preMarket = nowIST.isBefore(MARKET_OPEN);
+        boolean skipCharts = cashSessionClock != null
+                ? !cashSessionClock.isCashOpen()
+                : (isWeekend || preMarket);
 
-        if (isWeekend || preMarket) {
-            log.info("[Intraday] Skipping 1D chart fetch because market is closed (weekend/pre-market).");
+        if (skipCharts) {
+            log.info("[Intraday] Skipping 1D chart fetch because cash session is closed (reason={}).",
+                    cashSessionClock != null ? cashSessionClock.reason() : "weekend/pre-market");
         } else {
             try {
                 chartResponse = marketDataService.getHistoricalCharts(symbols, "1D");

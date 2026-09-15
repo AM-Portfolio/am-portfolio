@@ -72,6 +72,20 @@ public class PortfolioAnalyticsController {
         if (request.getCoreIdentifiers() == null) {
             request.setCoreIdentifiers(new com.portfolio.model.analytics.request.CoreIdentifiers());
         }
+        if (request.getFeatureToggles() == null) {
+            request.setFeatureToggles(new com.portfolio.model.analytics.request.FeatureToggles());
+        }
+        // Empty body / all-false toggles → enable full advanced payload (UI and curl probes).
+        var toggles = request.getFeatureToggles();
+        if (!toggles.isIncludeHeatmap()
+                && !toggles.isIncludeMovers()
+                && !toggles.isIncludeSectorAllocation()
+                && !toggles.isIncludeMarketCapAllocation()) {
+            toggles.setIncludeHeatmap(true);
+            toggles.setIncludeMovers(true);
+            toggles.setIncludeSectorAllocation(true);
+            toggles.setIncludeMarketCapAllocation(true);
+        }
 
         log.info("REST request for advanced analytics on portfolio: {} with timeframe: {} to {}",
                 portfolioId, request.getTimeFrame());

@@ -114,6 +114,29 @@ class PortfolioCalculatorTest {
     }
 
     @Test
+    void enrichHolding_shouldNotUseOhlcOpenAsPreviousCloseProxy() {
+        MarketData data = MarketData.builder()
+            .symbol("TCS")
+            .lastPrice(3300.0)
+            .ohlc(OhlcData.builder().open(3200.0).close(3250.0).build())
+            // NO previousClose — open must NOT be used as day baseline
+            .build();
+        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", data));
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+
+        holding.setTodayGainLoss(500.0);
+        holding.setTodayGainLossPercentage(5.0);
+        holding.setPercentageChange(1.5);
+
+        List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
+
+        assertNull(results.get(0).getTodayGainLoss());
+        assertNull(results.get(0).getTodayGainLossPercentage());
+        assertNull(results.get(0).getPercentageChange());
+        assertEquals(3300.0, results.get(0).getCurrentPrice());
+    }
+
+    @Test
     void enrichHolding_shouldNotCalculateDailyPnL_whenPreviousCloseIsMissing() {
         // Given: Market data with no previousClose and no open price
         MarketData data = MarketData.builder()

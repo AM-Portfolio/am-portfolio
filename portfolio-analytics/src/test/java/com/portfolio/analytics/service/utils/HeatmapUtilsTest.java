@@ -11,6 +11,8 @@ class HeatmapUtilsTest {
     private MarketData md(double last, double open, double close) {
         MarketData m = new MarketData();
         m.setLastPrice(last);
+        // previousClose is the day/period baseline (converter sets this for hist).
+        m.setPreviousClose(open > 0 ? open : null);
         m.setOhlc(OhlcData.builder().open(open).close(close).build());
         return m;
     }
@@ -35,7 +37,16 @@ class HeatmapUtilsTest {
         assertEquals(0.0, metrics.getPerformance());
     }
 
-    @Test void sectorMetrics_nullOhlcSkipped() {
+    @Test void sectorMetrics_nullOhlc_usesPreviousClose() {
+        MarketData m = new MarketData();
+        m.setLastPrice(110.0);
+        m.setPreviousClose(100.0);
+        m.setOhlc(null);
+        var metrics = HeatmapUtils.calculateSectorMetrics(List.of(m));
+        assertEquals(10.0, metrics.getChangePercent());
+    }
+
+    @Test void sectorMetrics_nullOhlc_noPreviousCloseSkipped() {
         MarketData m = new MarketData();
         m.setLastPrice(100.0);
         m.setOhlc(null);
@@ -102,11 +113,25 @@ class HeatmapUtilsTest {
         assertNull(HeatmapUtils.convertToStockDetail("SYM", null, 10));
     }
 
-    @Test void convertToStockDetail_nullOhlc() {
+    @Test void convertToStockDetail_nullOhlc_withLtpAndPrevClose() {
+        MarketData m = new MarketData();
+        m.setLastPrice(110.0);
+        m.setPreviousClose(100.0);
+        m.setOhlc(null);
+        var detail = HeatmapUtils.convertToStockDetail("SYM", m, 10);
+        assertNotNull(detail);
+        assertEquals("SYM", detail.getSymbol());
+        assertEquals(0, detail.getValue().compareTo(java.math.BigDecimal.valueOf(1100.0)));
+        assertEquals(10.0, detail.getChangePercent(), 0.01);
+    }
+
+    @Test void convertToStockDetail_nullOhlc_ltpOnly_stillHasValue() {
         MarketData m = new MarketData();
         m.setLastPrice(100.0);
         m.setOhlc(null);
-        assertNull(HeatmapUtils.convertToStockDetail("SYM", m, 10));
+        var detail = HeatmapUtils.convertToStockDetail("SYM", m, 5);
+        assertNotNull(detail);
+        assertEquals(0, detail.getValue().compareTo(java.math.BigDecimal.valueOf(500.0)));
     }
 
     @Test void convertToStockDetail_valid() {
@@ -115,16 +140,17 @@ class HeatmapUtilsTest {
         assertEquals("SYM", detail.getSymbol());
     }
 
-    @Test void createStockDetails_filtersNulls() {
+    @Test void createStockDetails_includesPricedWithoutOhlc() {
         MarketData nullOhlc = new MarketData();
         nullOhlc.setLastPrice(100.0);
+        nullOhlc.setPreviousClose(90.0);
         nullOhlc.setOhlc(null);
 
         var details = HeatmapUtils.createStockDetails(
                 List.of(md(110, 100, 105), nullOhlc),
                 List.of(10.0, 5.0),
                 List.of("A", "B"));
-        assertEquals(1, details.size());
+        assertEquals(2, details.size());
     }
 
     @Test void createSectorPerformance_basic() {
