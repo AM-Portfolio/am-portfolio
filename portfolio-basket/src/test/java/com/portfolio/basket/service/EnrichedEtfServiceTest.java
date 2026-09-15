@@ -34,13 +34,17 @@ class EnrichedEtfServiceTest {
     @Mock
     private BasketCatalogService catalogService;
 
+    @Mock
+    private EtfPerformanceEnricher performanceEnricher;
+
     private EnrichedEtfService service;
 
     @BeforeEach
     void setUp() {
-        service = new EnrichedEtfService(etfApiClient, basketEtfRedisService, catalogService);
+        service = new EnrichedEtfService(etfApiClient, basketEtfRedisService, catalogService, performanceEnricher);
         ReflectionTestUtils.setField(service, "etfL1TtlSeconds", 86400L);
         service.initL1();
+        lenient().when(performanceEnricher.fillMissing(any())).thenReturn(0);
     }
 
     @Test
@@ -51,7 +55,7 @@ class EnrichedEtfServiceTest {
 
     @Test
     void getEnrichedEtf_FetchesFromApi_WhenRedisFailsOpen() {
-        EnrichedEtfService noRedis = new EnrichedEtfService(etfApiClient, null, catalogService);
+        EnrichedEtfService noRedis = new EnrichedEtfService(etfApiClient, null, catalogService, performanceEnricher);
         ReflectionTestUtils.setField(noRedis, "etfL1TtlSeconds", 86400L);
         noRedis.initL1();
 
