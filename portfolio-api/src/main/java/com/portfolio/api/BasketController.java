@@ -88,11 +88,12 @@ public class BasketController {
         return response;
     }
 
-    @Operation(summary = "Get /my", description = "Endpoint to getMyBaskets", operationId = "getMyBaskets")
+    @Operation(summary = "Get /my", description = "List baskets owned by the caller. userId defaults to JWT subject.", operationId = "getMyBaskets")
     @GetMapping("/my")
     public List<BasketSummaryDto> getMyBaskets(
-            @RequestParam String userId, @RequestParam(required = false) String portfolioId) {
-        return basketReadService.findBasketsByOwner(userId, portfolioId);
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String portfolioId) {
+        return basketReadService.findBasketsByOwner(resolveOwnerUserId(userId), portfolioId);
     }
 
     @Operation(summary = "Post /opportunities", description = "Endpoint to getOpportunities", operationId = "getOpportunities")
@@ -227,12 +228,12 @@ public class BasketController {
         return basketPortfolioCreateService.create(request);
     }
 
-    @Operation(summary = "List basket drafts", description = "List durable basket drafts for a user", operationId = "listBasketDrafts")
+    @Operation(summary = "List basket drafts", description = "List durable basket drafts for the caller. userId defaults to JWT subject.", operationId = "listBasketDrafts")
     @GetMapping("/drafts")
     public BasketDraftDtos.BasketDraftListResponse listDrafts(
-            @RequestParam String userId,
+            @RequestParam(required = false) String userId,
             @RequestParam(required = false) String portfolioId) {
-        return basketDraftService.listDrafts(userId, portfolioId);
+        return basketDraftService.listDrafts(resolveOwnerUserId(userId), portfolioId);
     }
 
     @Operation(summary = "Upsert basket draft", description = "Save or update a basket draft (max 5 per user)", operationId = "upsertBasketDraft")
@@ -249,21 +250,21 @@ public class BasketController {
         return basketDraftService.upsert(request);
     }
 
-    @Operation(summary = "Get basket draft", description = "Load a full basket draft snapshot", operationId = "getBasketDraft")
+    @Operation(summary = "Get basket draft", description = "Load a full basket draft snapshot. userId defaults to JWT subject.", operationId = "getBasketDraft")
     @GetMapping("/drafts/{draftId}")
     public BasketDraftDtos.BasketDraftDetailDto getDraft(
             @PathVariable String draftId,
-            @RequestParam String userId) {
-        return basketDraftService.getDraft(draftId, userId);
+            @RequestParam(required = false) String userId) {
+        return basketDraftService.getDraft(draftId, resolveOwnerUserId(userId));
     }
 
-    @Operation(summary = "Delete basket draft", description = "Hard-delete a basket draft", operationId = "deleteBasketDraft")
+    @Operation(summary = "Delete basket draft", description = "Hard-delete a basket draft. userId defaults to JWT subject.", operationId = "deleteBasketDraft")
     @DeleteMapping("/drafts/{draftId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteDraft(
             @PathVariable String draftId,
-            @RequestParam String userId) {
-        basketDraftService.deleteDraft(draftId, userId);
+            @RequestParam(required = false) String userId) {
+        basketDraftService.deleteDraft(draftId, resolveOwnerUserId(userId));
     }
 
     @Operation(summary = "Get /{basketId}", description = "Endpoint to getBasketDetail", operationId = "getBasketDetail")
@@ -349,6 +350,13 @@ public class BasketController {
         private Boolean includeHeld;
         private BasketOpportunity opportunity;
         private List<String> excludedSymbols;
+    }
+
+    private String resolveOwnerUserId(String userId) {
+        if (userId != null && !userId.isBlank()) {
+            return userId.trim();
+        }
+        return com.am.security.context.UserContext.getUserIdOrThrow();
     }
 
     private List<EquityHoldings> resolveUserHoldings(String userId, String portfolioId,

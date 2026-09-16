@@ -349,6 +349,9 @@ cache:
 portfolio:
   redis:
     enabled: ${PORTFOLIO_REDIS_ENABLED:false}
+  analysis:
+    # Abort cold analysis before Cloudflare origin timeout (~100–125s).
+    budget-ms: ${PORTFOLIO_ANALYSIS_BUDGET_MS:90000}
   intelligence:
     # Primary history benchmark (beta / relative return). Use "SENSEX" or "NIFTY 50".
     primary-benchmark-symbol: ${PORTFOLIO_INTEL_BENCHMARK:NIFTY 50}

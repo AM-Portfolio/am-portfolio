@@ -1,11 +1,15 @@
 package com.portfolio.service.portfolio;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
@@ -32,15 +36,20 @@ public class PortfolioAnalysisService {
     @org.springframework.lang.Nullable
     private final PortfolioAnalysisRedisService portfolioAnalysisRedisService;
 
+    /** Fail before Cloudflare origin timeout (~100–125s). */
+    private final Duration analysisBudget;
+
     public PortfolioAnalysisService(
             PortfolioService portfolioService,
             StockPerformanceService stockPerformanceService,
             PortfolioAnalysisBuilder portfolioAnalysisBuilder,
-            @org.springframework.lang.Nullable PortfolioAnalysisRedisService portfolioAnalysisRedisService) {
+            @org.springframework.lang.Nullable PortfolioAnalysisRedisService portfolioAnalysisRedisService,
+            @Value("${portfolio.analysis.budget-ms:90000}") long analysisBudgetMs) {
         this.portfolioService = portfolioService;
         this.stockPerformanceService = stockPerformanceService;
         this.portfolioAnalysisBuilder = portfolioAnalysisBuilder;
         this.portfolioAnalysisRedisService = portfolioAnalysisRedisService;
+        this.analysisBudget = Duration.ofMillis(Math.max(5_000L, analysisBudgetMs));
     }
 
     public PortfolioAnalysis analyzePortfolio(
@@ -59,13 +68,14 @@ public class PortfolioAnalysisService {
             }
 
             Instant startProcessing = Instant.now();
-            log.info("Starting fresh portfolio analysis - Portfolio: {}, User: {}, Interval: {}", 
-                    portfolioId, userId, interval != null ? interval.getCode() : "null");
+            log.info("Starting fresh portfolio analysis - Portfolio: {}, User: {}, Interval: {}, budgetMs={}", 
+                    portfolioId, userId, interval != null ? interval.getCode() : "null", analysisBudget.toMillis());
             
             List<StockPerformance> performances = getPortfolioPerformances(portfolioId, interval);
             if (performances == null) {
                 return null;
             }
+            enforceBudget(startProcessing, "after performances");
 
             PortfolioAnalysis analysis = portfolioAnalysisBuilder.buildAnalysis(portfolioId, 
                 userId, 
@@ -75,15 +85,29 @@ public class PortfolioAnalysisService {
                 interval,
                 startProcessing
             );
+            long totalMs = Duration.between(startProcessing, Instant.now()).toMillis();
+            log.info("Fresh portfolio analysis complete - Portfolio: {}, totalMs={}", portfolioId, totalMs);
 
             if (portfolioAnalysisRedisService != null) {
                 portfolioAnalysisRedisService.cachePortfolioAnalysis(analysis, portfolioId, userId, interval);
             }
             return analysis;
 
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (Exception e) {
             log.error("Error analyzing portfolio {}: {}", portfolioId, e.getMessage(), e);
             return null;
+        }
+    }
+
+    private void enforceBudget(Instant startProcessing, String stage) {
+        Duration elapsed = Duration.between(startProcessing, Instant.now());
+        if (elapsed.compareTo(analysisBudget) > 0) {
+            log.warn("Portfolio analysis budget exceeded at {} — elapsedMs={} budgetMs={}",
+                    stage, elapsed.toMillis(), analysisBudget.toMillis());
+            throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT,
+                    "Portfolio analysis exceeded time budget (" + analysisBudget.toMillis() + "ms) at " + stage);
         }
     }
 

@@ -58,32 +58,50 @@ public class PortfolioAnalysisBuilder {
             .build();
     }
 
+    /**
+     * Intervals that need hist lookbacks for analysis. Sub-day windows (5m–1H) are
+     * skipped on the OVERALL path — they caused up to 11 sequential market-data hist
+     * waves and Cloudflare 524s (~125s). When a specific interval is requested, only
+     * that interval is computed.
+     */
+    static List<TimeInterval> intervalsForMetrics(TimeInterval currentInterval) {
+        if (currentInterval != null && currentInterval.getDuration() != null) {
+            return List.of(currentInterval);
+        }
+        return List.of(
+                TimeInterval.ONE_DAY,
+                TimeInterval.ONE_WEEK,
+                TimeInterval.ONE_MONTH,
+                TimeInterval.THREE_MONTHS,
+                TimeInterval.SIX_MONTHS,
+                TimeInterval.ONE_YEAR);
+    }
+
     public Map<TimeInterval, PerformanceMetrics> buildTimeBasedMetrics(
             List<StockPerformance> performances, 
             TimeInterval currentInterval) {
         Map<TimeInterval, PerformanceMetrics> metrics = new HashMap<>();
-        
-        for (TimeInterval interval : TimeInterval.values()) {
-            if (interval.getDuration() != null) {
-                Instant startTime = Instant.now().minus(interval.getDuration());
-                double startValue = stockPerformanceService.calculateHistoricalValue(performances, startTime);
-                double endValue = stockPerformanceService.calculateCurrentValue(performances);
-                
-                double valueChange = endValue - startValue;
-                double percentageChange = startValue != 0 ? (valueChange / startValue) * 100 : 0;
-                
-                metrics.put(interval, PerformanceMetrics.builder()
-                    .interval(interval)
-                    .startValue(startValue)
-                    .endValue(endValue)
-                    .valueChange(valueChange)
-                    .percentageChange(percentageChange)
-                    .startTime(startTime)
-                    .endTime(Instant.now())
-                    .build());
-            }
+        double endValue = stockPerformanceService.calculateCurrentValue(performances);
+        Instant endTime = Instant.now();
+
+        for (TimeInterval interval : intervalsForMetrics(currentInterval)) {
+            Instant startTime = endTime.minus(interval.getDuration());
+            double startValue = stockPerformanceService.calculateHistoricalValue(performances, startTime);
+
+            double valueChange = endValue - startValue;
+            double percentageChange = startValue != 0 ? (valueChange / startValue) * 100 : 0;
+
+            metrics.put(interval, PerformanceMetrics.builder()
+                .interval(interval)
+                .startValue(startValue)
+                .endValue(endValue)
+                .valueChange(valueChange)
+                .percentageChange(percentageChange)
+                .startTime(startTime)
+                .endTime(endTime)
+                .build());
         }
-        
+
         return metrics;
     }
 

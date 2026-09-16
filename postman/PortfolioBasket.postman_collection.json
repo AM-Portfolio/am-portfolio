@@ -7,6 +7,38 @@
     },
     "item": [
         {
+            "name": "Get My Baskets (JWT userId)",
+            "request": {
+                "method": "GET",
+                "header": [
+                    { "key": "Authorization", "value": "Bearer {{access_token}}" }
+                ],
+                "url": {
+                    "raw": "{{portfolio_base_url}}/v1/basket/my",
+                    "host": ["{{portfolio_base_url}}"],
+                    "path": ["v1", "basket", "my"]
+                },
+                "description": "userId is optional; defaults to JWT subject."
+            },
+            "response": []
+        },
+        {
+            "name": "List Basket Drafts (JWT userId)",
+            "request": {
+                "method": "GET",
+                "header": [
+                    { "key": "Authorization", "value": "Bearer {{access_token}}" }
+                ],
+                "url": {
+                    "raw": "{{portfolio_base_url}}/v1/basket/drafts",
+                    "host": ["{{portfolio_base_url}}"],
+                    "path": ["v1", "basket", "drafts"]
+                },
+                "description": "userId is optional; defaults to JWT subject."
+            },
+            "response": []
+        },
+        {
             "name": "Get Opportunities",
             "request": {
                 "method": "POST",
@@ -173,22 +205,14 @@
                 ],
                 "body": {
                     "mode": "raw",
-                    "raw": "{\n    \"etfIsin\": \"INF204KB14I2\",\n    \"userId\": \"ssd2658\",\n    \"portfolioId\": \"163d0143-4fcb-480c-ac20-622f14e0e293\"\n}"
+                    "raw": "{\n    \"etfIsin\": \"BANKBEES\",\n    \"userId\": \"{{userId}}\",\n    \"portfolioId\": \"{{portfolioId}}\"\n}"
                 },
                 "url": {
-                    "raw": "http://localhost:8062/v1/basket/preview",
-                    "protocol": "http",
-                    "host": [
-                        "localhost"
-                    ],
-                    "port": "8062",
-                    "path": [
-                        "v1",
-                        "basket",
-                        "preview"
-                    ]
+                    "raw": "{{portfolio_base_url}}/v1/basket/preview",
+                    "host": ["{{portfolio_base_url}}"],
+                    "path": ["v1", "basket", "preview"]
                 },
-                "description": "Preview basket composition for a specific ETF against user's current holdings. Shows what stocks need to be bought to replicate the ETF."
+                "description": "Preview basket for ETF symbol or ISIN (etfIsin). Example symbol: BANKBEES."
             },
             "response": []
         },
@@ -200,26 +224,19 @@
                     {
                         "key": "Content-Type",
                         "value": "application/json"
-                    }
+                    },
+                    { "key": "Authorization", "value": "Bearer {{access_token}}" }
                 ],
                 "body": {
                     "mode": "raw",
-                    "raw": "{\n    \"investmentAmount\": 100000,\n    \"opportunity\": {}\n}"
+                    "raw": "{\n    \"investmentAmount\": 100000,\n    \"includeHeld\": true,\n    \"opportunity\": {{basket_preview_opportunity}}\n}"
                 },
                 "url": {
-                    "raw": "http://localhost:8072/v1/basket/calculate-quantities",
-                    "protocol": "http",
-                    "host": [
-                        "localhost"
-                    ],
-                    "port": "8072",
-                    "path": [
-                        "v1",
-                        "basket",
-                        "calculate-quantities"
-                    ]
+                    "raw": "{{portfolio_base_url}}/v1/basket/calculate-quantities",
+                    "host": ["{{portfolio_base_url}}"],
+                    "path": ["v1", "basket", "calculate-quantities"]
                 },
-                "description": "Pass the full BasketOpportunity from POST /v1/basket/preview (must include composition[] with etfWeight). Do not send etfSymbol/holdings alone."
+                "description": "Pass the full BasketOpportunity JSON from Get Preview (must include composition[] with etfWeight). Set collection var basket_preview_opportunity from preview response."
             },
             "response": []
         }

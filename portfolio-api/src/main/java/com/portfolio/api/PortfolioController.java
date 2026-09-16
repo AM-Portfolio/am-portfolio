@@ -223,6 +223,8 @@ public class PortfolioController {
             log.info("PortfolioController - getPortfolioAnalysis - Successfully retrieved analysis for portfolio: {}",
                     res.portfolioId());
             return ResponseEntity.ok(analysis);
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            throw e;
         } catch (IllegalArgumentException e) {
             log.error("PortfolioController - getPortfolioAnalysis - Invalid interval: {}", interval, e);
             return ResponseEntity.badRequest().build();

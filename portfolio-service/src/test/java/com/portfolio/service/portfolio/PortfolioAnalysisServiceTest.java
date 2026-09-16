@@ -6,13 +6,12 @@ import com.am.common.amcommondata.model.enums.AssetType;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.builder.PortfolioAnalysisBuilder;
 import com.portfolio.model.StockPerformance;
-import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.PortfolioAnalysis;
 import com.portfolio.redis.service.PortfolioAnalysisRedisService;
 import com.portfolio.service.StockPerformanceService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -39,11 +38,20 @@ class PortfolioAnalysisServiceTest {
     @Mock
     private PortfolioAnalysisRedisService portfolioAnalysisRedisService;
 
-    @InjectMocks
     private PortfolioAnalysisService portfolioAnalysisService;
 
     private static final String PORTFOLIO_ID = UUID.randomUUID().toString();
     private static final String USER_ID = "test-user";
+
+    @BeforeEach
+    void setUp() {
+        portfolioAnalysisService = new PortfolioAnalysisService(
+                portfolioService,
+                stockPerformanceService,
+                portfolioAnalysisBuilder,
+                portfolioAnalysisRedisService,
+                90_000L);
+    }
 
     @Test
     void analyzePortfolio_CacheHit() {
@@ -70,7 +78,7 @@ class PortfolioAnalysisServiceTest {
         portfolio.setEquityModels(List.of(equity));
 
         when(portfolioService.getPortfolioById(any(UUID.class))).thenReturn(portfolio);
-        
+
         List<StockPerformance> performances = List.of(StockPerformance.builder().build());
         when(stockPerformanceService.calculateStockPerformances(anyList(), any())).thenReturn(performances);
 
