@@ -115,9 +115,10 @@ public class PortfolioIntelligenceService {
     public StressResponse stress(String portfolioId, StressRequest request, PortfolioModelV1 ownedPortfolio) {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
+            // includeHistory=true so β loads (Impact% = β_p × S_m). History path has its own timeout.
             PortfolioIntelligenceSnapshot snapshot = ownedPortfolio != null
-                    ? snapshotFactory.buildFromPortfolio(ownedPortfolio, false)
-                    : snapshotFactory.build(portfolioId, false);
+                    ? snapshotFactory.buildFromPortfolio(ownedPortfolio, true)
+                    : snapshotFactory.build(portfolioId, true);
             StressResponse response = stressEngine.run(snapshot, request != null ? request : new StressRequest());
             return stressEngine.finalizeAbs(response, snapshot.getTotalValue());
         } finally {

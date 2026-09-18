@@ -11,9 +11,11 @@ import com.portfolio.marketdata.model.FilterType;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
 import com.portfolio.marketdata.model.InstrumentType;
 import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.model.analytics.intelligence.CachedIntelligenceHistory;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.market.TimeFrame;
 import com.portfolio.model.util.SymbolResolver;
+import com.portfolio.redis.service.PortfolioIntelligenceHistoryRedisService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,6 +35,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -49,6 +52,7 @@ public class PortfolioIntelligenceSnapshotFactory {
     public static final String NIFTY_SYMBOL = "NIFTY 50";
     public static final int HISTORY_LOOKBACK_DAYS = 90;
     public static final long HISTORY_TIMEOUT_MS = 2500L;
+    public static final long HISTORY_TIMEOUT_STRESS_MS = 20_000L;
 
     @Value("${portfolio.intelligence.primary-benchmark-symbol:NIFTY 50}")
     private String primaryBenchmarkSymbol;
@@ -59,9 +63,16 @@ public class PortfolioIntelligenceSnapshotFactory {
     @Value("${portfolio.intelligence.history-timeout-ms:2500}")
     private long historyTimeoutMs;
 
+    @Value("${portfolio.intelligence.history-timeout-stress-ms:20000}")
+    private long historyTimeoutStressMs;
+
     private final PortfolioService portfolioService;
     private final MarketDataService marketDataService;
     private final SecurityDetailsService securityDetailsService;
+    private final PortfolioIntelligenceHistoryRedisService historyCache;
+
+    private final ConcurrentHashMap<String, CompletableFuture<HistoryFields>> historyInFlight =
+            new ConcurrentHashMap<>();
 
     private String benchmarkSymbol() {
         return (primaryBenchmarkSymbol == null || primaryBenchmarkSymbol.isBlank())
@@ -185,7 +196,7 @@ public class PortfolioIntelligenceSnapshotFactory {
         }
 
         HistoryFields history = includeHistory
-                ? loadHistoryMetrics(symbols, quantities)
+                ? loadHistoryMetrics(portfolioId, symbols, quantities)
                 : HistoryFields.empty();
         return finalizeSnapshot(
                 portfolioId,
@@ -199,23 +210,64 @@ public class PortfolioIntelligenceSnapshotFactory {
                 history.niftyDailyReturns);
     }
 
-    private HistoryFields loadHistoryMetrics(List<String> symbols, Map<String, Double> quantities) {
+    private HistoryFields loadHistoryMetrics(
+            String portfolioId, List<String> symbols, Map<String, Double> quantities) {
         if (symbols == null || symbols.isEmpty() || quantities == null || quantities.isEmpty()) {
             return HistoryFields.empty();
         }
+
+        var cached = historyCache.get(portfolioId);
+        if (cached.isPresent()) {
+            CachedIntelligenceHistory c = cached.get();
+            log.debug("Intel hist cache hit portfolioId={} historyPoints={} beta={}",
+                    portfolioId, c.getHistoryPoints(), c.getBeta());
+            return HistoryFields.fromCache(c);
+        }
+
+        String flightKey = portfolioId != null ? portfolioId : UUID.randomUUID().toString();
+        CompletableFuture<HistoryFields> created = new CompletableFuture<>();
+        CompletableFuture<HistoryFields> existing = historyInFlight.putIfAbsent(flightKey, created);
+        if (existing != null) {
+            try {
+                return existing.join();
+            } catch (Exception e) {
+                log.warn("Intel hist in-flight join failed: {}", e.getMessage());
+                return HistoryFields.empty();
+            }
+        }
+
         try {
-            long timeoutMs = historyTimeoutMs > 0 ? historyTimeoutMs : HISTORY_TIMEOUT_MS;
-            return CompletableFuture.supplyAsync(() -> fetchHistory(symbols, quantities))
+            long timeoutMs = historyTimeoutStressMs > 0 ? historyTimeoutStressMs : HISTORY_TIMEOUT_STRESS_MS;
+            HistoryFields loaded = CompletableFuture.supplyAsync(() -> fetchHistory(symbols, quantities))
                     .orTimeout(timeoutMs, TimeUnit.MILLISECONDS)
                     .exceptionally(ex -> {
-                        log.warn("Intel history timed out or failed after {}ms: {}",
-                                timeoutMs, ex.getMessage());
+                        log.warn("Intel history timed out or failed after {}ms portfolioId={}: {}",
+                                timeoutMs, portfolioId, ex.getMessage());
                         return HistoryFields.empty();
                     })
                     .join();
+            if (loaded.historyPoints >= HealthScoreConstants.MIN_HISTORY_POINTS
+                    && loaded.beta != null
+                    && loaded.beta > 0
+                    && Double.isFinite(loaded.beta)
+                    && portfolioId != null) {
+                historyCache.put(portfolioId, CachedIntelligenceHistory.builder()
+                        .historyPoints(loaded.historyPoints)
+                        .portRetPct(loaded.portRetPct)
+                        .niftyRetPct(loaded.niftyRetPct)
+                        .dailyVolPct(loaded.dailyVolPct)
+                        .beta(loaded.beta)
+                        .computedAtEpochMs(System.currentTimeMillis())
+                        .build());
+            }
+            created.complete(loaded);
+            return loaded;
         } catch (Exception e) {
-            log.warn("Intel history load failed: {}", e.getMessage());
+            log.warn("Intel history load failed portfolioId={}: {}", portfolioId, e.getMessage());
+            created.complete(HistoryFields.empty());
             return HistoryFields.empty();
+        } finally {
+            historyInFlight.remove(flightKey, created);
         }
     }
 
@@ -314,6 +366,17 @@ public class PortfolioIntelligenceSnapshotFactory {
             List<Double> niftyDailyReturns) {
         static HistoryFields empty() {
             return new HistoryFields(0, null, null, null, null, null, null);
+        }
+
+        static HistoryFields fromCache(CachedIntelligenceHistory c) {
+            return new HistoryFields(
+                    c.getHistoryPoints(),
+                    c.getPortRetPct(),
+                    c.getNiftyRetPct(),
+                    c.getDailyVolPct(),
+                    c.getBeta(),
+                    null,
+                    null);
         }
     }
 
