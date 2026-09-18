@@ -107,7 +107,8 @@ public class PortfolioServiceImpl implements PortfolioService {
 
     private void applyTradeEquityDelta(PortfolioDocument existing, PortfolioModelV1 portfolioModel) {
         String tradeAction = portfolioModel.getLastTradeAction();
-        List<com.am.common.amcommondata.document.asset.equity.EquityDocument> incomingEquities = portfolioMapper.toDocument(portfolioModel).getEquities();
+        PortfolioDocument incomingDoc = portfolioMapper.toDocument(portfolioModel);
+        List<com.am.common.amcommondata.document.asset.equity.EquityDocument> incomingEquities = incomingDoc.getEquities();
         
         List<com.am.common.amcommondata.document.asset.equity.EquityDocument> existingEquities = existing.getEquities();
         if (existingEquities == null) {
@@ -116,6 +117,13 @@ public class PortfolioServiceImpl implements PortfolioService {
 
         if ("REPLACE_ALL".equalsIgnoreCase(tradeAction)) {
             existingEquities = incomingEquities != null ? new java.util.ArrayList<>(incomingEquities) : new java.util.ArrayList<>();
+            existing.setMutualFunds(copyAssetList(incomingDoc.getMutualFunds()));
+            existing.setBonds(copyAssetList(incomingDoc.getBonds()));
+            existing.setCommodities(copyAssetList(incomingDoc.getCommodities()));
+            existing.setCash(copyAssetList(incomingDoc.getCash()));
+            if (portfolioModel.getName() != null && !portfolioModel.getName().isBlank()) {
+                existing.setName(portfolioModel.getName());
+            }
         } else if (incomingEquities != null && !incomingEquities.isEmpty()) {
             for (com.am.common.amcommondata.document.asset.equity.EquityDocument incoming : incomingEquities) {
                 String isin = incoming.getIsin();
@@ -178,16 +186,40 @@ public class PortfolioServiceImpl implements PortfolioService {
             }
         }
 
-        double totalValue = existingEquities.stream()
-            .mapToDouble(e -> {
-                double qty = e.getQuantity() != null ? e.getQuantity() : 0.0;
-                double price = e.getCurrentPrice() != null ? e.getCurrentPrice() : (e.getAvgBuyingPrice() != null ? e.getAvgBuyingPrice() : 0.0);
-                return qty * price;
-            })
+        double equityValue = existingEquities.stream()
+            .mapToDouble(e -> assetValue(e.getQuantity(), e.getCurrentPrice(), e.getAvgBuyingPrice(), e.getCurrentValue()))
             .sum();
+        double otherValue = sumAssetValues(existing.getMutualFunds())
+                + sumAssetValues(existing.getBonds())
+                + sumAssetValues(existing.getCommodities())
+                + sumAssetValues(existing.getCash());
 
         existing.setEquities(existingEquities);
-        existing.setTotalValue(totalValue);
+        existing.setTotalValue(equityValue + otherValue);
+    }
+
+    private static java.util.List<com.am.common.amcommondata.document.asset.AssetDocument> copyAssetList(
+            java.util.List<com.am.common.amcommondata.document.asset.AssetDocument> source) {
+        return source != null ? new java.util.ArrayList<>(source) : new java.util.ArrayList<>();
+    }
+
+    private static double sumAssetValues(
+            java.util.List<com.am.common.amcommondata.document.asset.AssetDocument> assets) {
+        if (assets == null || assets.isEmpty()) {
+            return 0.0;
+        }
+        return assets.stream()
+                .mapToDouble(a -> assetValue(a.getQuantity(), a.getCurrentPrice(), a.getAvgBuyingPrice(), a.getCurrentValue()))
+                .sum();
+    }
+
+    private static double assetValue(Double quantity, Double currentPrice, Double avgBuyingPrice, Double currentValue) {
+        if (currentValue != null && currentValue > 0) {
+            return currentValue;
+        }
+        double qty = quantity != null ? quantity : 0.0;
+        double price = currentPrice != null ? currentPrice : (avgBuyingPrice != null ? avgBuyingPrice : 0.0);
+        return qty * price;
     }
 
     @Transactional
@@ -280,6 +312,13 @@ public class PortfolioServiceImpl implements PortfolioService {
 
             PortfolioDocument incoming = portfolioMapper.toDocument(portfolioModel);
             doc.setEquities(incoming.getEquities());
+            doc.setMutualFunds(incoming.getMutualFunds());
+            doc.setBonds(incoming.getBonds());
+            doc.setCommodities(incoming.getCommodities());
+            doc.setCash(incoming.getCash());
+            if (portfolioModel.getName() != null && !portfolioModel.getName().isBlank()) {
+                doc.setName(portfolioModel.getName());
+            }
             if (portfolioModel.getTotalValue() != null) {
                 doc.setTotalValue(portfolioModel.getTotalValue());
             }

@@ -2,6 +2,7 @@ package com.portfolio.analytics.intelligence;
 
 import com.am.common.amcommondata.model.MarketCapType;
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.security.SecurityModel;
 import com.am.common.amcommondata.service.PortfolioService;
@@ -104,8 +105,23 @@ public class PortfolioIntelligenceSnapshotFactory {
 
     public PortfolioIntelligenceSnapshot buildFromPortfolio(PortfolioModelV1 portfolio, boolean includeHistory) {
         String portfolioId = portfolio.getId() != null ? portfolio.getId().toString() : null;
-        List<EquityModel> equities = portfolio.getEquityModels();
-        if (equities == null || equities.isEmpty()) {
+        List<EquityModel> equities = portfolio.getEquityModels() != null
+                ? portfolio.getEquityModels() : List.of();
+        List<AssetModel> mutualFunds = portfolio.getMutualFunds() != null
+                ? portfolio.getMutualFunds() : List.of();
+        List<AssetModel> bonds = portfolio.getBonds() != null
+                ? portfolio.getBonds() : List.of();
+        List<AssetModel> commodities = portfolio.getCommodities() != null
+                ? portfolio.getCommodities() : List.of();
+        List<AssetModel> cash = portfolio.getCash() != null
+                ? portfolio.getCash() : List.of();
+
+        boolean anyHoldings = !equities.isEmpty()
+                || !mutualFunds.isEmpty()
+                || !bonds.isEmpty()
+                || !commodities.isEmpty()
+                || !cash.isEmpty();
+        if (!anyHoldings) {
             return PortfolioIntelligenceSnapshot.builder()
                     .portfolioId(portfolioId)
                     .holdings(List.of())
@@ -191,6 +207,11 @@ public class PortfolioIntelligenceSnapshotFactory {
             quantities.put(sym, eq.getQuantity());
         }
 
+        droppedNoPrice += appendAssetHoldings(holdings, mutualFunds, HealthScoreEngine.ASSET_MUTUAL_FUND);
+        droppedNoPrice += appendAssetHoldings(holdings, bonds, HealthScoreEngine.ASSET_FIXED_INCOME);
+        droppedNoPrice += appendAssetHoldings(holdings, commodities, HealthScoreEngine.ASSET_COMMODITY);
+        droppedNoPrice += appendAssetHoldings(holdings, cash, HealthScoreEngine.ASSET_CASH);
+
         if (droppedNoPrice > 0) {
             log.warn("Intel snapshot portfolioId={} dropped {} holdings with no usable price",
                     portfolioId, droppedNoPrice);
@@ -209,6 +230,58 @@ public class PortfolioIntelligenceSnapshotFactory {
                 history.beta,
                 history.portfolioDailyReturns,
                 history.niftyDailyReturns);
+    }
+
+    /**
+     * Maps Option A non-equity lists into snapshot holdings using stored value/price.
+     * @return count of rows skipped for missing price/value
+     */
+    private int appendAssetHoldings(
+            List<PortfolioIntelligenceSnapshot.Holding> holdings,
+            List<AssetModel> assets,
+            String assetClass) {
+        if (assets == null || assets.isEmpty()) {
+            return 0;
+        }
+        int dropped = 0;
+        for (AssetModel asset : assets) {
+            if (asset == null) {
+                continue;
+            }
+            double value = resolveAssetValue(asset);
+            if (value <= 0) {
+                dropped++;
+                continue;
+            }
+            String sym = asset.getSymbol();
+            if (sym == null || sym.isBlank()) {
+                sym = asset.getName() != null ? asset.getName() : assetClass;
+            }
+            holdings.add(PortfolioIntelligenceSnapshot.Holding.builder()
+                    .symbol(SymbolResolver.normalize(sym))
+                    .value(value)
+                    .weightPct(0)
+                    .sector(null)
+                    .industry(null)
+                    .marketCap(null)
+                    .assetClass(assetClass)
+                    .build());
+        }
+        return dropped;
+    }
+
+    private static double resolveAssetValue(AssetModel asset) {
+        if (asset.getCurrentValue() != null && asset.getCurrentValue() > 0) {
+            return asset.getCurrentValue();
+        }
+        double qty = asset.getQuantity() != null ? asset.getQuantity() : 0.0;
+        if (qty <= 0) {
+            return 0.0;
+        }
+        double price = asset.getCurrentPrice() != null && asset.getCurrentPrice() > 0
+                ? asset.getCurrentPrice()
+                : (asset.getAvgBuyingPrice() != null ? asset.getAvgBuyingPrice() : 0.0);
+        return qty * price;
     }
 
     private HistoryFields loadHistoryMetrics(
