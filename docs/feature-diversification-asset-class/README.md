@@ -1,14 +1,7 @@
-﻿# Diversification Overview (multi-asset)
+﻿# Diversification Overview (multi-asset + volatility)
 
-**Canonical plan folder:** `Mds-docs/features/diversification-overview/`
+**Canonical plan:** `Mds-docs/features/diversification-overview/` (final plan **v2**)
 
-| Doc | Purpose |
-|-----|---------|
-| CURRENT_STATUS.md | As-is portfolio findings |
-| PLAN.md | Problem · requirement · phases · break analysis |
-| TODO.md | Phase checklist + prod E2E |
-| TESTING.md | Div-S / Div-P matrices + fix loop |
-| MATH.md | Current vs proposed formula |
-| architecture.drawio | Draw.io — problem · asset class · safe rollout · test loop |
+One-shot Health fix: honest multi-asset diversification + visible/reliable volatility (annualized, hist cache). Persistence Option A. Overview adds Volatility as 6th factor.
 
-This git branch implements that plan. Do not merge until PLAN DoD / TESTING gates pass.
+See PLAN / TODO / TESTING / MATH / architecture.drawio in that folder. Do not merge until DoD gates pass.
