@@ -54,8 +54,33 @@ class XRaySummaryBuilderTest {
         assertEquals(15.0, caps.get("SMALL_CAP").getWeightPct());
         assertEquals(150_000.0, caps.get("SMALL_CAP").getValue());
 
+        Map<String, XRayDto.WeightSliceDto> classes = byName(xray.getAssetClassWeights());
+        assertEquals(1, classes.size());
+        assertEquals(100.0, classes.get(HealthScoreEngine.ASSET_EQUITY).getWeightPct());
+        assertEquals(1_000_000.0, classes.get(HealthScoreEngine.ASSET_EQUITY).getValue());
+
         assertEquals("Banking", xray.getSectorWeights().get(0).getName());
         assertNotNull(xray.getSectorWeights().get(0).getValue());
+    }
+
+    @Test
+    void assetClassWeights_splitAcrossClasses() {
+        PortfolioIntelligenceSnapshot snapshot = PortfolioIntelligenceSnapshot.builder()
+                .portfolioId("fixture")
+                .holdings(List.of(
+                        holding("EQ1", 750_000, 75, "IT", "Soft", "LARGE_CAP", HealthScoreEngine.ASSET_EQUITY),
+                        holding("DEBT1", 200_000, 20, "Debt", "Bonds", "NA", HealthScoreEngine.ASSET_FIXED_INCOME),
+                        holding("GOLD1", 50_000, 5, "Metal", "Gold", "NA", HealthScoreEngine.ASSET_COMMODITY)
+                ))
+                .totalValue(1_000_000)
+                .build();
+
+        XRayDto xray = builder.build(snapshot);
+        Map<String, XRayDto.WeightSliceDto> classes = byName(xray.getAssetClassWeights());
+        assertEquals(75.0, classes.get(HealthScoreEngine.ASSET_EQUITY).getWeightPct());
+        assertEquals(20.0, classes.get(HealthScoreEngine.ASSET_FIXED_INCOME).getWeightPct());
+        assertEquals(5.0, classes.get(HealthScoreEngine.ASSET_COMMODITY).getWeightPct());
+        assertEquals(HealthScoreEngine.ASSET_EQUITY, xray.getAssetClassWeights().get(0).getName());
     }
 
     @Test
@@ -88,6 +113,17 @@ class XRaySummaryBuilderTest {
             String sector,
             String industry,
             String cap) {
+        return holding(symbol, value, weightPct, sector, industry, cap, null);
+    }
+
+    private static PortfolioIntelligenceSnapshot.Holding holding(
+            String symbol,
+            double value,
+            double weightPct,
+            String sector,
+            String industry,
+            String cap,
+            String assetClass) {
         return PortfolioIntelligenceSnapshot.Holding.builder()
                 .symbol(symbol)
                 .value(value)
@@ -95,6 +131,7 @@ class XRaySummaryBuilderTest {
                 .sector(sector)
                 .industry(industry)
                 .marketCap(cap)
+                .assetClass(assetClass)
                 .build();
     }
 }
