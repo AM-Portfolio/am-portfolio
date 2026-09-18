@@ -1,7 +1,14 @@
-﻿# Diversification + asset classes
+﻿# Diversification Overview (multi-asset)
 
-Planning lives in workspace `Mds-docs/features/diversification-asset-class/` (PLAN, MATH, TODO, architecture).
+**Canonical plan folder:** `Mds-docs/features/diversification-overview/`
 
-This branch is for implementation after β0 decisions (persistence Option A vs B, formula β1).
+| Doc | Purpose |
+|-----|---------|
+| CURRENT_STATUS.md | As-is portfolio findings |
+| PLAN.md | Problem · requirement · phases · break analysis |
+| TODO.md | Phase checklist + prod E2E |
+| TESTING.md | Div-S / Div-P matrices + fix loop |
+| MATH.md | Current vs proposed formula |
+| architecture.drawio | Draw.io — problem · asset class · safe rollout · test loop |
 
-Do not merge until D1–D4 gates in that PLAN pass.
+This git branch implements that plan. Do not merge until PLAN DoD / TESTING gates pass.
