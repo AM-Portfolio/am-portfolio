@@ -80,11 +80,39 @@ public class StressEngine {
             scenarios.add(impact(preset, applyPreset(snapshot, preset)));
         }
 
+        BetaMeta meta = resolveBetaMeta(snapshot);
         return StressResponse.builder()
                 .portfolioId(snapshot.getPortfolioId())
                 .estimateLabel(ESTIMATE_LABEL)
                 .scenarios(scenarios)
+                .method(meta.method)
+                .betaUsed(meta.betaUsed)
+                .benchmark(meta.benchmark)
+                .historyDays(meta.historyDays)
+                .betaAssumed(meta.betaAssumed)
                 .build();
+    }
+
+    private record BetaMeta(
+            String method,
+            Double betaUsed,
+            String benchmark,
+            Integer historyDays,
+            boolean betaAssumed) {
+    }
+
+    private static BetaMeta resolveBetaMeta(PortfolioIntelligenceSnapshot snapshot) {
+        int historyDays = snapshot.getHistoryPoints();
+        boolean measured = snapshot.getBeta() != null && snapshot.getBeta() > 0;
+        if (measured) {
+            return new BetaMeta(
+                    "PORTFOLIO_BETA",
+                    PortfolioIntelligenceSnapshotFactory.round2(snapshot.getBeta()),
+                    "NIFTY50",
+                    historyDays,
+                    false);
+        }
+        return new BetaMeta("ASSUMED_ONE", 1.0, "NIFTY50", historyDays, true);
     }
 
     private static void requireKnownPreset(String preset) {
@@ -168,6 +196,15 @@ public class StressEngine {
         if (matchesIt(target) && matchesIt(holdingSector)) {
             return true;
         }
+        if (matchesAuto(target) && matchesAuto(holdingSector)) {
+            return true;
+        }
+        if (matchesPharma(target) && matchesPharma(holdingSector)) {
+            return true;
+        }
+        if (matchesEnergy(target) && matchesEnergy(holdingSector)) {
+            return true;
+        }
         String h = holdingSector.toLowerCase(Locale.ROOT);
         String t = target.toLowerCase(Locale.ROOT);
         return h.equals(t) || h.contains(t) || t.contains(h);
@@ -198,6 +235,41 @@ public class StressEngine {
                 || s.endsWith(" it")
                 || s.contains("software")
                 || s.contains("computer");
+    }
+
+    static boolean matchesAuto(String sector) {
+        if (sector == null) {
+            return false;
+        }
+        String s = sector.toLowerCase(Locale.ROOT);
+        return s.contains("auto")
+                || s.contains("automobile")
+                || s.contains("automotive")
+                || s.contains("vehicle");
+    }
+
+    static boolean matchesPharma(String sector) {
+        if (sector == null) {
+            return false;
+        }
+        String s = sector.toLowerCase(Locale.ROOT);
+        return s.contains("pharma")
+                || s.contains("drug")
+                || s.contains("healthcare")
+                || s.contains("health care")
+                || s.contains("biotech");
+    }
+
+    static boolean matchesEnergy(String sector) {
+        if (sector == null) {
+            return false;
+        }
+        String s = sector.toLowerCase(Locale.ROOT);
+        return s.contains("energy")
+                || s.contains("oil")
+                || s.contains("gas")
+                || s.contains("power")
+                || s.contains("petroleum");
     }
 
     private StressResponse.ScenarioImpactDto impact(String id, double pctImpact) {

@@ -16,8 +16,48 @@ class StressEngineTest {
     private final StressEngine engine = new StressEngine();
 
     @Test
+    void niftyDown10_withBetaHalf_impactIsMinusFive() {
+        PortfolioIntelligenceSnapshot snap = snapshot(
+                0.5,
+                holding("A", 100, 60, "Energy"),
+                holding("B", 100, 40, "Pharma"));
+        StressResponse res = engine.run(snap, StressRequest.builder().preset("NIFTY_DOWN_10").build());
+        assertEquals(-5.0, res.getScenarios().get(0).getPctImpact(), 0.01);
+        assertEquals("PORTFOLIO_BETA", res.getMethod());
+        assertEquals(0.5, res.getBetaUsed(), 0.01);
+        assertEquals(Boolean.FALSE, res.getBetaAssumed());
+    }
+
+    @Test
+    void niftyDown10_withBetaOne_impactIsMinusTen() {
+        PortfolioIntelligenceSnapshot snap = snapshot(
+                1.0,
+                holding("A", 100, 100, "Energy"));
+        StressResponse res = engine.run(snap, StressRequest.builder().preset("NIFTY_DOWN_10").build());
+        assertEquals(-10.0, res.getScenarios().get(0).getPctImpact(), 0.01);
+        assertEquals(Boolean.FALSE, res.getBetaAssumed());
+    }
+
+    @Test
+    void niftyDown10_missingBeta_assumesOne() {
+        PortfolioIntelligenceSnapshot snap = PortfolioIntelligenceSnapshot.builder()
+                .portfolioId("p1")
+                .holdings(List.of(holding("A", 100, 100, "Energy")))
+                .totalValue(100)
+                .holdingsCount(1)
+                .beta(null)
+                .historyPoints(0)
+                .build();
+        StressResponse res = engine.run(snap, StressRequest.builder().preset("NIFTY_DOWN_10").build());
+        assertEquals(-10.0, res.getScenarios().get(0).getPctImpact(), 0.01);
+        assertEquals("ASSUMED_ONE", res.getMethod());
+        assertEquals(Boolean.TRUE, res.getBetaAssumed());
+    }
+
+    @Test
     void niftyDown10_longBook_negativeImpact() {
         PortfolioIntelligenceSnapshot snap = snapshot(
+                1.0,
                 holding("A", 100, 60, "Energy"),
                 holding("B", 100, 40, "Pharma"));
         StressResponse res = engine.run(snap, StressRequest.builder().preset("NIFTY_DOWN_10").build());
@@ -27,14 +67,14 @@ class StressEngineTest {
 
     @Test
     void unknownPreset_returns400() {
-        PortfolioIntelligenceSnapshot snap = snapshot(holding("A", 100, 100, "Energy"));
+        PortfolioIntelligenceSnapshot snap = snapshot(1.0, holding("A", 100, 100, "Energy"));
         assertThrows(ResponseStatusException.class,
                 () -> engine.run(snap, StressRequest.builder().preset("NOT_A_PRESET").build()));
     }
 
     @Test
     void customMissingShock_returns400() {
-        PortfolioIntelligenceSnapshot snap = snapshot(holding("A", 100, 100, "IT"));
+        PortfolioIntelligenceSnapshot snap = snapshot(1.0, holding("A", 100, 100, "IT"));
         StressRequest.CustomShock custom = StressRequest.CustomShock.builder()
                 .sector("IT")
                 .shockPct(null)
@@ -46,6 +86,7 @@ class StressEngineTest {
     @Test
     void batchPresets_returnsAll() {
         PortfolioIntelligenceSnapshot snap = snapshot(
+                1.0,
                 holding("HDFC", 100, 50, "Financial Services"),
                 holding("TCS", 100, 50, "Information Technology"));
         StressResponse res = engine.run(snap, StressRequest.builder()
@@ -57,6 +98,7 @@ class StressEngineTest {
     @Test
     void sensexAndSectorPresets_apply() {
         PortfolioIntelligenceSnapshot snap = snapshot(
+                1.0,
                 holding("MARUTI", 100, 40, "Auto"),
                 holding("SUNPHARMA", 100, 30, "Pharma"),
                 holding("RELIANCE", 100, 30, "Energy"));
@@ -68,18 +110,27 @@ class StressEngineTest {
 
     @Test
     void financialServices_matchesBankingShock() {
-        PortfolioIntelligenceSnapshot snap = snapshot(holding("HDFC", 100, 100, "Financial Services"));
+        PortfolioIntelligenceSnapshot snap = snapshot(1.0, holding("HDFC", 100, 100, "Financial Services"));
         StressResponse res = engine.run(snap, StressRequest.builder().preset("BANKING_DOWN_20").build());
         assertEquals(-20.0, res.getScenarios().get(0).getPctImpact(), 0.01);
     }
 
-    private static PortfolioIntelligenceSnapshot snapshot(PortfolioIntelligenceSnapshot.Holding... holdings) {
+    @Test
+    void automobile_alias_matchesAutoShock() {
+        PortfolioIntelligenceSnapshot snap = snapshot(1.0, holding("MARUTI", 100, 100, "Automobiles"));
+        StressResponse res = engine.run(snap, StressRequest.builder().preset("AUTO_DOWN_20").build());
+        assertEquals(-20.0, res.getScenarios().get(0).getPctImpact(), 0.01);
+    }
+
+    private static PortfolioIntelligenceSnapshot snapshot(
+            double beta, PortfolioIntelligenceSnapshot.Holding... holdings) {
         return PortfolioIntelligenceSnapshot.builder()
                 .portfolioId("p1")
                 .holdings(List.of(holdings))
                 .totalValue(200)
                 .holdingsCount(holdings.length)
-                .beta(1.0)
+                .beta(beta)
+                .historyPoints(30)
                 .build();
     }
 
