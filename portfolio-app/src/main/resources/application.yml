@@ -359,6 +359,8 @@ portfolio:
     history-timeout-ms: ${PORTFOLIO_INTEL_HISTORY_TIMEOUT_MS:2500}
     # Stress / intel β load — longer than soft timeout so MD hist can succeed once and fill cache
     history-timeout-stress-ms: ${PORTFOLIO_INTEL_HISTORY_TIMEOUT_STRESS_MS:20000}
+    # A/B/C diversification + annualized vol; default false keeps legacy count formula
+    health-v2: ${PORTFOLIO_INTEL_HEALTH_V2:false}
     risk:
       top1-high-pct: 25.0
       sector-high-pct: 30.0

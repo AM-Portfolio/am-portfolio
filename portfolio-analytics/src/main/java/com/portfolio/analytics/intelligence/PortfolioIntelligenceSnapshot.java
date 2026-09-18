@@ -55,6 +55,8 @@ public class PortfolioIntelligenceSnapshot {
         private String sector;
         private String industry;
         private String marketCap;
+        /** EQUITY / FIXED_INCOME / COMMODITY / CASH / MUTUAL_FUND — default EQUITY when null. */
+        private String assetClass;
     }
 
     public PortfolioIntelligenceSnapshot deepCopy() {
@@ -68,6 +70,7 @@ public class PortfolioIntelligenceSnapshot {
                         .sector(h.getSector())
                         .industry(h.getIndustry())
                         .marketCap(h.getMarketCap())
+                        .assetClass(h.getAssetClass())
                         .build());
             }
         }

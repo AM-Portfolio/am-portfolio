@@ -186,6 +186,7 @@ public class PortfolioIntelligenceSnapshotFactory {
                     .sector(sector)
                     .industry(industry)
                     .marketCap(marketCap)
+                    .assetClass(HealthScoreEngine.ASSET_EQUITY)
                     .build());
             quantities.put(sym, eq.getQuantity());
         }
