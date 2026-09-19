@@ -213,6 +213,16 @@ public class PortfolioServiceImpl implements PortfolioService {
                 .sum();
     }
 
+    private static double sumEquityDocs(
+            java.util.List<com.am.common.amcommondata.document.asset.equity.EquityDocument> equities) {
+        if (equities == null || equities.isEmpty()) {
+            return 0.0;
+        }
+        return equities.stream()
+                .mapToDouble(e -> assetValue(e.getQuantity(), e.getCurrentPrice(), e.getAvgBuyingPrice(), e.getCurrentValue()))
+                .sum();
+    }
+
     private static double assetValue(Double quantity, Double currentPrice, Double avgBuyingPrice, Double currentValue) {
         if (currentValue != null && currentValue > 0) {
             return currentValue;
@@ -311,17 +321,31 @@ public class PortfolioServiceImpl implements PortfolioService {
             }
 
             PortfolioDocument incoming = portfolioMapper.toDocument(portfolioModel);
-            doc.setEquities(incoming.getEquities());
-            doc.setMutualFunds(incoming.getMutualFunds());
-            doc.setBonds(incoming.getBonds());
-            doc.setCommodities(incoming.getCommodities());
-            doc.setCash(incoming.getCash());
+            // Soft-merge: null list on incoming = keep existing (Doc Intel / Kafka partial updates).
+            if (incoming.getEquities() != null) {
+                doc.setEquities(incoming.getEquities());
+            }
+            if (incoming.getMutualFunds() != null) {
+                doc.setMutualFunds(incoming.getMutualFunds());
+            }
+            if (incoming.getBonds() != null) {
+                doc.setBonds(incoming.getBonds());
+            }
+            if (incoming.getCommodities() != null) {
+                doc.setCommodities(incoming.getCommodities());
+            }
+            if (incoming.getCash() != null) {
+                doc.setCash(incoming.getCash());
+            }
             if (portfolioModel.getName() != null && !portfolioModel.getName().isBlank()) {
                 doc.setName(portfolioModel.getName());
             }
-            if (portfolioModel.getTotalValue() != null) {
-                doc.setTotalValue(portfolioModel.getTotalValue());
-            }
+            // Always recompute total from whatever lists are on the doc after merge.
+            doc.setTotalValue(sumEquityDocs(doc.getEquities())
+                    + sumAssetValues(doc.getMutualFunds())
+                    + sumAssetValues(doc.getBonds())
+                    + sumAssetValues(doc.getCommodities())
+                    + sumAssetValues(doc.getCash()));
             doc.setPortfolioKind(PortfolioKind.BROKER);
             // Keep stable broker name (no Zerodha-V*)
             if (doc.getName() == null || doc.getName().isBlank()
@@ -469,5 +493,88 @@ public class PortfolioServiceImpl implements PortfolioService {
                 }
             }
         });
+    }
+
+    @Override
+    @Transactional
+    public PortfolioModelV1 replaceAssetClassList(
+            UUID portfolioId,
+            String ownerUserId,
+            String assetClass,
+            List<com.am.common.amcommondata.model.asset.AssetModel> items) {
+        if (portfolioId == null || ownerUserId == null || ownerUserId.isBlank()) {
+            throw new IllegalArgumentException("portfolioId and owner are required");
+        }
+        String classKey = assetClass == null ? "" : assetClass.trim().toLowerCase();
+        if (!classKey.equals("bonds") && !classKey.equals("commodities") && !classKey.equals("cash")) {
+            throw new IllegalArgumentException("assetClass must be bonds, commodities, or cash");
+        }
+
+        PortfolioDocument doc = portfolioDocumentRepository.findById(portfolioId.toString())
+                .orElseThrow(() -> new IllegalArgumentException("Portfolio not found"));
+        if (!ownerUserId.equals(doc.getOwner())) {
+            throw new SecurityException("Not owner of portfolio");
+        }
+        if (!PortfolioKind.isBroker(doc.getPortfolioKind())) {
+            throw new IllegalArgumentException("Only BROKER portfolios support asset-class edits");
+        }
+
+        com.am.common.amcommondata.model.enums.AssetType type = switch (classKey) {
+            case "bonds" -> com.am.common.amcommondata.model.enums.AssetType.FIXED_INCOME;
+            case "commodities" -> com.am.common.amcommondata.model.enums.AssetType.COMMODITY;
+            case "cash" -> com.am.common.amcommondata.model.enums.AssetType.CASH;
+            default -> throw new IllegalArgumentException("assetClass must be bonds, commodities, or cash");
+        };
+
+        List<com.am.common.amcommondata.model.asset.AssetModel> normalized = new ArrayList<>();
+        if (items != null) {
+            for (com.am.common.amcommondata.model.asset.AssetModel item : items) {
+                if (item == null) {
+                    continue;
+                }
+                item.setAssetType(type);
+                double value = assetValue(item.getQuantity(), item.getCurrentPrice(), item.getAvgBuyingPrice(),
+                        item.getCurrentValue());
+                if (value <= 0) {
+                    throw new IllegalArgumentException(
+                            "Each item needs currentValue > 0 or quantity × price > 0");
+                }
+                if (item.getCurrentValue() == null || item.getCurrentValue() <= 0) {
+                    item.setCurrentValue(value);
+                }
+                if (item.getName() == null || item.getName().isBlank()) {
+                    throw new IllegalArgumentException("Each item requires a name");
+                }
+                if (item.getSymbol() == null || item.getSymbol().isBlank()) {
+                    item.setSymbol(item.getName().trim().toUpperCase().replaceAll("\\s+", "_"));
+                }
+                normalized.add(item);
+            }
+        }
+
+        List<com.am.common.amcommondata.document.asset.AssetDocument> asDocs =
+                mapNormalizedToDocuments(normalized);
+        switch (classKey) {
+            case "bonds" -> doc.setBonds(asDocs);
+            case "commodities" -> doc.setCommodities(asDocs);
+            case "cash" -> doc.setCash(asDocs);
+            default -> { }
+        }
+        doc.setTotalValue(sumEquityDocs(doc.getEquities())
+                + sumAssetValues(doc.getMutualFunds())
+                + sumAssetValues(doc.getBonds())
+                + sumAssetValues(doc.getCommodities())
+                + sumAssetValues(doc.getCash()));
+        if (doc.getAudit() != null) {
+            doc.getAudit().setUpdatedAt(LocalDateTime.now());
+        }
+        return portfolioMapper.toModel(portfolioDocumentRepository.save(doc));
+    }
+
+    private List<com.am.common.amcommondata.document.asset.AssetDocument> mapNormalizedToDocuments(
+            List<com.am.common.amcommondata.model.asset.AssetModel> normalized) {
+        PortfolioModelV1 tmp = PortfolioModelV1.builder().cash(normalized).build();
+        PortfolioDocument carrier = portfolioMapper.toDocument(tmp);
+        return carrier.getCash() != null ? carrier.getCash() : List.of();
     }
 }

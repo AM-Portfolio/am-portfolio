@@ -25,9 +25,25 @@ public class PortfolioMapperv1 {
   private final Optional<TradingSymbolResolver> tradingSymbolResolver;
 
     public PortfolioModelV1 toPortfolioModelV1(PortfolioUpdateEvent portfolioEvent) {
-        List<EquityModel> mappedEquities = mapToEquityModels(portfolioEvent, portfolioEvent.getBrokerType());
+        // null list = omit on soft-merge upsert; empty list = clear that class
+        List<EquityModel> mappedEquities = portfolioEvent.getEquities() != null
+                ? mapToEquityModels(portfolioEvent, portfolioEvent.getBrokerType())
+                : null;
 
-        PortfolioModelV1 portfolioModel = PortfolioModelV1.builder()
+        List<com.am.common.amcommondata.model.asset.AssetModel> mappedFunds = null;
+        if (portfolioEvent.getMutualFunds() != null) {
+            mappedFunds = portfolioEvent.getMutualFunds().stream()
+                    .filter(f -> f != null)
+                    .map(f -> mapToAsset(f, portfolioEvent.getBrokerType()))
+                    .collect(Collectors.toList());
+        }
+
+        double equityValue = mappedEquities != null ? calculateTotalValue(mappedEquities) : 0.0;
+        double mfValue = mappedFunds != null ? calculateAssetListValue(mappedFunds) : 0.0;
+        int equityCount = mappedEquities != null ? calculateAssetCount(mappedEquities) : 0;
+        int mfCount = mappedFunds != null ? mappedFunds.size() : 0;
+
+        return PortfolioModelV1.builder()
                 .id(portfolioEvent.getId())
                 .name(portfolioEvent.getPortfolioId())
                 .owner(portfolioEvent.getUserId())
@@ -36,11 +52,14 @@ public class PortfolioMapperv1 {
                 .status("Active")
                 .createdBy(portfolioEvent.getUserId())
                 .equityModels(mappedEquities)
-                .assetCount(calculateAssetCount(mappedEquities))
-                .totalValue(calculateTotalValue(mappedEquities))
+                .mutualFunds(mappedFunds)
+                .bonds(null)
+                .commodities(null)
+                .cash(null)
+                .assetCount(equityCount + mfCount)
+                .totalValue(equityValue + mfValue)
                 .version(0L)
                 .build();
-        return portfolioModel;
     }
 
     public PortfolioModelV1 toPortfolioModelV1(com.portfolio.model.events.trade.TradePortfolioSyncEvent tradeEvent) {
@@ -221,14 +240,45 @@ public class PortfolioMapperv1 {
     }
 
     private MutualFundModel mapToAsset(MutualFundModel fundModel, BrokerType brokerType) {
+        Double qty = fundModel.getQuantity();
+        Double avg = fundModel.getAvgBuyingPrice();
+        Double currentValue = fundModel.getCurrentValue();
+        if ((currentValue == null || currentValue <= 0) && qty != null && avg != null) {
+            currentValue = qty * avg;
+        }
+        Double investmentValue = fundModel.getInvestmentValue();
+        if ((investmentValue == null || investmentValue <= 0) && qty != null && avg != null) {
+            investmentValue = qty * avg;
+        }
         return MutualFundModel.builder()
                 .assetType(AssetType.MUTUAL_FUND)
                 .brokerType(brokerType)
                 .symbol(fundModel.getSymbol())
                 .name(fundModel.getName())
-                .avgBuyingPrice(fundModel.getAvgBuyingPrice())
-                .quantity(fundModel.getQuantity())
+                .avgBuyingPrice(avg)
+                .quantity(qty)
+                .currentPrice(fundModel.getCurrentPrice() != null ? fundModel.getCurrentPrice() : avg)
+                .currentValue(currentValue)
+                .investmentValue(investmentValue)
                 .build();
+    }
+
+    private Double calculateAssetListValue(List<com.am.common.amcommondata.model.asset.AssetModel> assets) {
+        if (assets == null || assets.isEmpty()) {
+            return 0.0;
+        }
+        return assets.stream()
+                .filter(a -> a != null)
+                .mapToDouble(a -> {
+                    if (a.getCurrentValue() != null && a.getCurrentValue() > 0) {
+                        return a.getCurrentValue();
+                    }
+                    double q = a.getQuantity() != null ? a.getQuantity() : 0.0;
+                    double p = a.getCurrentPrice() != null ? a.getCurrentPrice()
+                            : (a.getAvgBuyingPrice() != null ? a.getAvgBuyingPrice() : 0.0);
+                    return q * p;
+                })
+                .sum();
     }
 
     /**

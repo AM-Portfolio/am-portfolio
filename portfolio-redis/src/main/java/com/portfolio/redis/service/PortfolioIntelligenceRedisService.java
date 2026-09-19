@@ -66,6 +66,20 @@ public class PortfolioIntelligenceRedisService {
         }
     }
 
+    /** Drop cached intelligence so Class weights refresh after holdings writes. */
+    public void evict(String portfolioId) {
+        if (!isUsable() || portfolioId == null || portfolioId.isBlank()) {
+            return;
+        }
+        String key = buildKey(portfolioId);
+        try {
+            portfolioIntelligenceRedisTemplate.delete(key);
+            log.debug("Intel L2 evict key={}", key);
+        } catch (Exception e) {
+            log.warn("Intel L2 evict failed key={} — fail-open: {}", key, e.getMessage());
+        }
+    }
+
     private boolean isUsable() {
         return isRedisEnabled && portfolioIntelligenceRedisTemplate != null;
     }

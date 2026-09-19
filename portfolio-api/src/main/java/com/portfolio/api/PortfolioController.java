@@ -47,6 +47,10 @@ public class PortfolioController {
     private final com.portfolio.redis.service.ActiveMarketSymbolPublisher activeMarketSymbolPublisher;
     private final com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer;
     private final NewUserPortfolioFallbackService newUserPortfolioFallbackService;
+    private final com.portfolio.api.security.PortfolioOwnerAssert portfolioOwnerAssert;
+    private final com.portfolio.redis.service.PortfolioHoldingsRedisService portfolioHoldingsRedisService;
+    private final com.portfolio.redis.service.PortfolioSummaryRedisService portfolioSummaryRedisService;
+    private final com.portfolio.redis.service.PortfolioIntelligenceRedisService portfolioIntelligenceRedisService;
 
     @org.springframework.beans.factory.annotation.Value("${app.jwt.internal-secret}")
     private String internalSecret;
@@ -90,6 +94,59 @@ public class PortfolioController {
         } catch (IllegalArgumentException e) {
             log.error("PortfolioController - getPortfolioById - Invalid portfolio ID: {}", portfolioId, e);
             return ResponseEntity.badRequest().build();
+        }
+    }
+
+    @Operation(
+            summary = "Replace one asset-class list",
+            description = "Replaces bonds, commodities, or cash holdings on a BROKER portfolio. Equities and other classes are unchanged.",
+            operationId = "replaceAssetClassList")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Class list updated"),
+            @ApiResponse(responseCode = "400", description = "Invalid request"),
+            @ApiResponse(responseCode = "403", description = "Not portfolio owner"),
+            @ApiResponse(responseCode = "404", description = "Portfolio not found")
+    })
+    @PutMapping("/{portfolioId}/asset-classes/{assetClass}")
+    public ResponseEntity<com.portfolio.api.model.AssetClassReplaceResponse> replaceAssetClassList(
+            @PathVariable String portfolioId,
+            @PathVariable String assetClass,
+            @RequestBody(required = false) com.portfolio.api.model.AssetClassReplaceRequest request) {
+        PortfolioModelV1 owned = portfolioOwnerAssert.requireOwner(portfolioId);
+        String userId = owned.getOwner();
+        try {
+            PortfolioModelV1 saved = portfolioService.replaceAssetClassList(
+                    owned.getId(),
+                    userId,
+                    assetClass,
+                    request != null ? request.getItems() : List.of());
+            String pid = saved.getId() != null ? saved.getId().toString() : portfolioId;
+            portfolioHoldingsRedisService.evictPortfolioHoldings(userId, pid);
+            portfolioSummaryRedisService.evictPortfolioSummary(userId, pid);
+            portfolioIntelligenceRedisService.evict(pid);
+            activeMarketSymbolPublisher.publishFromPortfolio(saved);
+            int count = switch (assetClass == null ? "" : assetClass.trim().toLowerCase()) {
+                case "bonds" -> saved.getBonds() != null ? saved.getBonds().size() : 0;
+                case "commodities" -> saved.getCommodities() != null ? saved.getCommodities().size() : 0;
+                case "cash" -> saved.getCash() != null ? saved.getCash().size() : 0;
+                default -> 0;
+            };
+            return ResponseEntity.ok(com.portfolio.api.model.AssetClassReplaceResponse.builder()
+                    .portfolioId(saved.getId())
+                    .assetClass(assetClass)
+                    .itemCount(count)
+                    .totalValue(saved.getTotalValue())
+                    .build());
+        } catch (SecurityException e) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            if (e.getMessage() != null && e.getMessage().contains("not found")) {
+                throw new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, e.getMessage());
+            }
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, e.getMessage());
         }
     }
 
@@ -172,6 +229,12 @@ public class PortfolioController {
             PortfolioModelV1 saved = portfolioService.updateTradePortfolio(portfolioModel);
             if (saved != null) {
                 activeMarketSymbolPublisher.publishFromPortfolio(saved);
+                String pid = saved.getId() != null ? saved.getId().toString() : null;
+                if (pid != null && saved.getOwner() != null) {
+                    portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), pid);
+                    portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), pid);
+                    portfolioIntelligenceRedisService.evict(pid);
+                }
             }
             log.info("PortfolioController - syncPortfolioFromTrade: saved portfolioId={}", saved != null ? saved.getId() : "null");
             return ResponseEntity.ok(saved);

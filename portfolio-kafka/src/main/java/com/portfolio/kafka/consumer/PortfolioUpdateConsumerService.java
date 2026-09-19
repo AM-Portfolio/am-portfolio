@@ -61,6 +61,7 @@ public class PortfolioUpdateConsumerService {
     private final PortfolioHoldingsRedisService portfolioHoldingsRedisService;
     private final com.portfolio.redis.service.PortfolioSummaryRedisService portfolioSummaryRedisService;
     private final com.portfolio.redis.service.ActiveMarketSymbolPublisher activeMarketSymbolPublisher;
+    private final com.portfolio.redis.service.PortfolioIntelligenceRedisService portfolioIntelligenceRedisService;
     private final StringRedisTemplate           stringRedisTemplate;
 
     @Value("${app.kafka.portfolio.consumer.id:am-portfolio-consumer-group}")
@@ -162,6 +163,9 @@ public class PortfolioUpdateConsumerService {
             String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
             portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
             portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
+            if (portfolioId != null) {
+                portfolioIntelligenceRedisService.evict(portfolioId);
+            }
             activeMarketSymbolPublisher.publishFromPortfolio(saved);
         }
         publishUpdate(saved, event.getSource(), event.getPortfolioId());
@@ -203,6 +207,9 @@ public class PortfolioUpdateConsumerService {
             String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
             portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
             portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
+            if (portfolioId != null) {
+                portfolioIntelligenceRedisService.evict(portfolioId);
+            }
             activeMarketSymbolPublisher.publishFromPortfolio(saved);
         }
         publishUpdate(saved, "TRADE", event.getId());

@@ -143,7 +143,11 @@ public class PortfolioMapper {
     }
 
     private List<AssetDocument> mapAssetsToDocument(List<AssetModel> models) {
-        if (models == null || models.isEmpty()) {
+        // null = omit (soft-merge keep); empty = clear that class list
+        if (models == null) {
+            return null;
+        }
+        if (models.isEmpty()) {
             return Collections.emptyList();
         }
         return models.stream().map(assetMapper::toDocument).collect(Collectors.toList());
