@@ -208,11 +208,17 @@ public class PortfolioAnalyticsFacade {
                             request.setPrefetchedLiveMarketData(normalizedLive);
                         }
 
-                        // --- PREFETCH SECURITY DETAILS ONCE ---
-                        log.info("[Optimization] Prefetching security details once for {} symbols", symbols.size());
-                        Map<String, com.am.common.amcommondata.model.security.SecurityModel> prefetchedSecurities =
-                            securityDetailsService.getSecurityDetails(symbols);
-                        request.setPrefetchedSecurityDetails(prefetchedSecurities);
+                        // Movers-only: skip security-details prefetch (not used by TopMovers).
+                        boolean moversOnly = request.getFeatureToggles().isIncludeMovers()
+                                && !request.getFeatureToggles().isIncludeHeatmap()
+                                && !request.getFeatureToggles().isIncludeSectorAllocation()
+                                && !request.getFeatureToggles().isIncludeMarketCapAllocation();
+                        if (!moversOnly) {
+                            log.info("[Optimization] Prefetching security details once for {} symbols", symbols.size());
+                            Map<String, com.am.common.amcommondata.model.security.SecurityModel> prefetchedSecurities =
+                                securityDetailsService.getSecurityDetails(symbols);
+                            request.setPrefetchedSecurityDetails(prefetchedSecurities);
+                        }
                     }
                 }
             }
@@ -373,15 +379,29 @@ public class PortfolioAnalyticsFacade {
         }
         
         AdvancedAnalyticsResponse finalResponse = responseBuilder.build();
-        // Never L1-cache empty heatmap/allocation — CB/timeouts must not poison 60s.
+        // Never L1-cache empty heatmap/movers — CB/timeouts/collapsed day% must not poison 60s.
         boolean emptyHeatmap = finalResponse.getAnalytics() == null
                 || finalResponse.getAnalytics().getHeatmap() == null
                 || finalResponse.getAnalytics().getHeatmap().getSectors() == null
                 || finalResponse.getAnalytics().getHeatmap().getSectors().isEmpty();
-        if (!emptyHeatmap) {
+        boolean moversRequested = request.getFeatureToggles() != null
+                && request.getFeatureToggles().isIncludeMovers();
+        boolean emptyMovers = true;
+        if (finalResponse.getAnalytics() != null && finalResponse.getAnalytics().getMovers() != null) {
+            var movers = finalResponse.getAnalytics().getMovers();
+            boolean hasGainers = movers.getTopGainers() != null && !movers.getTopGainers().isEmpty();
+            boolean hasLosers = movers.getTopLosers() != null && !movers.getTopLosers().isEmpty();
+            emptyMovers = !hasGainers && !hasLosers;
+        }
+        boolean skipL1 = (request.getFeatureToggles() != null
+                && request.getFeatureToggles().isIncludeHeatmap()
+                && emptyHeatmap)
+                || (moversRequested && emptyMovers);
+        if (!skipL1) {
             fastCache.put(cacheKey, new CachedResponse(finalResponse));
         } else {
-            log.warn("[Optimization] Skipping L1 cache for empty heatmap key={}", cacheKey);
+            log.warn("[Optimization] Skipping L1 cache (emptyHeatmap={} emptyMovers={} key={})",
+                    emptyHeatmap, emptyMovers, cacheKey);
         }
 
         return finalResponse;
