@@ -1,5 +1,5 @@
-﻿# Last valueFile in Argo Application — overrides am-gitops image-tags while values revision is this branch.
+﻿# Last valueFile in Argo Application — overlays am-gitops image-tags while values revision is this branch.
 # Tag MUST stay quoted — unquoted CI run ids become YAML floats (3.55e+10 → InvalidImageName).
 global:
   image:
-    tag: "35602729668"
+    tag: "35605916258"
