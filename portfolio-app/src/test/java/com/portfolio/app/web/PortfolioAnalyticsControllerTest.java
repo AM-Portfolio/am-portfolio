@@ -63,9 +63,53 @@ class PortfolioAnalyticsControllerTest {
     @MockBean
     private PortfolioIntelligenceService portfolioIntelligenceService;
 
+    @MockBean
+    private com.portfolio.analytics.intelligence.AggregatePortfolioLoader aggregatePortfolioLoader;
+
+    @MockBean
+    private com.portfolio.redis.service.PortfolioIntelligenceRedisService portfolioIntelligenceRedisService;
+
     @AfterEach
     void tearDown() {
         UserContext.clear();
+    }
+
+    @Test
+    void allIntelligence_redisHit_skipsMerge() throws Exception {
+        String owner = "caller-user";
+        UserContext.setUserId(owner);
+        String cacheKey = "user:" + owner + ":all";
+        when(portfolioIntelligenceRedisService.get(cacheKey))
+                .thenReturn(java.util.Optional.of(
+                        PortfolioIntelligenceResponse.builder().portfolioId("ALL").build()));
+
+        mockMvc.perform(post("/v1/analytics/portfolio/all/intelligence")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk());
+
+        verify(aggregatePortfolioLoader, never()).loadMerged(anyString());
+        verify(portfolioIntelligenceService, never()).intelligence(anyString(), any());
+    }
+
+    @Test
+    void allIntelligence_redisMiss_loadsMerge() throws Exception {
+        String owner = "caller-user";
+        UserContext.setUserId(owner);
+        String cacheKey = "user:" + owner + ":all";
+        PortfolioModelV1 merged = new PortfolioModelV1();
+        when(portfolioIntelligenceRedisService.get(cacheKey)).thenReturn(java.util.Optional.empty());
+        when(aggregatePortfolioLoader.loadMerged(owner)).thenReturn(merged);
+        when(portfolioIntelligenceService.intelligence(eq(cacheKey), eq(merged)))
+                .thenReturn(PortfolioIntelligenceResponse.builder().portfolioId("ALL").build());
+
+        mockMvc.perform(post("/v1/analytics/portfolio/all/intelligence")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk());
+
+        verify(aggregatePortfolioLoader).loadMerged(owner);
+        verify(portfolioIntelligenceService).intelligence(eq(cacheKey), eq(merged));
     }
 
     @Test

@@ -100,11 +100,11 @@ public class PortfolioIntelligenceSnapshotFactory {
     }
 
     public PortfolioIntelligenceSnapshot buildFromPortfolio(PortfolioModelV1 portfolio) {
-        return buildFromPortfolio(portfolio, true, null, null);
+        return buildFromPortfolio(portfolio, true, null, null, true);
     }
 
     public PortfolioIntelligenceSnapshot buildFromPortfolio(PortfolioModelV1 portfolio, boolean includeHistory) {
-        return buildFromPortfolio(portfolio, includeHistory, null, null);
+        return buildFromPortfolio(portfolio, includeHistory, null, null, true);
     }
 
     /**
@@ -116,6 +116,18 @@ public class PortfolioIntelligenceSnapshotFactory {
             boolean includeHistory,
             String responsePortfolioId,
             String historyCacheKey) {
+        return buildFromPortfolio(portfolio, includeHistory, responsePortfolioId, historyCacheKey, true);
+    }
+
+    /**
+     * @param fetchHistoryIfMiss when false, only Redis hist is used (no network); miss → empty history / ASSUMED β
+     */
+    public PortfolioIntelligenceSnapshot buildFromPortfolio(
+            PortfolioModelV1 portfolio,
+            boolean includeHistory,
+            String responsePortfolioId,
+            String historyCacheKey,
+            boolean fetchHistoryIfMiss) {
         String portfolioId = responsePortfolioId != null
                 ? responsePortfolioId
                 : (portfolio.getId() != null ? portfolio.getId().toString() : null);
@@ -235,7 +247,7 @@ public class PortfolioIntelligenceSnapshotFactory {
         }
 
         HistoryFields history = includeHistory
-                ? loadHistoryMetrics(histKey, symbols, quantities)
+                ? loadHistoryMetrics(histKey, symbols, quantities, fetchHistoryIfMiss)
                 : HistoryFields.empty();
         return finalizeSnapshot(
                 portfolioId,
@@ -303,6 +315,14 @@ public class PortfolioIntelligenceSnapshotFactory {
 
     private HistoryFields loadHistoryMetrics(
             String portfolioId, List<String> symbols, Map<String, Double> quantities) {
+        return loadHistoryMetrics(portfolioId, symbols, quantities, true);
+    }
+
+    private HistoryFields loadHistoryMetrics(
+            String portfolioId,
+            List<String> symbols,
+            Map<String, Double> quantities,
+            boolean fetchHistoryIfMiss) {
         if (symbols == null || symbols.isEmpty() || quantities == null || quantities.isEmpty()) {
             return HistoryFields.empty();
         }
@@ -313,6 +333,11 @@ public class PortfolioIntelligenceSnapshotFactory {
             log.debug("Intel hist cache hit portfolioId={} historyPoints={} beta={}",
                     portfolioId, c.getHistoryPoints(), c.getBeta());
             return HistoryFields.fromCache(c);
+        }
+
+        if (!fetchHistoryIfMiss) {
+            log.debug("Intel hist cache miss portfolioId={} — skip fetch (cache-only mode)", portfolioId);
+            return HistoryFields.empty();
         }
 
         String flightKey = portfolioId != null ? portfolioId : UUID.randomUUID().toString();

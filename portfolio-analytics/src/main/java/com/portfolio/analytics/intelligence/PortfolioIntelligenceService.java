@@ -48,6 +48,11 @@ public class PortfolioIntelligenceService {
     private final ConcurrentHashMap<String, CompletableFuture<PortfolioIntelligenceResponse>> inFlight =
             new ConcurrentHashMap<>();
 
+    private final ConcurrentHashMap<String, CachedStress> stressL1 = new ConcurrentHashMap<>();
+    private static final long STRESS_L1_TTL_MS = 30_000L;
+
+    private record CachedStress(StressResponse response, long expiresAtMs) {}
+
     public PortfolioIntelligenceResponse intelligence(String portfolioId) {
         return intelligence(portfolioId, null);
     }
@@ -94,6 +99,14 @@ public class PortfolioIntelligenceService {
 
     private PortfolioIntelligenceSnapshot buildSnapshot(
             String portfolioId, PortfolioModelV1 ownedPortfolio, boolean includeHistory) {
+        return buildSnapshot(portfolioId, ownedPortfolio, includeHistory, true);
+    }
+
+    private PortfolioIntelligenceSnapshot buildSnapshot(
+            String portfolioId,
+            PortfolioModelV1 ownedPortfolio,
+            boolean includeHistory,
+            boolean fetchHistoryIfMiss) {
         if (ownedPortfolio == null) {
             return snapshotFactory.build(portfolioId, includeHistory);
         }
@@ -102,9 +115,11 @@ public class PortfolioIntelligenceService {
                     ownedPortfolio,
                     includeHistory,
                     AggregatePortfolioKeys.RESPONSE_PORTFOLIO_ID,
-                    portfolioId);
+                    portfolioId,
+                    fetchHistoryIfMiss);
         }
-        return snapshotFactory.buildFromPortfolio(ownedPortfolio, includeHistory);
+        return snapshotFactory.buildFromPortfolio(
+                ownedPortfolio, includeHistory, null, null, fetchHistoryIfMiss);
     }
 
     private static boolean isAggregateCacheKey(String portfolioId) {
@@ -132,17 +147,42 @@ public class PortfolioIntelligenceService {
     public StressResponse stress(String portfolioId, StressRequest request, PortfolioModelV1 ownedPortfolio) {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
-            // includeHistory=true so β loads (Impact% = β_p × S_m). History path has its own timeout.
-            PortfolioIntelligenceSnapshot snapshot = buildSnapshot(portfolioId, ownedPortfolio, true);
-            StressResponse response = stressEngine.run(snapshot, request != null ? request : new StressRequest());
+            StressRequest effective = request != null ? request : new StressRequest();
+            String l1Key = stressCacheKey(portfolioId, effective);
+            CachedStress hit = stressL1.get(l1Key);
+            if (hit != null && hit.expiresAtMs() > System.currentTimeMillis()) {
+                return hit.response();
+            }
+
+            // History: Redis cache only (no network wait). Miss → ASSUMED_ONE β instantly.
+            // Intel Overview warms the hist cache so subsequent stress gets PORTFOLIO_BETA.
+            PortfolioIntelligenceSnapshot snapshot = buildSnapshot(portfolioId, ownedPortfolio, true, false);
+            StressResponse response = stressEngine.run(snapshot, effective);
             StressResponse finalized = stressEngine.finalizeAbs(response, snapshot.getTotalValue());
             if (isAggregateCacheKey(portfolioId) && finalized != null) {
                 finalized.setPortfolioId(AggregatePortfolioKeys.RESPONSE_PORTFOLIO_ID);
+            }
+            if (finalized != null) {
+                stressL1.put(l1Key, new CachedStress(finalized, System.currentTimeMillis() + STRESS_L1_TTL_MS));
             }
             return finalized;
         } finally {
             sample.stop(Timer.builder("portfolio.intel.stress").register(meterRegistry));
         }
+    }
+
+    private static String stressCacheKey(String portfolioId, StressRequest request) {
+        StringBuilder sb = new StringBuilder(portfolioId != null ? portfolioId : "");
+        sb.append('|');
+        if (request.getCustom() != null) {
+            sb.append("C:").append(request.getCustom().getSector())
+                    .append(':').append(request.getCustom().getShockPct());
+        } else if (request.getPresets() != null && !request.getPresets().isEmpty()) {
+            sb.append("P:").append(String.join(",", request.getPresets()));
+        } else {
+            sb.append("p:").append(request.getPreset() != null ? request.getPreset() : "NIFTY_DOWN_10");
+        }
+        return sb.toString();
     }
 
     public WhatIfResponse whatIf(String portfolioId, WhatIfRequest request) {

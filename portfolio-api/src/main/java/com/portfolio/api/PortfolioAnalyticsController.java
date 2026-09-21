@@ -20,6 +20,7 @@ import com.portfolio.model.analytics.request.FeatureToggles;
 import com.portfolio.model.analytics.response.AdvancedAnalyticsResponse;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
+import com.portfolio.redis.service.PortfolioIntelligenceRedisService;
 import com.portfolio.service.PortfolioDashboardService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -50,6 +51,7 @@ public class PortfolioAnalyticsController {
     private final PortfolioOwnerAssert portfolioOwnerAssert;
     private final PortfolioIntelligenceService portfolioIntelligenceService;
     private final AggregatePortfolioLoader aggregatePortfolioLoader;
+    private final PortfolioIntelligenceRedisService portfolioIntelligenceRedisService;
 
     // ── All-Portfolios aggregate (literal paths; before /{portfolioId}/**) ──
 
@@ -91,8 +93,14 @@ public class PortfolioAnalyticsController {
             @RequestBody(required = false) Object ignored) {
         String userId = UserContext.getUserIdOrThrow();
         String cacheKey = AggregatePortfolioKeys.cacheKey(userId);
+        // Skip Mongo merge when Overview intel is already warm in Redis.
+        var cached = portfolioIntelligenceRedisService.get(cacheKey);
+        if (cached.isPresent()) {
+            log.info("REST request for intelligence on ALL portfolios user={} cache=hit", userId);
+            return ResponseEntity.ok(cached.get());
+        }
         PortfolioModelV1 merged = aggregatePortfolioLoader.loadMerged(userId);
-        log.info("REST request for intelligence on ALL portfolios user={}", userId);
+        log.info("REST request for intelligence on ALL portfolios user={} cache=miss", userId);
         return ResponseEntity.ok(portfolioIntelligenceService.intelligence(cacheKey, merged));
     }
 

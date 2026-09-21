@@ -51,6 +51,7 @@ public class PortfolioController {
     private final com.portfolio.redis.service.PortfolioHoldingsRedisService portfolioHoldingsRedisService;
     private final com.portfolio.redis.service.PortfolioSummaryRedisService portfolioSummaryRedisService;
     private final com.portfolio.redis.service.PortfolioIntelligenceRedisService portfolioIntelligenceRedisService;
+    private final com.portfolio.analytics.intelligence.AggregatePortfolioLoader aggregatePortfolioLoader;
 
     @org.springframework.beans.factory.annotation.Value("${app.jwt.internal-secret}")
     private String internalSecret;
@@ -128,6 +129,7 @@ public class PortfolioController {
             portfolioSummaryRedisService.evictPortfolioSummary(userId, pid);
             portfolioIntelligenceRedisService.evict(pid);
             portfolioIntelligenceRedisService.evictAggregateForUser(userId);
+            aggregatePortfolioLoader.evict(userId);
             activeMarketSymbolPublisher.publishFromPortfolio(saved);
             int count = switch (assetClass == null ? "" : assetClass.trim().toLowerCase()) {
                 case "bonds" -> saved.getBonds() != null ? saved.getBonds().size() : 0;
@@ -239,6 +241,7 @@ public class PortfolioController {
                     portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), pid);
                     portfolioIntelligenceRedisService.evict(pid);
                     portfolioIntelligenceRedisService.evictAggregateForUser(saved.getOwner());
+                    aggregatePortfolioLoader.evict(saved.getOwner());
                 }
             }
             log.info("PortfolioController - syncPortfolioFromTrade: saved portfolioId={}", saved != null ? saved.getId() : "null");
