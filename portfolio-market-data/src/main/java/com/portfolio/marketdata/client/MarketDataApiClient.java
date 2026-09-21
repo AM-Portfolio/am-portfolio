@@ -182,39 +182,60 @@ public class MarketDataApiClient extends AbstractApiClient {
         }
 
         /**
-         * Resolves the trading symbol from Market Data service dynamically for a given ISIN code.
-         * Used to map uploaded ISIN codes (like INF666M01IO8) to NSE/BSE tickers (like GROWWDEFNC)
-         * without hardcoding and respecting microservice database isolation.
-         *
-         * @param isin the ISIN code to resolve
-         * @return a Mono containing a map of isin and resolved symbol
+         * Resolves trading symbol for one ISIN via existing securities batch-search
+         * ({@code POST /v1/securities/batch-search}).
          */
-        @SuppressWarnings("rawtypes")
-        public Mono<Map> resolveTickerByIsin(String isin) {
-                String path = "/v1/market-data/instruments/isin/" + isin.trim().toUpperCase();
-                log.info("Resolving ticker symbol by ISIN via API: {}", path);
-                return get(path, Map.class)
-                                .doOnSuccess(data -> log.debug("Successfully resolved ISIN {} to symbol {}", 
-                                                isin, data != null ? data.get("symbol") : "null"))
-                                .doOnError(e -> log.error("Failed to resolve ticker symbol for ISIN {}: {}", 
-                                                isin, e.getMessage()));
+        public Mono<Map<String, String>> resolveTickerByIsin(String isin) {
+                if (isin == null || isin.isBlank()) {
+                        return Mono.just(Map.of());
+                }
+                return resolveTickersByIsins(List.of(isin.trim().toUpperCase()));
         }
 
         /**
-         * Resolves multiple trading symbols from Market Data service dynamically in a single batch query.
-         * Used to optimize bulk lookups during portfolio import/sync.
+         * Resolves trading symbols for ISINs (and other queries) via existing
+         * {@code POST /v1/securities/batch-search} — same path used by basket ETF enrichment.
          *
-         * @param isins list of ISIN codes to resolve
-         * @return a Mono containing a map of ISIN to resolved symbol
+         * @return map of query (ISIN) → best-match trading symbol
          */
-        @SuppressWarnings("rawtypes")
-        public Mono<Map> resolveTickersByIsins(List<String> isins) {
-                String path = "/v1/market-data/instruments/isin";
-                log.info("Resolving batch of {} ticker symbols by ISINs via POST API", isins.size());
-                return post(path, isins, Map.class)
-                                .doOnSuccess(data -> log.debug("Successfully resolved batch of {} ISINs", 
-                                                data != null ? data.size() : 0))
-                                .doOnError(e -> log.error("Failed to resolve batch of ISINs: {}", e.getMessage()));
+        public Mono<Map<String, String>> resolveTickersByIsins(List<String> isins) {
+                if (isins == null || isins.isEmpty()) {
+                        return Mono.just(Map.of());
+                }
+                List<String> cleaned = isins.stream()
+                                .filter(i -> i != null && !i.isBlank())
+                                .map(i -> i.trim().toUpperCase())
+                                .distinct()
+                                .toList();
+                if (cleaned.isEmpty()) {
+                        return Mono.just(Map.of());
+                }
+                com.portfolio.marketdata.model.BatchSearchRequest request =
+                                com.portfolio.marketdata.model.BatchSearchRequest.builder()
+                                                .queries(cleaned)
+                                                .limit(1)
+                                                .minMatchScore(0.0)
+                                                .build();
+                log.info("Resolving {} ISINs via securities batch-search", cleaned.size());
+                return batchSearch(request).map(response -> {
+                        Map<String, String> result = new java.util.HashMap<>();
+                        if (response == null || response.getResults() == null) {
+                                return result;
+                        }
+                        for (com.portfolio.marketdata.model.BatchSearchResponse.QueryResult qr : response.getResults()) {
+                                if (qr == null || qr.getQuery() == null || qr.getMatches() == null
+                                                || qr.getMatches().isEmpty()) {
+                                        continue;
+                                }
+                                com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch best =
+                                                qr.getMatches().get(0);
+                                if (best.getSymbol() != null && !best.getSymbol().isBlank()) {
+                                        result.put(qr.getQuery().trim().toUpperCase(),
+                                                        best.getSymbol().trim().toUpperCase());
+                                }
+                        }
+                        return result;
+                });
         }
 }
 

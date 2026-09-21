@@ -13,13 +13,19 @@ import org.springframework.stereotype.Service;
 import com.portfolio.model.events.PortfolioUpdateEvent;
 import com.portfolio.model.mapper.PortfolioMapperv1;
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.portfolio.kafka.metrics.PortfolioUpdateMetrics;
 import com.portfolio.kafka.publisher.PortfolioEventPublisher;
 import org.springframework.context.annotation.Lazy;
+import com.portfolio.model.history.HistoryJobMode;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
+import com.portfolio.service.scheduler.PortfolioHistoryJobService;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * Consumes messages from the am-portfolio Kafka topic.
@@ -61,7 +67,11 @@ public class PortfolioUpdateConsumerService {
     private final PortfolioHoldingsRedisService portfolioHoldingsRedisService;
     private final com.portfolio.redis.service.PortfolioSummaryRedisService portfolioSummaryRedisService;
     private final com.portfolio.redis.service.ActiveMarketSymbolPublisher activeMarketSymbolPublisher;
+    private final com.portfolio.service.portfolio.PortfolioHoldingsMongoService portfolioHoldingsMongoService;
     private final StringRedisTemplate           stringRedisTemplate;
+    private final PortfolioHistoryJobService    portfolioHistoryJobService;
+    private final PortfolioUpdateMetrics        portfolioUpdateMetrics;
+    private final com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer;
 
     @Value("${app.kafka.portfolio.consumer.id:am-portfolio-consumer-group}")
     private String consumerGroupId;
@@ -98,10 +108,11 @@ public class PortfolioUpdateConsumerService {
             String eventType = rootNode.has("eventType") ? rootNode.get("eventType").asText() : null;
 
             if ("TRADE_SYNC".equals(eventType)) {
+                portfolioUpdateMetrics.received("trade");
                 // ── Trade-management path ─────────────────────────────────────
                 com.portfolio.model.events.trade.TradePortfolioSyncEvent event =
                         objectMapper.treeToValue(rootNode, com.portfolio.model.events.trade.TradePortfolioSyncEvent.class);
-                log.info("Parsed TradePortfolioSyncEvent: eventId={} source={} dataVersion={} id={} portfolioId={} action={}",
+                log.info("[DocSync] Parsed TradePortfolioSyncEvent: eventId={} source={} dataVersion={} id={} portfolioId={} action={}",
                         event.getEventId(), event.getSource(), event.getDataVersion(),
                         event.getId(), event.getPortfolioId(), event.getAction());
 
@@ -114,6 +125,7 @@ public class PortfolioUpdateConsumerService {
                 if (isDuplicate(dedupKey)) {
                     log.warn("[DEDUP] Skipping already-processed Trade message: eventId={} id={} offset={}",
                             event.getEventId(), event.getId(), offset);
+                    portfolioUpdateMetrics.dedupSkipped("trade");
                     acknowledgment.acknowledge();
                     return;
                 }
@@ -122,16 +134,19 @@ public class PortfolioUpdateConsumerService {
                 markProcessed(dedupKey);
 
             } else {
+                portfolioUpdateMetrics.received("document");
                 // ── Document-parser path ──────────────────────────────────────
                 // PortfolioUpdateEvent (Document Parser) carries 'portfolioId' or 'equities'.
                 PortfolioUpdateEvent event = objectMapper.treeToValue(rootNode, PortfolioUpdateEvent.class);
                 String pid = event.getPortfolioId() != null ? event.getPortfolioId()
                         : (event.getId() != null ? event.getId().toString() : "doc-" + offset);
-                log.info("Parsed PortfolioUpdateEvent for portfolioId={} userId={}", pid, event.getUserId());
+                log.info("[DocSync] Parsed PortfolioUpdateEvent portfolioId={} userId={} offset={}",
+                        pid, event.getUserId(), offset);
 
                 String dedupKey = buildDedupKey("DOC", pid, offset, partition);
                 if (isDuplicate(dedupKey)) {
                     log.warn("[DEDUP] Skipping already-processed Document message: portfolioId={} offset={}", pid, offset);
+                    portfolioUpdateMetrics.dedupSkipped("document");
                     acknowledgment.acknowledge();
                     return;
                 }
@@ -150,6 +165,7 @@ public class PortfolioUpdateConsumerService {
             // will be processed normally.
             log.error("Failed to process message at topic={} partition={} offset={}: {}",
                     topic, partition, offset, e.getMessage(), e);
+            portfolioUpdateMetrics.failed("unknown", "process");
         }
     }
 
@@ -157,14 +173,34 @@ public class PortfolioUpdateConsumerService {
 
     private void processDocumentMessage(PortfolioUpdateEvent event) {
         PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
-        PortfolioModelV1 saved = portfolioService.upsertDocumentPortfolio(portfolioModel);
-        if (saved != null && saved.getOwner() != null) {
-            String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
-            portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
-            portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
-            activeMarketSymbolPublisher.publishFromPortfolio(saved);
+        String owner = portfolioModel.getOwner();
+        boolean brokerExisted = brokerExists(owner, portfolioModel);
+        boolean otherBrokers = hasOtherBrokers(owner, portfolioModel);
+        int equityCount = portfolioModel.getEquityModels() != null ? portfolioModel.getEquityModels().size() : 0;
+        log.info("[DocSync] Saving document holdings owner={} broker={} equityCount={} brokerExisted={} otherBrokers={}",
+                owner, portfolioModel.getBrokerType(), equityCount, brokerExisted, otherBrokers);
+        try {
+            // Kafka DocSync previously skipped HTTP-path normalizer — company-name symbols
+            // from demat files never resolved via ISIN and history/live quotes stayed empty.
+            portfolioEquitySymbolNormalizer.normalizePortfolio(portfolioModel);
+            PortfolioModelV1 saved = portfolioService.upsertDocumentPortfolio(portfolioModel);
+            if (saved != null && saved.getOwner() != null) {
+                String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
+                evictHoldingsCaches(saved.getOwner(), portfolioId);
+                portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
+                activeMarketSymbolPublisher.publishFromPortfolio(saved);
+
+                String op = brokerExisted ? "replace_all" : "create";
+                portfolioUpdateMetrics.success("document", op);
+                enqueueHistoryAfterUpsert(saved.getOwner(), portfolioId, brokerExisted, otherBrokers);
+            } else {
+                portfolioUpdateMetrics.failed("document", "save_null");
+            }
+            publishUpdate(saved, event.getSource(), event.getPortfolioId());
+        } catch (Exception e) {
+            portfolioUpdateMetrics.failed("document", "upsert");
+            throw e;
         }
-        publishUpdate(saved, event.getSource(), event.getPortfolioId());
     }
 
     private void processTradeMessage(com.portfolio.model.events.trade.TradePortfolioSyncEvent event) {
@@ -192,20 +228,91 @@ public class PortfolioUpdateConsumerService {
                 // NOTE: Do NOT publishUpdate here. Sending the deleted portfolio's data
                 // downstream would cause other consumers to re-create it.
                 log.info("Portfolio deletion complete for name={} owner={}", portfolioName, owner);
+                portfolioUpdateMetrics.success("trade", "delete");
             } else {
                 log.warn("Skipping DELETE_PORTFOLIO: owner is null for name={} uuid={}", portfolioName, portfolioUuid);
             }
             return;
         }
 
-        PortfolioModelV1 saved = portfolioService.updateTradePortfolio(portfolioModel);
-        if (saved != null && saved.getOwner() != null) {
-            String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
-            portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
-            portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
-            activeMarketSymbolPublisher.publishFromPortfolio(saved);
+        boolean brokerExisted = brokerExists(portfolioModel.getOwner(), portfolioModel);
+        boolean otherBrokers = hasOtherBrokers(portfolioModel.getOwner(), portfolioModel);
+        String action = portfolioModel.getLastTradeAction();
+        try {
+            PortfolioModelV1 saved = portfolioService.updateTradePortfolio(portfolioModel);
+            if (saved != null && saved.getOwner() != null) {
+                String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
+                evictHoldingsCaches(saved.getOwner(), portfolioId);
+                portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
+                activeMarketSymbolPublisher.publishFromPortfolio(saved);
+
+                String op = !brokerExisted ? "create"
+                        : "REPLACE_ALL".equals(action) ? "replace_all" : "update";
+                portfolioUpdateMetrics.success("trade", op);
+
+                if (!brokerExisted || "REPLACE_ALL".equals(action)) {
+                    enqueueHistoryAfterUpsert(saved.getOwner(), portfolioId, brokerExisted, otherBrokers);
+                } else {
+                    // Incremental trade: dirty if history job active
+                    var status = portfolioHistoryJobService.getStatus(saved.getOwner());
+                    if (status.getHistoryStatus() == com.portfolio.model.history.HistoryStatus.BUILDING) {
+                        portfolioHistoryJobService.bumpDirty(saved.getOwner());
+                    }
+                }
+            } else {
+                portfolioUpdateMetrics.failed("trade", "save_null");
+            }
+            publishUpdate(saved, "TRADE", event.getId());
+        } catch (RuntimeException e) {
+            portfolioUpdateMetrics.failed("trade", "upsert");
+            throw e;
         }
-        publishUpdate(saved, "TRADE", event.getId());
+    }
+
+    private boolean brokerExists(String owner, PortfolioModelV1 model) {
+        if (owner == null || model.getBrokerType() == null) {
+            return false;
+        }
+        List<PortfolioModelV1> existing = portfolioService.getPortfoliosByUserId(owner);
+        if (existing == null) {
+            return false;
+        }
+        return existing.stream()
+                .filter(p -> p.getPortfolioKind() == null || PortfolioKind.isBroker(p.getPortfolioKind()))
+                .anyMatch(p -> Objects.equals(p.getBrokerType(), model.getBrokerType()));
+    }
+
+    private boolean hasOtherBrokers(String owner, PortfolioModelV1 model) {
+        if (owner == null) {
+            return false;
+        }
+        List<PortfolioModelV1> existing = portfolioService.getPortfoliosByUserId(owner);
+        if (existing == null) {
+            return false;
+        }
+        return existing.stream()
+                .filter(p -> p.getPortfolioKind() == null || PortfolioKind.isBroker(p.getPortfolioKind()))
+                .anyMatch(p -> model.getBrokerType() == null || !Objects.equals(p.getBrokerType(), model.getBrokerType()));
+    }
+
+    private void enqueueHistoryAfterUpsert(String owner, String portfolioId, boolean brokerExisted, boolean otherBrokers) {
+        HistoryJobMode mode;
+        if (!brokerExisted && otherBrokers) {
+            mode = HistoryJobMode.MERGE_BROKER;
+        } else {
+            mode = HistoryJobMode.FULL;
+        }
+        log.info("[DocSync] Enqueue history job owner={} portfolioId={} mode={} brokerExisted={} otherBrokers={}",
+                owner, portfolioId, mode, brokerExisted, otherBrokers);
+        portfolioHistoryJobService.enqueue(owner, mode, portfolioId);
+    }
+
+    private void evictHoldingsCaches(String owner, String portfolioId) {
+        portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioId);
+        for (com.portfolio.model.TimeInterval interval : com.portfolio.model.TimeInterval.values()) {
+            portfolioHoldingsMongoService.deleteCache(owner, interval, portfolioId);
+            portfolioHoldingsMongoService.deleteCache(owner, interval, null);
+        }
     }
 
     private void publishUpdate(PortfolioModelV1 saved, String source, String originalId) {
