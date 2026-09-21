@@ -52,7 +52,7 @@ public class PortfolioIntelligenceSnapshotFactory {
     /** Default primary benchmark; override via portfolio.intelligence.primary-benchmark-symbol (e.g. SENSEX). */
     public static final String NIFTY_SYMBOL = "NIFTY 50";
     public static final int HISTORY_LOOKBACK_DAYS = 90;
-    public static final long HISTORY_TIMEOUT_MS = 2500L;
+    public static final long HISTORY_TIMEOUT_MS = 800L;
     public static final long HISTORY_TIMEOUT_STRESS_MS = 20_000L;
 
     @Value("${portfolio.intelligence.primary-benchmark-symbol:NIFTY 50}")
@@ -61,7 +61,7 @@ public class PortfolioIntelligenceSnapshotFactory {
     @Value("${portfolio.intelligence.history-lookback-days:90}")
     private int historyLookbackDays;
 
-    @Value("${portfolio.intelligence.history-timeout-ms:2500}")
+    @Value("${portfolio.intelligence.history-timeout-ms:800}")
     private long historyTimeoutMs;
 
     @Value("${portfolio.intelligence.history-timeout-stress-ms:20000}")
@@ -100,11 +100,28 @@ public class PortfolioIntelligenceSnapshotFactory {
     }
 
     public PortfolioIntelligenceSnapshot buildFromPortfolio(PortfolioModelV1 portfolio) {
-        return buildFromPortfolio(portfolio, true);
+        return buildFromPortfolio(portfolio, true, null, null);
     }
 
     public PortfolioIntelligenceSnapshot buildFromPortfolio(PortfolioModelV1 portfolio, boolean includeHistory) {
-        String portfolioId = portfolio.getId() != null ? portfolio.getId().toString() : null;
+        return buildFromPortfolio(portfolio, includeHistory, null, null);
+    }
+
+    /**
+     * @param responsePortfolioId optional id stamped on the snapshot (e.g. {@code ALL})
+     * @param historyCacheKey optional Redis/history key (e.g. {@code user:{id}:all}); falls back to response id / portfolio UUID
+     */
+    public PortfolioIntelligenceSnapshot buildFromPortfolio(
+            PortfolioModelV1 portfolio,
+            boolean includeHistory,
+            String responsePortfolioId,
+            String historyCacheKey) {
+        String portfolioId = responsePortfolioId != null
+                ? responsePortfolioId
+                : (portfolio.getId() != null ? portfolio.getId().toString() : null);
+        String histKey = historyCacheKey != null
+                ? historyCacheKey
+                : portfolioId;
         List<EquityModel> equities = portfolio.getEquityModels() != null
                 ? portfolio.getEquityModels() : List.of();
         List<AssetModel> mutualFunds = portfolio.getMutualFunds() != null
@@ -218,7 +235,7 @@ public class PortfolioIntelligenceSnapshotFactory {
         }
 
         HistoryFields history = includeHistory
-                ? loadHistoryMetrics(portfolioId, symbols, quantities)
+                ? loadHistoryMetrics(histKey, symbols, quantities)
                 : HistoryFields.empty();
         return finalizeSnapshot(
                 portfolioId,
@@ -311,7 +328,7 @@ public class PortfolioIntelligenceSnapshotFactory {
         }
 
         try {
-            long timeoutMs = historyTimeoutStressMs > 0 ? historyTimeoutStressMs : HISTORY_TIMEOUT_STRESS_MS;
+            long timeoutMs = historyTimeoutMs > 0 ? historyTimeoutMs : HISTORY_TIMEOUT_MS;
             HistoryFields loaded = CompletableFuture.supplyAsync(() -> fetchHistory(symbols, quantities))
                     .orTimeout(timeoutMs, TimeUnit.MILLISECONDS)
                     .exceptionally(ex -> {

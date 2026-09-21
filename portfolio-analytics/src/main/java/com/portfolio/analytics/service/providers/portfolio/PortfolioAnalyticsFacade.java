@@ -12,6 +12,7 @@ import com.portfolio.model.analytics.response.AdvancedAnalyticsResponse;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
+import com.portfolio.analytics.intelligence.AggregatePortfolioKeys;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.market.MarketData;
 import lombok.RequiredArgsConstructor;
@@ -153,11 +154,19 @@ public class PortfolioAnalyticsFacade {
         
         // --- PREFETCH MARKET DATA ONCE ---
         try {
-            UUID portfolioUuid = UUID.fromString(request.getCoreIdentifiers().getPortfolioId());
-            PortfolioModelV1 portfolio = portfolioService.getPortfolioById(portfolioUuid);
+            PortfolioModelV1 portfolio = request.getPrefetchedPortfolio();
+            if (portfolio == null) {
+                String pid = request.getCoreIdentifiers().getPortfolioId();
+                if (pid != null && !pid.isBlank()
+                        && !AggregatePortfolioKeys.RESPONSE_PORTFOLIO_ID.equalsIgnoreCase(pid)) {
+                    UUID portfolioUuid = UUID.fromString(pid);
+                    portfolio = portfolioService.getPortfolioById(portfolioUuid);
+                    if (portfolio != null) {
+                        request.setPrefetchedPortfolio(portfolio);
+                    }
+                }
+            }
             if (portfolio != null) {
-                request.setPrefetchedPortfolio(portfolio);
-                
                 if (portfolio.getEquityModels() != null && !portfolio.getEquityModels().isEmpty()) {
                     List<String> symbols = portfolio.getEquityModels().stream()
                             .map(EquityModel::getSymbol)

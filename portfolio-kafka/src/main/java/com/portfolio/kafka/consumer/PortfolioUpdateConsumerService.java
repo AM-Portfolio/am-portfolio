@@ -166,6 +166,7 @@ public class PortfolioUpdateConsumerService {
             if (portfolioId != null) {
                 portfolioIntelligenceRedisService.evict(portfolioId);
             }
+            portfolioIntelligenceRedisService.evictAggregateForUser(saved.getOwner());
             activeMarketSymbolPublisher.publishFromPortfolio(saved);
         }
         publishUpdate(saved, event.getSource(), event.getPortfolioId());
@@ -210,6 +211,7 @@ public class PortfolioUpdateConsumerService {
             if (portfolioId != null) {
                 portfolioIntelligenceRedisService.evict(portfolioId);
             }
+            portfolioIntelligenceRedisService.evictAggregateForUser(saved.getOwner());
             activeMarketSymbolPublisher.publishFromPortfolio(saved);
         }
         publishUpdate(saved, "TRADE", event.getId());

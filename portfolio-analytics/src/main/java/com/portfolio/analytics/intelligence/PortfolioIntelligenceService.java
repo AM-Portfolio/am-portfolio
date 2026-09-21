@@ -67,9 +67,7 @@ public class PortfolioIntelligenceService {
                     inFlight.putIfAbsent(portfolioId, created);
             if (existing == null) {
                 try {
-                    PortfolioIntelligenceSnapshot snapshot = ownedPortfolio != null
-                            ? snapshotFactory.buildFromPortfolio(ownedPortfolio)
-                            : snapshotFactory.build(portfolioId);
+                    PortfolioIntelligenceSnapshot snapshot = buildSnapshot(portfolioId, ownedPortfolio, true);
                     PortfolioIntelligenceResponse response = toIntelligenceResponse(snapshot);
                     intelligenceRedisService.put(portfolioId, response);
                     created.complete(response);
@@ -94,6 +92,25 @@ public class PortfolioIntelligenceService {
         }
     }
 
+    private PortfolioIntelligenceSnapshot buildSnapshot(
+            String portfolioId, PortfolioModelV1 ownedPortfolio, boolean includeHistory) {
+        if (ownedPortfolio == null) {
+            return snapshotFactory.build(portfolioId, includeHistory);
+        }
+        if (isAggregateCacheKey(portfolioId)) {
+            return snapshotFactory.buildFromPortfolio(
+                    ownedPortfolio,
+                    includeHistory,
+                    AggregatePortfolioKeys.RESPONSE_PORTFOLIO_ID,
+                    portfolioId);
+        }
+        return snapshotFactory.buildFromPortfolio(ownedPortfolio, includeHistory);
+    }
+
+    private static boolean isAggregateCacheKey(String portfolioId) {
+        return portfolioId != null && portfolioId.startsWith("user:") && portfolioId.endsWith(":all");
+    }
+
     private static RuntimeException unwrapStatus(Throwable t) {
         Throwable cur = t;
         while (cur instanceof java.util.concurrent.CompletionException && cur.getCause() != null) {
@@ -116,11 +133,13 @@ public class PortfolioIntelligenceService {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             // includeHistory=true so β loads (Impact% = β_p × S_m). History path has its own timeout.
-            PortfolioIntelligenceSnapshot snapshot = ownedPortfolio != null
-                    ? snapshotFactory.buildFromPortfolio(ownedPortfolio, true)
-                    : snapshotFactory.build(portfolioId, true);
+            PortfolioIntelligenceSnapshot snapshot = buildSnapshot(portfolioId, ownedPortfolio, true);
             StressResponse response = stressEngine.run(snapshot, request != null ? request : new StressRequest());
-            return stressEngine.finalizeAbs(response, snapshot.getTotalValue());
+            StressResponse finalized = stressEngine.finalizeAbs(response, snapshot.getTotalValue());
+            if (isAggregateCacheKey(portfolioId) && finalized != null) {
+                finalized.setPortfolioId(AggregatePortfolioKeys.RESPONSE_PORTFOLIO_ID);
+            }
+            return finalized;
         } finally {
             sample.stop(Timer.builder("portfolio.intel.stress").register(meterRegistry));
         }
@@ -133,9 +152,7 @@ public class PortfolioIntelligenceService {
     public WhatIfResponse whatIf(String portfolioId, WhatIfRequest request, PortfolioModelV1 ownedPortfolio) {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
-            PortfolioIntelligenceSnapshot snapshot = ownedPortfolio != null
-                    ? snapshotFactory.buildFromPortfolio(ownedPortfolio, false)
-                    : snapshotFactory.build(portfolioId, false);
+            PortfolioIntelligenceSnapshot snapshot = buildSnapshot(portfolioId, ownedPortfolio, false);
             return whatIfEngine.simulate(snapshot, request);
         } finally {
             sample.stop(Timer.builder("portfolio.intel.whatif").register(meterRegistry));

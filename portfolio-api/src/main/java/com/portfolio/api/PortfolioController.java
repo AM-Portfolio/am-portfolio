@@ -90,6 +90,9 @@ public class PortfolioController {
         try {
             PortfolioModelV1 portfolio = portfolioService.getPortfolioById(UUID.fromString(portfolioId));
             log.info("PortfolioController - getPortfolioById - Portfolio found: {}", portfolio != null ? "yes" : "no");
+            if (portfolio == null) {
+                return ResponseEntity.notFound().build();
+            }
             return ResponseEntity.ok(portfolio);
         } catch (IllegalArgumentException e) {
             log.error("PortfolioController - getPortfolioById - Invalid portfolio ID: {}", portfolioId, e);
@@ -124,6 +127,7 @@ public class PortfolioController {
             portfolioHoldingsRedisService.evictPortfolioHoldings(userId, pid);
             portfolioSummaryRedisService.evictPortfolioSummary(userId, pid);
             portfolioIntelligenceRedisService.evict(pid);
+            portfolioIntelligenceRedisService.evictAggregateForUser(userId);
             activeMarketSymbolPublisher.publishFromPortfolio(saved);
             int count = switch (assetClass == null ? "" : assetClass.trim().toLowerCase()) {
                 case "bonds" -> saved.getBonds() != null ? saved.getBonds().size() : 0;
@@ -234,6 +238,7 @@ public class PortfolioController {
                     portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), pid);
                     portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), pid);
                     portfolioIntelligenceRedisService.evict(pid);
+                    portfolioIntelligenceRedisService.evictAggregateForUser(saved.getOwner());
                 }
             }
             log.info("PortfolioController - syncPortfolioFromTrade: saved portfolioId={}", saved != null ? saved.getId() : "null");

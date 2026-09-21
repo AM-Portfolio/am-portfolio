@@ -80,6 +80,14 @@ public class PortfolioIntelligenceRedisService {
         }
     }
 
+    /** Evict All-Portfolios aggregate intel for the owner (key {@code user:{userId}:all}). */
+    public void evictAggregateForUser(String userId) {
+        if (userId == null || userId.isBlank()) {
+            return;
+        }
+        evict("user:" + userId.trim() + ":all");
+    }
+
     private boolean isUsable() {
         return isRedisEnabled && portfolioIntelligenceRedisTemplate != null;
     }
