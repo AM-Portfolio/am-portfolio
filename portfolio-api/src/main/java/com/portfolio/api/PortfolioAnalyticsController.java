@@ -7,6 +7,7 @@ import com.portfolio.analytics.intelligence.AggregatePortfolioLoader;
 import com.portfolio.analytics.intelligence.PortfolioIntelligenceService;
 import com.portfolio.analytics.service.providers.portfolio.PortfolioAnalyticsFacade;
 import com.portfolio.api.security.PortfolioOwnerAssert;
+import com.portfolio.model.analytics.intelligence.IntelligenceSuggestResponse;
 import com.portfolio.model.analytics.intelligence.PortfolioIntelligenceResponse;
 import com.portfolio.model.analytics.intelligence.ReportPreviewRequest;
 import com.portfolio.model.analytics.intelligence.ReportPreviewResponse;
@@ -85,6 +86,21 @@ public class PortfolioAnalyticsController {
         }
         response.setPortfolioId(AggregatePortfolioKeys.RESPONSE_PORTFOLIO_ID);
         return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "All-portfolios intelligence suggest", operationId = "suggestAllPortfoliosIntelligence")
+    @GetMapping("/all/suggest")
+    public ResponseEntity<IntelligenceSuggestResponse> suggestAll(
+            @RequestParam String context,
+            @RequestParam(required = false, defaultValue = "") String q,
+            @RequestParam(required = false) String wire,
+            @RequestParam(required = false, defaultValue = "8") int limit) {
+        String userId = UserContext.getUserIdOrThrow();
+        String cacheKey = AggregatePortfolioKeys.cacheKey(userId);
+        PortfolioModelV1 merged = aggregatePortfolioLoader.loadMerged(userId);
+        log.info("REST suggest ALL context={} q={}", context, q);
+        return ResponseEntity.ok(
+                portfolioIntelligenceService.suggest(cacheKey, context, q, wire, limit, merged));
     }
 
     @Operation(summary = "All-portfolios intelligence", operationId = "getAllPortfoliosIntelligence")
@@ -193,6 +209,32 @@ public class PortfolioAnalyticsController {
         var portfolio = portfolioOwnerAssert.requireOwner(portfolioId);
         log.info("REST request for intelligence on portfolio: {}", portfolioId);
         return ResponseEntity.ok(portfolioIntelligenceService.intelligence(portfolioId, portfolio));
+    }
+
+    @Operation(
+            summary = "Intelligence typeahead suggest",
+            description = "Context-aware suggestions: STRESS_SECTOR | WHAT_IF_SYMBOL | WHAT_IF_SECTOR | CLASS_ADD_NAME",
+            operationId = "suggestPortfolioIntelligence")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Suggestions", content = @Content(mediaType = "application/json", schema = @Schema(implementation = IntelligenceSuggestResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Unauthenticated"),
+            @ApiResponse(responseCode = "403", description = "Caller is not the portfolio owner"),
+            @ApiResponse(responseCode = "404", description = "Portfolio not found")
+    })
+    @GetMapping("/{portfolioId}/suggest")
+    public ResponseEntity<IntelligenceSuggestResponse> suggest(
+            @PathVariable String portfolioId,
+            @RequestParam String context,
+            @RequestParam(required = false, defaultValue = "") String q,
+            @RequestParam(required = false) String wire,
+            @RequestParam(required = false, defaultValue = "8") int limit) {
+        if (isReservedAll(portfolioId) || invalidPortfolioId(portfolioId)) {
+            return ResponseEntity.badRequest().build();
+        }
+        var portfolio = portfolioOwnerAssert.requireOwner(portfolioId);
+        log.info("REST suggest portfolio={} context={} q={}", portfolioId, context, q);
+        return ResponseEntity.ok(
+                portfolioIntelligenceService.suggest(portfolioId, context, q, wire, limit, portfolio));
     }
 
     @Operation(summary = "Stress scenarios", description = "Scenario estimate shocks. Requires portfolio ownership. No Mongo writes. Supports single preset or presets[] batch.", operationId = "runPortfolioStress")

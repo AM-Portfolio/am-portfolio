@@ -61,8 +61,32 @@ public class StressEngine {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "custom.shockPct is required and must be non-zero");
             }
-            String id = "CUSTOM_" + request.getCustom().getSector().replaceAll("\\s+", "_").toUpperCase(Locale.ROOT);
-            scenarios.add(impact(id, applySectorShock(snapshot, request.getCustom().getSector(), shockPct)));
+            String sector = request.getCustom().getSector().trim();
+            String id = "CUSTOM_" + sector.replaceAll("\\s+", "_").toUpperCase(Locale.ROOT);
+            double matchedWeight = 0;
+            int matchedHoldings = 0;
+            if (snapshot.getHoldings() != null) {
+                for (PortfolioIntelligenceSnapshot.Holding h : snapshot.getHoldings()) {
+                    if (SectorMatcher.matches(h.getSector(), sector)) {
+                        matchedWeight += h.getWeightPct();
+                        matchedHoldings++;
+                    }
+                }
+            }
+            matchedWeight = PortfolioIntelligenceSnapshotFactory.round2(matchedWeight);
+            double pct = applySectorShock(snapshot, sector, shockPct);
+            String note = matchedHoldings == 0
+                    ? "No holdings match this sector — impact 0%"
+                    : String.format(Locale.ROOT, "%d holdings · %.1f%% of book",
+                            matchedHoldings, matchedWeight);
+            scenarios.add(StressResponse.ScenarioImpactDto.builder()
+                    .id(id)
+                    .pctImpact(pct)
+                    .absImpact(0) // filled in finalizeAbs
+                    .matchedWeightPct(matchedWeight)
+                    .matchedHoldings(matchedHoldings)
+                    .note(note)
+                    .build());
         } else if (request != null && request.getPresets() != null && !request.getPresets().isEmpty()) {
             for (String raw : request.getPresets()) {
                 if (raw == null || raw.isBlank()) {
@@ -173,7 +197,7 @@ public class StressEngine {
             return 0;
         }
         for (PortfolioIntelligenceSnapshot.Holding h : snapshot.getHoldings()) {
-            if (sectorMatches(h.getSector(), sector)) {
+            if (SectorMatcher.matches(h.getSector(), sector)) {
                 pct += (h.getWeightPct() / 100.0) * shockPct * 1.0;
             }
         }
@@ -188,90 +212,31 @@ public class StressEngine {
         return 1.0;
     }
 
-    private static boolean sectorMatches(String holdingSector, String target) {
-        if (holdingSector == null || target == null) {
-            return false;
-        }
-        if (matchesBanking(target) && matchesBanking(holdingSector)) {
-            return true;
-        }
-        if (matchesIt(target) && matchesIt(holdingSector)) {
-            return true;
-        }
-        if (matchesAuto(target) && matchesAuto(holdingSector)) {
-            return true;
-        }
-        if (matchesPharma(target) && matchesPharma(holdingSector)) {
-            return true;
-        }
-        if (matchesEnergy(target) && matchesEnergy(holdingSector)) {
-            return true;
-        }
-        String h = holdingSector.toLowerCase(Locale.ROOT);
-        String t = target.toLowerCase(Locale.ROOT);
-        return h.equals(t) || h.contains(t) || t.contains(h);
+    /** @deprecated use {@link SectorMatcher#matches} */
+    static boolean sectorMatches(String holdingSector, String target) {
+        return SectorMatcher.matches(holdingSector, target);
     }
 
     /** Banking / Financial Services / Finance aliases aligned with X-Ray labels. */
     static boolean matchesBanking(String sector) {
-        if (sector == null) {
-            return false;
-        }
-        String s = sector.toLowerCase(Locale.ROOT);
-        return s.contains("bank")
-                || s.contains("financial")
-                || s.contains("finance")
-                || s.equals("bfsi");
+        return SectorMatcher.matchesBanking(sector);
     }
 
     /** IT / Information Technology / Software aliases. */
     static boolean matchesIt(String sector) {
-        if (sector == null) {
-            return false;
-        }
-        String s = sector.toLowerCase(Locale.ROOT);
-        return s.equals("it")
-                || s.contains("information technology")
-                || s.contains(" technol")
-                || s.startsWith("it ")
-                || s.endsWith(" it")
-                || s.contains("software")
-                || s.contains("computer");
+        return SectorMatcher.matchesIt(sector);
     }
 
     static boolean matchesAuto(String sector) {
-        if (sector == null) {
-            return false;
-        }
-        String s = sector.toLowerCase(Locale.ROOT);
-        return s.contains("auto")
-                || s.contains("automobile")
-                || s.contains("automotive")
-                || s.contains("vehicle");
+        return SectorMatcher.matchesAuto(sector);
     }
 
     static boolean matchesPharma(String sector) {
-        if (sector == null) {
-            return false;
-        }
-        String s = sector.toLowerCase(Locale.ROOT);
-        return s.contains("pharma")
-                || s.contains("drug")
-                || s.contains("healthcare")
-                || s.contains("health care")
-                || s.contains("biotech");
+        return SectorMatcher.matchesPharma(sector);
     }
 
     static boolean matchesEnergy(String sector) {
-        if (sector == null) {
-            return false;
-        }
-        String s = sector.toLowerCase(Locale.ROOT);
-        return s.contains("energy")
-                || s.contains("oil")
-                || s.contains("gas")
-                || s.contains("power")
-                || s.contains("petroleum");
+        return SectorMatcher.matchesEnergy(sector);
     }
 
     private StressResponse.ScenarioImpactDto impact(String id, double pctImpact) {
@@ -288,6 +253,9 @@ public class StressEngine {
                 .id(dto.getId())
                 .pctImpact(dto.getPctImpact())
                 .absImpact(abs)
+                .matchedWeightPct(dto.getMatchedWeightPct())
+                .matchedHoldings(dto.getMatchedHoldings())
+                .note(dto.getNote())
                 .build();
     }
 

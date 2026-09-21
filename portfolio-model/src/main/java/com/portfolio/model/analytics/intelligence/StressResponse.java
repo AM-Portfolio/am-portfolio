@@ -37,5 +37,11 @@ public class StressResponse {
         private String id;
         private double pctImpact;
         private double absImpact;
+        /** Custom sector: book weight matched by SectorMatcher (%). */
+        private Double matchedWeightPct;
+        /** Custom sector: holdings matched. */
+        private Integer matchedHoldings;
+        /** Short note e.g. no holdings matched. */
+        private String note;
     }
 }

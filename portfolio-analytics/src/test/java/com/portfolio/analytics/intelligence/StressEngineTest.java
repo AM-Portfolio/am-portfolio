@@ -134,6 +134,39 @@ class StressEngineTest {
         assertEquals(-20.0, res.getScenarios().get(0).getPctImpact(), 0.01);
     }
 
+    @Test
+    void customSector_matchesIt_notIndustrials_andSetsNote() {
+        PortfolioIntelligenceSnapshot snap = snapshot(
+                1.0,
+                holding("TCS", 100, 40, "Information Technology"),
+                holding("LT", 100, 60, "Industrials"));
+        StressRequest.CustomShock custom = StressRequest.CustomShock.builder()
+                .sector("IT")
+                .shockPct(-19.0)
+                .build();
+        StressResponse res = engine.run(snap, StressRequest.builder().custom(custom).build());
+        assertEquals(1, res.getScenarios().size());
+        StressResponse.ScenarioImpactDto row = res.getScenarios().get(0);
+        assertEquals(-7.6, row.getPctImpact(), 0.01);
+        assertEquals(40.0, row.getMatchedWeightPct(), 0.01);
+        assertEquals(1, row.getMatchedHoldings());
+        assertTrue(row.getNote() != null && row.getNote().contains("40.0%"));
+    }
+
+    @Test
+    void customSector_noMatch_zeroImpactWithNote() {
+        PortfolioIntelligenceSnapshot snap = snapshot(1.0, holding("LT", 100, 100, "Industrials"));
+        StressRequest.CustomShock custom = StressRequest.CustomShock.builder()
+                .sector("IT")
+                .shockPct(-19.0)
+                .build();
+        StressResponse res = engine.run(snap, StressRequest.builder().custom(custom).build());
+        StressResponse.ScenarioImpactDto row = res.getScenarios().get(0);
+        assertEquals(0.0, row.getPctImpact(), 0.01);
+        assertEquals(0, row.getMatchedHoldings());
+        assertTrue(row.getNote().contains("No holdings match"));
+    }
+
     private static PortfolioIntelligenceSnapshot snapshot(
             double beta, PortfolioIntelligenceSnapshot.Holding... holdings) {
         return PortfolioIntelligenceSnapshot.builder()

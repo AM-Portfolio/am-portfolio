@@ -1,6 +1,7 @@
 package com.portfolio.analytics.intelligence;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.portfolio.model.analytics.intelligence.IntelligenceSuggestResponse;
 import com.portfolio.model.analytics.intelligence.HealthDto;
 import com.portfolio.model.analytics.intelligence.PortfolioIntelligenceResponse;
 import com.portfolio.model.analytics.intelligence.ReportPreviewRequest;
@@ -44,6 +45,7 @@ public class PortfolioIntelligenceService {
     private final XRaySummaryBuilder xRaySummaryBuilder;
     private final StressEngine stressEngine;
     private final WhatIfEngine whatIfEngine;
+    private final IntelligenceSuggestService intelligenceSuggestService;
     private final PortfolioIntelligenceRedisService intelligenceRedisService;
     private final MeterRegistry meterRegistry;
 
@@ -170,6 +172,22 @@ public class PortfolioIntelligenceService {
             return re;
         }
         return new RuntimeException(cur);
+    }
+
+    public IntelligenceSuggestResponse suggest(
+            String portfolioId,
+            String context,
+            String query,
+            String wire,
+            int limit,
+            PortfolioModelV1 ownedPortfolio) {
+        PortfolioIntelligenceSnapshot snapshot = buildSnapshot(portfolioId, ownedPortfolio, false);
+        IntelligenceSuggestResponse response =
+                intelligenceSuggestService.suggest(snapshot, context, query, wire, limit);
+        if (isAggregateCacheKey(portfolioId) && response != null) {
+            response.setPortfolioId(AggregatePortfolioKeys.RESPONSE_PORTFOLIO_ID);
+        }
+        return response;
     }
 
     public StressResponse stress(String portfolioId, StressRequest request) {
