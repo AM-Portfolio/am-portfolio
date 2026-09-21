@@ -490,16 +490,16 @@ public class PortfolioIntelligenceSnapshotFactory {
         Map<String, MarketData> raw = marketDataService.getHistoricalData(histReq);
         Map<String, MarketData> normalized = normalizeHistorical(raw);
 
+        // Prefer INDEX bars for the benchmark — EQ "NIFTY 50" is often missing or flat,
+        // which yields historyPoints>0 with beta=null → sticky ASSUMED_ONE.
         String benchmarkKey = resolveBenchmarkKey(normalized);
-        if (!hasHistoricalPoints(normalized.get(benchmarkKey))) {
-            Map<String, MarketData> indexBars = fetchBenchmarkAsIndex(benchmark, from, to);
-            if (!indexBars.isEmpty()) {
-                normalized.putAll(indexBars);
-                benchmarkKey = resolveBenchmarkKey(normalized);
-                log.info("Intel hist benchmark filled via INDEX symbol={}", benchmark);
-            } else {
-                log.info("Intel hist empty reason=no_benchmark symbol={}", benchmark);
-            }
+        Map<String, MarketData> indexBars = fetchBenchmarkAsIndex(benchmark, from, to);
+        if (!indexBars.isEmpty()) {
+            normalized.putAll(indexBars);
+            benchmarkKey = resolveBenchmarkKey(normalized);
+            log.info("Intel hist benchmark filled via INDEX symbol={}", benchmark);
+        } else if (!hasHistoricalPoints(normalized.get(benchmarkKey))) {
+            log.info("Intel hist empty reason=no_benchmark symbol={}", benchmark);
         }
 
         if (normalized.isEmpty()) {
@@ -511,6 +511,9 @@ public class PortfolioIntelligenceSnapshotFactory {
                 IntelligenceHistoryMetrics.compute(normalized, quantities, benchmarkKey);
         if (metrics.historyPoints() == 0) {
             log.info("Intel hist empty reason=coverage_or_align benchmarkKey={}", benchmarkKey);
+        } else if (metrics.beta() == null) {
+            log.info("Intel hist beta null portfolio points={} benchmarkKey={} (market var/cov undefined)",
+                    metrics.historyPoints(), benchmarkKey);
         }
         return new HistoryFields(
                 metrics.historyPoints(),
