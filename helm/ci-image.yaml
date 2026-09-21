@@ -2,4 +2,4 @@
 # Tag MUST stay quoted — unquoted CI run ids become YAML floats (3.55e+10 → InvalidImageName).
 global:
   image:
-    tag: "35600709548"
+    tag: "35602729668"
