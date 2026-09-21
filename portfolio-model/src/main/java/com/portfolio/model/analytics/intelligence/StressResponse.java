@@ -41,6 +41,8 @@ public class StressResponse {
         private Double matchedWeightPct;
         /** Custom sector: holdings matched. */
         private Integer matchedHoldings;
+        /** Echo of request custom.shockPct (signed percent points). */
+        private Double appliedShockPct;
         /** Short note e.g. no holdings matched. */
         private String note;
     }

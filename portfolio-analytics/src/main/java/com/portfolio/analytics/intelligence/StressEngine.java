@@ -77,14 +77,16 @@ public class StressEngine {
             double pct = applySectorShock(snapshot, sector, shockPct);
             String note = matchedHoldings == 0
                     ? "No holdings match this sector — impact 0%"
-                    : String.format(Locale.ROOT, "%d holdings · %.1f%% of book",
-                            matchedHoldings, matchedWeight);
+                    : String.format(Locale.ROOT,
+                            "shock %+.0f%% on %d holdings (%.1f%% of book)",
+                            shockPct, matchedHoldings, matchedWeight);
             scenarios.add(StressResponse.ScenarioImpactDto.builder()
                     .id(id)
                     .pctImpact(pct)
                     .absImpact(0) // filled in finalizeAbs
                     .matchedWeightPct(matchedWeight)
                     .matchedHoldings(matchedHoldings)
+                    .appliedShockPct(shockPct)
                     .note(note)
                     .build());
         } else if (request != null && request.getPresets() != null && !request.getPresets().isEmpty()) {
@@ -255,6 +257,7 @@ public class StressEngine {
                 .absImpact(abs)
                 .matchedWeightPct(dto.getMatchedWeightPct())
                 .matchedHoldings(dto.getMatchedHoldings())
+                .appliedShockPct(dto.getAppliedShockPct())
                 .note(dto.getNote())
                 .build();
     }

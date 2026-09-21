@@ -40,6 +40,9 @@ public final class SectorMatcher {
         if (matchesEnergy(t) && matchesEnergy(h)) {
             return true;
         }
+        if (matchesFmcg(t) && matchesFmcg(h)) {
+            return true;
+        }
 
         String hl = h.toLowerCase(Locale.ROOT);
         String tl = t.toLowerCase(Locale.ROOT);
@@ -123,5 +126,16 @@ public final class SectorMatcher {
                 || s.contains("gas")
                 || s.contains("power")
                 || s.contains("petroleum");
+    }
+
+    /** FMCG / staples — short token {@code FMCG} must match full holding labels. */
+    public static boolean matchesFmcg(String sector) {
+        if (sector == null) {
+            return false;
+        }
+        String s = sector.toLowerCase(Locale.ROOT).trim();
+        return s.equals("fmcg")
+                || s.contains("fast moving consumer")
+                || s.contains("consumer staples");
     }
 }

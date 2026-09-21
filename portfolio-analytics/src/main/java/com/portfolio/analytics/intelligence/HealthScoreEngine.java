@@ -141,7 +141,10 @@ public class HealthScoreEngine {
         }
         if (historyOk && snapshot.getDailyVolPct() != null) {
             double dailyVol = snapshot.getDailyVolPct();
-            return new VolResult(roundInt(volatility(dailyVol)), "Daily vol " + dailyVol + "%", false);
+            return new VolResult(
+                    roundInt(volatility(dailyVol)),
+                    String.format(Locale.ROOT, "Daily vol %.2f%%", dailyVol),
+                    false);
         }
         return null;
     }

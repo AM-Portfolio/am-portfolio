@@ -59,7 +59,16 @@ public class PortfolioIntelligenceService {
 
     @PostConstruct
     void wireHistoryWarmedListener() {
-        snapshotFactory.setHistoryWarmedListener(this::evictStressL1);
+        snapshotFactory.setHistoryWarmedListener(this::onHistoryWarmed);
+    }
+
+    /** After hist Redis warm: drop sticky ASSUMED stress L1 and cold Overview intel. */
+    void onHistoryWarmed(String portfolioId) {
+        evictStressL1(portfolioId);
+        if (portfolioId != null && !portfolioId.isBlank()) {
+            intelligenceRedisService.evict(portfolioId);
+            log.debug("Evicted intel cache after hist warm portfolioId={}", portfolioId);
+        }
     }
 
     /** Drop sticky ASSUMED stress entries after hist Redis warm. */
@@ -98,7 +107,11 @@ public class PortfolioIntelligenceService {
                 try {
                     PortfolioIntelligenceSnapshot snapshot = buildSnapshot(portfolioId, ownedPortfolio, true);
                     PortfolioIntelligenceResponse response = toIntelligenceResponse(snapshot);
-                    intelligenceRedisService.put(portfolioId, response);
+                    // Never stick cold Overview (no measured hist) into L1/L2 — hist warm
+                    // would otherwise leave Volatility/β stale until TTL or hard refresh.
+                    if (isWarmEnoughToCache(snapshot, response)) {
+                        intelligenceRedisService.put(portfolioId, response);
+                    }
                     created.complete(response);
                     return response;
                 } catch (Throwable t) {
@@ -328,5 +341,18 @@ public class PortfolioIntelligenceService {
             return 0.9;
         }
         return 0.55;
+    }
+
+    /** Cache only when hist metrics are measured (confidence 0.9 path). */
+    static boolean isWarmEnoughToCache(
+            PortfolioIntelligenceSnapshot snapshot, PortfolioIntelligenceResponse response) {
+        if (snapshot == null || response == null) {
+            return false;
+        }
+        if (snapshot.getHistoryPoints() < HealthScoreConstants.MIN_HISTORY_POINTS) {
+            return false;
+        }
+        Double conf = response.getConfidence();
+        return conf != null && conf >= 0.9;
     }
 }

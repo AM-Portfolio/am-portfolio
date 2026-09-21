@@ -29,4 +29,12 @@ class SectorMatcherTest {
         assertThat(SectorMatcher.matches("Unknown", "IT")).isFalse();
         assertThat(SectorMatcher.matches("Energy", "Unknown")).isFalse();
     }
+
+    @Test
+    void fmcg_matchesFastMovingConsumerGoods() {
+        assertThat(SectorMatcher.matches("Fast Moving Consumer Goods", "FMCG")).isTrue();
+        assertThat(SectorMatcher.matches("FMCG", "Fast Moving Consumer Goods")).isTrue();
+        assertThat(SectorMatcher.matches("Consumer Staples", "FMCG")).isTrue();
+        assertThat(SectorMatcher.matches("Information Technology", "FMCG")).isFalse();
+    }
 }

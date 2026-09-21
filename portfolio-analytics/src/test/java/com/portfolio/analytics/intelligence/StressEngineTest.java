@@ -150,7 +150,29 @@ class StressEngineTest {
         assertEquals(-7.6, row.getPctImpact(), 0.01);
         assertEquals(40.0, row.getMatchedWeightPct(), 0.01);
         assertEquals(1, row.getMatchedHoldings());
+        assertEquals(-19.0, row.getAppliedShockPct(), 0.01);
         assertTrue(row.getNote() != null && row.getNote().contains("40.0%"));
+        assertTrue(row.getNote().contains("shock"));
+        StressResponse.ScenarioImpactDto finalized = engine.withAbs(row, 200);
+        assertEquals(-19.0, finalized.getAppliedShockPct(), 0.01);
+    }
+
+    @Test
+    void customSector_fmcgAlias_matchesFullName() {
+        PortfolioIntelligenceSnapshot snap = snapshot(
+                1.0,
+                holding("HUL", 100, 10, "Fast Moving Consumer Goods"),
+                holding("TCS", 100, 90, "Information Technology"));
+        StressRequest.CustomShock custom = StressRequest.CustomShock.builder()
+                .sector("FMCG")
+                .shockPct(18.0)
+                .build();
+        StressResponse res = engine.run(snap, StressRequest.builder().custom(custom).build());
+        StressResponse.ScenarioImpactDto row = res.getScenarios().get(0);
+        assertEquals(1.8, row.getPctImpact(), 0.01);
+        assertEquals(10.0, row.getMatchedWeightPct(), 0.01);
+        assertEquals(18.0, row.getAppliedShockPct(), 0.01);
+        assertTrue(row.getNote().contains("shock +18%"));
     }
 
     @Test
