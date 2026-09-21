@@ -16,11 +16,13 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.annotation.PostConstruct;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -52,6 +54,26 @@ public class PortfolioIntelligenceService {
     private static final long STRESS_L1_TTL_MS = 30_000L;
 
     private record CachedStress(StressResponse response, long expiresAtMs) {}
+
+    @PostConstruct
+    void wireHistoryWarmedListener() {
+        snapshotFactory.setHistoryWarmedListener(this::evictStressL1);
+    }
+
+    /** Drop sticky ASSUMED stress entries after hist Redis warm. */
+    void evictStressL1(String portfolioId) {
+        if (portfolioId == null || portfolioId.isBlank()) {
+            return;
+        }
+        String prefix = portfolioId + "|";
+        Iterator<Map.Entry<String, CachedStress>> it = stressL1.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<String, CachedStress> e = it.next();
+            if (e.getKey().startsWith(prefix)) {
+                it.remove();
+            }
+        }
+    }
 
     public PortfolioIntelligenceResponse intelligence(String portfolioId) {
         return intelligence(portfolioId, null);
@@ -99,7 +121,7 @@ public class PortfolioIntelligenceService {
 
     private PortfolioIntelligenceSnapshot buildSnapshot(
             String portfolioId, PortfolioModelV1 ownedPortfolio, boolean includeHistory) {
-        return buildSnapshot(portfolioId, ownedPortfolio, includeHistory, true);
+        return buildSnapshot(portfolioId, ownedPortfolio, includeHistory, true, 0L);
     }
 
     private PortfolioIntelligenceSnapshot buildSnapshot(
@@ -107,6 +129,15 @@ public class PortfolioIntelligenceService {
             PortfolioModelV1 ownedPortfolio,
             boolean includeHistory,
             boolean fetchHistoryIfMiss) {
+        return buildSnapshot(portfolioId, ownedPortfolio, includeHistory, fetchHistoryIfMiss, 0L);
+    }
+
+    private PortfolioIntelligenceSnapshot buildSnapshot(
+            String portfolioId,
+            PortfolioModelV1 ownedPortfolio,
+            boolean includeHistory,
+            boolean fetchHistoryIfMiss,
+            long historyTimeoutOverrideMs) {
         if (ownedPortfolio == null) {
             return snapshotFactory.build(portfolioId, includeHistory);
         }
@@ -116,10 +147,11 @@ public class PortfolioIntelligenceService {
                     includeHistory,
                     AggregatePortfolioKeys.RESPONSE_PORTFOLIO_ID,
                     portfolioId,
-                    fetchHistoryIfMiss);
+                    fetchHistoryIfMiss,
+                    historyTimeoutOverrideMs);
         }
         return snapshotFactory.buildFromPortfolio(
-                ownedPortfolio, includeHistory, null, null, fetchHistoryIfMiss);
+                ownedPortfolio, includeHistory, null, null, fetchHistoryIfMiss, historyTimeoutOverrideMs);
     }
 
     private static boolean isAggregateCacheKey(String portfolioId) {
@@ -154,15 +186,20 @@ public class PortfolioIntelligenceService {
                 return hit.response();
             }
 
-            // History: Redis cache only (no network wait). Miss → ASSUMED_ONE β instantly.
-            // Intel Overview warms the hist cache so subsequent stress gets PORTFOLIO_BETA.
-            PortfolioIntelligenceSnapshot snapshot = buildSnapshot(portfolioId, ownedPortfolio, true, false);
+            // Fetch hist with stress timeout (20s); joins in-flight intel warm when present.
+            PortfolioIntelligenceSnapshot snapshot = buildSnapshot(
+                    portfolioId,
+                    ownedPortfolio,
+                    true,
+                    true,
+                    snapshotFactory.getHistoryTimeoutStressMs());
             StressResponse response = stressEngine.run(snapshot, effective);
             StressResponse finalized = stressEngine.finalizeAbs(response, snapshot.getTotalValue());
             if (isAggregateCacheKey(portfolioId) && finalized != null) {
                 finalized.setPortfolioId(AggregatePortfolioKeys.RESPONSE_PORTFOLIO_ID);
             }
-            if (finalized != null) {
+            // Only cache measured-β responses — never sticky ASSUMED_ONE.
+            if (finalized != null && !Boolean.TRUE.equals(finalized.getBetaAssumed())) {
                 stressL1.put(l1Key, new CachedStress(finalized, System.currentTimeMillis() + STRESS_L1_TTL_MS));
             }
             return finalized;
