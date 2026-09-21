@@ -31,13 +31,14 @@ public class PortfolioEquitySymbolNormalizer {
             return;
         }
 
-        // Gather all unique ISIN codes from the equities to perform a single batch lookup
+        // Gather ISINs that still need ticker resolution (skip already-compact tickers).
         java.util.List<String> isinsToResolve = equities.stream()
                 .filter(e -> e != null)
                 .map(e -> {
-                    String normalized = e.getSymbol() != null ? com.portfolio.model.util.SymbolResolver.normalize(e.getSymbol()) : null;
-                    if (normalized != null && !normalized.isBlank() && !TradingSymbolResolver.looksLikeIsin(normalized)) {
-                        return null; // Already a standard ticker symbol, no need to resolve
+                    String normalized = e.getSymbol() != null
+                            ? com.portfolio.model.util.SymbolResolver.normalize(e.getSymbol()) : null;
+                    if (TradingSymbolResolver.looksLikeTradingTicker(normalized)) {
+                        return null;
                     }
                     if (e.getIsin() != null && !e.getIsin().isBlank()) {
                         return e.getIsin().trim().toUpperCase();
@@ -81,6 +82,13 @@ public class PortfolioEquitySymbolNormalizer {
         }
 
         if (resolved == null || resolved.isBlank()) {
+            // Keep a resolvable market key: prefer ISIN over company-name symbol.
+            if (isinKey != null && !TradingSymbolResolver.looksLikeTradingTicker(equity.getSymbol())) {
+                equity.setSymbol(isinKey);
+                if (equity.getIsin() == null || equity.getIsin().isBlank()) {
+                    equity.setIsin(isinKey);
+                }
+            }
             return;
         }
 
@@ -94,8 +102,10 @@ public class PortfolioEquitySymbolNormalizer {
             }
         }
 
-        if (!TradingSymbolResolver.looksLikeIsin(resolved)) {
+        if (TradingSymbolResolver.looksLikeTradingTicker(resolved)) {
             equity.setSymbol(resolved);
+        } else if (isinKey != null) {
+            equity.setSymbol(isinKey);
         }
     }
 }

@@ -36,5 +36,24 @@ public interface TradingSymbolResolver {
         String trimmed = value.trim().toUpperCase();
         return trimmed.length() == 12 && trimmed.matches("[A-Z]{2}[A-Z0-9]{10}");
     }
+
+    /**
+     * Compact exchange ticker (e.g. RELIANCE, NSE:RELIANCE-EQ), not a company name
+     * or free-text security name from demat summaries.
+     */
+    static boolean looksLikeTradingTicker(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String trimmed = value.trim();
+        if (trimmed.length() > 20 || trimmed.indexOf(' ') >= 0) {
+            return false;
+        }
+        if (looksLikeIsin(trimmed)) {
+            return false;
+        }
+        // Allow exchange prefixes and common ticker characters only.
+        return trimmed.matches("(?i)[A-Z0-9][A-Z0-9._\\-&:]*");
+    }
 }
 

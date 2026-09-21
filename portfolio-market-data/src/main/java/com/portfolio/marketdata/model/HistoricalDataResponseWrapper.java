@@ -33,9 +33,11 @@ public class HistoricalDataResponseWrapper {
     private LocalDate toDate;
     
     /**
-     * Map of symbols to their respective historical data responses
+     * Map of symbols to their respective historical series.
+     * Matches am-market {@code HistoricalDataResponseV1}: flat {@link HistoricalData}
+     * per symbol (tradingSymbol / interval / dataPoints), not a nested wrapper.
      */
-    private Map<String, HistoricalDataResponse> data;
+    private Map<String, HistoricalData> data;
     
     /**
      * Time interval for the data points (e.g., "day", "15min")
@@ -71,4 +73,9 @@ public class HistoricalDataResponseWrapper {
      * Processing time in milliseconds for the entire request
      */
     private long processingTimeMs;
+
+    /** Present when am-market rejects the request (e.g. missing {@code from}). */
+    private String error;
+
+    private String message;
 }
