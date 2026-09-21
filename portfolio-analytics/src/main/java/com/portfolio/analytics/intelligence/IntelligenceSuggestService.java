@@ -257,7 +257,24 @@ public class IntelligenceSuggestService {
         if (query == null || query.isBlank()) {
             return true;
         }
-        return label.toLowerCase(Locale.ROOT).contains(query.toLowerCase(Locale.ROOT));
+        if (label == null || label.isBlank()) {
+            return false;
+        }
+        String l = label.toLowerCase(Locale.ROOT).trim();
+        String q = query.toLowerCase(Locale.ROOT).trim();
+        if (l.equals(q) || l.startsWith(q + " ") || l.endsWith(" " + q) || l.contains(" " + q + " ")) {
+            return true;
+        }
+        // Short tokens: whole-token / prefix only — avoid "it" ⊆ "commodities".
+        if (q.length() <= 3) {
+            for (String part : l.split("[\\s/|&,-]+")) {
+                if (part.equals(q) || part.startsWith(q)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return l.contains(q);
     }
 
     private static List<IntelligenceSuggestResponse.SuggestionDto> mergeSuggestions(

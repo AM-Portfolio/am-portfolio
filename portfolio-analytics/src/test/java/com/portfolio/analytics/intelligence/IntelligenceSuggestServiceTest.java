@@ -74,6 +74,23 @@ class IntelligenceSuggestServiceTest {
     }
 
     @Test
+    void stressSector_shortItDoesNotMatchCommodities() {
+        PortfolioIntelligenceSnapshot snap = snapshot(
+                holding("GOLD", 40, "Commodities"),
+                holding("TCS", 60, "Information Technology"));
+
+        IntelligenceSuggestResponse res = service.suggest(
+                snap, IntelligenceSuggestService.CTX_STRESS_SECTOR, "IT", null, 8);
+
+        List<String> labels = res.getSuggestions().stream()
+                .map(IntelligenceSuggestResponse.SuggestionDto::getLabel)
+                .toList();
+        assertFalse(labels.stream().anyMatch(l -> l.equalsIgnoreCase("Commodities")));
+        assertTrue(labels.stream().anyMatch(l ->
+                l.equalsIgnoreCase("IT") || l.toLowerCase().contains("technology")));
+    }
+
+    @Test
     void unknownContext_returnsEmpty() {
         PortfolioIntelligenceSnapshot snap = snapshot(holding("TCS", 100, "IT"));
         IntelligenceSuggestResponse res = service.suggest(snap, "NOPE", "t", null, 8);
