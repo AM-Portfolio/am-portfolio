@@ -355,7 +355,7 @@ portfolio:
   intelligence:
     # Primary history benchmark (beta / relative return). Use "SENSEX" or "NIFTY 50".
     primary-benchmark-symbol: ${PORTFOLIO_INTEL_BENCHMARK:NIFTY 50}
-    history-lookback-days: ${PORTFOLIO_INTEL_HISTORY_LOOKBACK_DAYS:90}
+    history-lookback-days: ${PORTFOLIO_INTEL_HISTORY_LOOKBACK_DAYS:60}
     history-timeout-ms: ${PORTFOLIO_INTEL_HISTORY_TIMEOUT_MS:800}
     # Stress / intel β load — longer than soft timeout so MD hist can succeed once and fill cache
     history-timeout-stress-ms: ${PORTFOLIO_INTEL_HISTORY_TIMEOUT_STRESS_MS:20000}

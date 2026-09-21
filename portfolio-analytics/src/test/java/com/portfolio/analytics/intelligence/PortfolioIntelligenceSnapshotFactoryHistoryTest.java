@@ -50,7 +50,7 @@ class PortfolioIntelligenceSnapshotFactoryHistoryTest {
         factory = new PortfolioIntelligenceSnapshotFactory(
                 portfolioService, marketDataService, securityDetailsService, historyCache);
         ReflectionTestUtils.setField(factory, "primaryBenchmarkSymbol", "NIFTY 50");
-        ReflectionTestUtils.setField(factory, "historyLookbackDays", 90);
+        ReflectionTestUtils.setField(factory, "historyLookbackDays", 60);
         ReflectionTestUtils.setField(factory, "historyTimeoutMs", 800L);
         ReflectionTestUtils.setField(factory, "historyTimeoutStressMs", 20_000L);
     }

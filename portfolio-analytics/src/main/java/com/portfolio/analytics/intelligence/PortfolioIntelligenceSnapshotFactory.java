@@ -51,14 +51,14 @@ public class PortfolioIntelligenceSnapshotFactory {
 
     /** Default primary benchmark; override via portfolio.intelligence.primary-benchmark-symbol (e.g. SENSEX). */
     public static final String NIFTY_SYMBOL = "NIFTY 50";
-    public static final int HISTORY_LOOKBACK_DAYS = 90;
+    public static final int HISTORY_LOOKBACK_DAYS = 60;
     public static final long HISTORY_TIMEOUT_MS = 800L;
     public static final long HISTORY_TIMEOUT_STRESS_MS = 20_000L;
 
     @Value("${portfolio.intelligence.primary-benchmark-symbol:NIFTY 50}")
     private String primaryBenchmarkSymbol;
 
-    @Value("${portfolio.intelligence.history-lookback-days:90}")
+    @Value("${portfolio.intelligence.history-lookback-days:60}")
     private int historyLookbackDays;
 
     @Value("${portfolio.intelligence.history-timeout-ms:800}")
