@@ -81,6 +81,29 @@ class PortfolioIntelligenceSnapshotFactoryHistoryTest {
     }
 
     @Test
+    void softTimeout_leavesInFlightWarm_soLaterAwaitGetsBeta() throws Exception {
+        when(historyCache.get(any())).thenReturn(Optional.empty());
+        when(marketDataService.getHistoricalData(any())).thenAnswer(inv -> {
+            Thread.sleep(400);
+            return sampleHistWithBenchmark();
+        });
+
+        Map<String, Double> qty = Map.of("RELIANCE", 10.0);
+        List<String> symbols = List.of("RELIANCE");
+
+        Object soft = ReflectionTestUtils.invokeMethod(
+                factory, "loadHistoryMetrics", "pid-soft", symbols, qty, true, 80L);
+        assertThat(soft).isNotNull();
+        // Soft path may be empty (timeout) or already filled; either way in-flight must finish.
+        Thread.sleep(600);
+        Object after = ReflectionTestUtils.invokeMethod(
+                factory, "loadHistoryMetrics", "pid-soft", symbols, qty, true, 5_000L);
+        assertThat(after).isNotNull();
+        Integer points = (Integer) ReflectionTestUtils.getField(after, "historyPoints");
+        assertThat(points).isNotNull().isGreaterThanOrEqualTo(20);
+    }
+
+    @Test
     void fetchHistory_retriesBenchmarkAsIndexWhenEqMisses() {
         Map<String, MarketData> eqOnly = new HashMap<>();
         eqOnly.put("RELIANCE", series("RELIANCE", 100));

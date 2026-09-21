@@ -360,73 +360,79 @@ public class PortfolioIntelligenceSnapshotFactory {
         }
 
         String flightKey = portfolioId != null ? portfolioId : UUID.randomUUID().toString();
-        long joinTimeoutMs = effectiveHistoryTimeoutMs(historyTimeoutOverrideMs);
+        long timeoutMs = effectiveHistoryTimeoutMs(historyTimeoutOverrideMs);
 
         if (!fetchHistoryIfMiss) {
             CompletableFuture<HistoryFields> inflight = historyInFlight.get(flightKey);
             if (inflight != null) {
-                try {
-                    HistoryFields joined = inflight.orTimeout(joinTimeoutMs, TimeUnit.MILLISECONDS).join();
-                    log.info("Intel hist joined in-flight portfolioId={} historyPoints={} beta={}",
-                            portfolioId, joined.historyPoints, joined.beta);
-                    return joined;
-                } catch (Exception e) {
-                    log.info("Intel hist empty portfolioId={} reason=inflight_join_failed detail={}",
-                            portfolioId, e.getMessage());
-                    return HistoryFields.empty();
-                }
+                return awaitHistory(inflight, timeoutMs, portfolioId, "inflight_join");
             }
             log.info("Intel hist empty portfolioId={} reason=cache_only_no_inflight", portfolioId);
             return HistoryFields.empty();
         }
 
-        CompletableFuture<HistoryFields> created = new CompletableFuture<>();
-        CompletableFuture<HistoryFields> existing = historyInFlight.putIfAbsent(flightKey, created);
-        if (existing != null) {
-            try {
-                return existing.orTimeout(joinTimeoutMs, TimeUnit.MILLISECONDS).join();
-            } catch (Exception e) {
-                log.warn("Intel hist in-flight join failed: {}", e.getMessage());
-                return HistoryFields.empty();
-            }
-        }
+        CompletableFuture<HistoryFields> work = historyInFlight.computeIfAbsent(flightKey, key -> {
+            CompletableFuture<HistoryFields> fetch = CompletableFuture.supplyAsync(
+                    () -> fetchHistory(symbols, quantities));
+            fetch.whenComplete((loaded, err) -> {
+                try {
+                    HistoryFields result = err != null || loaded == null
+                            ? HistoryFields.empty()
+                            : loaded;
+                    if (err != null) {
+                        log.info("Intel hist empty portfolioId={} reason=fetch_failed detail={}",
+                                portfolioId, err.getMessage());
+                    } else if (result.historyPoints == 0) {
+                        log.info("Intel hist empty portfolioId={} reason=empty_after_fetch", portfolioId);
+                    }
+                    if (result.historyPoints >= HealthScoreConstants.MIN_HISTORY_POINTS
+                            && result.beta != null
+                            && result.beta > 0
+                            && Double.isFinite(result.beta)
+                            && portfolioId != null) {
+                        historyCache.put(portfolioId, CachedIntelligenceHistory.builder()
+                                .historyPoints(result.historyPoints)
+                                .portRetPct(result.portRetPct)
+                                .niftyRetPct(result.niftyRetPct)
+                                .dailyVolPct(result.dailyVolPct)
+                                .beta(result.beta)
+                                .computedAtEpochMs(System.currentTimeMillis())
+                                .build());
+                        onHistoryWarmed(portfolioId);
+                    }
+                } finally {
+                    historyInFlight.remove(key, fetch);
+                }
+            });
+            return fetch;
+        });
 
+        return awaitHistory(work, timeoutMs, portfolioId, "timeout");
+    }
+
+    /**
+     * Soft-wait for hist without cancelling the shared in-flight future.
+     * Intel may return empty at 800ms while MD continues; stress joins the same future.
+     */
+    private HistoryFields awaitHistory(
+            CompletableFuture<HistoryFields> work,
+            long timeoutMs,
+            String portfolioId,
+            String timeoutReason) {
         try {
-            long timeoutMs = effectiveHistoryTimeoutMs(historyTimeoutOverrideMs);
-            HistoryFields loaded = CompletableFuture.supplyAsync(() -> fetchHistory(symbols, quantities))
-                    .orTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                    .exceptionally(ex -> {
-                        log.info("Intel hist empty portfolioId={} reason=timeout timeoutMs={} detail={}",
-                                portfolioId, timeoutMs, ex.getMessage());
-                        return HistoryFields.empty();
-                    })
+            CompletableFuture<HistoryFields> softEmpty = new CompletableFuture<>();
+            softEmpty.completeOnTimeout(HistoryFields.empty(), timeoutMs, TimeUnit.MILLISECONDS);
+            HistoryFields result = work.applyToEither(softEmpty, v -> v != null ? v : HistoryFields.empty())
                     .join();
-            if (loaded.historyPoints == 0) {
-                log.info("Intel hist empty portfolioId={} reason=empty_after_fetch", portfolioId);
+            if (result.historyPoints == 0 && !work.isDone()) {
+                log.info("Intel hist empty portfolioId={} reason={} timeoutMs={}",
+                        portfolioId, timeoutReason, timeoutMs);
             }
-            if (loaded.historyPoints >= HealthScoreConstants.MIN_HISTORY_POINTS
-                    && loaded.beta != null
-                    && loaded.beta > 0
-                    && Double.isFinite(loaded.beta)
-                    && portfolioId != null) {
-                historyCache.put(portfolioId, CachedIntelligenceHistory.builder()
-                        .historyPoints(loaded.historyPoints)
-                        .portRetPct(loaded.portRetPct)
-                        .niftyRetPct(loaded.niftyRetPct)
-                        .dailyVolPct(loaded.dailyVolPct)
-                        .beta(loaded.beta)
-                        .computedAtEpochMs(System.currentTimeMillis())
-                        .build());
-                onHistoryWarmed(portfolioId);
-            }
-            created.complete(loaded);
-            return loaded;
+            return result;
         } catch (Exception e) {
-            log.warn("Intel history load failed portfolioId={}: {}", portfolioId, e.getMessage());
-            created.complete(HistoryFields.empty());
+            log.info("Intel hist empty portfolioId={} reason={}_failed detail={}",
+                    portfolioId, timeoutReason, e.getMessage());
             return HistoryFields.empty();
-        } finally {
-            historyInFlight.remove(flightKey, created);
         }
     }
 
