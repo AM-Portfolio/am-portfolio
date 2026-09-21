@@ -387,7 +387,6 @@ public class PortfolioIntelligenceSnapshotFactory {
                     }
                     if (result.historyPoints >= HealthScoreConstants.MIN_HISTORY_POINTS
                             && result.beta != null
-                            && result.beta > 0
                             && Double.isFinite(result.beta)
                             && portfolioId != null) {
                         historyCache.put(portfolioId, CachedIntelligenceHistory.builder()

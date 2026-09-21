@@ -39,6 +39,18 @@ class StressEngineTest {
     }
 
     @Test
+    void niftyDown10_withNegativeBeta_isMeasuredNotAssumed() {
+        PortfolioIntelligenceSnapshot snap = snapshot(
+                -0.4,
+                holding("A", 100, 100, "Energy"));
+        StressResponse res = engine.run(snap, StressRequest.builder().preset("NIFTY_DOWN_10").build());
+        assertEquals(4.0, res.getScenarios().get(0).getPctImpact(), 0.01);
+        assertEquals("PORTFOLIO_BETA", res.getMethod());
+        assertEquals(-0.4, res.getBetaUsed(), 0.01);
+        assertEquals(Boolean.FALSE, res.getBetaAssumed());
+    }
+
+    @Test
     void niftyDown10_missingBeta_assumesOne() {
         PortfolioIntelligenceSnapshot snap = PortfolioIntelligenceSnapshot.builder()
                 .portfolioId("p1")

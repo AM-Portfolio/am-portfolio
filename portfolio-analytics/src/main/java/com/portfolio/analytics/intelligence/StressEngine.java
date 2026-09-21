@@ -103,11 +103,12 @@ public class StressEngine {
 
     private static BetaMeta resolveBetaMeta(PortfolioIntelligenceSnapshot snapshot) {
         int historyDays = snapshot.getHistoryPoints();
-        boolean measured = snapshot.getBeta() != null && snapshot.getBeta() > 0;
+        Double beta = snapshot.getBeta();
+        boolean measured = beta != null && Double.isFinite(beta) && historyDays >= 20;
         if (measured) {
             return new BetaMeta(
                     "PORTFOLIO_BETA",
-                    PortfolioIntelligenceSnapshotFactory.round2(snapshot.getBeta()),
+                    PortfolioIntelligenceSnapshotFactory.round2(beta),
                     "NIFTY50",
                     historyDays,
                     false);
@@ -180,8 +181,9 @@ public class StressEngine {
     }
 
     private static double betaProxy(PortfolioIntelligenceSnapshot snapshot) {
-        if (snapshot.getBeta() != null && snapshot.getBeta() > 0) {
-            return snapshot.getBeta();
+        Double beta = snapshot.getBeta();
+        if (beta != null && Double.isFinite(beta)) {
+            return beta;
         }
         return 1.0;
     }
