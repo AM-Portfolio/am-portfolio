@@ -1,3 +1,5 @@
-﻿global:
+# Written by CI for feature-branch preprod rolls. Do not commit on main.
+# Last valueFile in Argo Application — overrides am-gitops image-tags while values revision is this branch.
+global:
   image:
-    tag: "35613157645"
+    tag: "35700664457"
