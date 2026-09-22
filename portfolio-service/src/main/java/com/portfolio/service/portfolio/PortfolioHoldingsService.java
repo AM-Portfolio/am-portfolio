@@ -2,6 +2,7 @@ package com.portfolio.service.portfolio;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -206,9 +207,27 @@ public class PortfolioHoldingsService {
             log.info("Enriching stock prices for {} equity holdings for {}",
                     portfolioHoldings.getEquityHoldings() != null ? portfolioHoldings.getEquityHoldings().size() : 0,
                     context);
-            var enrichedHoldings = portfolioCalculator.enrichHoldings(portfolioHoldings.getEquityHoldings());
-            portfolioCalculator.calculateWeights(enrichedHoldings);
-            portfolioHoldings.setEquityHoldings(enrichedHoldings);
+            List<EquityHoldings> all = portfolioHoldings.getEquityHoldings() != null
+                    ? portfolioHoldings.getEquityHoldings()
+                    : List.of();
+            List<EquityHoldings> equities = new ArrayList<>();
+            List<EquityHoldings> classRows = new ArrayList<>();
+            for (EquityHoldings h : all) {
+                String cls = h.getAssetClass();
+                if (cls == null
+                        || cls.isBlank()
+                        || PortfolioHoldingsMapper.ASSET_EQUITY.equalsIgnoreCase(cls)) {
+                    equities.add(h);
+                } else {
+                    classRows.add(h);
+                }
+            }
+            equities = portfolioCalculator.enrichHoldings(equities);
+            List<EquityHoldings> merged = new ArrayList<>(equities.size() + classRows.size());
+            merged.addAll(equities);
+            merged.addAll(classRows);
+            portfolioCalculator.calculateWeights(merged);
+            portfolioHoldings.setEquityHoldings(merged);
             stampFreshness(portfolioHoldings, "OHLC");
         } else {
             stampFreshness(portfolioHoldings, "CACHE");
@@ -244,10 +263,25 @@ public class PortfolioHoldingsService {
     }
 
     protected List<EquityHoldings> getHoldings(List<PortfolioModelV1> portfolios) {
-        var equityHoldings = portfolioHoldingsMapper.toEquityHoldings(portfolios);
-        equityHoldings = portfolioCalculator.enrichHoldings(equityHoldings);
-        portfolioCalculator.calculateWeights(equityHoldings);
-        return equityHoldings;
+        var allHoldings = portfolioHoldingsMapper.toEquityHoldings(portfolios);
+        List<EquityHoldings> equities = new ArrayList<>();
+        List<EquityHoldings> classRows = new ArrayList<>();
+        for (EquityHoldings h : allHoldings) {
+            String cls = h.getAssetClass();
+            if (cls == null
+                    || cls.isBlank()
+                    || PortfolioHoldingsMapper.ASSET_EQUITY.equalsIgnoreCase(cls)) {
+                equities.add(h);
+            } else {
+                classRows.add(h);
+            }
+        }
+        equities = portfolioCalculator.enrichHoldings(equities);
+        List<EquityHoldings> merged = new ArrayList<>(equities.size() + classRows.size());
+        merged.addAll(equities);
+        merged.addAll(classRows);
+        portfolioCalculator.calculateWeights(merged);
+        return merged;
     }
 
     private Optional<PortfolioHoldings> getCachedHoldings(String userId, TimeInterval interval, String portfolioId) {

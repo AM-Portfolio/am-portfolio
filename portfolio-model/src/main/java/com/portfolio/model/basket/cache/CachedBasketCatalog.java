@@ -7,9 +7,12 @@ import java.util.List;
 
 /**
  * L2 Redis blob for basket catalog (themes + aliases).
+ * {@code catalogVersion} bumps when classpath seed must overwrite stale Mongo.
  */
 @Data
 public class CachedBasketCatalog {
+    /** Bump in basket-catalog.yml when seed content must replace existing Mongo. */
+    private int catalogVersion = 1;
     private List<String> defaultThemeIds = new ArrayList<>();
     private List<Theme> themes = new ArrayList<>();
 

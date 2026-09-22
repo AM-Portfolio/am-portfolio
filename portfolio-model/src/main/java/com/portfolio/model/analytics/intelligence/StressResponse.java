@@ -18,6 +18,16 @@ public class StressResponse {
     private String estimateLabel;
     private List<ScenarioImpactDto> scenarios;
 
+    /** HOLDING_BETA | PORTFOLIO_BETA | SECTOR_WEIGHT | ASSUMED_ONE */
+    private String method;
+    /** Portfolio β used for index scenarios; null when sector-only / assumed. */
+    private Double betaUsed;
+    /** Benchmark for β (e.g. NIFTY50). Sensex presets may share NIFTY β until separate series. */
+    private String benchmark;
+    private Integer historyDays;
+    /** True when β defaulted to 1.0 because history/β missing. */
+    private Boolean betaAssumed;
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -27,5 +37,13 @@ public class StressResponse {
         private String id;
         private double pctImpact;
         private double absImpact;
+        /** Custom sector: book weight matched by SectorMatcher (%). */
+        private Double matchedWeightPct;
+        /** Custom sector: holdings matched. */
+        private Integer matchedHoldings;
+        /** Echo of request custom.shockPct (signed percent points). */
+        private Double appliedShockPct;
+        /** Short note e.g. no holdings matched. */
+        private String note;
     }
 }

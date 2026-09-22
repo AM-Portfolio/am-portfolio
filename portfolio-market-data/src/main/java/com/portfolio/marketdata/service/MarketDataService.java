@@ -73,6 +73,16 @@ public class MarketDataService {
             .maximumSize(20000)
             .build();
 
+    /**
+     * Symbols where prior-close hist was already attempted this TTL window.
+     * Kept separate from {@link #priorCloseCache} so a miss never poisons day% with last≈prev.
+     */
+    private final com.github.benmanes.caffeine.cache.Cache<String, Boolean> priorClosePrefetchAttempted =
+            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+            .expireAfterWrite(18, java.util.concurrent.TimeUnit.HOURS)
+            .maximumSize(20000)
+            .build();
+
     private final com.github.benmanes.caffeine.cache.Cache<String, com.portfolio.marketdata.model.HistoricalData> chartCache = 
             com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
             .expireAfterWrite(3, java.util.concurrent.TimeUnit.MINUTES)
@@ -911,6 +921,7 @@ public class MarketDataService {
     /**
      * When session is closed, lastPrice often equals rolled previousClose → day% collapses to ~0.
      * Prefer cached prior closes; historical lookback only for cache misses (once per symbol / 18h).
+     * Never store collapsed last≈prev into {@link #priorCloseCache} (use {@link #priorClosePrefetchAttempted}).
      */
     void repairCollapsedPreviousClose(Map<String, MarketData> result) {
         if (result == null || result.isEmpty()) {
@@ -918,19 +929,20 @@ public class MarketDataService {
         }
         List<String> needsPrior = new ArrayList<>();
         int fromCache = 0;
+        Map<String, MarketData> repairedForRedis = new HashMap<>();
         for (Map.Entry<String, MarketData> e : result.entrySet()) {
             MarketData md = e.getValue();
             if (!needsPriorSessionClose(md)) {
                 continue;
             }
             Double cached = priorCloseCache.getIfPresent(e.getKey());
-            if (cached != null && cached > 0) {
-                // Cached prior (or attempt marker). Apply when it differs; otherwise leave as-is.
-                if (md.getLastPrice() == null
-                        || Math.abs(cached - md.getLastPrice()) / md.getLastPrice() >= 0.0001) {
-                    md.setPreviousClose(cached);
-                    localCache.put(e.getKey(), md);
-                }
+            if (cached != null && cached > 0 && isDistinctPrior(cached, md.getLastPrice())) {
+                md.setPreviousClose(cached);
+                localCache.put(e.getKey(), md);
+                repairedForRedis.put(e.getKey(), md);
+                fromCache++;
+            } else if (Boolean.TRUE.equals(priorClosePrefetchAttempted.getIfPresent(e.getKey()))) {
+                // Already tried hist this window — leave collapsed; do not re-hit API.
                 fromCache++;
             } else {
                 needsPrior.add(e.getKey());
@@ -940,6 +952,7 @@ public class MarketDataService {
             if (fromCache > 0) {
                 log.debug("[MarketData] Applied {} priorClose values from cache", fromCache);
             }
+            writeBackRepairedMarketData(repairedForRedis);
             return;
         }
         try {
@@ -954,13 +967,9 @@ public class MarketDataService {
             Map<String, MarketData> hist = getHistoricalData(request);
             if (hist == null || hist.isEmpty()) {
                 for (String symbol : needsPrior) {
-                    MarketData live = result.get(symbol);
-                    if (live != null && live.getLastPrice() != null && live.getLastPrice() > 0) {
-                        Double mark = live.getPreviousClose() != null && live.getPreviousClose() > 0
-                                ? live.getPreviousClose() : live.getLastPrice();
-                        priorCloseCache.put(symbol, mark);
-                    }
+                    priorClosePrefetchAttempted.put(symbol, Boolean.TRUE);
                 }
+                writeBackRepairedMarketData(repairedForRedis);
                 return;
             }
             int repaired = 0;
@@ -973,30 +982,40 @@ public class MarketDataService {
                 if (live == null) {
                     continue;
                 }
+                priorClosePrefetchAttempted.put(symbol, Boolean.TRUE);
                 Double prior = h != null ? resolvePriorCloseFromHistorical(h, live.getLastPrice()) : null;
-                if (prior != null && prior > 0) {
+                if (prior != null && prior > 0 && isDistinctPrior(prior, live.getLastPrice())) {
                     live.setPreviousClose(prior);
                     priorCloseCache.put(symbol, prior);
                     localCache.put(symbol, live);
+                    repairedForRedis.put(symbol, live);
                     repaired++;
-                } else {
-                    // Mark attempted so we do not re-hit historical every request
-                    Double fallback = live.getPreviousClose() != null && live.getPreviousClose() > 0
-                            ? live.getPreviousClose()
-                            : live.getLastPrice();
-                    if (fallback != null && fallback > 0) {
-                        priorCloseCache.put(symbol, fallback);
-                    }
                 }
+                // Miss: mark attempted only — never poison priorCloseCache with last≈prev.
             }
             log.info("[MarketData] Repaired previousClose hist={}/{} cacheHit={}",
                     repaired, needsPrior.size(), fromCache);
+            writeBackRepairedMarketData(repairedForRedis);
         } catch (Exception e) {
             log.warn("[MarketData] prior-close repair failed: {}", e.getMessage());
+            for (String symbol : needsPrior) {
+                priorClosePrefetchAttempted.put(symbol, Boolean.TRUE);
+            }
         }
     }
 
-    private static boolean needsPriorSessionClose(MarketData md) {
+    private void writeBackRepairedMarketData(Map<String, MarketData> repaired) {
+        if (repaired == null || repaired.isEmpty() || marketDataRedisService == null) {
+            return;
+        }
+        try {
+            marketDataRedisService.cacheMarketData(repaired);
+        } catch (Exception e) {
+            log.debug("[MarketData] Redis write-back of repaired priorClose skipped: {}", e.getMessage());
+        }
+    }
+
+    static boolean needsPriorSessionClose(MarketData md) {
         if (md == null) {
             return false;
         }
@@ -1008,26 +1027,40 @@ public class MarketDataService {
         if (prev == null || prev <= 0) {
             return true;
         }
-        return Math.abs(last - prev) / prev < 0.0001;
+        return !isDistinctPrior(prev, last);
     }
 
-    private static Double resolvePriorCloseFromHistorical(MarketData historical, Double sessionClose) {
+    /** True when prior differs from session last by at least 1 bp (relative). */
+    static boolean isDistinctPrior(Double prior, Double sessionClose) {
+        if (prior == null || prior <= 0 || sessionClose == null || sessionClose <= 0) {
+            return false;
+        }
+        return Math.abs(prior - sessionClose) / sessionClose >= 0.0001;
+    }
+
+    /**
+     * Walk daily bars backward from the latest close to find a prior session close
+     * distinct from the rolled session close (weekend / holiday collapse).
+     */
+    static Double resolvePriorCloseFromHistorical(MarketData historical, Double sessionClose) {
         if (historical == null) {
             return null;
         }
         List<MarketData.MarketDataPoint> points = historical.getDataPoints();
         if (points != null && points.size() >= 2) {
-            MarketData.MarketDataPoint prior = points.get(points.size() - 2);
-            if (prior != null && prior.getOhlcData() != null && prior.getOhlcData().getClose() > 0) {
-                double close = prior.getOhlcData().getClose();
-                if (sessionClose == null || Math.abs(close - sessionClose) / sessionClose >= 0.0001) {
+            for (int i = points.size() - 2; i >= 0; i--) {
+                MarketData.MarketDataPoint bar = points.get(i);
+                if (bar == null || bar.getOhlcData() == null || bar.getOhlcData().getClose() <= 0) {
+                    continue;
+                }
+                double close = bar.getOhlcData().getClose();
+                if (isDistinctPrior(close, sessionClose)) {
                     return close;
                 }
             }
         }
-        if (historical.getPreviousClose() != null && historical.getPreviousClose() > 0
-                && (sessionClose == null
-                    || Math.abs(historical.getPreviousClose() - sessionClose) / sessionClose >= 0.0001)) {
+        if (historical.getPreviousClose() != null
+                && isDistinctPrior(historical.getPreviousClose(), sessionClose)) {
             return historical.getPreviousClose();
         }
         return null;

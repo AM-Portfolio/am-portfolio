@@ -56,6 +56,8 @@ env:
   SPRING_PROFILES_ACTIVE: "prod,security"
   REDIS_CACHE_ENABLED: "true"
   PORTFOLIO_REDIS_ENABLED: "true"
+  # Diversification A/B/C + annualized vol (Overview Volatility factor)
+  PORTFOLIO_INTEL_HEALTH_V2: "true"
 
 resources:
   limits:

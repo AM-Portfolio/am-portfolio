@@ -107,7 +107,8 @@ public class PortfolioServiceImpl implements PortfolioService {
 
     private void applyTradeEquityDelta(PortfolioDocument existing, PortfolioModelV1 portfolioModel) {
         String tradeAction = portfolioModel.getLastTradeAction();
-        List<com.am.common.amcommondata.document.asset.equity.EquityDocument> incomingEquities = portfolioMapper.toDocument(portfolioModel).getEquities();
+        PortfolioDocument incomingDoc = portfolioMapper.toDocument(portfolioModel);
+        List<com.am.common.amcommondata.document.asset.equity.EquityDocument> incomingEquities = incomingDoc.getEquities();
         
         List<com.am.common.amcommondata.document.asset.equity.EquityDocument> existingEquities = existing.getEquities();
         if (existingEquities == null) {
@@ -116,6 +117,13 @@ public class PortfolioServiceImpl implements PortfolioService {
 
         if ("REPLACE_ALL".equalsIgnoreCase(tradeAction)) {
             existingEquities = incomingEquities != null ? new java.util.ArrayList<>(incomingEquities) : new java.util.ArrayList<>();
+            existing.setMutualFunds(copyAssetList(incomingDoc.getMutualFunds()));
+            existing.setBonds(copyAssetList(incomingDoc.getBonds()));
+            existing.setCommodities(copyAssetList(incomingDoc.getCommodities()));
+            existing.setCash(copyAssetList(incomingDoc.getCash()));
+            if (portfolioModel.getName() != null && !portfolioModel.getName().isBlank()) {
+                existing.setName(portfolioModel.getName());
+            }
         } else if (incomingEquities != null && !incomingEquities.isEmpty()) {
             for (com.am.common.amcommondata.document.asset.equity.EquityDocument incoming : incomingEquities) {
                 String isin = incoming.getIsin();
@@ -178,16 +186,50 @@ public class PortfolioServiceImpl implements PortfolioService {
             }
         }
 
-        double totalValue = existingEquities.stream()
-            .mapToDouble(e -> {
-                double qty = e.getQuantity() != null ? e.getQuantity() : 0.0;
-                double price = e.getCurrentPrice() != null ? e.getCurrentPrice() : (e.getAvgBuyingPrice() != null ? e.getAvgBuyingPrice() : 0.0);
-                return qty * price;
-            })
+        double equityValue = existingEquities.stream()
+            .mapToDouble(e -> assetValue(e.getQuantity(), e.getCurrentPrice(), e.getAvgBuyingPrice(), e.getCurrentValue()))
             .sum();
+        double otherValue = sumAssetValues(existing.getMutualFunds())
+                + sumAssetValues(existing.getBonds())
+                + sumAssetValues(existing.getCommodities())
+                + sumAssetValues(existing.getCash());
 
         existing.setEquities(existingEquities);
-        existing.setTotalValue(totalValue);
+        existing.setTotalValue(equityValue + otherValue);
+    }
+
+    private static java.util.List<com.am.common.amcommondata.document.asset.AssetDocument> copyAssetList(
+            java.util.List<com.am.common.amcommondata.document.asset.AssetDocument> source) {
+        return source != null ? new java.util.ArrayList<>(source) : new java.util.ArrayList<>();
+    }
+
+    private static double sumAssetValues(
+            java.util.List<com.am.common.amcommondata.document.asset.AssetDocument> assets) {
+        if (assets == null || assets.isEmpty()) {
+            return 0.0;
+        }
+        return assets.stream()
+                .mapToDouble(a -> assetValue(a.getQuantity(), a.getCurrentPrice(), a.getAvgBuyingPrice(), a.getCurrentValue()))
+                .sum();
+    }
+
+    private static double sumEquityDocs(
+            java.util.List<com.am.common.amcommondata.document.asset.equity.EquityDocument> equities) {
+        if (equities == null || equities.isEmpty()) {
+            return 0.0;
+        }
+        return equities.stream()
+                .mapToDouble(e -> assetValue(e.getQuantity(), e.getCurrentPrice(), e.getAvgBuyingPrice(), e.getCurrentValue()))
+                .sum();
+    }
+
+    private static double assetValue(Double quantity, Double currentPrice, Double avgBuyingPrice, Double currentValue) {
+        if (currentValue != null && currentValue > 0) {
+            return currentValue;
+        }
+        double qty = quantity != null ? quantity : 0.0;
+        double price = currentPrice != null ? currentPrice : (avgBuyingPrice != null ? avgBuyingPrice : 0.0);
+        return qty * price;
     }
 
     @Transactional
@@ -279,10 +321,31 @@ public class PortfolioServiceImpl implements PortfolioService {
             }
 
             PortfolioDocument incoming = portfolioMapper.toDocument(portfolioModel);
-            doc.setEquities(incoming.getEquities());
-            if (portfolioModel.getTotalValue() != null) {
-                doc.setTotalValue(portfolioModel.getTotalValue());
+            // Soft-merge: null list on incoming = keep existing (Doc Intel / Kafka partial updates).
+            if (incoming.getEquities() != null) {
+                doc.setEquities(incoming.getEquities());
             }
+            if (incoming.getMutualFunds() != null) {
+                doc.setMutualFunds(incoming.getMutualFunds());
+            }
+            if (incoming.getBonds() != null) {
+                doc.setBonds(incoming.getBonds());
+            }
+            if (incoming.getCommodities() != null) {
+                doc.setCommodities(incoming.getCommodities());
+            }
+            if (incoming.getCash() != null) {
+                doc.setCash(incoming.getCash());
+            }
+            if (portfolioModel.getName() != null && !portfolioModel.getName().isBlank()) {
+                doc.setName(portfolioModel.getName());
+            }
+            // Always recompute total from whatever lists are on the doc after merge.
+            doc.setTotalValue(sumEquityDocs(doc.getEquities())
+                    + sumAssetValues(doc.getMutualFunds())
+                    + sumAssetValues(doc.getBonds())
+                    + sumAssetValues(doc.getCommodities())
+                    + sumAssetValues(doc.getCash()));
             doc.setPortfolioKind(PortfolioKind.BROKER);
             // Keep stable broker name (no Zerodha-V*)
             if (doc.getName() == null || doc.getName().isBlank()
@@ -430,5 +493,88 @@ public class PortfolioServiceImpl implements PortfolioService {
                 }
             }
         });
+    }
+
+    @Override
+    @Transactional
+    public PortfolioModelV1 replaceAssetClassList(
+            UUID portfolioId,
+            String ownerUserId,
+            String assetClass,
+            List<com.am.common.amcommondata.model.asset.AssetModel> items) {
+        if (portfolioId == null || ownerUserId == null || ownerUserId.isBlank()) {
+            throw new IllegalArgumentException("portfolioId and owner are required");
+        }
+        String classKey = assetClass == null ? "" : assetClass.trim().toLowerCase();
+        if (!classKey.equals("bonds") && !classKey.equals("commodities") && !classKey.equals("cash")) {
+            throw new IllegalArgumentException("assetClass must be bonds, commodities, or cash");
+        }
+
+        PortfolioDocument doc = portfolioDocumentRepository.findById(portfolioId.toString())
+                .orElseThrow(() -> new IllegalArgumentException("Portfolio not found"));
+        if (!ownerUserId.equals(doc.getOwner())) {
+            throw new SecurityException("Not owner of portfolio");
+        }
+        if (!PortfolioKind.isBroker(doc.getPortfolioKind())) {
+            throw new IllegalArgumentException("Only BROKER portfolios support asset-class edits");
+        }
+
+        com.am.common.amcommondata.model.enums.AssetType type = switch (classKey) {
+            case "bonds" -> com.am.common.amcommondata.model.enums.AssetType.FIXED_INCOME;
+            case "commodities" -> com.am.common.amcommondata.model.enums.AssetType.COMMODITY;
+            case "cash" -> com.am.common.amcommondata.model.enums.AssetType.CASH;
+            default -> throw new IllegalArgumentException("assetClass must be bonds, commodities, or cash");
+        };
+
+        List<com.am.common.amcommondata.model.asset.AssetModel> normalized = new ArrayList<>();
+        if (items != null) {
+            for (com.am.common.amcommondata.model.asset.AssetModel item : items) {
+                if (item == null) {
+                    continue;
+                }
+                item.setAssetType(type);
+                double value = assetValue(item.getQuantity(), item.getCurrentPrice(), item.getAvgBuyingPrice(),
+                        item.getCurrentValue());
+                if (value <= 0) {
+                    throw new IllegalArgumentException(
+                            "Each item needs currentValue > 0 or quantity × price > 0");
+                }
+                if (item.getCurrentValue() == null || item.getCurrentValue() <= 0) {
+                    item.setCurrentValue(value);
+                }
+                if (item.getName() == null || item.getName().isBlank()) {
+                    throw new IllegalArgumentException("Each item requires a name");
+                }
+                if (item.getSymbol() == null || item.getSymbol().isBlank()) {
+                    item.setSymbol(item.getName().trim().toUpperCase().replaceAll("\\s+", "_"));
+                }
+                normalized.add(item);
+            }
+        }
+
+        List<com.am.common.amcommondata.document.asset.AssetDocument> asDocs =
+                mapNormalizedToDocuments(normalized);
+        switch (classKey) {
+            case "bonds" -> doc.setBonds(asDocs);
+            case "commodities" -> doc.setCommodities(asDocs);
+            case "cash" -> doc.setCash(asDocs);
+            default -> { }
+        }
+        doc.setTotalValue(sumEquityDocs(doc.getEquities())
+                + sumAssetValues(doc.getMutualFunds())
+                + sumAssetValues(doc.getBonds())
+                + sumAssetValues(doc.getCommodities())
+                + sumAssetValues(doc.getCash()));
+        if (doc.getAudit() != null) {
+            doc.getAudit().setUpdatedAt(LocalDateTime.now());
+        }
+        return portfolioMapper.toModel(portfolioDocumentRepository.save(doc));
+    }
+
+    private List<com.am.common.amcommondata.document.asset.AssetDocument> mapNormalizedToDocuments(
+            List<com.am.common.amcommondata.model.asset.AssetModel> normalized) {
+        PortfolioModelV1 tmp = PortfolioModelV1.builder().cash(normalized).build();
+        PortfolioDocument carrier = portfolioMapper.toDocument(tmp);
+        return carrier.getCash() != null ? carrier.getCash() : List.of();
     }
 }

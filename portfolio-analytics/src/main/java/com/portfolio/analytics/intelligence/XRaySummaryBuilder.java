@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Builds X-Ray sector / industry / market-cap weight slices from snapshot money weights.
+ * Builds X-Ray sector / industry / market-cap / asset-class weight slices from snapshot money weights.
  */
 @Component
 public class XRaySummaryBuilder {
@@ -20,6 +20,7 @@ public class XRaySummaryBuilder {
                 .sectorWeights(groupWeights(snapshot, PortfolioIntelligenceSnapshot.Holding::getSector))
                 .industryWeights(groupWeights(snapshot, PortfolioIntelligenceSnapshot.Holding::getIndustry))
                 .marketCapWeights(groupWeights(snapshot, PortfolioIntelligenceSnapshot.Holding::getMarketCap))
+                .assetClassWeights(groupWeights(snapshot, h -> HealthScoreEngine.normalizeAssetClass(h.getAssetClass())))
                 .totalValue(PortfolioIntelligenceSnapshotFactory.round2(snapshot.getTotalValue()))
                 .build();
     }

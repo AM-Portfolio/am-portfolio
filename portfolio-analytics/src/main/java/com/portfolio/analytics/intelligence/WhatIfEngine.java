@@ -226,10 +226,7 @@ public class WhatIfEngine {
     }
 
     private static boolean sectorEquals(String a, String b) {
-        if (a == null || b == null) {
-            return false;
-        }
-        return a.trim().equalsIgnoreCase(b.trim());
+        return SectorMatcher.matches(a, b);
     }
 
     private WhatIfResponse.SnapshotCompare compare(PortfolioIntelligenceSnapshot snap, HealthDto health) {
