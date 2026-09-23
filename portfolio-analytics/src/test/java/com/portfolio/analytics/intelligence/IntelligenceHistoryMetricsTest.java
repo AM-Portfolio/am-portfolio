@@ -14,6 +14,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -89,6 +90,20 @@ class IntelligenceHistoryMetricsTest {
                 IntelligenceHistoryMetrics.compute(Map.of(), Map.of(AAA, 1.0), NIFTY);
         assertEquals(0, result.historyPoints());
         assertTrue(result.portfolioDailyReturns().isEmpty());
+    }
+
+    @Test
+    void beta_nullWhenFewerThanTwoReturns() {
+        assertNull(IntelligenceHistoryMetrics.beta(List.of(0.01), List.of(0.01)));
+        assertNull(IntelligenceHistoryMetrics.beta(null, List.of(0.01, 0.02)));
+    }
+
+    @Test
+    void beta_nullWhenMarketVarianceZero() {
+        // Constant market returns → varM = 0 → β undefined
+        assertNull(IntelligenceHistoryMetrics.beta(
+                List.of(0.01, 0.02, 0.03),
+                List.of(0.0, 0.0, 0.0)));
     }
 
     private static MarketData series(String symbol, List<MarketData.MarketDataPoint> points) {

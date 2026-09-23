@@ -2,6 +2,7 @@ package com.portfolio.analytics.intelligence;
 
 import com.am.common.amcommondata.model.MarketCapType;
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.security.SecurityModel;
 import com.am.common.amcommondata.service.PortfolioService;
@@ -11,9 +12,11 @@ import com.portfolio.marketdata.model.FilterType;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
 import com.portfolio.marketdata.model.InstrumentType;
 import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.model.analytics.intelligence.CachedIntelligenceHistory;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.market.TimeFrame;
 import com.portfolio.model.util.SymbolResolver;
+import com.portfolio.redis.service.PortfolioIntelligenceHistoryRedisService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,12 +30,14 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -47,21 +52,29 @@ public class PortfolioIntelligenceSnapshotFactory {
 
     /** Default primary benchmark; override via portfolio.intelligence.primary-benchmark-symbol (e.g. SENSEX). */
     public static final String NIFTY_SYMBOL = "NIFTY 50";
-    public static final int HISTORY_LOOKBACK_DAYS = 90;
-    public static final long HISTORY_TIMEOUT_MS = 2500L;
+    public static final int HISTORY_LOOKBACK_DAYS = 60;
+    public static final long HISTORY_TIMEOUT_MS = 800L;
+    public static final long HISTORY_TIMEOUT_STRESS_MS = 20_000L;
 
     @Value("${portfolio.intelligence.primary-benchmark-symbol:NIFTY 50}")
     private String primaryBenchmarkSymbol;
 
-    @Value("${portfolio.intelligence.history-lookback-days:90}")
+    @Value("${portfolio.intelligence.history-lookback-days:60}")
     private int historyLookbackDays;
 
-    @Value("${portfolio.intelligence.history-timeout-ms:2500}")
+    @Value("${portfolio.intelligence.history-timeout-ms:800}")
     private long historyTimeoutMs;
+
+    @Value("${portfolio.intelligence.history-timeout-stress-ms:20000}")
+    private long historyTimeoutStressMs;
 
     private final PortfolioService portfolioService;
     private final MarketDataService marketDataService;
     private final SecurityDetailsService securityDetailsService;
+    private final PortfolioIntelligenceHistoryRedisService historyCache;
+
+    private final ConcurrentHashMap<String, CompletableFuture<HistoryFields>> historyInFlight =
+            new ConcurrentHashMap<>();
 
     private String benchmarkSymbol() {
         return (primaryBenchmarkSymbol == null || primaryBenchmarkSymbol.isBlank())
@@ -88,13 +101,71 @@ public class PortfolioIntelligenceSnapshotFactory {
     }
 
     public PortfolioIntelligenceSnapshot buildFromPortfolio(PortfolioModelV1 portfolio) {
-        return buildFromPortfolio(portfolio, true);
+        return buildFromPortfolio(portfolio, true, null, null, true);
     }
 
     public PortfolioIntelligenceSnapshot buildFromPortfolio(PortfolioModelV1 portfolio, boolean includeHistory) {
-        String portfolioId = portfolio.getId() != null ? portfolio.getId().toString() : null;
-        List<EquityModel> equities = portfolio.getEquityModels();
-        if (equities == null || equities.isEmpty()) {
+        return buildFromPortfolio(portfolio, includeHistory, null, null, true);
+    }
+
+    /**
+     * @param responsePortfolioId optional id stamped on the snapshot (e.g. {@code ALL})
+     * @param historyCacheKey optional Redis/history key (e.g. {@code user:{id}:all}); falls back to response id / portfolio UUID
+     */
+    public PortfolioIntelligenceSnapshot buildFromPortfolio(
+            PortfolioModelV1 portfolio,
+            boolean includeHistory,
+            String responsePortfolioId,
+            String historyCacheKey) {
+        return buildFromPortfolio(portfolio, includeHistory, responsePortfolioId, historyCacheKey, true);
+    }
+
+    /**
+     * @param fetchHistoryIfMiss when false, Redis/L1 hist only; joins in-flight if present, else empty
+     */
+    public PortfolioIntelligenceSnapshot buildFromPortfolio(
+            PortfolioModelV1 portfolio,
+            boolean includeHistory,
+            String responsePortfolioId,
+            String historyCacheKey,
+            boolean fetchHistoryIfMiss) {
+        return buildFromPortfolio(
+                portfolio, includeHistory, responsePortfolioId, historyCacheKey, fetchHistoryIfMiss, 0L);
+    }
+
+    /**
+     * @param historyTimeoutOverrideMs when &gt; 0, used instead of {@code history-timeout-ms} for network fetch
+     */
+    public PortfolioIntelligenceSnapshot buildFromPortfolio(
+            PortfolioModelV1 portfolio,
+            boolean includeHistory,
+            String responsePortfolioId,
+            String historyCacheKey,
+            boolean fetchHistoryIfMiss,
+            long historyTimeoutOverrideMs) {
+        String portfolioId = responsePortfolioId != null
+                ? responsePortfolioId
+                : (portfolio.getId() != null ? portfolio.getId().toString() : null);
+        String histKey = historyCacheKey != null
+                ? historyCacheKey
+                : portfolioId;
+        List<EquityModel> equities = portfolio.getEquityModels() != null
+                ? portfolio.getEquityModels() : List.of();
+        List<AssetModel> mutualFunds = portfolio.getMutualFunds() != null
+                ? portfolio.getMutualFunds() : List.of();
+        List<AssetModel> bonds = portfolio.getBonds() != null
+                ? portfolio.getBonds() : List.of();
+        List<AssetModel> commodities = portfolio.getCommodities() != null
+                ? portfolio.getCommodities() : List.of();
+        List<AssetModel> cash = portfolio.getCash() != null
+                ? portfolio.getCash() : List.of();
+
+        boolean anyHoldings = !equities.isEmpty()
+                || !mutualFunds.isEmpty()
+                || !bonds.isEmpty()
+                || !commodities.isEmpty()
+                || !cash.isEmpty();
+        if (!anyHoldings) {
             return PortfolioIntelligenceSnapshot.builder()
                     .portfolioId(portfolioId)
                     .holdings(List.of())
@@ -175,9 +246,15 @@ public class PortfolioIntelligenceSnapshotFactory {
                     .sector(sector)
                     .industry(industry)
                     .marketCap(marketCap)
+                    .assetClass(HealthScoreEngine.ASSET_EQUITY)
                     .build());
             quantities.put(sym, eq.getQuantity());
         }
+
+        droppedNoPrice += appendAssetHoldings(holdings, mutualFunds, HealthScoreEngine.ASSET_MUTUAL_FUND);
+        droppedNoPrice += appendAssetHoldings(holdings, bonds, HealthScoreEngine.ASSET_FIXED_INCOME);
+        droppedNoPrice += appendAssetHoldings(holdings, commodities, HealthScoreEngine.ASSET_COMMODITY);
+        droppedNoPrice += appendAssetHoldings(holdings, cash, HealthScoreEngine.ASSET_CASH);
 
         if (droppedNoPrice > 0) {
             log.warn("Intel snapshot portfolioId={} dropped {} holdings with no usable price",
@@ -185,7 +262,7 @@ public class PortfolioIntelligenceSnapshotFactory {
         }
 
         HistoryFields history = includeHistory
-                ? loadHistoryMetrics(symbols, quantities)
+                ? loadHistoryMetrics(histKey, symbols, quantities, fetchHistoryIfMiss, historyTimeoutOverrideMs)
                 : HistoryFields.empty();
         return finalizeSnapshot(
                 portfolioId,
@@ -199,24 +276,193 @@ public class PortfolioIntelligenceSnapshotFactory {
                 history.niftyDailyReturns);
     }
 
-    private HistoryFields loadHistoryMetrics(List<String> symbols, Map<String, Double> quantities) {
+    /**
+     * Maps Option A non-equity lists into snapshot holdings using stored value/price.
+     * @return count of rows skipped for missing price/value
+     */
+    private int appendAssetHoldings(
+            List<PortfolioIntelligenceSnapshot.Holding> holdings,
+            List<AssetModel> assets,
+            String assetClass) {
+        if (assets == null || assets.isEmpty()) {
+            return 0;
+        }
+        int dropped = 0;
+        for (AssetModel asset : assets) {
+            if (asset == null) {
+                continue;
+            }
+            double value = resolveAssetValue(asset);
+            if (value <= 0) {
+                dropped++;
+                continue;
+            }
+            String sym = asset.getSymbol();
+            if (sym == null || sym.isBlank()) {
+                sym = asset.getName() != null ? asset.getName() : assetClass;
+            }
+            holdings.add(PortfolioIntelligenceSnapshot.Holding.builder()
+                    .symbol(SymbolResolver.normalize(sym))
+                    .value(value)
+                    .weightPct(0)
+                    .sector(null)
+                    .industry(null)
+                    .marketCap(null)
+                    .assetClass(assetClass)
+                    .build());
+        }
+        return dropped;
+    }
+
+    private static double resolveAssetValue(AssetModel asset) {
+        if (asset.getCurrentValue() != null && asset.getCurrentValue() > 0) {
+            return asset.getCurrentValue();
+        }
+        double qty = asset.getQuantity() != null ? asset.getQuantity() : 0.0;
+        if (qty <= 0) {
+            return 0.0;
+        }
+        double price = asset.getCurrentPrice() != null && asset.getCurrentPrice() > 0
+                ? asset.getCurrentPrice()
+                : (asset.getAvgBuyingPrice() != null ? asset.getAvgBuyingPrice() : 0.0);
+        return qty * price;
+    }
+
+    private HistoryFields loadHistoryMetrics(
+            String portfolioId, List<String> symbols, Map<String, Double> quantities) {
+        return loadHistoryMetrics(portfolioId, symbols, quantities, true, 0L);
+    }
+
+    private HistoryFields loadHistoryMetrics(
+            String portfolioId,
+            List<String> symbols,
+            Map<String, Double> quantities,
+            boolean fetchHistoryIfMiss) {
+        return loadHistoryMetrics(portfolioId, symbols, quantities, fetchHistoryIfMiss, 0L);
+    }
+
+    private HistoryFields loadHistoryMetrics(
+            String portfolioId,
+            List<String> symbols,
+            Map<String, Double> quantities,
+            boolean fetchHistoryIfMiss,
+            long historyTimeoutOverrideMs) {
         if (symbols == null || symbols.isEmpty() || quantities == null || quantities.isEmpty()) {
+            log.info("Intel hist empty portfolioId={} reason=no_symbols", portfolioId);
             return HistoryFields.empty();
         }
+
+        var cached = historyCache.get(portfolioId);
+        if (cached.isPresent()) {
+            CachedIntelligenceHistory c = cached.get();
+            log.debug("Intel hist cache hit portfolioId={} historyPoints={} beta={}",
+                    portfolioId, c.getHistoryPoints(), c.getBeta());
+            return HistoryFields.fromCache(c);
+        }
+
+        String flightKey = portfolioId != null ? portfolioId : UUID.randomUUID().toString();
+        long timeoutMs = effectiveHistoryTimeoutMs(historyTimeoutOverrideMs);
+
+        if (!fetchHistoryIfMiss) {
+            CompletableFuture<HistoryFields> inflight = historyInFlight.get(flightKey);
+            if (inflight != null) {
+                return awaitHistory(inflight, timeoutMs, portfolioId, "inflight_join");
+            }
+            log.info("Intel hist empty portfolioId={} reason=cache_only_no_inflight", portfolioId);
+            return HistoryFields.empty();
+        }
+
+        CompletableFuture<HistoryFields> work = historyInFlight.computeIfAbsent(flightKey, key -> {
+            CompletableFuture<HistoryFields> fetch = CompletableFuture.supplyAsync(
+                    () -> fetchHistory(symbols, quantities));
+            fetch.whenComplete((loaded, err) -> {
+                try {
+                    HistoryFields result = err != null || loaded == null
+                            ? HistoryFields.empty()
+                            : loaded;
+                    if (err != null) {
+                        log.info("Intel hist empty portfolioId={} reason=fetch_failed detail={}",
+                                portfolioId, err.getMessage());
+                    } else if (result.historyPoints == 0) {
+                        log.info("Intel hist empty portfolioId={} reason=empty_after_fetch", portfolioId);
+                    }
+                    if (result.historyPoints >= HealthScoreConstants.MIN_HISTORY_POINTS
+                            && result.beta != null
+                            && Double.isFinite(result.beta)
+                            && portfolioId != null) {
+                        historyCache.put(portfolioId, CachedIntelligenceHistory.builder()
+                                .historyPoints(result.historyPoints)
+                                .portRetPct(result.portRetPct)
+                                .niftyRetPct(result.niftyRetPct)
+                                .dailyVolPct(result.dailyVolPct)
+                                .beta(result.beta)
+                                .computedAtEpochMs(System.currentTimeMillis())
+                                .build());
+                        onHistoryWarmed(portfolioId);
+                    }
+                } finally {
+                    historyInFlight.remove(key, fetch);
+                }
+            });
+            return fetch;
+        });
+
+        return awaitHistory(work, timeoutMs, portfolioId, "timeout");
+    }
+
+    /**
+     * Soft-wait for hist without cancelling the shared in-flight future.
+     * Intel may return empty at 800ms while MD continues; stress joins the same future.
+     */
+    private HistoryFields awaitHistory(
+            CompletableFuture<HistoryFields> work,
+            long timeoutMs,
+            String portfolioId,
+            String timeoutReason) {
         try {
-            long timeoutMs = historyTimeoutMs > 0 ? historyTimeoutMs : HISTORY_TIMEOUT_MS;
-            return CompletableFuture.supplyAsync(() -> fetchHistory(symbols, quantities))
-                    .orTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                    .exceptionally(ex -> {
-                        log.warn("Intel history timed out or failed after {}ms: {}",
-                                timeoutMs, ex.getMessage());
-                        return HistoryFields.empty();
-                    })
+            CompletableFuture<HistoryFields> softEmpty = new CompletableFuture<>();
+            softEmpty.completeOnTimeout(HistoryFields.empty(), timeoutMs, TimeUnit.MILLISECONDS);
+            HistoryFields result = work.applyToEither(softEmpty, v -> v != null ? v : HistoryFields.empty())
                     .join();
+            if (result.historyPoints == 0 && !work.isDone()) {
+                log.info("Intel hist empty portfolioId={} reason={} timeoutMs={}",
+                        portfolioId, timeoutReason, timeoutMs);
+            }
+            return result;
         } catch (Exception e) {
-            log.warn("Intel history load failed: {}", e.getMessage());
+            log.info("Intel hist empty portfolioId={} reason={}_failed detail={}",
+                    portfolioId, timeoutReason, e.getMessage());
             return HistoryFields.empty();
         }
+    }
+
+    private long effectiveHistoryTimeoutMs(long historyTimeoutOverrideMs) {
+        if (historyTimeoutOverrideMs > 0) {
+            return historyTimeoutOverrideMs;
+        }
+        return historyTimeoutMs > 0 ? historyTimeoutMs : HISTORY_TIMEOUT_MS;
+    }
+
+    /** Optional hook so stress L1 can drop sticky ASSUMED entries after hist warms. */
+    private volatile java.util.function.Consumer<String> historyWarmedListener;
+
+    public void setHistoryWarmedListener(java.util.function.Consumer<String> listener) {
+        this.historyWarmedListener = listener;
+    }
+
+    private void onHistoryWarmed(String portfolioId) {
+        java.util.function.Consumer<String> listener = historyWarmedListener;
+        if (listener != null && portfolioId != null) {
+            try {
+                listener.accept(portfolioId);
+            } catch (Exception e) {
+                log.debug("historyWarmedListener failed: {}", e.getMessage());
+            }
+        }
+    }
+
+    public long getHistoryTimeoutStressMs() {
+        return historyTimeoutStressMs > 0 ? historyTimeoutStressMs : HISTORY_TIMEOUT_STRESS_MS;
     }
 
     private HistoryFields fetchHistory(List<String> symbols, Map<String, Double> quantities) {
@@ -225,11 +471,7 @@ public class PortfolioIntelligenceSnapshotFactory {
         LocalDate from = to.minusDays(lookback);
         List<String> histSymbols = new ArrayList<>(symbols);
         String benchmark = benchmarkSymbol();
-        String benchmarkNorm = SymbolResolver.normalize(benchmark);
-        if (histSymbols.stream().noneMatch(s ->
-                s.equalsIgnoreCase(benchmarkNorm) || s.equalsIgnoreCase(benchmark))) {
-            histSymbols.add(benchmark);
-        }
+        // Do not put NIFTY on the EQ batch — INDEX overlay supplies the benchmark.
 
         HistoricalDataRequest histReq = HistoricalDataRequest.builder()
                 .symbols(String.join(",", histSymbols))
@@ -237,26 +479,48 @@ public class PortfolioIntelligenceSnapshotFactory {
                 .toDate(to.toString())
                 .filterType(FilterType.ALL.getValue())
                 .instrumentType(InstrumentType.EQ.getValue())
+                .isIndexSymbol(false)
                 .continuous(false)
                 .interval(TimeFrame.DAY.getValue())
                 .build();
 
         Map<String, MarketData> raw = marketDataService.getHistoricalData(histReq);
-        Map<String, MarketData> normalized = new HashMap<>();
-        if (raw != null) {
-            for (Map.Entry<String, MarketData> entry : raw.entrySet()) {
-                if (entry.getValue() != null) {
-                    String key = entry.getKey().contains(":")
-                            ? entry.getKey().substring(entry.getKey().indexOf(':') + 1)
-                            : entry.getKey();
-                    normalized.put(SymbolResolver.normalize(key), entry.getValue());
-                }
+        Map<String, MarketData> normalized = normalizeHistorical(raw);
+
+        // Prefer INDEX bars for the benchmark — EQ "NIFTY 50" is often missing or flat,
+        // which yields historyPoints>0 with beta=null → sticky ASSUMED_ONE.
+        // Overlay writes the INDEX series under every alias so first-key-wins cannot
+        // keep a flat EQ "NIFTY 50" when INDEX arrived as "NIFTY50".
+        String benchmarkKey = resolveBenchmarkKey(normalized);
+        Map<String, MarketData> indexBars = fetchBenchmarkAsIndex(benchmark, from, to);
+        MarketData indexSeries = pickUsableBenchmarkSeries(indexBars);
+        if (indexSeries != null) {
+            applyBenchmarkSeriesToAliases(normalized, indexSeries);
+            normalized.putAll(indexBars);
+            benchmarkKey = resolveBenchmarkKey(normalized);
+            log.info("Intel hist benchmark filled via INDEX symbol={}", benchmark);
+        } else {
+            MarketData eqSeries = normalized.get(benchmarkKey);
+            if (!hasNonZeroCloseVariance(eqSeries)) {
+                dropBenchmarkAliases(normalized);
+                benchmarkKey = resolveBenchmarkKey(normalized);
+                log.info("Intel hist empty reason=no_benchmark symbol={}", benchmark);
             }
         }
 
-        String benchmarkKey = resolveBenchmarkKey(normalized);
+        if (normalized.isEmpty()) {
+            log.info("Intel hist empty reason=empty_md");
+            return HistoryFields.empty();
+        }
+
         IntelligenceHistoryMetrics.Result metrics =
                 IntelligenceHistoryMetrics.compute(normalized, quantities, benchmarkKey);
+        if (metrics.historyPoints() == 0) {
+            log.info("Intel hist empty reason=coverage_or_align benchmarkKey={}", benchmarkKey);
+        } else if (metrics.beta() == null) {
+            log.info("Intel hist beta null portfolio points={} benchmarkKey={} (market var/cov undefined)",
+                    metrics.historyPoints(), benchmarkKey);
+        }
         return new HistoryFields(
                 metrics.historyPoints(),
                 metrics.portRetPct(),
@@ -265,6 +529,115 @@ public class PortfolioIntelligenceSnapshotFactory {
                 metrics.beta(),
                 metrics.portfolioDailyReturns(),
                 metrics.niftyDailyReturns());
+    }
+
+    private Map<String, MarketData> fetchBenchmarkAsIndex(String benchmark, LocalDate from, LocalDate to) {
+        try {
+            HistoricalDataRequest indexReq = HistoricalDataRequest.builder()
+                    .symbols(benchmark)
+                    .fromDate(from.toString())
+                    .toDate(to.toString())
+                    .filterType(FilterType.ALL.getValue())
+                    .instrumentType(InstrumentType.INDEX.getValue())
+                    .isIndexSymbol(true)
+                    .continuous(false)
+                    .interval(TimeFrame.DAY.getValue())
+                    .build();
+            return normalizeHistorical(marketDataService.getHistoricalData(indexReq));
+        } catch (Exception e) {
+            log.warn("Intel hist INDEX benchmark fetch failed: {}", e.getMessage());
+            return Map.of();
+        }
+    }
+
+    private static Map<String, MarketData> normalizeHistorical(Map<String, MarketData> raw) {
+        Map<String, MarketData> normalized = new HashMap<>();
+        if (raw == null) {
+            return normalized;
+        }
+        for (Map.Entry<String, MarketData> entry : raw.entrySet()) {
+            if (entry.getValue() != null) {
+                String key = entry.getKey().contains(":")
+                        ? entry.getKey().substring(entry.getKey().indexOf(':') + 1)
+                        : entry.getKey();
+                normalized.put(SymbolResolver.normalize(key), entry.getValue());
+            }
+        }
+        return normalized;
+    }
+
+    private static boolean hasHistoricalPoints(MarketData md) {
+        return md != null && md.getDataPoints() != null && !md.getDataPoints().isEmpty();
+    }
+
+    private void applyBenchmarkSeriesToAliases(Map<String, MarketData> normalized, MarketData series) {
+        for (String alias : benchmarkAliasKeys()) {
+            if (alias != null && !alias.isBlank()) {
+                normalized.put(alias, series);
+            }
+        }
+    }
+
+    private void dropBenchmarkAliases(Map<String, MarketData> normalized) {
+        for (String alias : benchmarkAliasKeys()) {
+            if (alias != null) {
+                normalized.remove(alias);
+            }
+        }
+    }
+
+    private List<String> benchmarkAliasKeys() {
+        String configured = benchmarkSymbol();
+        String configuredNorm = SymbolResolver.normalize(configured);
+        LinkedHashSet<String> keys = new LinkedHashSet<>();
+        keys.add(configuredNorm);
+        keys.add(configured);
+        String upper = configured.toUpperCase(Locale.ROOT);
+        if (upper.contains("NIFTY")) {
+            keys.add(SymbolResolver.normalize("NIFTY50"));
+            keys.add("NIFTY 50");
+            keys.add("NIFTY50");
+        }
+        if (upper.contains("SENSEX") || upper.contains("BSE")) {
+            keys.add(SymbolResolver.normalize("SENSEX"));
+            keys.add("SENSEX");
+            keys.add("BSE SENSEX");
+        }
+        return new ArrayList<>(keys);
+    }
+
+    private static MarketData pickUsableBenchmarkSeries(Map<String, MarketData> bars) {
+        if (bars == null || bars.isEmpty()) {
+            return null;
+        }
+        for (MarketData md : bars.values()) {
+            if (hasNonZeroCloseVariance(md)) {
+                return md;
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasNonZeroCloseVariance(MarketData md) {
+        if (!hasHistoricalPoints(md)) {
+            return false;
+        }
+        Double first = null;
+        for (MarketData.MarketDataPoint p : md.getDataPoints()) {
+            if (p == null || p.getOhlcData() == null) {
+                continue;
+            }
+            Double close = p.getOhlcData().getClose();
+            if (close == null || !Double.isFinite(close) || close <= 0) {
+                continue;
+            }
+            if (first == null) {
+                first = close;
+            } else if (Math.abs(close - first) > 1e-9) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String resolveBenchmarkKey(Map<String, MarketData> normalized) {
@@ -314,6 +687,17 @@ public class PortfolioIntelligenceSnapshotFactory {
             List<Double> niftyDailyReturns) {
         static HistoryFields empty() {
             return new HistoryFields(0, null, null, null, null, null, null);
+        }
+
+        static HistoryFields fromCache(CachedIntelligenceHistory c) {
+            return new HistoryFields(
+                    c.getHistoryPoints(),
+                    c.getPortRetPct(),
+                    c.getNiftyRetPct(),
+                    c.getDailyVolPct(),
+                    c.getBeta(),
+                    null,
+                    null);
         }
     }
 
@@ -377,6 +761,9 @@ public class PortfolioIntelligenceSnapshotFactory {
 
         double liquidSharePct = total > 0 ? round2((liquidValue / total) * 100.0) : 0.0;
 
+        boolean measuredHist = historyPoints >= HealthScoreConstants.MIN_HISTORY_POINTS;
+        Double measuredBeta = measuredHist && beta != null && Double.isFinite(beta) ? beta : null;
+
         return PortfolioIntelligenceSnapshot.builder()
                 .portfolioId(portfolioId)
                 .holdings(holdings)
@@ -388,10 +775,10 @@ public class PortfolioIntelligenceSnapshotFactory {
                 .maxSectorName(maxSectorName)
                 .liquidSharePct(liquidSharePct)
                 .historyPoints(historyPoints)
-                .portRetPct(portRetPct)
-                .niftyRetPct(niftyRetPct)
-                .dailyVolPct(dailyVolPct)
-                .beta(beta)
+                .portRetPct(measuredHist ? portRetPct : null)
+                .niftyRetPct(measuredHist ? niftyRetPct : null)
+                .dailyVolPct(measuredHist ? dailyVolPct : null)
+                .beta(measuredBeta)
                 .portfolioDailyReturns(portfolioDailyReturns)
                 .niftyDailyReturns(niftyDailyReturns)
                 .build();

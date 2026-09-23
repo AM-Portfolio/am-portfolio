@@ -62,6 +62,30 @@ class PortfolioControllerTest {
     @MockBean
     private com.portfolio.service.portfolio.PortfolioIntradayService portfolioIntradayService;
 
+    @MockBean
+    private com.portfolio.redis.service.ActiveMarketSymbolPublisher activeMarketSymbolPublisher;
+
+    @MockBean
+    private com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer;
+
+    @MockBean
+    private com.portfolio.service.NewUserPortfolioFallbackService newUserPortfolioFallbackService;
+
+    @MockBean
+    private com.portfolio.api.security.PortfolioOwnerAssert portfolioOwnerAssert;
+
+    @MockBean
+    private com.portfolio.redis.service.PortfolioHoldingsRedisService portfolioHoldingsRedisService;
+
+    @MockBean
+    private com.portfolio.redis.service.PortfolioSummaryRedisService portfolioSummaryRedisService;
+
+    @MockBean
+    private com.portfolio.redis.service.PortfolioIntelligenceRedisService portfolioIntelligenceRedisService;
+
+    @MockBean
+    private com.portfolio.analytics.intelligence.AggregatePortfolioLoader aggregatePortfolioLoader;
+
     @AfterEach
     void tearDown() {
         UserContext.clear();
@@ -81,6 +105,15 @@ class PortfolioControllerTest {
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.id").value(portfolioId.toString()))
                 .andExpect(jsonPath("$.name").value("My Portfolio"));
+    }
+
+    @Test
+    void getPortfolioById_MissingPortfolio_ReturnsNotFound() throws Exception {
+        UUID portfolioId = UUID.randomUUID();
+        when(portfolioService.getPortfolioById(portfolioId)).thenReturn(null);
+
+        mockMvc.perform(get("/v1/portfolios/{portfolioId}", portfolioId.toString()))
+                .andExpect(status().isNotFound());
     }
 
     @Test

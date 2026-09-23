@@ -69,6 +69,9 @@ spring:
       portfolio-intel:
         ttl: 90 # seconds — Overview intelligence warm cache (fail-open)
         key-prefix: "portfolio:intel:v1:"
+      portfolio-intel-hist:
+        ttl: 300 # seconds — regression β / history for stress (longer than Overview)
+        key-prefix: "portfolio:intel-hist:v1:"
       basket-etf:
         ttl: 86400 # 24 hours — enriched ETF constituents
         key-prefix: "basket:etf:enriched:v6:"
@@ -352,8 +355,12 @@ portfolio:
   intelligence:
     # Primary history benchmark (beta / relative return). Use "SENSEX" or "NIFTY 50".
     primary-benchmark-symbol: ${PORTFOLIO_INTEL_BENCHMARK:NIFTY 50}
-    history-lookback-days: ${PORTFOLIO_INTEL_HISTORY_LOOKBACK_DAYS:90}
-    history-timeout-ms: ${PORTFOLIO_INTEL_HISTORY_TIMEOUT_MS:2500}
+    history-lookback-days: ${PORTFOLIO_INTEL_HISTORY_LOOKBACK_DAYS:60}
+    history-timeout-ms: ${PORTFOLIO_INTEL_HISTORY_TIMEOUT_MS:800}
+    # Stress / intel β load — longer than soft timeout so MD hist can succeed once and fill cache
+    history-timeout-stress-ms: ${PORTFOLIO_INTEL_HISTORY_TIMEOUT_STRESS_MS:20000}
+    # A/B/C diversification + annualized vol; default false keeps legacy count formula
+    health-v2: ${PORTFOLIO_INTEL_HEALTH_V2:false}
     risk:
       top1-high-pct: 25.0
       sector-high-pct: 30.0

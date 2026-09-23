@@ -59,6 +59,9 @@ public class EquityHoldings {
    /** Short note e.g. "40 in Nifty IT · Zerodha". */
    private String allocationNote;
 
+   /** EQUITY / COMMODITY / FIXED_INCOME / CASH — null/omit treated as EQUITY. */
+   private String assetClass;
+
    @Builder.Default
    private List<EquityBrokerHolding> brokerPortfolios = new ArrayList<>();
 }

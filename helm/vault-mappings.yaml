@@ -9,6 +9,10 @@ vault:
     parser:
       mappings:
         ETF_API_URL: "URL"
+    market:
+      mappings:
+        MARKET_DATA_API_URL: "URL"
+        MARKET_DATA_CALENDAR_BASE_URL: "URL"
 
     logging:
       template: |

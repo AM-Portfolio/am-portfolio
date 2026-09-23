@@ -82,8 +82,20 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
         return super.resolvePrefetchedMarketData(request);
     }
 
-    
-    
+    /**
+     * Movers must always try live OHLC when live prefetch is empty — never inherit
+     * period-hist prefetchAttempted skip that leaves Overview with empty gainers/losers.
+     */
+    @Override
+    protected boolean allowsPrefetchFanOut() {
+        return true;
+    }
+
+    @Override
+    protected boolean preferLiveMarketDataOnFanOut() {
+        return true;
+    }
+
     /**
      * Creates an empty response when no data is available
      */

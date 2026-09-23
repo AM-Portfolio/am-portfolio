@@ -94,6 +94,22 @@ class TopMoverUtilsTest {
         assertEquals("DOWN", losers.get(0).getSymbol());
     }
 
+    @Test void topLosers_emptyWhenNoNegatives() {
+        Map<String, Double> perf = Map.of("UP", 5.0, "FLAT", 0.0);
+        Map<String, Double> change = Map.of("UP", 5.0, "FLAT", 0.0);
+        Map<String, MarketData> data = Map.of("UP", md(105, 100, 100), "FLAT", md(100, 100, 100));
+        var losers = TopMoverUtils.getTopLosers(data, perf, change, 10);
+        assertTrue(losers.isEmpty());
+    }
+
+    @Test void topGainers_emptyWhenNoPositives() {
+        Map<String, Double> perf = Map.of("DOWN", -3.0);
+        Map<String, Double> change = Map.of("DOWN", -3.0);
+        Map<String, MarketData> data = Map.of("DOWN", md(97, 100, 100));
+        var gainers = TopMoverUtils.getTopGainers(data, perf, change, 10);
+        assertTrue(gainers.isEmpty());
+    }
+
     @Test void topGainers_respectsLimit() {
         Map<String, Double> perf = Map.of("A", 10.0, "B", 20.0, "C", 30.0);
         Map<String, Double> change = Map.of("A", 10.0, "B", 20.0, "C", 30.0);

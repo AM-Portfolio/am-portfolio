@@ -238,4 +238,11 @@ public class RedisConfig {
             RedisConnectionFactory connectionFactory) {
         return createRedisTemplate(connectionFactory, PortfolioIntelligenceResponse.class);
     }
+
+    @Bean
+    public RedisTemplate<String, com.portfolio.model.analytics.intelligence.CachedIntelligenceHistory>
+            portfolioIntelligenceHistoryRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(
+                connectionFactory, com.portfolio.model.analytics.intelligence.CachedIntelligenceHistory.class);
+    }
 }
