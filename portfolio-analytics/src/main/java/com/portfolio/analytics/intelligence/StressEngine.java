@@ -206,12 +206,10 @@ public class StressEngine {
         return PortfolioIntelligenceSnapshotFactory.round2(pct);
     }
 
+    /** Same gate as {@link #resolveBetaMeta}: index shocks use 1.0 unless β is measured. */
     private static double betaProxy(PortfolioIntelligenceSnapshot snapshot) {
-        Double beta = snapshot.getBeta();
-        if (beta != null && Double.isFinite(beta)) {
-            return beta;
-        }
-        return 1.0;
+        BetaMeta meta = resolveBetaMeta(snapshot);
+        return meta.betaUsed != null ? meta.betaUsed : 1.0;
     }
 
     /** @deprecated use {@link SectorMatcher#matches} */

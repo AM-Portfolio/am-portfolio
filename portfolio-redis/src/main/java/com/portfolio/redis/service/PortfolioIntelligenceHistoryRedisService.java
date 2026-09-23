@@ -96,7 +96,6 @@ public class PortfolioIntelligenceHistoryRedisService {
         return c != null
                 && c.getHistoryPoints() >= MIN_POINTS
                 && c.getBeta() != null
-                && c.getBeta() > 0
                 && Double.isFinite(c.getBeta());
     }
 

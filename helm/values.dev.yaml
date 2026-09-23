@@ -16,6 +16,8 @@ vault:
       path: apps/data/dev/services/am-portfolio
     parser:
       path: apps/data/dev/services/am-parser
+    market:
+      path: apps/data/dev/services/am-market-data
     logging:
       path: apps/data/dev/services/logging
     mongodb:

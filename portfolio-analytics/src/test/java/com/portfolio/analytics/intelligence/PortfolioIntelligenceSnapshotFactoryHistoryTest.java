@@ -124,10 +124,53 @@ class PortfolioIntelligenceSnapshotFactoryHistoryTest {
 
         ArgumentCaptor<HistoricalDataRequest> cap = ArgumentCaptor.forClass(HistoricalDataRequest.class);
         verify(marketDataService, atLeastOnce()).getHistoricalData(cap.capture());
-        assertThat(cap.getAllValues().stream()
-                .anyMatch(r -> InstrumentType.INDEX.getValue().equals(r.getInstrumentType())))
-                .isTrue();
+        List<HistoricalDataRequest> sent = cap.getAllValues();
+        HistoricalDataRequest eqReq = sent.stream()
+                .filter(r -> InstrumentType.EQ.getValue().equals(r.getInstrumentType()))
+                .findFirst()
+                .orElseThrow();
+        HistoricalDataRequest idxReq = sent.stream()
+                .filter(r -> InstrumentType.INDEX.getValue().equals(r.getInstrumentType()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(eqReq.getIsIndexSymbol()).isFalse();
+        assertThat(eqReq.getInterval()).isEqualTo(TimeFrame.DAY.getValue());
+        assertThat(eqReq.getSymbols()).doesNotContain("NIFTY");
+        LocalDate expectedFrom = LocalDate.now().minusDays(60);
+        assertThat(eqReq.getFromDate()).isEqualTo(expectedFrom.toString());
+        assertThat(idxReq.getIsIndexSymbol()).isTrue();
+        assertThat(idxReq.getInterval()).isEqualTo(TimeFrame.DAY.getValue());
+        assertThat(idxReq.getFromDate()).isEqualTo(expectedFrom.toString());
         assertThat(fields).isNotNull();
+        Integer points = (Integer) ReflectionTestUtils.getField(fields, "historyPoints");
+        Double beta = (Double) ReflectionTestUtils.getField(fields, "beta");
+        assertThat(points).isNotNull().isGreaterThanOrEqualTo(20);
+        assertThat(beta).isNotNull();
+    }
+
+    @Test
+    void fetchHistory_indexOverlayReplacesFlatEqNiftyWhenKeysDiffer() {
+        Map<String, MarketData> eq = new HashMap<>();
+        eq.put("RELIANCE", series("RELIANCE", 100));
+        eq.put("NIFTY 50", flatSeries("NIFTY 50", 200));
+        when(marketDataService.getHistoricalData(any())).thenAnswer(inv -> {
+            HistoricalDataRequest req = inv.getArgument(0);
+            if (InstrumentType.INDEX.getValue().equals(req.getInstrumentType())) {
+                Map<String, MarketData> idx = new HashMap<>();
+                idx.put("NIFTY50", series("NIFTY50", 220));
+                return idx;
+            }
+            return eq;
+        });
+
+        Object fields = ReflectionTestUtils.invokeMethod(
+                factory, "fetchHistory", List.of("RELIANCE"), Map.of("RELIANCE", 10.0));
+
+        assertThat(fields).isNotNull();
+        Integer points = (Integer) ReflectionTestUtils.getField(fields, "historyPoints");
+        Double beta = (Double) ReflectionTestUtils.getField(fields, "beta");
+        assertThat(points).isNotNull().isGreaterThanOrEqualTo(20);
+        assertThat(beta).isNotNull().isFinite();
     }
 
     private static Map<String, MarketData> sampleHistWithBenchmark() {
@@ -142,6 +185,23 @@ class PortfolioIntelligenceSnapshotFactoryHistoryTest {
         LocalDate d = LocalDate.now().minusDays(60);
         for (int i = 0; i < 40; i++) {
             double close = start + i;
+            points.add(MarketData.MarketDataPoint.builder()
+                    .timestamp(d.plusDays(i).atStartOfDay(java.time.ZoneId.of("Asia/Kolkata")).toInstant())
+                    .ohlcData(OhlcData.builder().close(close).open(close).high(close).low(close).build())
+                    .build());
+        }
+        return MarketData.builder()
+                .symbol(symbol)
+                .timeFrame(TimeFrame.DAY)
+                .historical(true)
+                .dataPoints(points)
+                .build();
+    }
+
+    private static MarketData flatSeries(String symbol, double close) {
+        List<MarketData.MarketDataPoint> points = new ArrayList<>();
+        LocalDate d = LocalDate.now().minusDays(60);
+        for (int i = 0; i < 40; i++) {
             points.add(MarketData.MarketDataPoint.builder()
                     .timestamp(d.plusDays(i).atStartOfDay(java.time.ZoneId.of("Asia/Kolkata")).toInstant())
                     .ohlcData(OhlcData.builder().close(close).open(close).high(close).low(close).build())

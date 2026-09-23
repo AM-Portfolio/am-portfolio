@@ -18,14 +18,15 @@ public class StressResponse {
     private String estimateLabel;
     private List<ScenarioImpactDto> scenarios;
 
-    /** HOLDING_BETA | PORTFOLIO_BETA | SECTOR_WEIGHT | ASSUMED_ONE */
+    /** {@code PORTFOLIO_BETA} when historyPoints ≥ 20 and β is finite; otherwise {@code ASSUMED_ONE}. */
     private String method;
-    /** Portfolio β used for index scenarios; null when sector-only / assumed. */
+    /** β applied to index presets. Always present: measured value, or 1.0 when assumed. */
     private Double betaUsed;
     /** Benchmark for β (e.g. NIFTY50). Sensex presets may share NIFTY β until separate series. */
     private String benchmark;
+    /** Aligned daily-return count used for β (not calendar days). */
     private Integer historyDays;
-    /** True when β defaulted to 1.0 because history/β missing. */
+    /** True when β defaulted to 1.0 (history &lt; 20 or β missing/non-finite). */
     private Boolean betaAssumed;
 
     @Data

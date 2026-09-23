@@ -30,6 +30,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -470,11 +471,7 @@ public class PortfolioIntelligenceSnapshotFactory {
         LocalDate from = to.minusDays(lookback);
         List<String> histSymbols = new ArrayList<>(symbols);
         String benchmark = benchmarkSymbol();
-        String benchmarkNorm = SymbolResolver.normalize(benchmark);
-        if (histSymbols.stream().noneMatch(s ->
-                s.equalsIgnoreCase(benchmarkNorm) || s.equalsIgnoreCase(benchmark))) {
-            histSymbols.add(benchmark);
-        }
+        // Do not put NIFTY on the EQ batch — INDEX overlay supplies the benchmark.
 
         HistoricalDataRequest histReq = HistoricalDataRequest.builder()
                 .symbols(String.join(",", histSymbols))
@@ -482,6 +479,7 @@ public class PortfolioIntelligenceSnapshotFactory {
                 .toDate(to.toString())
                 .filterType(FilterType.ALL.getValue())
                 .instrumentType(InstrumentType.EQ.getValue())
+                .isIndexSymbol(false)
                 .continuous(false)
                 .interval(TimeFrame.DAY.getValue())
                 .build();
@@ -491,14 +489,23 @@ public class PortfolioIntelligenceSnapshotFactory {
 
         // Prefer INDEX bars for the benchmark — EQ "NIFTY 50" is often missing or flat,
         // which yields historyPoints>0 with beta=null → sticky ASSUMED_ONE.
+        // Overlay writes the INDEX series under every alias so first-key-wins cannot
+        // keep a flat EQ "NIFTY 50" when INDEX arrived as "NIFTY50".
         String benchmarkKey = resolveBenchmarkKey(normalized);
         Map<String, MarketData> indexBars = fetchBenchmarkAsIndex(benchmark, from, to);
-        if (!indexBars.isEmpty()) {
+        MarketData indexSeries = pickUsableBenchmarkSeries(indexBars);
+        if (indexSeries != null) {
+            applyBenchmarkSeriesToAliases(normalized, indexSeries);
             normalized.putAll(indexBars);
             benchmarkKey = resolveBenchmarkKey(normalized);
             log.info("Intel hist benchmark filled via INDEX symbol={}", benchmark);
-        } else if (!hasHistoricalPoints(normalized.get(benchmarkKey))) {
-            log.info("Intel hist empty reason=no_benchmark symbol={}", benchmark);
+        } else {
+            MarketData eqSeries = normalized.get(benchmarkKey);
+            if (!hasNonZeroCloseVariance(eqSeries)) {
+                dropBenchmarkAliases(normalized);
+                benchmarkKey = resolveBenchmarkKey(normalized);
+                log.info("Intel hist empty reason=no_benchmark symbol={}", benchmark);
+            }
         }
 
         if (normalized.isEmpty()) {
@@ -532,6 +539,7 @@ public class PortfolioIntelligenceSnapshotFactory {
                     .toDate(to.toString())
                     .filterType(FilterType.ALL.getValue())
                     .instrumentType(InstrumentType.INDEX.getValue())
+                    .isIndexSymbol(true)
                     .continuous(false)
                     .interval(TimeFrame.DAY.getValue())
                     .build();
@@ -560,6 +568,76 @@ public class PortfolioIntelligenceSnapshotFactory {
 
     private static boolean hasHistoricalPoints(MarketData md) {
         return md != null && md.getDataPoints() != null && !md.getDataPoints().isEmpty();
+    }
+
+    private void applyBenchmarkSeriesToAliases(Map<String, MarketData> normalized, MarketData series) {
+        for (String alias : benchmarkAliasKeys()) {
+            if (alias != null && !alias.isBlank()) {
+                normalized.put(alias, series);
+            }
+        }
+    }
+
+    private void dropBenchmarkAliases(Map<String, MarketData> normalized) {
+        for (String alias : benchmarkAliasKeys()) {
+            if (alias != null) {
+                normalized.remove(alias);
+            }
+        }
+    }
+
+    private List<String> benchmarkAliasKeys() {
+        String configured = benchmarkSymbol();
+        String configuredNorm = SymbolResolver.normalize(configured);
+        LinkedHashSet<String> keys = new LinkedHashSet<>();
+        keys.add(configuredNorm);
+        keys.add(configured);
+        String upper = configured.toUpperCase(Locale.ROOT);
+        if (upper.contains("NIFTY")) {
+            keys.add(SymbolResolver.normalize("NIFTY50"));
+            keys.add("NIFTY 50");
+            keys.add("NIFTY50");
+        }
+        if (upper.contains("SENSEX") || upper.contains("BSE")) {
+            keys.add(SymbolResolver.normalize("SENSEX"));
+            keys.add("SENSEX");
+            keys.add("BSE SENSEX");
+        }
+        return new ArrayList<>(keys);
+    }
+
+    private static MarketData pickUsableBenchmarkSeries(Map<String, MarketData> bars) {
+        if (bars == null || bars.isEmpty()) {
+            return null;
+        }
+        for (MarketData md : bars.values()) {
+            if (hasNonZeroCloseVariance(md)) {
+                return md;
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasNonZeroCloseVariance(MarketData md) {
+        if (!hasHistoricalPoints(md)) {
+            return false;
+        }
+        Double first = null;
+        for (MarketData.MarketDataPoint p : md.getDataPoints()) {
+            if (p == null || p.getOhlcData() == null) {
+                continue;
+            }
+            Double close = p.getOhlcData().getClose();
+            if (close == null || !Double.isFinite(close) || close <= 0) {
+                continue;
+            }
+            if (first == null) {
+                first = close;
+            } else if (Math.abs(close - first) > 1e-9) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String resolveBenchmarkKey(Map<String, MarketData> normalized) {
@@ -683,6 +761,9 @@ public class PortfolioIntelligenceSnapshotFactory {
 
         double liquidSharePct = total > 0 ? round2((liquidValue / total) * 100.0) : 0.0;
 
+        boolean measuredHist = historyPoints >= HealthScoreConstants.MIN_HISTORY_POINTS;
+        Double measuredBeta = measuredHist && beta != null && Double.isFinite(beta) ? beta : null;
+
         return PortfolioIntelligenceSnapshot.builder()
                 .portfolioId(portfolioId)
                 .holdings(holdings)
@@ -694,10 +775,10 @@ public class PortfolioIntelligenceSnapshotFactory {
                 .maxSectorName(maxSectorName)
                 .liquidSharePct(liquidSharePct)
                 .historyPoints(historyPoints)
-                .portRetPct(portRetPct)
-                .niftyRetPct(niftyRetPct)
-                .dailyVolPct(dailyVolPct)
-                .beta(beta)
+                .portRetPct(measuredHist ? portRetPct : null)
+                .niftyRetPct(measuredHist ? niftyRetPct : null)
+                .dailyVolPct(measuredHist ? dailyVolPct : null)
+                .beta(measuredBeta)
                 .portfolioDailyReturns(portfolioDailyReturns)
                 .niftyDailyReturns(niftyDailyReturns)
                 .build();

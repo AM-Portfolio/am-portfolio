@@ -67,6 +67,25 @@ class PortfolioIntelligenceHistoryRedisServiceTest {
     }
 
     @Test
+    void put_accepts_non_positive_finite_beta() {
+        CachedIntelligenceHistory hist = CachedIntelligenceHistory.builder()
+                .historyPoints(40)
+                .beta(-0.4)
+                .build();
+        service.put("p-neg", hist);
+        verify(valueOps).set(eq("portfolio:intel-hist:v1:p-neg"), any(CachedIntelligenceHistory.class), eq(Duration.ofSeconds(300)));
+        assertThat(service.get("p-neg")).isPresent();
+        assertThat(service.get("p-neg").get().getBeta()).isEqualTo(-0.4);
+    }
+
+    @Test
+    void put_ignores_null_beta_even_with_enough_points() {
+        service.put("p-null", CachedIntelligenceHistory.builder().historyPoints(40).beta(null).build());
+        verify(valueOps, never()).set(anyString(), any(), any());
+        assertThat(service.get("p-null")).isEmpty();
+    }
+
+    @Test
     void get_reads_l2_when_l1_empty() {
         CachedIntelligenceHistory hist = CachedIntelligenceHistory.builder()
                 .historyPoints(40)

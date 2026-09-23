@@ -250,6 +250,7 @@ public class MarketDataService {
                                     .interval(request.getInterval())
                                     .filterType(request.getFilterType())
                                     .instrumentType(request.getInstrumentType())
+                                    .isIndexSymbol(request.getIsIndexSymbol())
                                     .filterFrequency(request.getFilterFrequency())
                                     .continuous(request.getContinuous())
                                     .forceRefresh(request.getForceRefresh())

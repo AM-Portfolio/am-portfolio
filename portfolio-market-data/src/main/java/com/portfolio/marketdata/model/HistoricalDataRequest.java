@@ -28,5 +28,8 @@ public class HistoricalDataRequest {
     private Integer filterFrequency;
     private Boolean continuous;
     private Boolean forceRefresh = false;
+    /** Market-data main uses this to keep index series (true) vs expand to constituents (false). */
+    @JsonProperty("isIndexSymbol")
+    private Boolean isIndexSymbol;
     private Map<String, String> additionalParams;
 }

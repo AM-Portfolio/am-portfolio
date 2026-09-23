@@ -51,6 +51,41 @@ class StressEngineTest {
     }
 
     @Test
+    void niftyDown10_nineteenDaysWithBeta_assumesOneAndShockUsesOne() {
+        PortfolioIntelligenceSnapshot snap = PortfolioIntelligenceSnapshot.builder()
+                .portfolioId("p1")
+                .holdings(List.of(holding("A", 100, 100, "Energy")))
+                .totalValue(100)
+                .holdingsCount(1)
+                .beta(0.5)
+                .historyPoints(19)
+                .build();
+        StressResponse res = engine.run(snap, StressRequest.builder().preset("NIFTY_DOWN_10").build());
+        assertEquals(-10.0, res.getScenarios().get(0).getPctImpact(), 0.01);
+        assertEquals("ASSUMED_ONE", res.getMethod());
+        assertEquals(1.0, res.getBetaUsed(), 0.01);
+        assertEquals(Boolean.TRUE, res.getBetaAssumed());
+        assertEquals(19, res.getHistoryDays());
+    }
+
+    @Test
+    void niftyDown10_thirtyDaysNullBeta_assumesOne() {
+        PortfolioIntelligenceSnapshot snap = PortfolioIntelligenceSnapshot.builder()
+                .portfolioId("p1")
+                .holdings(List.of(holding("A", 100, 100, "Energy")))
+                .totalValue(100)
+                .holdingsCount(1)
+                .beta(null)
+                .historyPoints(30)
+                .build();
+        StressResponse res = engine.run(snap, StressRequest.builder().preset("NIFTY_DOWN_10").build());
+        assertEquals(-10.0, res.getScenarios().get(0).getPctImpact(), 0.01);
+        assertEquals("ASSUMED_ONE", res.getMethod());
+        assertEquals(1.0, res.getBetaUsed(), 0.01);
+        assertEquals(Boolean.TRUE, res.getBetaAssumed());
+    }
+
+    @Test
     void niftyDown10_missingBeta_assumesOne() {
         PortfolioIntelligenceSnapshot snap = PortfolioIntelligenceSnapshot.builder()
                 .portfolioId("p1")
