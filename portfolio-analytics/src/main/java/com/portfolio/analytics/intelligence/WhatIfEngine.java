@@ -233,10 +233,25 @@ public class WhatIfEngine {
         Map<String, Double> weights = new LinkedHashMap<>();
         Map<String, Double> sectorWeights = new LinkedHashMap<>();
         if (snap.getHoldings() != null) {
+            java.util.Set<String> nonEquity = java.util.Set.of(
+                    HealthScoreEngine.ASSET_FIXED_INCOME,
+                    HealthScoreEngine.ASSET_COMMODITY,
+                    HealthScoreEngine.ASSET_CASH
+            );
+            double totalSectorWeight = 0.0;
             for (PortfolioIntelligenceSnapshot.Holding h : snap.getHoldings()) {
                 weights.put(h.getSymbol(), h.getWeightPct());
-                if (h.getSector() != null) {
-                    sectorWeights.merge(h.getSector(), h.getWeightPct(), Double::sum);
+                String ac = HealthScoreEngine.normalizeAssetClass(h.getAssetClass());
+                if (!nonEquity.contains(ac)) {
+                    String sector = h.getSector();
+                    if (sector == null || sector.isBlank()) sector = "Unknown";
+                    sectorWeights.merge(sector, h.getWeightPct(), Double::sum);
+                    totalSectorWeight += h.getWeightPct();
+                }
+            }
+            if (totalSectorWeight > 0) {
+                for (Map.Entry<String, Double> e : sectorWeights.entrySet()) {
+                    e.setValue((e.getValue() / totalSectorWeight) * 100.0);
                 }
             }
         }
