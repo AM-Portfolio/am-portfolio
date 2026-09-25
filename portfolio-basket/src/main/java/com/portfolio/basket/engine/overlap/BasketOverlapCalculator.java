@@ -125,6 +125,10 @@ public class BasketOverlapCalculator {
             }
         }
 
+        Map<String, EquityHoldings> userSymbolMap = allUserHoldings.stream()
+                .filter(h -> h.getSymbol() != null && !h.getSymbol().isBlank())
+                .collect(Collectors.toMap(EquityHoldings::getSymbol, h -> h, (a, b) -> a));
+
         if (etf.getHoldings() != null) {
             class ItemReqPair {
                 BasketItem item;
@@ -155,8 +159,15 @@ public class BasketOverlapCalculator {
             }
 
             for (ItemReqPair pair : pairs) {
+                EquityHoldings match = null;
                 if (pair.req.getIsin() != null && userMap.containsKey(pair.req.getIsin())) {
-                    boolean isMatch = processDirectMatch(pair.item, pair.req, userMap.get(pair.req.getIsin()),
+                    match = userMap.get(pair.req.getIsin());
+                } else if (pair.req.getSymbol() != null && userSymbolMap.containsKey(pair.req.getSymbol())) {
+                    match = userSymbolMap.get(pair.req.getSymbol());
+                }
+
+                if (match != null) {
+                    boolean isMatch = processDirectMatch(pair.item, pair.req, match,
                             consumedWeightByIsin, prices);
                     if (isMatch) {
                         matchCount++;
