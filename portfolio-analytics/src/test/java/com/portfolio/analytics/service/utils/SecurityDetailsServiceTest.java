@@ -22,6 +22,7 @@ class SecurityDetailsServiceTest {
 
     @Mock private SecurityService securityService;
     @Mock private MarketCapMongoService marketCapMongoService;
+    @Mock private com.portfolio.basket.client.EtfApiClient etfApiClient;
     @InjectMocks private SecurityDetailsService service;
 
     private SecurityModel buildSecurity(String symbol, String sector, String industry, MarketCapType cap) {
