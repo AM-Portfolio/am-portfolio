@@ -25,13 +25,13 @@ public class PortfolioSnapshotService {
 
     private static final java.util.Map<String, java.time.Period> TIMEFRAME_PERIODS = java.util.Map.of(
         "1D",  java.time.Period.ofDays(1),
-        "1W",  java.time.Period.ofWeeks(1),
-        "1M",  java.time.Period.ofMonths(1),
-        "3M",  java.time.Period.ofMonths(3),
-        "6M",  java.time.Period.ofMonths(6),
-        "1Y",  java.time.Period.ofYears(1),
-        "3Y",  java.time.Period.ofYears(3),
-        "5Y",  java.time.Period.ofYears(5)
+        "1W",  java.time.Period.ofDays(7),
+        "1M",  java.time.Period.ofDays(30),
+        "3M",  java.time.Period.ofDays(90),
+        "6M",  java.time.Period.ofDays(180),
+        "1Y",  java.time.Period.ofDays(365),
+        "3Y",  java.time.Period.ofDays(365 * 3),
+        "5Y",  java.time.Period.ofDays(365 * 5)
     );
 
     @org.springframework.cache.annotation.CacheEvict(value = "portfolioHistory", allEntries = true)
@@ -112,8 +112,8 @@ public class PortfolioSnapshotService {
             documents = portfolioSnapshotRepository
                 .findByUserIdAndSnapshotDateBetweenOrderBySnapshotDateAsc(userId, fromDate, today.plusDays(1));
         } else {
-            // Real date math: 1M = exactly 1 calendar month ago
-            java.time.Period period = TIMEFRAME_PERIODS.getOrDefault(frame, java.time.Period.ofMonths(1));
+            // Fixed-day windows aligned with modern-ui TimeFrame.dateRange (1M=30d, …)
+            java.time.Period period = TIMEFRAME_PERIODS.getOrDefault(frame, java.time.Period.ofDays(30));
             LocalDate fromDate = today.minus(period);
             documents = portfolioSnapshotRepository
                 .findByUserIdAndSnapshotDateBetweenOrderBySnapshotDateAsc(userId, fromDate, today.plusDays(1));
