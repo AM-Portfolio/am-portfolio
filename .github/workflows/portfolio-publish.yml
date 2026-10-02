@@ -37,4 +37,6 @@ jobs:
       # Actions gets permission_denied: write_package.
       image_name: "am-portfolio"
       build_context: "."
+      # pin-then-sync.sh lives on am-pipelines main (not develop).
+      pipelines_ref: "main"
     secrets: inherit
