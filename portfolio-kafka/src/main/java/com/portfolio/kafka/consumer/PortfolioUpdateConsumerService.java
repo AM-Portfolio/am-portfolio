@@ -194,8 +194,8 @@ public class PortfolioUpdateConsumerService {
                     portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioName);
                     portfolioSummaryRedisService.evictPortfolioSummary(owner, portfolioName);
                 }
-                // NOTE: Do NOT publishUpdate here. Sending the deleted portfolio's data
-                // downstream would cause other consumers to re-create it.
+                // Publish the delete event to notify am-analysis and others
+                portfolioEventPublisher.publishPortfolioDelete(owner, portfolioUuid, portfolioName, event.getSource());
                 log.info("Portfolio deletion complete for name={} owner={}", portfolioName, owner);
             } else {
                 log.warn("Skipping DELETE_PORTFOLIO: owner is null for name={} uuid={}", portfolioName, portfolioUuid);

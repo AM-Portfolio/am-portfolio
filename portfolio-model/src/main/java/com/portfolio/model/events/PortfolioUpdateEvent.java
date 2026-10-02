@@ -29,6 +29,7 @@ public class PortfolioUpdateEvent {
     private String userId;
     private String portfolioId;
     private String name;
+    private String action;
 
     // Core Data
     private List<EquityModel> equities;

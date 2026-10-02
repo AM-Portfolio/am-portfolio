@@ -58,4 +58,32 @@ public class PortfolioEventPublisher {
         log.info("Published resolved portfolio to outbound topic for user: {}, broker: {}, source: {}",
                  savedPortfolio.getOwner(), savedPortfolio.getBrokerType(), source);
     }
+
+    public void publishPortfolioDelete(String owner, String portfolioId, String name, String source) {
+        if (kafkaProducerService == null) {
+            log.debug("Kafka disabled - skipping portfolio delete publish for user: {}", owner);
+            return;
+        }
+
+        UUID resolvedId = null;
+        try {
+            if (portfolioId != null) resolvedId = UUID.fromString(portfolioId);
+        } catch (Exception e) {
+            resolvedId = UUID.randomUUID();
+        }
+        if (resolvedId == null) resolvedId = UUID.randomUUID();
+
+        PortfolioUpdateEvent outboundEvent = PortfolioUpdateEvent.builder()
+                .id(resolvedId)
+                .userId(owner)
+                .portfolioId(resolvedId.toString())
+                .name(name)
+                .source(source != null ? source : "PORTFOLIO_RESOLVED")
+                .action("DELETE")
+                .timestamp(LocalDateTime.now())
+                .build();
+
+        kafkaProducerService.sendMessage(outboundEvent, null);
+        log.info("Published DELETED portfolio to outbound topic for user: {}, name: {}", owner, name);
+    }
 }
