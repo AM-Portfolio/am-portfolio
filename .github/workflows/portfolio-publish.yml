@@ -34,3 +34,4 @@ jobs:
       image_name: "am-portfolio"
       build_context: "."
     secrets: inherit
+# Trigger new push
