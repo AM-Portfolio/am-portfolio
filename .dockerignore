@@ -1,5 +1,6 @@
 target/
 **/target/
+!portfolio-app/target/*.jar
 .git/
 **/.git/
 node_modules/
