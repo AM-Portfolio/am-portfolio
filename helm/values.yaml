@@ -21,7 +21,8 @@ global:
       enabled: false
 
 image:
-  repository: am-portfolio
+  # Repo-scoped GHCR path (matches gitops releases + central-build-publish default).
+  repository: am-portfolio/am-portfolio
   pullPolicy: Always
 
 service:
