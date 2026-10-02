@@ -39,6 +39,10 @@ public class HealthScoreEngine {
     }
 
     public HealthDto compute(PortfolioIntelligenceSnapshot snapshot) {
+        if (snapshot.getHoldings() == null || snapshot.getHoldings().isEmpty()) {
+            return null;
+        }
+
         Map<String, ScoredComponent> scored = new LinkedHashMap<>();
 
         DivResult divResult = scoreDiversification(snapshot);
