@@ -46,6 +46,10 @@ public class RiskRadarEngine {
     }
 
     public RiskDto compute(PortfolioIntelligenceSnapshot snapshot) {
+        if (snapshot.getHoldings() == null || snapshot.getHoldings().isEmpty()) {
+            return null;
+        }
+
         int concHealth = roundInt(HealthScoreEngine.concentration(snapshot));
         int divHealth = roundInt(healthV2
                 ? HealthScoreEngine.diversificationV2(snapshot)
