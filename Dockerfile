@@ -1,28 +1,4 @@
-# Multi-stage build for Portfolio Service (Unified Monorepo)
-# Stage 1: Build with Maven
-ARG BASE_REGISTRY=""
-FROM maven:3.9.6-eclipse-temurin-21 AS build
-
-# Build arguments for GitHub authentication
-ARG GITHUB_PACKAGES_USERNAME
-ARG GITHUB_PACKAGES_TOKEN
-
-WORKDIR /build
-
-# Copy settings.xml to Maven config directory
-COPY settings.xml /root/.m2/settings.xml
-
-# Copy the entire project for unified build
-COPY . .
-
-# Build everything in one go
-# Because am-common-data is now a module in the root POM,
-# Maven will build it and make it available to other modules automatically.
-RUN --mount=type=cache,target=/root/.m2 \
-    GITHUB_ACTOR=${GITHUB_PACKAGES_USERNAME} GITHUB_TOKEN=${GITHUB_PACKAGES_TOKEN} \
-    mvn clean package -DskipTests -B -s settings.xml -U
-
-# Stage 2: Runtime with JRE 21
+# Runtime with JRE 21
 FROM eclipse-temurin:21-jdk-jammy
 
 WORKDIR /app
@@ -42,8 +18,8 @@ RUN apt-get update && \
     # Set timezone
     ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
 
-# Copy the built JAR from build stage and set correct ownership
-COPY --from=build --chown=spring:spring /build/portfolio-app/target/*.jar app.jar
+# Copy the built JAR from the local target directory and set correct ownership
+COPY --chown=spring:spring portfolio-app/target/*.jar app.jar
 
 # Drop to non-root — matches K8s securityContext runAsUser: 1001
 USER 1001:1001

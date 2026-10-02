@@ -32,5 +32,6 @@ jobs:
       language: "java"
       working_directory: "."
       image_name: "am-portfolio"
+      ghcr_image_name: "am-portfolio"
       build_context: "."
     secrets: inherit
