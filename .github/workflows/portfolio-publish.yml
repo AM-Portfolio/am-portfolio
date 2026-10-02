@@ -31,6 +31,12 @@ jobs:
     with:
       language: "java"
       working_directory: "."
+      # Contabo / Argo service name. GHCR path defaults to am-portfolio/am-portfolio
+      # (repo-scoped) so GITHUB_TOKEN can write_package. Do NOT set ghcr_image_name
+      # to the flat org package "am-portfolio" — that package is unlinked and
+      # Actions gets permission_denied: write_package.
       image_name: "am-portfolio"
       build_context: "."
+      # pin-then-sync.sh lives on am-pipelines main (not develop).
+      pipelines_ref: "main"
     secrets: inherit
