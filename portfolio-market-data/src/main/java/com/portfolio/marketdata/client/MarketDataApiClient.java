@@ -238,7 +238,7 @@ public class MarketDataApiClient extends AbstractApiClient {
                                                         }
                                                 }
                                         }
-                                        return resultMap;
+                                        return (Map) resultMap;
                                 })
                                 .doOnSuccess(data -> log.debug("Successfully resolved batch of {} ISINs", 
                                                 data != null ? data.size() : 0))
