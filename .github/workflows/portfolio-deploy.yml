@@ -3,6 +3,11 @@ name: Manual Deploy — AM Portfolio
 on:
   workflow_dispatch:
     inputs:
+      service:
+        description: "Service name (passed by amctl)"
+        required: false
+        type: string
+        default: ""
       image_tag:
         description: "GHCR tag (leave empty = use current preprod pin from am-gitops)"
         required: false
