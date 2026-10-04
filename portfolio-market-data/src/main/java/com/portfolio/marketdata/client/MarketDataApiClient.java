@@ -131,6 +131,19 @@ public class MarketDataApiClient extends AbstractApiClient {
         @io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker(name = "historicalDataApi")
         public Mono<HistoricalDataResponseWrapper> getHistoricalData(HistoricalDataRequest request) {
                 // Ensure we have a comma-separated string of symbols
+                if (request.getSymbols() != null && !request.getSymbols().isEmpty()) {
+                        String[] parts = request.getSymbols().split(",");
+                        java.util.List<String> updated = new java.util.ArrayList<>();
+                        for (String part : parts) {
+                                String s = part.trim();
+                                if (!s.contains(":") && !s.contains(" ")) {
+                                        updated.add("NSE:" + s);
+                                } else {
+                                        updated.add(s);
+                                }
+                        }
+                        request.setSymbols(String.join(",", updated));
+                }
 
                 log.debug("Fetching historical data for {} from {} to {} with interval={}, filterType={}, forceRefresh={}",
                                 request.getSymbols(), request.getFromDate(), request.getToDate(),
@@ -189,15 +202,9 @@ public class MarketDataApiClient extends AbstractApiClient {
          * @param isin the ISIN code to resolve
          * @return a Mono containing a map of isin and resolved symbol
          */
-        @SuppressWarnings("rawtypes")
+        @SuppressWarnings({ "rawtypes", "unchecked" })
         public Mono<Map> resolveTickerByIsin(String isin) {
-                String path = "/v1/market-data/instruments/isin/" + isin.trim().toUpperCase();
-                log.info("Resolving ticker symbol by ISIN via API: {}", path);
-                return get(path, Map.class)
-                                .doOnSuccess(data -> log.debug("Successfully resolved ISIN {} to symbol {}", 
-                                                isin, data != null ? data.get("symbol") : "null"))
-                                .doOnError(e -> log.error("Failed to resolve ticker symbol for ISIN {}: {}", 
-                                                isin, e.getMessage()));
+                return resolveTickersByIsins(List.of(isin.trim().toUpperCase()));
         }
 
         /**
@@ -207,11 +214,32 @@ public class MarketDataApiClient extends AbstractApiClient {
          * @param isins list of ISIN codes to resolve
          * @return a Mono containing a map of ISIN to resolved symbol
          */
-        @SuppressWarnings("rawtypes")
+        @SuppressWarnings({ "rawtypes", "unchecked" })
         public Mono<Map> resolveTickersByIsins(List<String> isins) {
-                String path = "/v1/market-data/instruments/isin";
+                String path = "/v1/instruments/search";
                 log.info("Resolving batch of {} ticker symbols by ISINs via POST API", isins.size());
-                return post(path, isins, Map.class)
+                Map<String, Object> body = Map.of("isins", isins);
+                return post(path, body, Map.class)
+                                .map(response -> {
+                                        Map<String, String> resultMap = new java.util.HashMap<>();
+                                        if (response != null && response.containsKey("value")) {
+                                                Object valueObj = response.get("value");
+                                                if (valueObj instanceof List) {
+                                                        List<Map<String, Object>> values = (List<Map<String, Object>>) valueObj;
+                                                        for (Map<String, Object> val : values) {
+                                                                String isin = (String) val.get("isin");
+                                                                String symbol = (String) val.get("trading_symbol");
+                                                                if (isin != null && symbol != null) {
+                                                                        String exchange = (String) val.get("exchange");
+                                                                        if ("NSE".equalsIgnoreCase(exchange) || !resultMap.containsKey(isin)) {
+                                                                                resultMap.put(isin, symbol);
+                                                                        }
+                                                                }
+                                                        }
+                                                }
+                                        }
+                                        return resultMap;
+                                })
                                 .doOnSuccess(data -> log.debug("Successfully resolved batch of {} ISINs", 
                                                 data != null ? data.size() : 0))
                                 .doOnError(e -> log.error("Failed to resolve batch of ISINs: {}", e.getMessage()));
