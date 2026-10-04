@@ -9,7 +9,6 @@ context: .
 github:
     repo: AM-Portfolio/am-portfolio
     deploy_workflow: portfolio-deploy.yml
-    service: am-portfolio
     # workflow_dispatch ref — must be default branch once workflow is registered
     ref: main
 deploy:
