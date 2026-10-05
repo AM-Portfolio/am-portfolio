@@ -468,13 +468,13 @@ public class PortfolioServiceImpl implements PortfolioService {
         
         List<PortfolioDocument> portfolios = portfolioDocumentRepository.findByOwner(owner);
         for (PortfolioDocument portfolio : portfolios) {
-            if (id.equals(portfolio.getName())) {
+            if (id.equals(portfolio.getName()) || id.equals(portfolio.getId().toString())) {
                 portfolioDocumentRepository.delete(portfolio);
-                log.info("Deleted portfolio with name: {} and owner: {}", id, owner);
+                log.info("Deleted portfolio with name/id: {} and owner: {}", id, owner);
                 return;
             }
         }
-        log.warn("Portfolio not found for deletion with name: {} and owner: {}", id, owner);
+        log.warn("Portfolio not found for deletion with name/id: {} and owner: {}", id, owner);
     }
 
     @Override
