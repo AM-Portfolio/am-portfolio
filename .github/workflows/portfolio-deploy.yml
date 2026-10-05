@@ -40,12 +40,12 @@ jobs:
           repository: AM-Portfolio/am-pipelines
           path: am-pipelines-repo
           ref: main
-          token: ${{ secrets.GITHUB_PAT || secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.AM_GITHUB_PAT || secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Resolve tag
         id: tag
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_PAT || secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AM_GITHUB_PAT || secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
           TAG_IN: ${{ inputs.image_tag }}
         run: |
           set -euo pipefail
@@ -65,7 +65,7 @@ jobs:
       - name: Deploy + verify Contabo (dev/preprod)
         if: inputs.environment == 'dev' || inputs.environment == 'preprod'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_PAT || secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AM_GITHUB_PAT || secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
           ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
           ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
           INPUT_SERVICE_NAME: am-portfolio
@@ -80,7 +80,7 @@ jobs:
       - name: Promote + verify Contabo (prod/dr)
         if: inputs.environment == 'prod' || inputs.environment == 'dr'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_PAT || secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AM_GITHUB_PAT || secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
           ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
           ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
           INPUT_SERVICE_NAME: am-portfolio
