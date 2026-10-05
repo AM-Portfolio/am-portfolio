@@ -74,8 +74,8 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x am-pipelines-repo/scripts/ci/argo-api-lib.sh
-          chmod +x am-pipelines-repo/scripts/ci/argo-pin-and-wait.sh
-          am-pipelines-repo/scripts/ci/argo-pin-and-wait.sh
+          chmod +x am-pipelines-repo/scripts/ci/argo-roll-image-and-wait.sh
+          am-pipelines-repo/scripts/ci/argo-roll-image-and-wait.sh
 
       - name: Promote + verify Contabo (prod/dr)
         if: inputs.environment == 'prod' || inputs.environment == 'dr'
