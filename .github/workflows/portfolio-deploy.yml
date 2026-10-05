@@ -71,6 +71,7 @@ jobs:
           INPUT_SERVICE_NAME: am-portfolio
           INPUT_ENVIRONMENT: ${{ inputs.environment }}
           INPUT_IMAGE_TAG: ${{ steps.tag.outputs.tag }}
+          ARGO_ROLL_SKIP_PUT: "0"
         run: |
           set -euo pipefail
           chmod +x am-pipelines-repo/scripts/ci/argo-api-lib.sh
