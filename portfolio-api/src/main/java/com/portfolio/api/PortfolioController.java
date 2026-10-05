@@ -508,6 +508,7 @@ public class PortfolioController {
         return ResponseEntity.ok("Snapshot for userId=" + userId + " on date=" + date + " has been successfully deleted. You can now use the trigger-catchup endpoint to rebuild it.");
     }
 
+
     /**
      * DEV/ADMIN ONLY — Hidden from Swagger.
      * Fixes broken "Grow" or "Auto-created GROW" portfolio names in MongoDB.

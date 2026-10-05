@@ -468,7 +468,7 @@ public class PortfolioServiceImpl implements PortfolioService {
         
         List<PortfolioDocument> portfolios = portfolioDocumentRepository.findByOwner(owner);
         for (PortfolioDocument portfolio : portfolios) {
-            if (id.equals(portfolio.getName()) || id.equals(portfolio.getId().toString())) {
+            if (id.equals(portfolio.getName()) || (portfolio.getId() != null && id.equals(portfolio.getId().toString()))) {
                 portfolioDocumentRepository.delete(portfolio);
                 log.info("Deleted portfolio with name/id: {} and owner: {}", id, owner);
                 return;

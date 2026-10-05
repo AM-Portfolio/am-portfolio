@@ -181,10 +181,11 @@ public class PortfolioUpdateConsumerService {
             String portfolioName = event.getPortfolioId(); // e.g. "brand-new-portfolio-1"
             String portfolioUuid = portfolioModel.getId() != null ? portfolioModel.getId().toString() : null;
 
+            String idToDelete = portfolioUuid != null ? portfolioUuid : portfolioName;
             if (owner != null) {
                 log.info("Deleting portfolio name={} uuid={} for user={} based on DELETE_PORTFOLIO action",
                         portfolioName, portfolioUuid, owner);
-                portfolioService.deletePortfolioByIdAndOwner(portfolioName, owner);
+                portfolioService.deletePortfolioByIdAndOwner(idToDelete, owner);
                 // Evict all relevant caches for both the UUID and name variants
                 if (portfolioUuid != null) {
                     portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioUuid);
