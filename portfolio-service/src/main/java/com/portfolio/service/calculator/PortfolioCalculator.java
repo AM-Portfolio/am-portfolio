@@ -12,15 +12,17 @@ import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
+import com.portfolio.model.resolver.TradingSymbolResolver;
 import com.am.common.amcommondata.service.price.StockPriceMongoService;
 import com.am.common.amcommondata.document.price.StockPriceDocument;
 import com.am.common.amcommondata.service.marketcap.MarketCapMongoService;
 import com.am.common.amcommondata.document.marketcap.MarketCapDocument;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
+
+import org.springframework.lang.Nullable;
 
 import io.micrometer.observation.annotation.Observed;
 
@@ -33,18 +35,22 @@ public class PortfolioCalculator {
     private final StockPriceMongoService stockPriceMongoService;
     private final com.portfolio.basket.client.EtfApiClient etfApiClient;
     private final java.util.concurrent.Executor taskExecutor;
+    @Nullable
+    private final TradingSymbolResolver tradingSymbolResolver;
 
     public PortfolioCalculator(
             MarketDataService marketDataService,
             MarketCapMongoService marketCapMongoService,
             StockPriceMongoService stockPriceMongoService,
             com.portfolio.basket.client.EtfApiClient etfApiClient,
-            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
+            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
+            @Nullable TradingSymbolResolver tradingSymbolResolver) {
         this.marketDataService = marketDataService;
         this.marketCapMongoService = marketCapMongoService;
         this.stockPriceMongoService = stockPriceMongoService;
         this.etfApiClient = etfApiClient;
         this.taskExecutor = taskExecutor;
+        this.tradingSymbolResolver = tradingSymbolResolver;
     }
 
     /**
@@ -59,6 +65,9 @@ public class PortfolioCalculator {
         if (equityHoldings == null || equityHoldings.isEmpty()) {
             return equityHoldings;
         }
+
+        // Broker aliases / ISIN-as-symbol must be canonicalized before OHLC + sector lookup.
+        canonicalizeHoldingSymbols(equityHoldings);
 
         // Extract all symbols
         List<String> symbols = equityHoldings.stream()
@@ -136,6 +145,7 @@ public class PortfolioCalculator {
         if (equityHoldings == null || equityHoldings.isEmpty()) {
             return equityHoldings;
         }
+        canonicalizeHoldingSymbols(equityHoldings);
         List<String> symbols = equityHoldings.stream()
                 .map(EquityHoldings::getSymbol)
                 .filter(symbol -> symbol != null)
@@ -439,5 +449,59 @@ public class PortfolioCalculator {
             cleaned = symbol.substring(colonIndex + 1);
         }
         return com.portfolio.model.util.SymbolResolver.normalize(cleaned);
+    }
+
+    /**
+     * Resolve broker tickers (IDEA, VIKRAMSOLR, …) and ISIN-as-symbol rows to NSE tickers
+     * before any OHLC / sector fetch — covers cold path and Redis overlay reprice.
+     */
+    private void canonicalizeHoldingSymbols(List<EquityHoldings> equityHoldings) {
+        if (tradingSymbolResolver == null || equityHoldings == null || equityHoldings.isEmpty()) {
+            return;
+        }
+        List<String> isins = equityHoldings.stream()
+                .filter(h -> h != null)
+                .map(h -> {
+                    if (h.getIsin() != null && !h.getIsin().isBlank()) {
+                        return h.getIsin().trim().toUpperCase();
+                    }
+                    if (TradingSymbolResolver.looksLikeIsin(h.getSymbol())) {
+                        return h.getSymbol().trim().toUpperCase();
+                    }
+                    return null;
+                })
+                .filter(s -> s != null && !s.isBlank())
+                .distinct()
+                .collect(Collectors.toList());
+        Map<String, String> byIsin = isins.isEmpty()
+                ? Map.of()
+                : tradingSymbolResolver.resolveTradingSymbols(isins);
+
+        for (EquityHoldings holding : equityHoldings) {
+            if (holding == null) {
+                continue;
+            }
+            String before = holding.getSymbol();
+            String isinKey = holding.getIsin() != null && !holding.getIsin().isBlank()
+                    ? holding.getIsin().trim().toUpperCase()
+                    : (TradingSymbolResolver.looksLikeIsin(before) ? before.trim().toUpperCase() : null);
+            String resolved = null;
+            if (isinKey != null && byIsin.containsKey(isinKey)) {
+                resolved = byIsin.get(isinKey);
+            }
+            if (resolved == null) {
+                resolved = tradingSymbolResolver.resolveTradingSymbol(before, holding.getIsin());
+            }
+            if (resolved == null || resolved.isBlank() || TradingSymbolResolver.looksLikeIsin(resolved)) {
+                continue;
+            }
+            holding.setSymbol(resolved);
+            if ((holding.getIsin() == null || holding.getIsin().isBlank()) && isinKey != null) {
+                holding.setIsin(isinKey);
+            }
+            if (before != null && !before.equalsIgnoreCase(resolved)) {
+                log.info("Holdings symbol canonicalize {} → {} (isin={})", before, resolved, isinKey);
+            }
+        }
     }
 }

@@ -43,8 +43,21 @@ class MongoTradingSymbolResolverTest {
     }
 
     @Test
+    void whenNoIsinAndSymbolReturnsSameAlias_triesNameSearch() {
+        when(marketDataApiClient.resolveTickersByQueries(eq(List.of("IDEA")), eq(List.of("SYMBOL"))))
+                .thenReturn(Mono.just(Map.of("IDEA", "IDEA")));
+        when(marketDataApiClient.resolveTickersByQueries(eq(List.of("IDEA")), eq(List.of("NAME"))))
+                .thenReturn(Mono.just(Map.of("IDEA", "VODAFONEIDEA")));
+
+        MongoTradingSymbolResolver resolver = new MongoTradingSymbolResolver(marketDataApiClient);
+        assertEquals("VODAFONEIDEA", resolver.resolveTradingSymbol("IDEA", null));
+    }
+
+    @Test
     void whenNoIsinAndSymbolSearchMiss_returnsNormalizedTicker() {
         when(marketDataApiClient.resolveTickersByQueries(eq(List.of("RELIANCE")), eq(List.of("SYMBOL"))))
+                .thenReturn(Mono.just(Map.of()));
+        when(marketDataApiClient.resolveTickersByQueries(eq(List.of("RELIANCE")), eq(List.of("NAME"))))
                 .thenReturn(Mono.just(Map.of()));
 
         MongoTradingSymbolResolver resolver = new MongoTradingSymbolResolver(marketDataApiClient);

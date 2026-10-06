@@ -24,6 +24,7 @@ import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
 import com.portfolio.redis.session.CashSessionClock;
 import com.portfolio.service.calculator.PortfolioCalculator;
+import com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer;
 
 import io.micrometer.observation.annotation.Observed;
 import lombok.extern.slf4j.Slf4j;
@@ -44,6 +45,8 @@ public class PortfolioHoldingsService {
     private final java.util.concurrent.Executor taskExecutor;
     @Nullable
     private final CashSessionClock cashSessionClock;
+    @Nullable
+    private final PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer;
 
     public PortfolioHoldingsService(
             PortfolioService portfolioService,
@@ -52,7 +55,8 @@ public class PortfolioHoldingsService {
             PortfolioCalculator portfolioCalculator,
             PortfolioHoldingsMongoService portfolioHoldingsMongoService,
             @Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
-            @Nullable CashSessionClock cashSessionClock) {
+            @Nullable CashSessionClock cashSessionClock,
+            @Nullable PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer) {
         this.portfolioService = portfolioService;
         this.portfolioHoldingsMapper = portfolioHoldingsMapper;
         this.portfolioHoldingsRedisService = portfolioHoldingsRedisService;
@@ -60,6 +64,7 @@ public class PortfolioHoldingsService {
         this.portfolioHoldingsMongoService = portfolioHoldingsMongoService;
         this.taskExecutor = taskExecutor;
         this.cashSessionClock = cashSessionClock;
+        this.portfolioEquitySymbolNormalizer = portfolioEquitySymbolNormalizer;
     }
 
     @Value("${portfolio.redis.enabled:true}")
@@ -211,6 +216,9 @@ public class PortfolioHoldingsService {
         String context = portfolioId != null ? "portfolio: " + portfolioId : "all portfolios";
         log.debug("Building portfolio holdings for user: {} and {}", userId, context);
 
+        // Heal broker aliases in Mongo so subsequent reads / X-Ray / Kafka stay on NSE tickers.
+        healStoredSymbols(portfolios);
+
         var portfolioHoldings = portfolioHoldingsMapper.toPortfolioHoldingsV1(portfolios);
         // Allocation availableQuantity is set in PortfolioHoldingsMapper — do not re-query ledger here
 
@@ -347,5 +355,35 @@ public class PortfolioHoldingsService {
                 log.error("Async rebuild failed for user: {}", userId, ex);
             }
         }, taskExecutor);
+    }
+
+    private void healStoredSymbols(List<PortfolioModelV1> portfolios) {
+        if (portfolioEquitySymbolNormalizer == null || portfolios == null || portfolios.isEmpty()) {
+            return;
+        }
+        for (PortfolioModelV1 portfolio : portfolios) {
+            if (portfolio == null) {
+                continue;
+            }
+            try {
+                boolean changed = portfolioEquitySymbolNormalizer.normalizePortfolioAndDetectChange(portfolio);
+                if (!changed) {
+                    continue;
+                }
+                portfolioService.upsertDocumentPortfolio(portfolio);
+                log.info("Persisted symbol heal for portfolio id={} name={}",
+                        portfolio.getId(), portfolio.getName());
+                String owner = portfolio.getOwner();
+                if (owner != null && !owner.isBlank() && isRedisEnabled && portfolioHoldingsRedisService != null) {
+                    String pid = portfolio.getId() != null ? portfolio.getId().toString() : null;
+                    portfolioHoldingsRedisService.evictPortfolioHoldings(owner, pid);
+                    if (portfolio.getName() != null && !portfolio.getName().isBlank()) {
+                        portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolio.getName());
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Symbol heal failed for portfolio {}: {}", portfolio.getId(), e.getMessage());
+            }
+        }
     }
 }

@@ -42,12 +42,32 @@ public class MongoTradingSymbolResolver implements TradingSymbolResolver {
             if (resolved != null) {
                 return resolved;
             }
+            // ISIN miss: still try SYMBOL/NAME on the broker ticker before emitting ISIN-as-symbol.
+            if (normalizedSymbol != null && !normalizedSymbol.isBlank()
+                    && !TradingSymbolResolver.looksLikeIsin(normalizedSymbol)) {
+                String bySymbol = lookupTradingSymbolByQuery(normalizedSymbol, "SYMBOL");
+                if (bySymbol != null && !bySymbol.equalsIgnoreCase(normalizedSymbol)) {
+                    return bySymbol;
+                }
+                String byName = lookupTradingSymbolByQuery(normalizedSymbol, "NAME");
+                if (byName != null && !byName.equalsIgnoreCase(normalizedSymbol)) {
+                    return byName;
+                }
+            }
             return fallbackIdentifier(normalizedSymbol, isin);
         }
 
-        // No ISIN: try canonicalizing via SYMBOL search (aliases like IDEA → VODAFONEIDEA).
+        // No ISIN (or ISIN miss above): canonicalize broker aliases via SYMBOL then NAME.
+        // NAME matters when SYMBOL search returns the same alias (stale IDEA row) or misses.
         if (normalizedSymbol != null && !normalizedSymbol.isBlank()) {
             String bySymbol = lookupTradingSymbolByQuery(normalizedSymbol, "SYMBOL");
+            if (bySymbol != null && !bySymbol.equalsIgnoreCase(normalizedSymbol)) {
+                return bySymbol;
+            }
+            String byName = lookupTradingSymbolByQuery(normalizedSymbol, "NAME");
+            if (byName != null && !byName.equalsIgnoreCase(normalizedSymbol)) {
+                return byName;
+            }
             if (bySymbol != null) {
                 return bySymbol;
             }

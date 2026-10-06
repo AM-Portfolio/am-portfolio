@@ -88,11 +88,14 @@ public class PortfolioEquitySymbolNormalizer {
             resolved = tradingSymbolResolver.resolveTradingSymbol(equity.getSymbol(), equity.getIsin());
         }
 
-        // NAME search when still unresolved / ISIN-shaped (no ISIN or MD miss on ISIN).
-        if ((resolved == null || resolved.isBlank() || TradingSymbolResolver.looksLikeIsin(resolved))
+        String before = equity.getSymbol();
+        boolean unchangedAlias = resolved != null && before != null && resolved.equalsIgnoreCase(before);
+
+        // NAME search when unresolved, ISIN-shaped, or broker alias unchanged (IDEA→IDEA).
+        if ((resolved == null || resolved.isBlank() || TradingSymbolResolver.looksLikeIsin(resolved) || unchangedAlias)
                 && equity.getName() != null && !equity.getName().isBlank()) {
             String byName = lookupByName(equity.getName());
-            if (byName != null) {
+            if (byName != null && (before == null || !byName.equalsIgnoreCase(before))) {
                 resolved = byName;
             }
         }
@@ -101,7 +104,6 @@ public class PortfolioEquitySymbolNormalizer {
             return;
         }
 
-        String before = equity.getSymbol();
         equity.setSymbol(resolved);
         if (before != null && !before.equalsIgnoreCase(resolved)) {
             log.info("Normalized equity symbol {} → {} (isin={})", before, resolved, isinKey);
