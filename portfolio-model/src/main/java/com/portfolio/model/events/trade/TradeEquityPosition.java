@@ -34,6 +34,8 @@ public class TradeEquityPosition {
 
     // --- Instrument metadata ---
     private String isin;
+    /** Company / scheme name from trade-management (optional). */
+    private String name;
     private String sector;
     private String industry;
     private String marketCap;

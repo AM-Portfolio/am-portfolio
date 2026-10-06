@@ -84,9 +84,13 @@ public class RiskRadarEngine {
 
         List<RiskDto.RiskFindingDto> findings = new ArrayList<>();
         if (snapshot.getTop1Pct() >= top1HighPct) {
+            String topLabel = snapshot.getTop1Symbol() != null && !snapshot.getTop1Symbol().isBlank()
+                    ? String.format(Locale.ROOT, "Top holding %s %.1f%%", snapshot.getTop1Symbol().trim(),
+                            snapshot.getTop1Pct())
+                    : String.format(Locale.ROOT, "Top holding %.1f%%", snapshot.getTop1Pct());
             findings.add(RiskDto.RiskFindingDto.builder()
                     .code("TOP1_HIGH")
-                    .label(String.format(Locale.ROOT, "Top holding %.1f%%", snapshot.getTop1Pct()))
+                    .label(topLabel)
                     .severity("HIGH")
                     .build());
         }

@@ -736,6 +736,7 @@ public class PortfolioIntelligenceSnapshotFactory {
         int holdingsCount = holdings.size();
         Set<String> sectors = new HashSet<>();
         double top1 = 0;
+        String top1Symbol = null;
         Map<String, Double> sectorSums = new HashMap<>();
         double liquidValue = 0;
 
@@ -744,7 +745,10 @@ public class PortfolioIntelligenceSnapshotFactory {
                 sectors.add(h.getSector());
                 sectorSums.merge(h.getSector(), h.getWeightPct(), Double::sum);
             }
-            top1 = Math.max(top1, h.getWeightPct());
+            if (h.getWeightPct() > top1) {
+                top1 = h.getWeightPct();
+                top1Symbol = h.getSymbol();
+            }
             if (isLiquidCap(h.getMarketCap())) {
                 liquidValue += h.getValue();
             }
@@ -771,6 +775,7 @@ public class PortfolioIntelligenceSnapshotFactory {
                 .holdingsCount(holdingsCount)
                 .distinctSectors(sectors.size())
                 .top1Pct(round2(top1))
+                .top1Symbol(top1Symbol)
                 .maxSectorPct(round2(maxSectorPct))
                 .maxSectorName(maxSectorName)
                 .liquidSharePct(liquidSharePct)

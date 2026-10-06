@@ -560,6 +560,7 @@ public class PortfolioController {
 
         int updatedPortfolios = 0;
         int normalizedEquities = 0;
+        int cachesEvicted = 0;
         for (PortfolioModelV1 portfolio : portfolios) {
             if (portfolio == null || portfolio.getEquityModels() == null) {
                 continue;
@@ -572,13 +573,33 @@ public class PortfolioController {
                 updatedPortfolios++;
                 normalizedEquities += (before - after);
             }
+            // Always evict caches so UI cannot keep serving ISIN-as-symbol holdings
+            // even when Mongo had no delta (e.g. prior normalize without eviction).
+            String owner = portfolio.getOwner();
+            if (owner != null && !owner.isBlank()) {
+                String portfolioId = portfolio.getId() != null ? portfolio.getId().toString() : null;
+                String portfolioName = portfolio.getName();
+                portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioId);
+                portfolioSummaryRedisService.evictPortfolioSummary(owner, portfolioId);
+                if (portfolioName != null && !portfolioName.isBlank()
+                        && (portfolioId == null || !portfolioName.equals(portfolioId))) {
+                    portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioName);
+                    portfolioSummaryRedisService.evictPortfolioSummary(owner, portfolioName);
+                }
+                if (portfolioId != null) {
+                    portfolioIntelligenceRedisService.evict(portfolioId);
+                }
+                portfolioIntelligenceRedisService.evictAggregateForUser(owner);
+                cachesEvicted++;
+            }
         }
 
-        log.info("[DEV] Symbol normalization complete: portfoliosUpdated={}, equitiesNormalized={}",
-                updatedPortfolios, normalizedEquities);
+        log.info("[DEV] Symbol normalization complete: portfoliosUpdated={}, equitiesNormalized={}, cachesEvicted={}",
+                updatedPortfolios, normalizedEquities, cachesEvicted);
         return ResponseEntity.ok(java.util.Map.of(
                 "portfoliosUpdated", updatedPortfolios,
-                "equitiesNormalized", normalizedEquities));
+                "equitiesNormalized", normalizedEquities,
+                "cachesEvicted", cachesEvicted));
     }
 
     private int countIsinSymbols(PortfolioModelV1 portfolio) {

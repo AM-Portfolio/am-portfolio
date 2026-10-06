@@ -18,6 +18,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.portfolio.kafka.publisher.PortfolioEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
+import com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer;
 
 import java.time.Duration;
 
@@ -62,6 +63,7 @@ public class PortfolioUpdateConsumerService {
     private final com.portfolio.redis.service.PortfolioSummaryRedisService portfolioSummaryRedisService;
     private final com.portfolio.redis.service.ActiveMarketSymbolPublisher activeMarketSymbolPublisher;
     private final com.portfolio.redis.service.PortfolioIntelligenceRedisService portfolioIntelligenceRedisService;
+    private final PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer;
     private final StringRedisTemplate           stringRedisTemplate;
 
     @Value("${app.kafka.portfolio.consumer.id:am-portfolio-consumer-group}")
@@ -158,6 +160,8 @@ public class PortfolioUpdateConsumerService {
 
     private void processDocumentMessage(PortfolioUpdateEvent event) {
         PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
+        // Batch ISIN→ticker normalize (same as HTTP /sync) before persist
+        portfolioEquitySymbolNormalizer.normalizePortfolio(portfolioModel);
         PortfolioModelV1 saved = portfolioService.upsertDocumentPortfolio(portfolioModel);
         if (saved != null && saved.getOwner() != null) {
             String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
@@ -174,7 +178,7 @@ public class PortfolioUpdateConsumerService {
 
     private void processTradeMessage(com.portfolio.model.events.trade.TradePortfolioSyncEvent event) {
         PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
-        
+
         if ("DELETE_PORTFOLIO".equals(portfolioModel.getLastTradeAction())) {
             String owner = portfolioModel.getOwner();
             // deletePortfolioByIdAndOwner matches against the portfolio NAME in MongoDB.
@@ -204,6 +208,9 @@ public class PortfolioUpdateConsumerService {
             return;
         }
 
+        // Batch ISIN→ticker normalize (same as HTTP /sync) before persist —
+        // Kafka path previously relied only on per-row point lookup.
+        portfolioEquitySymbolNormalizer.normalizePortfolio(portfolioModel);
         PortfolioModelV1 saved = portfolioService.updateTradePortfolio(portfolioModel);
         if (saved != null && saved.getOwner() != null) {
             String portfolioId = saved.getId() != null ? saved.getId().toString() : null;

@@ -50,7 +50,7 @@ public class HealthScoreEngine {
 
         int conc = roundInt(concentration(snapshot));
         scored.put(ID_CONCENTRATION, new ScoredComponent(conc, MIX_CONCENTRATION,
-                "Top1 " + snapshot.getTop1Pct() + "%, max sector " + snapshot.getMaxSectorPct() + "%"));
+                concentrationReason(snapshot)));
 
         boolean historyOk = snapshot.getHistoryPoints() >= MIN_HISTORY_POINTS;
         boolean includePerf = historyOk
@@ -328,6 +328,15 @@ public class HealthScoreEngine {
 
     static double concentration(PortfolioIntelligenceSnapshot s) {
         return clamp(100 - 2 * s.getTop1Pct() - 1.5 * Math.max(0, s.getMaxSectorPct() - 20), 0, 100);
+    }
+
+    /** e.g. {@code Top1 VIKRAMSOLAR 60.06%, max sector 99.99%} — UI polishes Top1 → Top holding. */
+    static String concentrationReason(PortfolioIntelligenceSnapshot s) {
+        String symbol = s.getTop1Symbol();
+        if (symbol != null && !symbol.isBlank()) {
+            return "Top1 " + symbol.trim() + " " + s.getTop1Pct() + "%, max sector " + s.getMaxSectorPct() + "%";
+        }
+        return "Top1 " + s.getTop1Pct() + "%, max sector " + s.getMaxSectorPct() + "%";
     }
 
     static double performance(double portRetPct, double niftyRetPct) {

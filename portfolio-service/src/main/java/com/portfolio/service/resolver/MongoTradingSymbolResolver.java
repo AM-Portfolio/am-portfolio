@@ -61,6 +61,11 @@ public class MongoTradingSymbolResolver implements TradingSymbolResolver {
         return null;
     }
 
+    /**
+     * Point lookup: {@link MarketDataApiClient#resolveTickerByIsin} returns
+     * {@code Map&lt;ISIN, tradingSymbol&gt;} (same shape as batch). Read by ISIN key —
+     * do not look for a nested {@code "symbol"} property.
+     */
     @SuppressWarnings("rawtypes")
     private String lookupTradingSymbolByIsin(String isin) {
         if (marketDataApiClient == null) {
@@ -71,12 +76,28 @@ public class MongoTradingSymbolResolver implements TradingSymbolResolver {
             // Block synchronously since the TradingSymbolResolver interface is synchronous.
             // This is called inside parsing threads.
             Map response = marketDataApiClient.resolveTickerByIsin(isin).block();
-            if (response != null && response.containsKey("symbol")) {
-                String symbol = String.valueOf(response.get("symbol"));
-                if (symbol != null && !symbol.isBlank()) {
-                    return symbol.trim().toUpperCase();
+            if (response == null || response.isEmpty()) {
+                return null;
+            }
+            Object tickerObj = response.get(isin);
+            if (tickerObj == null) {
+                // Case-insensitive fallback if map keys differ only by case
+                for (Object key : response.keySet()) {
+                    if (key != null && isin.equalsIgnoreCase(String.valueOf(key))) {
+                        tickerObj = response.get(key);
+                        break;
+                    }
                 }
             }
+            if (tickerObj == null) {
+                return null;
+            }
+            String ticker = String.valueOf(tickerObj).trim().toUpperCase();
+            if (ticker.isBlank() || TradingSymbolResolver.looksLikeIsin(ticker)) {
+                log.warn("ISIN lookup for {} returned non-ticker value: {}", isin, ticker);
+                return null;
+            }
+            return ticker;
         } catch (Exception ex) {
             // Fail-open: save must continue even if API resolver is down.
             log.warn("ISIN lookup API call failed for {}: {}", isin, ex.getMessage());
@@ -114,7 +135,10 @@ public class MongoTradingSymbolResolver implements TradingSymbolResolver {
                 Map<String, String> result = new java.util.HashMap<>();
                 response.forEach((k, v) -> {
                     if (k != null && v != null) {
-                        result.put(String.valueOf(k).trim().toUpperCase(), String.valueOf(v).trim().toUpperCase());
+                        String ticker = String.valueOf(v).trim().toUpperCase();
+                        if (!ticker.isBlank() && !TradingSymbolResolver.looksLikeIsin(ticker)) {
+                            result.put(String.valueOf(k).trim().toUpperCase(), ticker);
+                        }
                     }
                 });
                 return result;
@@ -135,4 +159,3 @@ public class MongoTradingSymbolResolver implements TradingSymbolResolver {
         return null;
     }
 }
-
