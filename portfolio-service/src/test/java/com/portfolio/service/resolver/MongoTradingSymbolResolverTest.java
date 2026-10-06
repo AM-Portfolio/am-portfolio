@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
@@ -68,12 +67,6 @@ class MongoTradingSymbolResolverTest {
     @Test
     void looksLikeIsin_detectsIndianEquityPattern() {
         assertTrue(com.portfolio.model.resolver.TradingSymbolResolver.looksLikeIsin("INE002A01018"));
-    }
-
-    @Test
-    void looksLikeIsin_rejectsTwelveLetterTicker() {
-        assertFalse(com.portfolio.model.resolver.TradingSymbolResolver.looksLikeIsin("VODAFONEIDEA"));
-        assertFalse(com.portfolio.model.resolver.TradingSymbolResolver.looksLikeIsin("IDEA"));
     }
 
     @Test

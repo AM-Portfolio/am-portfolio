@@ -244,8 +244,7 @@ public class PortfolioServiceImpl implements PortfolioService {
             return false;
         }
         String s = value.trim().toUpperCase();
-        // Indian ISIN only — do not treat 12-letter tickers (VODAFONEIDEA) as ISINs.
-        return s.length() == 12 && s.matches("IN[A-Z0-9]{10}");
+        return s.length() == 12 && s.matches("[A-Z]{2}[A-Z0-9]{10}");
     }
 
     private static java.util.List<com.am.common.amcommondata.document.asset.AssetDocument> copyAssetList(
