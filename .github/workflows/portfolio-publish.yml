@@ -3,22 +3,8 @@ name: Portfolio Publish
 on:
   push:
     branches: ["main", "develop", "fix/**", "hotfix/**", "feature/**", "feat/**"]
-    paths:
-      - "portfolio-**"
-      - "am-common-data/**"
-      - "helm/**"
-      - "Dockerfile"
-      - "pom.xml"
-      - ".github/workflows/portfolio-publish.yml"
   pull_request:
     branches: ["main", "develop"]
-    paths:
-      - "portfolio-**"
-      - "am-common-data/**"
-      - "helm/**"
-      - "Dockerfile"
-      - "pom.xml"
-      - ".github/workflows/portfolio-publish.yml"
   workflow_dispatch:
 
 jobs:
