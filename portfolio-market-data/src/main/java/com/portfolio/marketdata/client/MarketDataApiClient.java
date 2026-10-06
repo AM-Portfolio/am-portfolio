@@ -227,12 +227,12 @@ public class MarketDataApiClient extends AbstractApiClient {
                                                 if (valueObj instanceof List) {
                                                         List<Map<String, Object>> values = (List<Map<String, Object>>) valueObj;
                                                         for (Map<String, Object> val : values) {
-                                                                String isin = (String) val.get("isin");
+                                                                String isinVal = (String) val.get("isin");
                                                                 String symbol = (String) val.get("trading_symbol");
-                                                                if (isin != null && symbol != null) {
+                                                                if (isinVal != null && symbol != null) {
                                                                         String exchange = (String) val.get("exchange");
-                                                                        if ("NSE".equalsIgnoreCase(exchange) || !resultMap.containsKey(isin)) {
-                                                                                resultMap.put(isin, symbol);
+                                                                        if ("NSE".equalsIgnoreCase(exchange) || !resultMap.containsKey(isinVal)) {
+                                                                                resultMap.put(isinVal, symbol);
                                                                         }
                                                                 }
                                                         }
