@@ -160,8 +160,14 @@ public class PortfolioUpdateConsumerService {
 
     private void processDocumentMessage(PortfolioUpdateEvent event) {
         PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
-        // Batch ISIN→ticker normalize (same as HTTP /sync) before persist
-        portfolioEquitySymbolNormalizer.normalizePortfolio(portfolioModel);
+        // Batch ISIN→ticker normalize (same as HTTP /sync) before persist.
+        // Must not block Mongo upsert + trade fan-out if Market Data is slow/down.
+        try {
+            portfolioEquitySymbolNormalizer.normalizePortfolio(portfolioModel);
+        } catch (Exception e) {
+            log.warn("ISIN normalize failed for portfolioId={} — continuing upsert/fan-out: {}",
+                    event.getPortfolioId(), e.getMessage());
+        }
         PortfolioModelV1 saved = portfolioService.upsertDocumentPortfolio(portfolioModel);
         if (saved != null && saved.getOwner() != null) {
             String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
