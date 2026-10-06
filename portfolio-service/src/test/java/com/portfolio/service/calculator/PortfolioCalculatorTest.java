@@ -48,7 +48,7 @@ class PortfolioCalculatorTest {
 
     @BeforeEach
     void setUp() {
-        portfolioCalculator = new PortfolioCalculator(marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run, null);
+        portfolioCalculator = new PortfolioCalculator(marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run);
         holding = new EquityHoldings();
         holding.setSymbol("TCS");
         holding.setQuantity(10.0);
