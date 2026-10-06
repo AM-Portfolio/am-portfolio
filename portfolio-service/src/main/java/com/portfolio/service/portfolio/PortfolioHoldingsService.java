@@ -144,7 +144,18 @@ public class PortfolioHoldingsService {
         List<EquityHoldings> list = cached.getEquityHoldings();
         if (list != null && !list.isEmpty()) {
             try {
-                list = portfolioCalculator.repriceHoldings(list);
+                // Re-run full enrich when any sector is missing so X-Ray/holdings
+                // don't stay on "—" after a cold MD miss was cached.
+                boolean needsSectorEnrich = list.stream().anyMatch(h ->
+                        h.getSector() == null
+                                || h.getSector().isBlank()
+                                || "-".equals(h.getSector())
+                                || "Unknown".equalsIgnoreCase(h.getSector()));
+                if (needsSectorEnrich) {
+                    list = portfolioCalculator.enrichHoldings(list);
+                } else {
+                    list = portfolioCalculator.repriceHoldings(list);
+                }
                 portfolioCalculator.calculateWeights(list);
                 cached.setEquityHoldings(list);
             } catch (Exception e) {

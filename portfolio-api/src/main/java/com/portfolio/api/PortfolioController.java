@@ -565,13 +565,12 @@ public class PortfolioController {
             if (portfolio == null || portfolio.getEquityModels() == null) {
                 continue;
             }
-            int before = countIsinSymbols(portfolio);
-            portfolioEquitySymbolNormalizer.normalizePortfolio(portfolio);
-            int after = countIsinSymbols(portfolio);
-            if (before != after) {
+            // Detect any ticker change (IDEA→VODAFONEIDEA), not only ISIN-as-symbol rows.
+            boolean changed = portfolioEquitySymbolNormalizer.normalizePortfolioAndDetectChange(portfolio);
+            if (changed) {
                 portfolioService.upsertDocumentPortfolio(portfolio);
                 updatedPortfolios++;
-                normalizedEquities += (before - after);
+                normalizedEquities += portfolio.getEquityModels().size();
             }
             // Always evict caches so UI cannot keep serving ISIN-as-symbol holdings
             // even when Mongo had no delta (e.g. prior normalize without eviction).
@@ -601,20 +600,4 @@ public class PortfolioController {
                 "equitiesNormalized", normalizedEquities,
                 "cachesEvicted", cachesEvicted));
     }
-
-    private int countIsinSymbols(PortfolioModelV1 portfolio) {
-        if (portfolio.getEquityModels() == null) {
-            return 0;
-        }
-        int count = 0;
-        for (com.am.common.amcommondata.model.asset.equity.EquityModel equity : portfolio.getEquityModels()) {
-            if (equity != null && equity.getSymbol() != null
-                    && com.portfolio.model.resolver.TradingSymbolResolver.looksLikeIsin(equity.getSymbol())) {
-                count++;
-            }
-        }
-        return count;
-    }
 }
-
-// Trigger workflow

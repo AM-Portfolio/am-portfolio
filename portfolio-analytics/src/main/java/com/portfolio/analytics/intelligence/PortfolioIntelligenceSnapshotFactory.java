@@ -15,6 +15,7 @@ import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.intelligence.CachedIntelligenceHistory;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.market.TimeFrame;
+import com.portfolio.model.resolver.TradingSymbolResolver;
 import com.portfolio.model.util.SymbolResolver;
 import com.portfolio.redis.service.PortfolioIntelligenceHistoryRedisService;
 import lombok.RequiredArgsConstructor;
@@ -72,6 +73,7 @@ public class PortfolioIntelligenceSnapshotFactory {
     private final MarketDataService marketDataService;
     private final SecurityDetailsService securityDetailsService;
     private final PortfolioIntelligenceHistoryRedisService historyCache;
+    private final TradingSymbolResolver tradingSymbolResolver;
 
     private final ConcurrentHashMap<String, CompletableFuture<HistoryFields>> historyInFlight =
             new ConcurrentHashMap<>();
@@ -176,10 +178,14 @@ public class PortfolioIntelligenceSnapshotFactory {
                     .build();
         }
 
+        // In-memory ISIN→ticker normalize so X-Ray/MD/sector work even before Mongo repair.
+        normalizeEquitySymbolsInPlace(equities);
+
         List<String> symbols = equities.stream()
                 .filter(e -> e != null && e.getSymbol() != null && !e.getSymbol().isBlank())
                 .filter(e -> e.getQuantity() != null && e.getQuantity() > 0)
                 .map(e -> SymbolResolver.normalize(e.getSymbol()))
+                .filter(s -> s != null && !s.isBlank() && !TradingSymbolResolver.looksLikeIsin(s))
                 .distinct()
                 .collect(Collectors.toList());
 
@@ -787,6 +793,51 @@ public class PortfolioIntelligenceSnapshotFactory {
                 .portfolioDailyReturns(portfolioDailyReturns)
                 .niftyDailyReturns(niftyDailyReturns)
                 .build();
+    }
+
+    private void normalizeEquitySymbolsInPlace(List<EquityModel> equities) {
+        if (equities == null || equities.isEmpty() || tradingSymbolResolver == null) {
+            return;
+        }
+        List<String> isins = equities.stream()
+                .filter(e -> e != null)
+                .map(e -> {
+                    if (e.getIsin() != null && !e.getIsin().isBlank()) {
+                        return e.getIsin().trim().toUpperCase();
+                    }
+                    if (TradingSymbolResolver.looksLikeIsin(e.getSymbol())) {
+                        return e.getSymbol().trim().toUpperCase();
+                    }
+                    return null;
+                })
+                .filter(s -> s != null && !s.isBlank())
+                .distinct()
+                .collect(Collectors.toList());
+        Map<String, String> byIsin = isins.isEmpty()
+                ? Map.of()
+                : tradingSymbolResolver.resolveTradingSymbols(isins);
+        for (EquityModel eq : equities) {
+            if (eq == null) {
+                continue;
+            }
+            String isinKey = eq.getIsin() != null && !eq.getIsin().isBlank()
+                    ? eq.getIsin().trim().toUpperCase()
+                    : (TradingSymbolResolver.looksLikeIsin(eq.getSymbol())
+                            ? eq.getSymbol().trim().toUpperCase() : null);
+            String resolved = null;
+            if (isinKey != null && byIsin.containsKey(isinKey)) {
+                resolved = byIsin.get(isinKey);
+            }
+            if (resolved == null) {
+                resolved = tradingSymbolResolver.resolveTradingSymbol(eq.getSymbol(), eq.getIsin());
+            }
+            if (resolved != null && !resolved.isBlank() && !TradingSymbolResolver.looksLikeIsin(resolved)) {
+                eq.setSymbol(resolved);
+                if ((eq.getIsin() == null || eq.getIsin().isBlank()) && isinKey != null) {
+                    eq.setIsin(isinKey);
+                }
+            }
+        }
     }
 
     private static boolean isLiquidCap(String marketCap) {

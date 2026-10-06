@@ -253,5 +253,50 @@ public class MarketDataApiClient extends AbstractApiClient {
                                                 data != null ? data.size() : 0))
                                 .doOnError(e -> log.error("Failed to resolve batch of ISINs: {}", e.getMessage()));
         }
+
+        /**
+         * Generic securities batch-search (SYMBOL / NAME / ISIN) keyed by the original query.
+         */
+        @SuppressWarnings({ "rawtypes", "unchecked" })
+        public Mono<Map> resolveTickersByQueries(List<String> queries, List<String> searchFields) {
+                if (queries == null || queries.isEmpty()) {
+                        return Mono.just(Map.of());
+                }
+                List<String> fields = (searchFields == null || searchFields.isEmpty())
+                                ? List.of("SYMBOL", "NAME")
+                                : searchFields;
+                log.info("Resolving batch of {} queries via securities batch-search fields={}", queries.size(), fields);
+                com.portfolio.marketdata.model.BatchSearchRequest request = com.portfolio.marketdata.model.BatchSearchRequest
+                                .builder()
+                                .queries(queries)
+                                .limit(1)
+                                .searchFields(fields)
+                                .minMatchScore(0.0)
+                                .build();
+                return batchSearch(request)
+                                .map(response -> {
+                                        Map<String, String> resultMap = new java.util.HashMap<>();
+                                        if (response != null && response.getResults() != null) {
+                                                for (com.portfolio.marketdata.model.BatchSearchResponse.QueryResult qr : response
+                                                                .getResults()) {
+                                                        if (qr == null || qr.getQuery() == null
+                                                                        || qr.getMatches() == null
+                                                                        || qr.getMatches().isEmpty()) {
+                                                                continue;
+                                                        }
+                                                        com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch match = qr
+                                                                        .getMatches().get(0);
+                                                        String ticker = match.getSymbol();
+                                                        if (ticker == null || ticker.isBlank()) {
+                                                                continue;
+                                                        }
+                                                        resultMap.put(qr.getQuery().trim().toUpperCase(),
+                                                                        ticker.trim().toUpperCase());
+                                                }
+                                        }
+                                        return (Map) resultMap;
+                                })
+                                .doOnError(e -> log.error("Failed to resolve batch queries: {}", e.getMessage()));
+        }
 }
 

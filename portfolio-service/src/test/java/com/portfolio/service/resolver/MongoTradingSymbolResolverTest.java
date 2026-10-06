@@ -13,8 +13,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.never;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -25,10 +24,31 @@ class MongoTradingSymbolResolverTest {
     private MarketDataApiClient marketDataApiClient;
 
     @Test
-    void returnsNormalizedTickerWhenSymbolIsAlreadyTicker() {
+    void prefersIsinOverBrokerTickerThatLooksLikeSymbol() {
+        when(marketDataApiClient.resolveTickerByIsin("INE669E01016"))
+                .thenReturn(Mono.just(Map.of("INE669E01016", "VODAFONEIDEA")));
+
         MongoTradingSymbolResolver resolver = new MongoTradingSymbolResolver(marketDataApiClient);
-        assertEquals("RELIANCE", resolver.resolveTradingSymbol("NSE:RELIANCE-EQ", "INE002A01018"));
-        verify(marketDataApiClient, never()).resolveTickerByIsin(anyString());
+        assertEquals("VODAFONEIDEA", resolver.resolveTradingSymbol("IDEA", "INE669E01016"));
+        verify(marketDataApiClient).resolveTickerByIsin("INE669E01016");
+    }
+
+    @Test
+    void whenNoIsin_symbolSearchCanonicalizesAlias() {
+        when(marketDataApiClient.resolveTickersByQueries(eq(List.of("IDEA")), eq(List.of("SYMBOL"))))
+                .thenReturn(Mono.just(Map.of("IDEA", "VODAFONEIDEA")));
+
+        MongoTradingSymbolResolver resolver = new MongoTradingSymbolResolver(marketDataApiClient);
+        assertEquals("VODAFONEIDEA", resolver.resolveTradingSymbol("IDEA", null));
+    }
+
+    @Test
+    void whenNoIsinAndSymbolSearchMiss_returnsNormalizedTicker() {
+        when(marketDataApiClient.resolveTickersByQueries(eq(List.of("RELIANCE")), eq(List.of("SYMBOL"))))
+                .thenReturn(Mono.just(Map.of()));
+
+        MongoTradingSymbolResolver resolver = new MongoTradingSymbolResolver(marketDataApiClient);
+        assertEquals("RELIANCE", resolver.resolveTradingSymbol("NSE:RELIANCE-EQ", null));
     }
 
     @Test

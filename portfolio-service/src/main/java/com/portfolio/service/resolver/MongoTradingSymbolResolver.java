@@ -16,6 +16,9 @@ import java.util.List;
  *
  * <p>Fail-open: if API is unavailable or the instrument is missing, returns the normalized
  * input so holdings are never dropped during save.
+ *
+ * <p>When an ISIN is present it is always preferred over a broker ticker that only "looks"
+ * like a symbol (e.g. IDEA + INE669E01016 → VODAFONEIDEA).
  */
 @Service
 @Slf4j
@@ -31,21 +34,24 @@ public class MongoTradingSymbolResolver implements TradingSymbolResolver {
     @Override
     public String resolveTradingSymbol(String symbol, String isin) {
         String normalizedSymbol = symbol != null ? SymbolResolver.normalize(symbol) : null;
-
-        // Already a normal ticker — no DB/API lookup needed.
-        if (normalizedSymbol != null && !normalizedSymbol.isBlank()
-                && !TradingSymbolResolver.looksLikeIsin(normalizedSymbol)) {
-            return normalizedSymbol.trim().toUpperCase();
-        }
-
         String isinToResolve = pickIsin(normalizedSymbol, isin);
-        if (isinToResolve == null) {
+
+        // ISIN always wins — even when symbol looks like a ticker (broker aliases).
+        if (isinToResolve != null) {
+            String resolved = lookupTradingSymbolByIsin(isinToResolve);
+            if (resolved != null) {
+                return resolved;
+            }
             return fallbackIdentifier(normalizedSymbol, isin);
         }
 
-        String resolved = lookupTradingSymbolByIsin(isinToResolve);
-        if (resolved != null) {
-            return resolved;
+        // No ISIN: try canonicalizing via SYMBOL search (aliases like IDEA → VODAFONEIDEA).
+        if (normalizedSymbol != null && !normalizedSymbol.isBlank()) {
+            String bySymbol = lookupTradingSymbolByQuery(normalizedSymbol, "SYMBOL");
+            if (bySymbol != null) {
+                return bySymbol;
+            }
+            return normalizedSymbol.trim().toUpperCase();
         }
 
         return fallbackIdentifier(normalizedSymbol, isin);
@@ -73,41 +79,57 @@ public class MongoTradingSymbolResolver implements TradingSymbolResolver {
             return null;
         }
         try {
-            // Block synchronously since the TradingSymbolResolver interface is synchronous.
-            // This is called inside parsing threads.
             Map response = marketDataApiClient.resolveTickerByIsin(isin).block();
-            if (response == null || response.isEmpty()) {
-                return null;
-            }
-            Object tickerObj = response.get(isin);
-            if (tickerObj == null) {
-                // Case-insensitive fallback if map keys differ only by case
-                for (Object key : response.keySet()) {
-                    if (key != null && isin.equalsIgnoreCase(String.valueOf(key))) {
-                        tickerObj = response.get(key);
-                        break;
-                    }
-                }
-            }
-            if (tickerObj == null) {
-                return null;
-            }
-            String ticker = String.valueOf(tickerObj).trim().toUpperCase();
-            if (ticker.isBlank() || TradingSymbolResolver.looksLikeIsin(ticker)) {
-                log.warn("ISIN lookup for {} returned non-ticker value: {}", isin, ticker);
-                return null;
-            }
-            return ticker;
+            return extractTicker(response, isin);
         } catch (Exception ex) {
-            // Fail-open: save must continue even if API resolver is down.
             log.warn("ISIN lookup API call failed for {}: {}", isin, ex.getMessage());
         }
         return null;
     }
 
+    @SuppressWarnings("rawtypes")
+    private String lookupTradingSymbolByQuery(String query, String searchField) {
+        if (marketDataApiClient == null || query == null || query.isBlank()) {
+            return null;
+        }
+        try {
+            Map response = marketDataApiClient
+                    .resolveTickersByQueries(List.of(query.trim().toUpperCase()), List.of(searchField))
+                    .block();
+            return extractTicker(response, query.trim().toUpperCase());
+        } catch (Exception ex) {
+            log.warn("SYMBOL/NAME lookup failed for {}: {}", query, ex.getMessage());
+            return null;
+        }
+    }
+
+    @SuppressWarnings("rawtypes")
+    private String extractTicker(Map response, String key) {
+        if (response == null || response.isEmpty()) {
+            return null;
+        }
+        Object tickerObj = response.get(key);
+        if (tickerObj == null) {
+            for (Object k : response.keySet()) {
+                if (k != null && key.equalsIgnoreCase(String.valueOf(k))) {
+                    tickerObj = response.get(k);
+                    break;
+                }
+            }
+        }
+        if (tickerObj == null) {
+            return null;
+        }
+        String ticker = String.valueOf(tickerObj).trim().toUpperCase();
+        if (ticker.isBlank() || TradingSymbolResolver.looksLikeIsin(ticker)) {
+            log.warn("Lookup for {} returned non-ticker value: {}", key, ticker);
+            return null;
+        }
+        return ticker;
+    }
+
     /**
      * Resolves multiple ISIN codes to NSE/BSE symbols dynamically in a single batch API call.
-     * Respects database isolation boundaries and optimizes network latency.
      *
      * @param isins List of ISIN codes of securities
      * @return Map mapping ISIN to resolved symbol
@@ -129,7 +151,6 @@ public class MongoTradingSymbolResolver implements TradingSymbolResolver {
                 return Map.of();
             }
 
-            // Execute the bulk request synchronously since the pipeline needs immediate resolving
             Map response = marketDataApiClient.resolveTickersByIsins(cleanedIsins).block();
             if (response != null) {
                 Map<String, String> result = new java.util.HashMap<>();
@@ -150,11 +171,15 @@ public class MongoTradingSymbolResolver implements TradingSymbolResolver {
     }
 
     private String fallbackIdentifier(String normalizedSymbol, String isin) {
-        if (normalizedSymbol != null && !normalizedSymbol.isBlank()) {
+        if (normalizedSymbol != null && !normalizedSymbol.isBlank()
+                && !TradingSymbolResolver.looksLikeIsin(normalizedSymbol)) {
             return normalizedSymbol.trim().toUpperCase();
         }
         if (isin != null && !isin.isBlank()) {
             return isin.trim().toUpperCase();
+        }
+        if (normalizedSymbol != null && !normalizedSymbol.isBlank()) {
+            return normalizedSymbol.trim().toUpperCase();
         }
         return null;
     }
