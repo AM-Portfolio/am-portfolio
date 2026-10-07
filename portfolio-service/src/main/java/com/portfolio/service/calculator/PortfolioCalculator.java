@@ -441,3 +441,4 @@ public class PortfolioCalculator {
         return com.portfolio.model.util.SymbolResolver.normalize(cleaned);
     }
 }
+

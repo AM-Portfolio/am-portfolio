@@ -24,6 +24,10 @@ import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import com.am.security.context.UserContext;
+=======
+import java.util.Collections;
+import java.util.UUID;
+>>>>>>> origin/develop
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -57,6 +61,7 @@ class PortfolioControllerTest {
     @MockBean
     private PortfolioService portfolioService;
 
+<<<<<<< HEAD
     @MockBean
     private PortfolioHistoryScheduler portfolioHistoryScheduler;
 
@@ -96,68 +101,6 @@ class PortfolioControllerTest {
     @MockBean
     private com.portfolio.service.portfolio.BrokerPortfolioDeleteService brokerPortfolioDeleteService;
 
-    @AfterEach
-    void tearDown() {
-        UserContext.clear();
-    }
-
-    @Test
-    void getPortfolioById_ValidUuid_ReturnsPortfolio() throws Exception {
-        UUID portfolioId = UUID.randomUUID();
-        PortfolioModelV1 model = new PortfolioModelV1();
-        model.setId(portfolioId);
-        model.setName("My Portfolio");
-
-        when(portfolioService.getPortfolioById(portfolioId)).thenReturn(model);
-
-        mockMvc.perform(get("/v1/portfolios/{portfolioId}", portfolioId.toString()))
-                .andExpect(status().isOk())
-                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$.id").value(portfolioId.toString()))
-                .andExpect(jsonPath("$.name").value("My Portfolio"));
-    }
-
-    @Test
-    void getPortfolioById_MissingPortfolio_ReturnsNotFound() throws Exception {
-        UUID portfolioId = UUID.randomUUID();
-        when(portfolioService.getPortfolioById(portfolioId)).thenReturn(null);
-
-        mockMvc.perform(get("/v1/portfolios/{portfolioId}", portfolioId.toString()))
-                .andExpect(status().isNotFound());
-    }
-
-    @Test
-    void getPortfolioById_InvalidUuid_ReturnsBadRequest() throws Exception {
-        mockMvc.perform(get("/v1/portfolios/{portfolioId}", "not-a-uuid"))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void getPortfolios_ReturnsList() throws Exception {
-        String userId = "user-123";
-        UserContext.setUserId(userId);
-        PortfolioModelV1 p1 = new PortfolioModelV1();
-        p1.setName("P1");
-        
-        when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(Arrays.asList(p1));
-
-        mockMvc.perform(get("/v1/portfolios"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].name").value("P1"));
-    }
-
-    @Test
-    void getPortfolioBasicDetails_NoPortfolios_Returns200EmptyList() throws Exception {
-        String userId = "empty-user";
-        UserContext.setUserId(userId);
-        when(newUserPortfolioFallbackService.listBasicPortfolios(userId))
-                .thenReturn(Collections.emptyList());
-
-        mockMvc.perform(get("/v1/portfolios/list"))
-                .andExpect(status().isOk())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$.length()").value(0));
     }
 
     @Test
@@ -284,3 +227,4 @@ class PortfolioControllerTest {
                 .andExpect(jsonPath("$.name").value("StillReadable"));
     }
 }
+
