@@ -187,30 +187,55 @@ public class PortfolioUpdateConsumerService {
 
         if ("DELETE_PORTFOLIO".equals(portfolioModel.getLastTradeAction())) {
             String owner = portfolioModel.getOwner();
-            // deletePortfolioByIdAndOwner matches against the portfolio NAME in MongoDB.
-            String portfolioName = event.getPortfolioId(); // e.g. "brand-new-portfolio-1"
-            String portfolioUuid = portfolioModel.getId() != null ? portfolioModel.getId().toString() : null;
+            // Trade payload: id = Mongo UUID, portfolioId field = human name (see PortfolioSyncEvent).
+            String portfolioName = event.getPortfolioId();
+            String portfolioUuid = null;
+            if (event.getId() != null && !event.getId().isBlank()) {
+                try {
+                    portfolioUuid = java.util.UUID.fromString(event.getId().trim()).toString();
+                } catch (IllegalArgumentException ignored) {
+                    log.warn("DELETE_PORTFOLIO event.id is not a UUID: {}", event.getId());
+                }
+            }
+            if (portfolioUuid == null && portfolioModel.getId() != null) {
+                portfolioUuid = portfolioModel.getId().toString();
+            }
 
             String idToDelete = portfolioUuid != null ? portfolioUuid : portfolioName;
-            if (owner != null) {
-                log.info("Deleting portfolio name={} uuid={} for user={} based on DELETE_PORTFOLIO action",
-                        portfolioName, portfolioUuid, owner);
-                portfolioService.deletePortfolioByIdAndOwner(idToDelete, owner);
-                // Evict all relevant caches for both the UUID and name variants
-                if (portfolioUuid != null) {
-                    portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioUuid);
-                    portfolioSummaryRedisService.evictPortfolioSummary(owner, portfolioUuid);
-                }
-                if (portfolioName != null) {
-                    portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioName);
-                    portfolioSummaryRedisService.evictPortfolioSummary(owner, portfolioName);
-                }
-                // Publish the delete event to notify am-analysis and others
-                portfolioEventPublisher.publishPortfolioDelete(owner, portfolioUuid, portfolioName, event.getSource());
-                log.info("Portfolio deletion complete for name={} owner={}", portfolioName, owner);
-            } else {
+            if (owner == null || owner.isBlank()) {
                 log.warn("Skipping DELETE_PORTFOLIO: owner is null for name={} uuid={}", portfolioName, portfolioUuid);
+                return;
             }
+            if (idToDelete == null || idToDelete.isBlank()) {
+                log.warn("Skipping DELETE_PORTFOLIO: no id/name to delete for owner={}", owner);
+                return;
+            }
+
+            log.info("Deleting portfolio name={} uuid={} for user={} based on DELETE_PORTFOLIO action",
+                    portfolioName, portfolioUuid, owner);
+            portfolioService.deletePortfolioByIdAndOwner(idToDelete, owner);
+
+            if (portfolioUuid != null) {
+                portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioUuid);
+                portfolioSummaryRedisService.evictPortfolioSummary(owner, portfolioUuid);
+                portfolioIntelligenceRedisService.evict(portfolioUuid);
+                portfolioIntelligenceRedisService.evictAggregateForUser(owner);
+            }
+            if (portfolioName != null && !portfolioName.isBlank()
+                    && (portfolioUuid == null || !portfolioName.equals(portfolioUuid))) {
+                portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioName);
+                portfolioSummaryRedisService.evictPortfolioSummary(owner, portfolioName);
+            }
+
+            // Always fan-out DELETE when we have a UUID so analysis cannot stay stale after Mongo miss.
+            if (portfolioUuid != null) {
+                portfolioEventPublisher.publishPortfolioDelete(
+                        owner, portfolioUuid, portfolioName, event.getSource());
+            } else {
+                log.warn("DELETE_PORTFOLIO: no UUID — Mongo delete attempted by name={} but outbound DELETE skipped",
+                        portfolioName);
+            }
+            log.info("Portfolio deletion complete for name={} uuid={} owner={}", portfolioName, portfolioUuid, owner);
             return;
         }
 

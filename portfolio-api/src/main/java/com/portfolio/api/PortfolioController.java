@@ -52,6 +52,7 @@ public class PortfolioController {
     private final com.portfolio.redis.service.PortfolioSummaryRedisService portfolioSummaryRedisService;
     private final com.portfolio.redis.service.PortfolioIntelligenceRedisService portfolioIntelligenceRedisService;
     private final com.portfolio.analytics.intelligence.AggregatePortfolioLoader aggregatePortfolioLoader;
+    private final com.portfolio.service.portfolio.BrokerPortfolioDeleteService brokerPortfolioDeleteService;
 
     @org.springframework.beans.factory.annotation.Value("${app.jwt.internal-secret}")
     private String internalSecret;
@@ -203,6 +204,25 @@ public class PortfolioController {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
         log.info("PortfolioController - dismissDemoPortfolio (legacy clear) called for userId: {}", userId);
         newUserPortfolioFallbackService.dismissForUser(userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(
+            summary = "Delete a broker portfolio",
+            description = "Hard-deletes the caller's portfolio from Mongo, evicts caches, and publishes action=DELETE on am-portfolio-update so analysis and trade clear. Path portfolioId + JWT owner only.",
+            operationId = "deletePortfolio")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "204", description = "Portfolio deleted"),
+            @ApiResponse(responseCode = "400", description = "Invalid portfolio ID"),
+            @ApiResponse(responseCode = "403", description = "Not portfolio owner"),
+            @ApiResponse(responseCode = "404", description = "Portfolio not found")
+    })
+    @DeleteMapping("/{portfolioId}")
+    public ResponseEntity<Void> deletePortfolio(
+            @Parameter(description = "Portfolio ID (UUID)") @PathVariable String portfolioId) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        log.info("PortfolioController - deletePortfolio portfolioId={} userId={}", portfolioId, userId);
+        brokerPortfolioDeleteService.deleteOwnedPortfolio(portfolioId, userId);
         return ResponseEntity.noContent().build();
     }
 
