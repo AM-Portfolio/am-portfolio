@@ -3,31 +3,27 @@ package com.portfolio.app.web;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.am.common.amcommondata.service.PortfolioSnapshotService;
+import com.am.security.context.UserContext;
 import com.portfolio.api.PortfolioController;
 import com.portfolio.api.exception.GlobalExceptionHandler;
 import com.portfolio.service.PortfolioDashboardService;
 import com.portfolio.service.scheduler.PortfolioHistoryScheduler;
 import com.portfolio.service.scheduler.SnapshotCatchUpService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.server.ResponseStatusException;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.UUID;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import com.am.security.context.UserContext;
-=======
-import java.util.Collections;
-import java.util.UUID;
->>>>>>> origin/develop
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -38,9 +34,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * Unit tests for PortfolioController.
@@ -61,7 +57,6 @@ class PortfolioControllerTest {
     @MockBean
     private PortfolioService portfolioService;
 
-<<<<<<< HEAD
     @MockBean
     private PortfolioHistoryScheduler portfolioHistoryScheduler;
 
@@ -101,6 +96,40 @@ class PortfolioControllerTest {
     @MockBean
     private com.portfolio.service.portfolio.BrokerPortfolioDeleteService brokerPortfolioDeleteService;
 
+    @AfterEach
+    void tearDown() {
+        UserContext.clear();
+    }
+
+    @Test
+    void getPortfolioById_ValidUuid_ReturnsPortfolio() throws Exception {
+        UUID portfolioId = UUID.randomUUID();
+        PortfolioModelV1 model = new PortfolioModelV1();
+        model.setId(portfolioId);
+        model.setName("My Portfolio");
+
+        when(portfolioService.getPortfolioById(portfolioId)).thenReturn(model);
+
+        mockMvc.perform(get("/v1/portfolios/{portfolioId}", portfolioId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.id").value(portfolioId.toString()))
+                .andExpect(jsonPath("$.name").value("My Portfolio"));
+    }
+
+    @Test
+    void getPortfolioById_MissingPortfolio_ReturnsNotFound() throws Exception {
+        UUID portfolioId = UUID.randomUUID();
+        when(portfolioService.getPortfolioById(portfolioId)).thenReturn(null);
+
+        mockMvc.perform(get("/v1/portfolios/{portfolioId}", portfolioId.toString()))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void getPortfolioById_InvalidUuid_ReturnsBadRequest() throws Exception {
+        mockMvc.perform(get("/v1/portfolios/{portfolioId}", "not-a-uuid"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -193,7 +222,6 @@ class PortfolioControllerTest {
     @Test
     void deletePortfolio_unauthorized_whenNoUserContext() throws Exception {
         UUID portfolioId = UUID.randomUUID();
-        // UserContext cleared in @AfterEach / no setUserId → getUserIdOrThrow fails before service
         mockMvc.perform(delete("/v1/portfolios/{portfolioId}", portfolioId.toString()))
                 .andExpect(status().is4xxClientError());
 
@@ -227,4 +255,3 @@ class PortfolioControllerTest {
                 .andExpect(jsonPath("$.name").value("StillReadable"));
     }
 }
-

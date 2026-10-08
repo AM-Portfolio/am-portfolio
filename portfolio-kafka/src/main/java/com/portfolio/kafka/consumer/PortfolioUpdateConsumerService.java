@@ -240,8 +240,13 @@ public class PortfolioUpdateConsumerService {
         }
 
         // Batch ISIN→ticker normalize (same as HTTP /sync) before persist —
-        // Kafka path previously relied only on per-row point lookup.
-        portfolioEquitySymbolNormalizer.normalizePortfolio(portfolioModel);
+        // Must not block Mongo upsert if Market Data is slow/down (same as document path).
+        try {
+            portfolioEquitySymbolNormalizer.normalizePortfolio(portfolioModel);
+        } catch (Exception e) {
+            log.warn("ISIN normalize failed for trade portfolioId={} — continuing upsert: {}",
+                    event.getId(), e.getMessage());
+        }
         PortfolioModelV1 saved = portfolioService.updateTradePortfolio(portfolioModel);
         if (saved != null && saved.getOwner() != null) {
             String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
