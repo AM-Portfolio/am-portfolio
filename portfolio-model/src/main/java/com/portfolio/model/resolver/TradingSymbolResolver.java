@@ -27,14 +27,15 @@ public interface TradingSymbolResolver {
     }
 
     /**
-     * Indian equity ISIN: 12 chars, starts with two letters (e.g. INE002A01018).
+     * Indian equity ISIN only: {@code IN} + 10 alphanumerics (e.g. INE002A01018).
+     * Must not match 12-letter tickers like {@code VODAFONEIDEA}.
      */
     static boolean looksLikeIsin(String value) {
         if (value == null || value.isBlank()) {
             return false;
         }
         String trimmed = value.trim().toUpperCase();
-        return trimmed.length() == 12 && trimmed.matches("[A-Z]{2}[A-Z0-9]{10}");
+        return trimmed.matches("^IN[A-Z0-9]{10}$");
     }
 }
 

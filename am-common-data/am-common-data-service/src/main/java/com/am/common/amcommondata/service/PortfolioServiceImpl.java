@@ -149,6 +149,8 @@ public class PortfolioServiceImpl implements PortfolioService {
                         if (incoming.getCurrentPrice() != null) {
                             match.setCurrentPrice(incoming.getCurrentPrice());
                         }
+                        // Heal ISIN-as-symbol rows when a later sync brings a real ticker (matched by ISIN).
+                        applyIncomingInstrumentMeta(match, incoming);
                     } else {
                         existingEquities.add(incoming);
                     }
@@ -166,6 +168,7 @@ public class PortfolioServiceImpl implements PortfolioService {
                             if (incoming.getCurrentPrice() != null) {
                                 match.setCurrentPrice(incoming.getCurrentPrice());
                             }
+                            applyIncomingInstrumentMeta(match, incoming);
                         }
                     }
                 } else if ("UPDATE".equalsIgnoreCase(tradeAction)) {
@@ -179,6 +182,7 @@ public class PortfolioServiceImpl implements PortfolioService {
                         if (incoming.getInvestmentValue() != null) {
                             match.setInvestmentValue(incoming.getInvestmentValue());
                         }
+                        applyIncomingInstrumentMeta(match, incoming);
                     } else {
                         existingEquities.add(incoming);
                     }
@@ -196,6 +200,51 @@ public class PortfolioServiceImpl implements PortfolioService {
 
         existing.setEquities(existingEquities);
         existing.setTotalValue(equityValue + otherValue);
+    }
+
+    /**
+     * When a trade sync matches an existing row by ISIN, refresh ticker/name/isin
+     * so legacy ISIN-as-symbol holdings heal without waiting for REPLACE_ALL.
+     */
+    private static void applyIncomingInstrumentMeta(
+            com.am.common.amcommondata.document.asset.equity.EquityDocument match,
+            com.am.common.amcommondata.document.asset.equity.EquityDocument incoming) {
+        if (match == null || incoming == null) {
+            return;
+        }
+        String incomingSymbol = incoming.getSymbol();
+        if (incomingSymbol != null && !incomingSymbol.isBlank() && !looksLikeIsin(incomingSymbol)) {
+            match.setSymbol(incomingSymbol.trim().toUpperCase());
+        }
+        if (incoming.getIsin() != null && !incoming.getIsin().isBlank()) {
+            match.setIsin(incoming.getIsin().trim().toUpperCase());
+        } else if ((match.getIsin() == null || match.getIsin().isBlank())
+                && looksLikeIsin(match.getSymbol())) {
+            match.setIsin(match.getSymbol().trim().toUpperCase());
+        }
+        if (incoming.getName() != null && !incoming.getName().isBlank()) {
+            match.setName(incoming.getName());
+        }
+        if (incoming.getCompanyName() != null && !incoming.getCompanyName().isBlank()) {
+            match.setCompanyName(incoming.getCompanyName());
+        }
+        if (incoming.getSector() != null && !incoming.getSector().isBlank()) {
+            match.setSector(incoming.getSector());
+        }
+        if (incoming.getIndustry() != null && !incoming.getIndustry().isBlank()) {
+            match.setIndustry(incoming.getIndustry());
+        }
+        if (incoming.getMarketCap() != null && !incoming.getMarketCap().isBlank()) {
+            match.setMarketCap(incoming.getMarketCap());
+        }
+    }
+
+    private static boolean looksLikeIsin(String value) {
+        if (value == null) {
+            return false;
+        }
+        String s = value.trim().toUpperCase();
+        return s.matches("^IN[A-Z0-9]{10}$");
     }
 
     private static java.util.List<com.am.common.amcommondata.document.asset.AssetDocument> copyAssetList(
@@ -468,13 +517,13 @@ public class PortfolioServiceImpl implements PortfolioService {
         
         List<PortfolioDocument> portfolios = portfolioDocumentRepository.findByOwner(owner);
         for (PortfolioDocument portfolio : portfolios) {
-            if (id.equals(portfolio.getName())) {
+            if (id.equals(portfolio.getName()) || (portfolio.getId() != null && id.equals(portfolio.getId().toString()))) {
                 portfolioDocumentRepository.delete(portfolio);
-                log.info("Deleted portfolio with name: {} and owner: {}", id, owner);
+                log.info("Deleted portfolio with name/id: {} and owner: {}", id, owner);
                 return;
             }
         }
-        log.warn("Portfolio not found for deletion with name: {} and owner: {}", id, owner);
+        log.warn("Portfolio not found for deletion with name/id: {} and owner: {}", id, owner);
     }
 
     @Override

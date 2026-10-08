@@ -2,22 +2,31 @@ package com.portfolio.service.resolver;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
+import com.portfolio.marketdata.client.MarketDataApiClient;
 import com.portfolio.model.resolver.TradingSymbolResolver;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Normalizes equity symbols on any inbound portfolio payload before Mongo persist.
  *
- * <p>Covers HTTP sync from trade-management which bypasses {@link com.portfolio.model.mapper.PortfolioMapperv1}.
+ * <p>ISIN is always preferred when present — broker tickers that only look like symbols
+ * (IDEA, VIKRAMSOLR, …) are re-resolved via market-data. When ISIN is blank, SYMBOL then
+ * NAME batch-search is used so future uploads still get a canonical NSE ticker.
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PortfolioEquitySymbolNormalizer {
 
     private final TradingSymbolResolver tradingSymbolResolver;
+    private final MarketDataApiClient marketDataApiClient;
 
     public void normalizePortfolio(PortfolioModelV1 portfolio) {
         if (portfolio == null || portfolio.getEquityModels() == null) {
@@ -31,72 +40,130 @@ public class PortfolioEquitySymbolNormalizer {
             return;
         }
 
-        // Gather all unique ISIN codes from the equities to perform a single batch lookup
-        java.util.List<String> isinsToResolve = equities.stream()
+        List<String> isinsToResolve = equities.stream()
                 .filter(e -> e != null)
-                .map(e -> {
-                    String normalized = e.getSymbol() != null ? com.portfolio.model.util.SymbolResolver.normalize(e.getSymbol()) : null;
-                    if (normalized != null && !normalized.isBlank() && !TradingSymbolResolver.looksLikeIsin(normalized)) {
-                        return null; // Already a standard ticker symbol, no need to resolve
-                    }
-                    if (e.getIsin() != null && !e.getIsin().isBlank()) {
-                        return e.getIsin().trim().toUpperCase();
-                    }
-                    if (TradingSymbolResolver.looksLikeIsin(e.getSymbol())) {
-                        return e.getSymbol().trim().toUpperCase();
-                    }
-                    return null;
-                })
+                .map(this::extractIsin)
                 .filter(isin -> isin != null && !isin.isBlank())
                 .distinct()
-                .collect(java.util.stream.Collectors.toList());
+                .collect(Collectors.toList());
 
-        // Perform batch call to fetch resolved symbols
-        java.util.Map<String, String> resolvedMap = java.util.Map.of();
+        Map<String, String> resolvedByIsin = Map.of();
         if (!isinsToResolve.isEmpty()) {
-            resolvedMap = tradingSymbolResolver.resolveTradingSymbols(isinsToResolve);
+            resolvedByIsin = tradingSymbolResolver.resolveTradingSymbols(isinsToResolve);
         }
 
         for (EquityModel equity : equities) {
             if (equity == null) {
                 continue;
             }
-            applyResolvedSymbol(equity, resolvedMap);
+            applyResolvedSymbol(equity, resolvedByIsin);
         }
     }
 
-    private void applyResolvedSymbol(EquityModel equity, java.util.Map<String, String> resolvedMap) {
-        // Resolve using the batch map if present; otherwise fall back to point lookup resolver
-        String isinKey = equity.getIsin() != null && !equity.getIsin().isBlank() 
-                ? equity.getIsin().trim().toUpperCase() 
-                : (TradingSymbolResolver.looksLikeIsin(equity.getSymbol()) ? equity.getSymbol().trim().toUpperCase() : null);
+    private String extractIsin(EquityModel e) {
+        if (e.getIsin() != null && !e.getIsin().isBlank()) {
+            return e.getIsin().trim().toUpperCase();
+        }
+        if (TradingSymbolResolver.looksLikeIsin(e.getSymbol())) {
+            return e.getSymbol().trim().toUpperCase();
+        }
+        return null;
+    }
+
+    private void applyResolvedSymbol(EquityModel equity, Map<String, String> resolvedByIsin) {
+        String isinKey = extractIsin(equity);
+
+        if ((equity.getIsin() == null || equity.getIsin().isBlank())
+                && TradingSymbolResolver.looksLikeIsin(equity.getSymbol())) {
+            equity.setIsin(equity.getSymbol().trim().toUpperCase());
+            isinKey = equity.getIsin();
+        }
 
         String resolved = null;
-        if (isinKey != null && resolvedMap.containsKey(isinKey)) {
-            resolved = resolvedMap.get(isinKey);
+        if (isinKey != null && resolvedByIsin.containsKey(isinKey)) {
+            resolved = resolvedByIsin.get(isinKey);
         }
 
         if (resolved == null) {
             resolved = tradingSymbolResolver.resolveTradingSymbol(equity.getSymbol(), equity.getIsin());
         }
 
-        if (resolved == null || resolved.isBlank()) {
-            return;
-        }
-
-        // Keep ISIN in its own field; symbol should be the tradable ticker when possible.
-        if (TradingSymbolResolver.looksLikeIsin(equity.getIsin())
-                || (equity.getIsin() == null && TradingSymbolResolver.looksLikeIsin(equity.getSymbol()))) {
-            if (equity.getIsin() == null || equity.getIsin().isBlank()) {
-                equity.setIsin(TradingSymbolResolver.looksLikeIsin(equity.getSymbol())
-                        ? equity.getSymbol().trim().toUpperCase()
-                        : equity.getIsin());
+        // NAME search when still unresolved / ISIN-shaped (no ISIN or MD miss on ISIN).
+        if ((resolved == null || resolved.isBlank() || TradingSymbolResolver.looksLikeIsin(resolved))
+                && equity.getName() != null && !equity.getName().isBlank()) {
+            String byName = lookupByName(equity.getName());
+            if (byName != null) {
+                resolved = byName;
             }
         }
 
-        if (!TradingSymbolResolver.looksLikeIsin(resolved)) {
-            equity.setSymbol(resolved);
+        if (resolved == null || resolved.isBlank() || TradingSymbolResolver.looksLikeIsin(resolved)) {
+            return;
+        }
+
+        String before = equity.getSymbol();
+        equity.setSymbol(resolved);
+        if (before != null && !before.equalsIgnoreCase(resolved)) {
+            log.info("Normalized equity symbol {} → {} (isin={})", before, resolved, isinKey);
         }
     }
-}
 
+    @SuppressWarnings("rawtypes")
+    private String lookupByName(String name) {
+        if (marketDataApiClient == null || name == null || name.isBlank()) {
+            return null;
+        }
+        try {
+            String query = name.trim();
+            Map response = marketDataApiClient
+                    .resolveTickersByQueries(List.of(query), List.of("NAME"))
+                    .block();
+            if (response == null || response.isEmpty()) {
+                return null;
+            }
+            Object ticker = response.get(query.toUpperCase());
+            if (ticker == null) {
+                for (Object k : response.keySet()) {
+                    if (k != null && query.equalsIgnoreCase(String.valueOf(k))) {
+                        ticker = response.get(k);
+                        break;
+                    }
+                }
+            }
+            if (ticker == null) {
+                return null;
+            }
+            String t = String.valueOf(ticker).trim().toUpperCase();
+            if (t.isBlank() || TradingSymbolResolver.looksLikeIsin(t)) {
+                return null;
+            }
+            return t;
+        } catch (Exception e) {
+            log.warn("NAME lookup failed for {}: {}", name, e.getMessage());
+            return null;
+        }
+    }
+
+    /** True when any equity symbol changed after normalization (repair endpoints). */
+    public boolean normalizePortfolioAndDetectChange(PortfolioModelV1 portfolio) {
+        if (portfolio == null || portfolio.getEquityModels() == null) {
+            return false;
+        }
+        Map<Integer, String> before = new HashMap<>();
+        List<EquityModel> equities = portfolio.getEquityModels();
+        for (int i = 0; i < equities.size(); i++) {
+            EquityModel e = equities.get(i);
+            before.put(i, e != null ? e.getSymbol() : null);
+        }
+        normalizeEquities(equities);
+        for (int i = 0; i < equities.size(); i++) {
+            EquityModel e = equities.get(i);
+            String after = e != null ? e.getSymbol() : null;
+            String b = before.get(i);
+            if (b == null ? after != null : !b.equals(after)) {
+                return true;
+            }
+        }
+        return false;
+    }
+}

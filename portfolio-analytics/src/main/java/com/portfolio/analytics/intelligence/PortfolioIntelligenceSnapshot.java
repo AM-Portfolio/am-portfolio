@@ -26,6 +26,8 @@ public class PortfolioIntelligenceSnapshot {
     private int holdingsCount;
     private int distinctSectors;
     private double top1Pct;
+    /** Symbol / ticker of the largest holding by weight (may be null). */
+    private String top1Symbol;
     private double maxSectorPct;
     private String maxSectorName;
     private double liquidSharePct;
@@ -81,6 +83,7 @@ public class PortfolioIntelligenceSnapshot {
                 .holdingsCount(holdingsCount)
                 .distinctSectors(distinctSectors)
                 .top1Pct(top1Pct)
+                .top1Symbol(top1Symbol)
                 .maxSectorPct(maxSectorPct)
                 .maxSectorName(maxSectorName)
                 .liquidSharePct(liquidSharePct)

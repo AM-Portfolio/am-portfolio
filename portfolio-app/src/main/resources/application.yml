@@ -334,6 +334,16 @@ management:
 # Enable the request-log filter and standard MDC fields:
 # traceId, spanId, correlationId, service, request.method, request.path, http.status
 am:
+  # When AM_SECURITY_ENABLED=true, am-security-lib owns the filter chain.
+  # Defaults only permit /health — kube probes use /actuator/health/* and get 401.
+  security:
+    public-paths:
+      - "/actuator/**"
+      - "/health"
+      - "/swagger-ui.html"
+      - "/swagger-ui/**"
+      - "/v3/api-docs/**"
+      - "/api-docs/**"
   observability:
     enabled: true
     request-log:

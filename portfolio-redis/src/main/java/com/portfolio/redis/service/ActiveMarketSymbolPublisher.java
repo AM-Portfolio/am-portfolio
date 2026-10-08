@@ -29,7 +29,7 @@ public class ActiveMarketSymbolPublisher {
 
     public static final String DEFAULT_REDIS_KEY = "market:active-symbols";
 
-    private static final Pattern ISIN_PATTERN = Pattern.compile("^[A-Z]{2}[A-Z0-9]{10}$");
+    private static final Pattern ISIN_PATTERN = Pattern.compile("^IN[A-Z0-9]{10}$");
 
     private final StringRedisTemplate stringRedisTemplate;
 

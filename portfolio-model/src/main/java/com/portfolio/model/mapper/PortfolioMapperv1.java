@@ -138,6 +138,10 @@ public class PortfolioMapperv1 {
         EquityModel em = new EquityModel();
         em.setSymbol(e.getSymbol());
         em.setIsin(e.getIsin());
+        if (e.getName() != null && !e.getName().isBlank()) {
+            em.setName(e.getName());
+            em.setCompanyName(e.getName());
+        }
         em.setSector(e.getSector());
         em.setIndustry(e.getIndustry());
         em.setMarketCap(e.getMarketCap());
