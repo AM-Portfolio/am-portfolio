@@ -349,14 +349,37 @@ public class PortfolioServiceImpl implements PortfolioService {
 
         String owner = portfolioModel.getOwner();
         com.am.common.amcommondata.model.enums.BrokerType brokerType = portfolioModel.getBrokerType();
+        // GROW (legacy) and GROWW share display "Groww" — always upsert as GROWW.
+        if (brokerType == com.am.common.amcommondata.model.enums.BrokerType.GROW) {
+            brokerType = com.am.common.amcommondata.model.enums.BrokerType.GROWW;
+            portfolioModel.setBrokerType(brokerType);
+        }
 
         java.util.List<PortfolioDocument> existingDocs =
             portfolioDocumentRepository.findByOwnerAndBrokerType(owner, brokerType);
+        // Legacy rows stored as GROW must merge into the GROWW canonical book.
+        if (brokerType == com.am.common.amcommondata.model.enums.BrokerType.GROWW) {
+            java.util.List<PortfolioDocument> legacyGrow =
+                portfolioDocumentRepository.findByOwnerAndBrokerType(owner,
+                        com.am.common.amcommondata.model.enums.BrokerType.GROW);
+            if (legacyGrow != null && !legacyGrow.isEmpty()) {
+                existingDocs = new java.util.ArrayList<>(existingDocs != null ? existingDocs : List.of());
+                existingDocs.addAll(legacyGrow);
+            }
+        }
 
         // Only BROKER (or legacy null) docs participate in Kafka upsert. Never touch BASKET.
         List<PortfolioDocument> brokerDocs = existingDocs == null ? List.of() : existingDocs.stream()
                 .filter(d -> PortfolioKind.isBroker(d.getPortfolioKind()))
                 .collect(Collectors.toList());
+        // Dedupe by Mongo id (GROW + GROWW query can return the same doc once each path).
+        Map<String, PortfolioDocument> uniqueById = new HashMap<>();
+        for (PortfolioDocument d : brokerDocs) {
+            if (d != null && d.getId() != null) {
+                uniqueById.putIfAbsent(d.getId(), d);
+            }
+        }
+        brokerDocs = new ArrayList<>(uniqueById.values());
 
         if (!brokerDocs.isEmpty()) {
             PortfolioDocument doc = pickCanonicalBroker(brokerDocs);
@@ -368,6 +391,8 @@ public class PortfolioServiceImpl implements PortfolioService {
                     portfolioDocumentRepository.delete(extra);
                 }
             }
+            // Normalize legacy GROW enum on the kept doc
+            doc.setBrokerType(brokerType);
 
             PortfolioDocument incoming = portfolioMapper.toDocument(portfolioModel);
             // Soft-merge: null list on incoming = keep existing (Doc Intel / Kafka partial updates).
