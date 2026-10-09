@@ -46,83 +46,66 @@ public class PortfolioServiceImpl implements PortfolioService {
     private BrokerPortfolioCleanupListener brokerPortfolioCleanupListener;
 
     /**
-     * Lists the owner's portfolios. BROKER rows that are the same logical book
-     * (GROW + GROWW, or same display name) are healed: extras deleted, one kept.
+     * Lists the owner's portfolios. BROKER twins (GROW + GROWW, or same broker enum)
+     * are collapsed <strong>in memory only</strong> so the dropdown shows one Groww.
+     * <p>
+     * We deliberately do <strong>not</strong> delete Mongo rows or publish Kafka DELETE
+     * on list — that can remove the UUID trade-management still uses and break sync.
+     * Physical merge + DELETE stays on {@link #upsertDocumentPortfolio} (next upload).
      * Baskets are never collapsed.
      */
     @Override
-    @Transactional
     public List<PortfolioModelV1> getPortfoliosByUserId(String userId) {
-        List<PortfolioDocument> docs = portfolioDocumentRepository.findByOwner(userId).stream()
+        List<PortfolioModelV1> all = portfolioDocumentRepository.findByOwner(userId).stream()
                 .filter(doc -> doc.getPortfolioKind() != PortfolioKind.DELETED)
+                .map(portfolioMapper::toModel)
                 .collect(Collectors.toList());
-
-        List<PortfolioDocument> brokers = new ArrayList<>();
-        List<PortfolioDocument> others = new ArrayList<>();
-        for (PortfolioDocument doc : docs) {
-            if (PortfolioKind.isBroker(doc.getPortfolioKind())) {
-                brokers.add(doc);
-            } else {
-                others.add(doc);
-            }
-        }
-
-        List<PortfolioDocument> keptBrokers = healDuplicateBrokerDocuments(userId, brokers);
-        List<PortfolioDocument> surviving = new ArrayList<>(keptBrokers.size() + others.size());
-        surviving.addAll(keptBrokers);
-        surviving.addAll(others);
-        return surviving.stream().map(portfolioMapper::toModel).collect(Collectors.toList());
+        return collapseBrokerModelsForDisplay(all);
     }
 
     /**
-     * Keep one BROKER doc per logical identity; delete the rest.
-     * Identity: canonical broker (GROW/GROWW → GROWW), else case-insensitive name.
+     * One BROKER row per logical identity for API/UI. No Mongo writes.
      */
-    private List<PortfolioDocument> healDuplicateBrokerDocuments(String owner, List<PortfolioDocument> brokers) {
-        if (brokers == null || brokers.size() <= 1) {
-            return brokers == null ? List.of() : brokers;
+    static List<PortfolioModelV1> collapseBrokerModelsForDisplay(List<PortfolioModelV1> portfolios) {
+        if (portfolios == null || portfolios.size() <= 1) {
+            return portfolios == null ? List.of() : portfolios;
         }
-
-        Map<String, List<PortfolioDocument>> byIdentity = new LinkedHashMap<>();
-        for (PortfolioDocument doc : brokers) {
-            if (doc == null) {
+        Map<String, PortfolioModelV1> brokersByIdentity = new LinkedHashMap<>();
+        List<PortfolioModelV1> others = new ArrayList<>();
+        for (PortfolioModelV1 p : portfolios) {
+            if (p == null) {
                 continue;
             }
-            byIdentity.computeIfAbsent(brokerIdentityKey(doc), k -> new ArrayList<>()).add(doc);
-        }
-
-        List<PortfolioDocument> kept = new ArrayList<>();
-        for (Map.Entry<String, List<PortfolioDocument>> entry : byIdentity.entrySet()) {
-            List<PortfolioDocument> group = entry.getValue();
-            if (group.size() == 1) {
-                kept.add(persistGrowCanonical(group.get(0)));
+            if (!PortfolioKind.isBroker(p.getPortfolioKind())) {
+                others.add(p);
                 continue;
             }
-            PortfolioDocument canonical = pickCanonicalBroker(group);
-            for (PortfolioDocument extra : group) {
-                if (extra.getId() != null && extra.getId().equals(canonical.getId())) {
-                    continue;
-                }
-                log.info("Healing duplicate BROKER portfolio id={} name={} broker={} for owner={} identity={}",
-                        extra.getId(), extra.getName(), extra.getBrokerType(), owner, entry.getKey());
-                portfolioDocumentRepository.delete(extra);
-                notifyDuplicateRemoved(owner, extra);
+            String key = brokerIdentityKey(p);
+            PortfolioModelV1 existing = brokersByIdentity.get(key);
+            if (existing == null || preferModel(p, existing)) {
+                brokersByIdentity.put(key, p);
             }
-            kept.add(persistGrowCanonical(canonical));
         }
-        return kept;
+        List<PortfolioModelV1> out = new ArrayList<>(brokersByIdentity.values());
+        out.addAll(others);
+        return out;
     }
 
-    /** Persist GROW → GROWW so the unique owner+broker index cannot recreate a twin. */
-    private PortfolioDocument persistGrowCanonical(PortfolioDocument doc) {
-        if (doc == null || doc.getBrokerType() != BrokerType.GROW) {
-            return doc;
+    private static boolean preferModel(PortfolioModelV1 candidate, PortfolioModelV1 incumbent) {
+        double cVal = candidate.getTotalValue() != null ? candidate.getTotalValue() : 0.0;
+        double iVal = incumbent.getTotalValue() != null ? incumbent.getTotalValue() : 0.0;
+        if (cVal != iVal) {
+            return cVal > iVal;
         }
-        doc.setBrokerType(BrokerType.GROWW);
-        if (doc.getName() == null || doc.getName().isBlank() || "Grow".equalsIgnoreCase(doc.getName())) {
-            doc.setName(BrokerType.GROWW.getCode());
+        LocalDateTime cUp = candidate.getUpdatedAt();
+        LocalDateTime iUp = incumbent.getUpdatedAt();
+        if (cUp == null) {
+            return false;
         }
-        return portfolioDocumentRepository.save(doc);
+        if (iUp == null) {
+            return true;
+        }
+        return cUp.isAfter(iUp);
     }
 
     private void notifyDuplicateRemoved(String owner, PortfolioDocument extra) {
@@ -142,22 +125,33 @@ public class PortfolioServiceImpl implements PortfolioService {
         if (doc == null) {
             return "unknown";
         }
-        BrokerType bt = doc.getBrokerType();
+        return brokerIdentityKey(doc.getBrokerType(), doc.getName(), doc.getId());
+    }
+
+    static String brokerIdentityKey(PortfolioModelV1 model) {
+        if (model == null) {
+            return "unknown";
+        }
+        String id = model.getId() != null ? model.getId().toString() : null;
+        return brokerIdentityKey(model.getBrokerType(), model.getName(), id);
+    }
+
+    static String brokerIdentityKey(BrokerType bt, String name, String id) {
         if (bt == BrokerType.GROW || bt == BrokerType.GROWW) {
             return "broker:GROWW";
         }
         if (bt != null) {
             return "broker:" + bt.name();
         }
-        String name = doc.getName();
         if (name != null && !name.isBlank()) {
             String n = name.trim().toLowerCase(Locale.ROOT);
-            if (n.contains("grow")) {
+            // Exact Grow aliases only — do not match "Growth", "Outgrow", etc.
+            if ("grow".equals(n) || "groww".equals(n)) {
                 return "broker:GROWW";
             }
             return "name:" + n;
         }
-        return "id:" + doc.getId();
+        return "id:" + id;
     }
 
     @Override
@@ -497,7 +491,18 @@ public class PortfolioServiceImpl implements PortfolioService {
         brokerDocs = new ArrayList<>(uniqueById.values());
 
         if (!brokerDocs.isEmpty()) {
+            // Prefer the incoming UUID when it is already one of the twins so trade/analysis
+            // keep a stable portfolioId (value-based pick alone can DELETE the trade row).
             PortfolioDocument doc = pickCanonicalBroker(brokerDocs);
+            if (portfolioModel.getId() != null) {
+                String incomingId = portfolioModel.getId().toString();
+                for (PortfolioDocument candidate : brokerDocs) {
+                    if (incomingId.equals(candidate.getId())) {
+                        doc = candidate;
+                        break;
+                    }
+                }
+            }
             // Delete other BROKER duplicates only — never baskets
             for (PortfolioDocument extra : brokerDocs) {
                 if (!extra.getId().equals(doc.getId())) {
