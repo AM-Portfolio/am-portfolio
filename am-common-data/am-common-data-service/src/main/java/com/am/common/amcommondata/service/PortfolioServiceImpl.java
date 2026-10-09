@@ -15,6 +15,8 @@ import com.am.common.amcommondata.model.ledger.AllocationLedgerEventType;
 
 import lombok.RequiredArgsConstructor;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
@@ -39,6 +41,10 @@ public class PortfolioServiceImpl implements PortfolioService {
     private final PortfolioDocumentRepository portfolioDocumentRepository;
     private final PortfolioMapper portfolioMapper;
     private final AllocationLedgerRepository allocationLedgerRepository;
+
+    /** Optional in unit tests; when present, kafka module fans out DELETE for cleaned twins. */
+    @Autowired(required = false)
+    private ApplicationEventPublisher applicationEventPublisher;
 
     /**
      * Lists the owner's portfolios. BROKER twins (GROW + GROWW, or same broker enum)
@@ -104,18 +110,41 @@ public class PortfolioServiceImpl implements PortfolioService {
     }
 
     /**
-     * Kafka DELETE fan-out for upsert-cleaned twins lives in portfolio-kafka via
-     * {@code PortfolioDeleteNotifier} on explicit delete paths. We do not inject a
-     * new common-data listener here: portfolio-kafka depends on the <em>published</em>
-     * am-common-data-service jar ({@code am.common.version}), so a new interface
-     * would fail CI until Common Lib Publish succeeds.
+     * Prefer incoming UUID, then GROWW over GROW, then value/recency.
      */
+    private PortfolioDocument pickSurvivorBrokerDoc(List<PortfolioDocument> brokerDocs, UUID incomingId) {
+        if (incomingId != null) {
+            String incoming = incomingId.toString();
+            for (PortfolioDocument candidate : brokerDocs) {
+                if (incoming.equals(candidate.getId())) {
+                    return candidate;
+                }
+            }
+        }
+        List<PortfolioDocument> growwPreferred = brokerDocs.stream()
+                .filter(d -> d.getBrokerType() == BrokerType.GROWW)
+                .collect(Collectors.toList());
+        if (!growwPreferred.isEmpty()) {
+            return pickCanonicalBroker(growwPreferred);
+        }
+        return pickCanonicalBroker(brokerDocs);
+    }
+
     private void notifyDuplicateRemoved(String owner, PortfolioDocument extra) {
         if (extra == null || extra.getId() == null) {
             return;
         }
-        log.info("Duplicate BROKER removed owner={} id={} name={} (Mongo only; list collapse + analysis handle orphans)",
-                owner, extra.getId(), extra.getName());
+        log.info("Duplicate BROKER removed owner={} id={} name={}", owner, extra.getId(), extra.getName());
+        if (applicationEventPublisher == null) {
+            return;
+        }
+        try {
+            applicationEventPublisher.publishEvent(
+                    new DuplicateBrokerRemovedEvent(owner, extra.getId(), extra.getName()));
+        } catch (Exception e) {
+            log.warn("Failed to publish DuplicateBrokerRemovedEvent owner={} id={}: {}",
+                    owner, extra.getId(), e.getMessage());
+        }
     }
 
     /** Same logical broker book → one key (GROW/GROWW share Groww). */
@@ -489,18 +518,11 @@ public class PortfolioServiceImpl implements PortfolioService {
         brokerDocs = new ArrayList<>(uniqueById.values());
 
         if (!brokerDocs.isEmpty()) {
-            // Prefer the incoming UUID when it is already one of the twins so trade/analysis
-            // keep a stable portfolioId (value-based pick alone can DELETE the trade row).
-            PortfolioDocument doc = pickCanonicalBroker(brokerDocs);
-            if (portfolioModel.getId() != null) {
-                String incomingId = portfolioModel.getId().toString();
-                for (PortfolioDocument candidate : brokerDocs) {
-                    if (incomingId.equals(candidate.getId())) {
-                        doc = candidate;
-                        break;
-                    }
-                }
-            }
+            // Survivor pick (stable for trade/analysis):
+            // 1) incoming UUID when it already exists among twins
+            // 2) else prefer GROWW over legacy GROW
+            // 3) else highest totalValue / latest update
+            PortfolioDocument doc = pickSurvivorBrokerDoc(brokerDocs, portfolioModel.getId());
             // Delete other BROKER duplicates only — never baskets
             for (PortfolioDocument extra : brokerDocs) {
                 if (!extra.getId().equals(doc.getId())) {

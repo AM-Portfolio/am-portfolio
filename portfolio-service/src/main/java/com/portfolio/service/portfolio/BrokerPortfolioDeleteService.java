@@ -1,6 +1,7 @@
 package com.portfolio.service.portfolio;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
 import com.portfolio.redis.service.PortfolioIntelligenceRedisService;
@@ -66,6 +67,11 @@ public class BrokerPortfolioDeleteService {
         }
         if (!ownerId.equals(portfolio.getOwner())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not owner of portfolio");
+        }
+        // This endpoint is broker-only — never wipe baskets via DELETE /{portfolioId}.
+        if (PortfolioKind.isBasket(portfolio.getPortfolioKind())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Basket portfolios cannot be deleted via broker delete");
         }
 
         String name = portfolio.getName();
