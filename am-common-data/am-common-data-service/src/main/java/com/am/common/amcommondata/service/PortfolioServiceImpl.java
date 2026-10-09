@@ -15,7 +15,6 @@ import com.am.common.amcommondata.model.ledger.AllocationLedgerEventType;
 
 import lombok.RequiredArgsConstructor;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
@@ -40,10 +39,6 @@ public class PortfolioServiceImpl implements PortfolioService {
     private final PortfolioDocumentRepository portfolioDocumentRepository;
     private final PortfolioMapper portfolioMapper;
     private final AllocationLedgerRepository allocationLedgerRepository;
-
-    /** Optional — portfolio-kafka publishes DELETE so analysis/trade drop the orphan UUID. */
-    @Autowired(required = false)
-    private BrokerPortfolioCleanupListener brokerPortfolioCleanupListener;
 
     /**
      * Lists the owner's portfolios. BROKER twins (GROW + GROWW, or same broker enum)
@@ -108,16 +103,19 @@ public class PortfolioServiceImpl implements PortfolioService {
         return cUp.isAfter(iUp);
     }
 
+    /**
+     * Kafka DELETE fan-out for upsert-cleaned twins lives in portfolio-kafka via
+     * {@code PortfolioDeleteNotifier} on explicit delete paths. We do not inject a
+     * new common-data listener here: portfolio-kafka depends on the <em>published</em>
+     * am-common-data-service jar ({@code am.common.version}), so a new interface
+     * would fail CI until Common Lib Publish succeeds.
+     */
     private void notifyDuplicateRemoved(String owner, PortfolioDocument extra) {
-        if (brokerPortfolioCleanupListener == null || extra == null || extra.getId() == null) {
+        if (extra == null || extra.getId() == null) {
             return;
         }
-        try {
-            brokerPortfolioCleanupListener.onDuplicateBrokerRemoved(owner, extra.getId(), extra.getName());
-        } catch (Exception e) {
-            log.warn("Duplicate-broker cleanup notify failed owner={} id={}: {}",
-                    owner, extra.getId(), e.getMessage());
-        }
+        log.info("Duplicate BROKER removed owner={} id={} name={} (Mongo only; list collapse + analysis handle orphans)",
+                owner, extra.getId(), extra.getName());
     }
 
     /** Same logical broker book → one key (GROW/GROWW share Groww). */
