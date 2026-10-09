@@ -52,6 +52,7 @@ public class PortfolioController {
     private final com.portfolio.redis.service.PortfolioSummaryRedisService portfolioSummaryRedisService;
     private final com.portfolio.redis.service.PortfolioIntelligenceRedisService portfolioIntelligenceRedisService;
     private final com.portfolio.analytics.intelligence.AggregatePortfolioLoader aggregatePortfolioLoader;
+    private final com.portfolio.service.portfolio.BrokerPortfolioDeleteService brokerPortfolioDeleteService;
 
     @org.springframework.beans.factory.annotation.Value("${app.jwt.internal-secret}")
     private String internalSecret;
@@ -206,6 +207,25 @@ public class PortfolioController {
         return ResponseEntity.noContent().build();
     }
 
+    @Operation(
+            summary = "Delete a broker portfolio",
+            description = "Hard-deletes the caller's portfolio from Mongo, evicts caches, and publishes action=DELETE on am-portfolio-update so analysis and trade clear. Path portfolioId + JWT owner only.",
+            operationId = "deletePortfolio")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "204", description = "Portfolio deleted"),
+            @ApiResponse(responseCode = "400", description = "Invalid portfolio ID"),
+            @ApiResponse(responseCode = "403", description = "Not portfolio owner"),
+            @ApiResponse(responseCode = "404", description = "Portfolio not found")
+    })
+    @DeleteMapping("/{portfolioId}")
+    public ResponseEntity<Void> deletePortfolio(
+            @Parameter(description = "Portfolio ID (UUID)") @PathVariable String portfolioId) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        log.info("PortfolioController - deletePortfolio portfolioId={} userId={}", portfolioId, userId);
+        brokerPortfolioDeleteService.deleteOwnedPortfolio(portfolioId, userId);
+        return ResponseEntity.noContent().build();
+    }
+
     /**
      * Internal sync endpoint — called by am-trade-management when a portfolio is created or updated in trade.
      * This upserts the portfolio into am-portfolio's database so the user can see it in the Portfolio portal.
@@ -275,7 +295,10 @@ public class PortfolioController {
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+
         NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
+
+
         log.info(
                 "PortfolioController - getPortfolioAnalysis called - Portfolio: {}, User: {}, Page: {}, Size: {}, Interval: {}",
                 res.portfolioId(), res.userId(), page, size, interval != null ? interval : "null");
@@ -312,7 +335,10 @@ public class PortfolioController {
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+
         NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
+
+
         log.info(
                 "PortfolioController - getPortfolioSummary called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}",
                 res.userId(), res.portfolioId() != null ? res.portfolioId() : "all", page, size, interval != null ? interval : "null");
@@ -358,7 +384,10 @@ public class PortfolioController {
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+
         NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
+
+
         log.info(
                 "PortfolioController - getPortfolioHoldings called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}",
                 res.userId(), res.portfolioId() != null ? res.portfolioId() : "all", page, size, interval != null ? interval : "null");
@@ -508,6 +537,7 @@ public class PortfolioController {
         return ResponseEntity.ok("Snapshot for userId=" + userId + " on date=" + date + " has been successfully deleted. You can now use the trigger-catchup endpoint to rebuild it.");
     }
 
+
     /**
      * DEV/ADMIN ONLY — Hidden from Swagger.
      * Fixes broken "Grow" or "Auto-created GROW" portfolio names in MongoDB.
@@ -559,40 +589,44 @@ public class PortfolioController {
 
         int updatedPortfolios = 0;
         int normalizedEquities = 0;
+        int cachesEvicted = 0;
         for (PortfolioModelV1 portfolio : portfolios) {
             if (portfolio == null || portfolio.getEquityModels() == null) {
                 continue;
             }
-            int before = countIsinSymbols(portfolio);
-            portfolioEquitySymbolNormalizer.normalizePortfolio(portfolio);
-            int after = countIsinSymbols(portfolio);
-            if (before != after) {
+            // Detect any ticker change (IDEA→VODAFONEIDEA), not only ISIN-as-symbol rows.
+            boolean changed = portfolioEquitySymbolNormalizer.normalizePortfolioAndDetectChange(portfolio);
+            if (changed) {
                 portfolioService.upsertDocumentPortfolio(portfolio);
                 updatedPortfolios++;
-                normalizedEquities += (before - after);
+                normalizedEquities += portfolio.getEquityModels().size();
+            }
+            // Always evict caches so UI cannot keep serving ISIN-as-symbol holdings
+            // even when Mongo had no delta (e.g. prior normalize without eviction).
+            String owner = portfolio.getOwner();
+            if (owner != null && !owner.isBlank()) {
+                String portfolioId = portfolio.getId() != null ? portfolio.getId().toString() : null;
+                String portfolioName = portfolio.getName();
+                portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioId);
+                portfolioSummaryRedisService.evictPortfolioSummary(owner, portfolioId);
+                if (portfolioName != null && !portfolioName.isBlank()
+                        && (portfolioId == null || !portfolioName.equals(portfolioId))) {
+                    portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioName);
+                    portfolioSummaryRedisService.evictPortfolioSummary(owner, portfolioName);
+                }
+                if (portfolioId != null) {
+                    portfolioIntelligenceRedisService.evict(portfolioId);
+                }
+                portfolioIntelligenceRedisService.evictAggregateForUser(owner);
+                cachesEvicted++;
             }
         }
 
-        log.info("[DEV] Symbol normalization complete: portfoliosUpdated={}, equitiesNormalized={}",
-                updatedPortfolios, normalizedEquities);
+        log.info("[DEV] Symbol normalization complete: portfoliosUpdated={}, equitiesNormalized={}, cachesEvicted={}",
+                updatedPortfolios, normalizedEquities, cachesEvicted);
         return ResponseEntity.ok(java.util.Map.of(
                 "portfoliosUpdated", updatedPortfolios,
-                "equitiesNormalized", normalizedEquities));
-    }
-
-    private int countIsinSymbols(PortfolioModelV1 portfolio) {
-        if (portfolio.getEquityModels() == null) {
-            return 0;
-        }
-        int count = 0;
-        for (com.am.common.amcommondata.model.asset.equity.EquityModel equity : portfolio.getEquityModels()) {
-            if (equity != null && equity.getSymbol() != null
-                    && com.portfolio.model.resolver.TradingSymbolResolver.looksLikeIsin(equity.getSymbol())) {
-                count++;
-            }
-        }
-        return count;
+                "equitiesNormalized", normalizedEquities,
+                "cachesEvicted", cachesEvicted));
     }
 }
-
-// Trigger workflow

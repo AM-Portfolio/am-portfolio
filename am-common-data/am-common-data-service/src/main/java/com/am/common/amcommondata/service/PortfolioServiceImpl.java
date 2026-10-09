@@ -5,6 +5,7 @@ import com.am.common.amcommondata.document.portfolio.PortfolioDocument;
 import com.am.common.amcommondata.mapper.PortfolioMapper;
 import com.am.common.amcommondata.model.HoldingAllocation;
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.repository.portfolio.PortfolioDocumentRepository;
 import com.am.common.amcommondata.repository.ledger.AllocationLedgerRepository;
@@ -14,6 +15,8 @@ import com.am.common.amcommondata.model.ledger.AllocationLedgerEventType;
 
 import lombok.RequiredArgsConstructor;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
@@ -21,7 +24,9 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -37,12 +42,143 @@ public class PortfolioServiceImpl implements PortfolioService {
     private final PortfolioMapper portfolioMapper;
     private final AllocationLedgerRepository allocationLedgerRepository;
 
+    /** Optional in unit tests; when present, kafka module fans out DELETE for cleaned twins. */
+    @Autowired(required = false)
+    private ApplicationEventPublisher applicationEventPublisher;
+
+    /**
+     * Lists the owner's portfolios. BROKER twins (GROW + GROWW, or same broker enum)
+     * are collapsed <strong>in memory only</strong> so the dropdown shows one Groww.
+     * <p>
+     * We deliberately do <strong>not</strong> delete Mongo rows or publish Kafka DELETE
+     * on list — that can remove the UUID trade-management still uses and break sync.
+     * Physical merge + DELETE stays on {@link #upsertDocumentPortfolio} (next upload).
+     * Baskets are never collapsed.
+     */
     @Override
     public List<PortfolioModelV1> getPortfoliosByUserId(String userId) {
-        return portfolioDocumentRepository.findByOwner(userId).stream()
+        List<PortfolioModelV1> all = portfolioDocumentRepository.findByOwner(userId).stream()
                 .filter(doc -> doc.getPortfolioKind() != PortfolioKind.DELETED)
                 .map(portfolioMapper::toModel)
                 .collect(Collectors.toList());
+        return collapseBrokerModelsForDisplay(all);
+    }
+
+    /**
+     * One BROKER row per logical identity for API/UI. No Mongo writes.
+     */
+    static List<PortfolioModelV1> collapseBrokerModelsForDisplay(List<PortfolioModelV1> portfolios) {
+        if (portfolios == null || portfolios.size() <= 1) {
+            return portfolios == null ? List.of() : portfolios;
+        }
+        Map<String, PortfolioModelV1> brokersByIdentity = new LinkedHashMap<>();
+        List<PortfolioModelV1> others = new ArrayList<>();
+        for (PortfolioModelV1 p : portfolios) {
+            if (p == null) {
+                continue;
+            }
+            if (!PortfolioKind.isBroker(p.getPortfolioKind())) {
+                others.add(p);
+                continue;
+            }
+            String key = brokerIdentityKey(p);
+            PortfolioModelV1 existing = brokersByIdentity.get(key);
+            if (existing == null || preferModel(p, existing)) {
+                brokersByIdentity.put(key, p);
+            }
+        }
+        List<PortfolioModelV1> out = new ArrayList<>(brokersByIdentity.values());
+        out.addAll(others);
+        return out;
+    }
+
+    private static boolean preferModel(PortfolioModelV1 candidate, PortfolioModelV1 incumbent) {
+        double cVal = candidate.getTotalValue() != null ? candidate.getTotalValue() : 0.0;
+        double iVal = incumbent.getTotalValue() != null ? incumbent.getTotalValue() : 0.0;
+        if (cVal != iVal) {
+            return cVal > iVal;
+        }
+        LocalDateTime cUp = candidate.getUpdatedAt();
+        LocalDateTime iUp = incumbent.getUpdatedAt();
+        if (cUp == null) {
+            return false;
+        }
+        if (iUp == null) {
+            return true;
+        }
+        return cUp.isAfter(iUp);
+    }
+
+    /**
+     * Prefer incoming UUID, then GROWW over GROW, then value/recency.
+     */
+    private PortfolioDocument pickSurvivorBrokerDoc(List<PortfolioDocument> brokerDocs, UUID incomingId) {
+        if (incomingId != null) {
+            String incoming = incomingId.toString();
+            for (PortfolioDocument candidate : brokerDocs) {
+                if (incoming.equals(candidate.getId())) {
+                    return candidate;
+                }
+            }
+        }
+        List<PortfolioDocument> growwPreferred = brokerDocs.stream()
+                .filter(d -> d.getBrokerType() == BrokerType.GROWW)
+                .collect(Collectors.toList());
+        if (!growwPreferred.isEmpty()) {
+            return pickCanonicalBroker(growwPreferred);
+        }
+        return pickCanonicalBroker(brokerDocs);
+    }
+
+    private void notifyDuplicateRemoved(String owner, PortfolioDocument extra) {
+        if (extra == null || extra.getId() == null) {
+            return;
+        }
+        log.info("Duplicate BROKER removed owner={} id={} name={}", owner, extra.getId(), extra.getName());
+        if (applicationEventPublisher == null) {
+            return;
+        }
+        try {
+            applicationEventPublisher.publishEvent(
+                    new DuplicateBrokerRemovedEvent(owner, extra.getId(), extra.getName()));
+        } catch (Exception e) {
+            log.warn("Failed to publish DuplicateBrokerRemovedEvent owner={} id={}: {}",
+                    owner, extra.getId(), e.getMessage());
+        }
+    }
+
+    /** Same logical broker book → one key (GROW/GROWW share Groww). */
+    static String brokerIdentityKey(PortfolioDocument doc) {
+        if (doc == null) {
+            return "unknown";
+        }
+        return brokerIdentityKey(doc.getBrokerType(), doc.getName(), doc.getId());
+    }
+
+    static String brokerIdentityKey(PortfolioModelV1 model) {
+        if (model == null) {
+            return "unknown";
+        }
+        String id = model.getId() != null ? model.getId().toString() : null;
+        return brokerIdentityKey(model.getBrokerType(), model.getName(), id);
+    }
+
+    static String brokerIdentityKey(BrokerType bt, String name, String id) {
+        if (bt == BrokerType.GROW || bt == BrokerType.GROWW) {
+            return "broker:GROWW";
+        }
+        if (bt != null) {
+            return "broker:" + bt.name();
+        }
+        if (name != null && !name.isBlank()) {
+            String n = name.trim().toLowerCase(Locale.ROOT);
+            // Exact Grow aliases only — do not match "Growth", "Outgrow", etc.
+            if ("grow".equals(n) || "groww".equals(n)) {
+                return "broker:GROWW";
+            }
+            return "name:" + n;
+        }
+        return "id:" + id;
     }
 
     @Override
@@ -149,6 +285,8 @@ public class PortfolioServiceImpl implements PortfolioService {
                         if (incoming.getCurrentPrice() != null) {
                             match.setCurrentPrice(incoming.getCurrentPrice());
                         }
+                        // Heal ISIN-as-symbol rows when a later sync brings a real ticker (matched by ISIN).
+                        applyIncomingInstrumentMeta(match, incoming);
                     } else {
                         existingEquities.add(incoming);
                     }
@@ -166,6 +304,7 @@ public class PortfolioServiceImpl implements PortfolioService {
                             if (incoming.getCurrentPrice() != null) {
                                 match.setCurrentPrice(incoming.getCurrentPrice());
                             }
+                            applyIncomingInstrumentMeta(match, incoming);
                         }
                     }
                 } else if ("UPDATE".equalsIgnoreCase(tradeAction)) {
@@ -179,6 +318,7 @@ public class PortfolioServiceImpl implements PortfolioService {
                         if (incoming.getInvestmentValue() != null) {
                             match.setInvestmentValue(incoming.getInvestmentValue());
                         }
+                        applyIncomingInstrumentMeta(match, incoming);
                     } else {
                         existingEquities.add(incoming);
                     }
@@ -196,6 +336,51 @@ public class PortfolioServiceImpl implements PortfolioService {
 
         existing.setEquities(existingEquities);
         existing.setTotalValue(equityValue + otherValue);
+    }
+
+    /**
+     * When a trade sync matches an existing row by ISIN, refresh ticker/name/isin
+     * so legacy ISIN-as-symbol holdings heal without waiting for REPLACE_ALL.
+     */
+    private static void applyIncomingInstrumentMeta(
+            com.am.common.amcommondata.document.asset.equity.EquityDocument match,
+            com.am.common.amcommondata.document.asset.equity.EquityDocument incoming) {
+        if (match == null || incoming == null) {
+            return;
+        }
+        String incomingSymbol = incoming.getSymbol();
+        if (incomingSymbol != null && !incomingSymbol.isBlank() && !looksLikeIsin(incomingSymbol)) {
+            match.setSymbol(incomingSymbol.trim().toUpperCase());
+        }
+        if (incoming.getIsin() != null && !incoming.getIsin().isBlank()) {
+            match.setIsin(incoming.getIsin().trim().toUpperCase());
+        } else if ((match.getIsin() == null || match.getIsin().isBlank())
+                && looksLikeIsin(match.getSymbol())) {
+            match.setIsin(match.getSymbol().trim().toUpperCase());
+        }
+        if (incoming.getName() != null && !incoming.getName().isBlank()) {
+            match.setName(incoming.getName());
+        }
+        if (incoming.getCompanyName() != null && !incoming.getCompanyName().isBlank()) {
+            match.setCompanyName(incoming.getCompanyName());
+        }
+        if (incoming.getSector() != null && !incoming.getSector().isBlank()) {
+            match.setSector(incoming.getSector());
+        }
+        if (incoming.getIndustry() != null && !incoming.getIndustry().isBlank()) {
+            match.setIndustry(incoming.getIndustry());
+        }
+        if (incoming.getMarketCap() != null && !incoming.getMarketCap().isBlank()) {
+            match.setMarketCap(incoming.getMarketCap());
+        }
+    }
+
+    private static boolean looksLikeIsin(String value) {
+        if (value == null) {
+            return false;
+        }
+        String s = value.trim().toUpperCase();
+        return s.matches("^IN[A-Z0-9]{10}$");
     }
 
     private static java.util.List<com.am.common.amcommondata.document.asset.AssetDocument> copyAssetList(
@@ -300,25 +485,55 @@ public class PortfolioServiceImpl implements PortfolioService {
 
         String owner = portfolioModel.getOwner();
         com.am.common.amcommondata.model.enums.BrokerType brokerType = portfolioModel.getBrokerType();
+        // GROW (legacy) and GROWW share display "Groww" — always upsert as GROWW.
+        if (brokerType == com.am.common.amcommondata.model.enums.BrokerType.GROW) {
+            brokerType = com.am.common.amcommondata.model.enums.BrokerType.GROWW;
+            portfolioModel.setBrokerType(brokerType);
+        }
 
         java.util.List<PortfolioDocument> existingDocs =
             portfolioDocumentRepository.findByOwnerAndBrokerType(owner, brokerType);
+        // Legacy rows stored as GROW must merge into the GROWW canonical book.
+        if (brokerType == com.am.common.amcommondata.model.enums.BrokerType.GROWW) {
+            java.util.List<PortfolioDocument> legacyGrow =
+                portfolioDocumentRepository.findByOwnerAndBrokerType(owner,
+                        com.am.common.amcommondata.model.enums.BrokerType.GROW);
+            if (legacyGrow != null && !legacyGrow.isEmpty()) {
+                existingDocs = new java.util.ArrayList<>(existingDocs != null ? existingDocs : List.of());
+                existingDocs.addAll(legacyGrow);
+            }
+        }
 
         // Only BROKER (or legacy null) docs participate in Kafka upsert. Never touch BASKET.
         List<PortfolioDocument> brokerDocs = existingDocs == null ? List.of() : existingDocs.stream()
                 .filter(d -> PortfolioKind.isBroker(d.getPortfolioKind()))
                 .collect(Collectors.toList());
+        // Dedupe by Mongo id (GROW + GROWW query can return the same doc once each path).
+        Map<String, PortfolioDocument> uniqueById = new HashMap<>();
+        for (PortfolioDocument d : brokerDocs) {
+            if (d != null && d.getId() != null) {
+                uniqueById.putIfAbsent(d.getId(), d);
+            }
+        }
+        brokerDocs = new ArrayList<>(uniqueById.values());
 
         if (!brokerDocs.isEmpty()) {
-            PortfolioDocument doc = pickCanonicalBroker(brokerDocs);
+            // Survivor pick (stable for trade/analysis):
+            // 1) incoming UUID when it already exists among twins
+            // 2) else prefer GROWW over legacy GROW
+            // 3) else highest totalValue / latest update
+            PortfolioDocument doc = pickSurvivorBrokerDoc(brokerDocs, portfolioModel.getId());
             // Delete other BROKER duplicates only — never baskets
             for (PortfolioDocument extra : brokerDocs) {
                 if (!extra.getId().equals(doc.getId())) {
                     log.info("Cleaning duplicate BROKER portfolio id={} name={} for owner={}",
                             extra.getId(), extra.getName(), owner);
                     portfolioDocumentRepository.delete(extra);
+                    notifyDuplicateRemoved(owner, extra);
                 }
             }
+            // Normalize legacy GROW enum on the kept doc
+            doc.setBrokerType(brokerType);
 
             PortfolioDocument incoming = portfolioMapper.toDocument(portfolioModel);
             // Soft-merge: null list on incoming = keep existing (Doc Intel / Kafka partial updates).
@@ -468,13 +683,13 @@ public class PortfolioServiceImpl implements PortfolioService {
         
         List<PortfolioDocument> portfolios = portfolioDocumentRepository.findByOwner(owner);
         for (PortfolioDocument portfolio : portfolios) {
-            if (id.equals(portfolio.getName())) {
+            if (id.equals(portfolio.getName()) || (portfolio.getId() != null && id.equals(portfolio.getId().toString()))) {
                 portfolioDocumentRepository.delete(portfolio);
-                log.info("Deleted portfolio with name: {} and owner: {}", id, owner);
+                log.info("Deleted portfolio with name/id: {} and owner: {}", id, owner);
                 return;
             }
         }
-        log.warn("Portfolio not found for deletion with name: {} and owner: {}", id, owner);
+        log.warn("Portfolio not found for deletion with name/id: {} and owner: {}", id, owner);
     }
 
     @Override
