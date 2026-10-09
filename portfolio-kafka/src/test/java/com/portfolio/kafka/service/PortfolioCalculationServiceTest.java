@@ -55,6 +55,7 @@ class PortfolioCalculationServiceTest {
 
         when(newUserPortfolioFallbackService.resolveRequest("u1", "p1"))
                 .thenReturn(new NewUserPortfolioFallbackService.DemoResolution("u1", "p1"));
+        when(newUserPortfolioFallbackService.getDemoPortfolioId()).thenReturn("demo-shared");
 
         service.processCalculation("u1", "p1", "corr");
 
@@ -62,6 +63,22 @@ class PortfolioCalculationServiceTest {
         verify(producerService).sendMessage(any(), eq("corr"));
         verify(producerService).sendPortfolioStreamMessage(any(), eq("corr"));
         verifyNoInteractions(portfolioService);
+    }
+
+    @Test void processCalculation_demoRemap_skipsTradeFanoutTopic() {
+        PortfolioHoldings ph = new PortfolioHoldings();
+        ph.setEquityHoldings(List.of(holding("AAPL", 1000.0)));
+        when(holdingsService.getPortfolioHoldings("demo-owner", "demo-shared", TimeInterval.ONE_DAY)).thenReturn(ph);
+        when(calculator.enrichHoldings(any())).thenReturn(ph.getEquityHoldings());
+        when(calculator.calculateSummary(any(), anyDouble())).thenReturn(new PortfolioSummaryV1());
+        when(newUserPortfolioFallbackService.resolveRequest("new-user", "demo-shared"))
+                .thenReturn(new NewUserPortfolioFallbackService.DemoResolution("demo-owner", "demo-shared"));
+        when(newUserPortfolioFallbackService.getDemoPortfolioId()).thenReturn("demo-shared");
+
+        service.processCalculation("new-user", "demo-shared", "corr");
+
+        verify(producerService, never()).sendMessage(any(), any());
+        verify(producerService).sendPortfolioStreamMessage(any(), eq("corr"));
     }
 
     @Test void processCalculation_withoutPortfolioId_publishesPerPortfolio() {
@@ -76,6 +93,7 @@ class PortfolioCalculationServiceTest {
 
         when(newUserPortfolioFallbackService.resolveRequest("u1", P1_ID.toString()))
                 .thenReturn(new NewUserPortfolioFallbackService.DemoResolution("u1", P1_ID.toString()));
+        when(newUserPortfolioFallbackService.getDemoPortfolioId()).thenReturn("demo-shared");
 
         service.processCalculation("u1", null, null);
 
@@ -128,6 +146,7 @@ class PortfolioCalculationServiceTest {
 
         when(newUserPortfolioFallbackService.resolveRequest("u1", "p1"))
                 .thenReturn(new NewUserPortfolioFallbackService.DemoResolution("u1", "p1"));
+        when(newUserPortfolioFallbackService.getDemoPortfolioId()).thenReturn("demo-shared");
 
         service.processCalculation("u1", "p1", "corr");
 
@@ -137,6 +156,7 @@ class PortfolioCalculationServiceTest {
         assertEquals(1100.0, cap.getValue().getTotalValue());
         assertEquals("u1", cap.getValue().getUserId());
         assertEquals("p1", cap.getValue().getPortfolioId());
+        assertEquals("PORTFOLIO_CALC", cap.getValue().getSource());
     }
 
     @Test void processCalculation_calculatorThrows_propagatesException() {
@@ -166,6 +186,7 @@ class PortfolioCalculationServiceTest {
 
         when(newUserPortfolioFallbackService.resolveRequest("u1", P1_ID.toString()))
                 .thenReturn(new NewUserPortfolioFallbackService.DemoResolution("u1", P1_ID.toString()));
+        when(newUserPortfolioFallbackService.getDemoPortfolioId()).thenReturn("demo-shared");
 
         service.processCalculation("u1", null, null);
 

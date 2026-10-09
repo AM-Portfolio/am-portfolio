@@ -9,6 +9,7 @@ import com.portfolio.model.market.TimeFrame;
 import com.portfolio.redis.service.PortfolioIntelligenceHistoryRedisService;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
+import com.portfolio.model.resolver.TradingSymbolResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -42,13 +43,16 @@ class PortfolioIntelligenceSnapshotFactoryHistoryTest {
     private SecurityDetailsService securityDetailsService;
     @Mock
     private PortfolioIntelligenceHistoryRedisService historyCache;
+    @Mock
+    private TradingSymbolResolver tradingSymbolResolver;
 
     private PortfolioIntelligenceSnapshotFactory factory;
 
     @BeforeEach
     void setUp() {
         factory = new PortfolioIntelligenceSnapshotFactory(
-                portfolioService, marketDataService, securityDetailsService, historyCache);
+                portfolioService, marketDataService, securityDetailsService, historyCache,
+                tradingSymbolResolver);
         ReflectionTestUtils.setField(factory, "primaryBenchmarkSymbol", "NIFTY 50");
         ReflectionTestUtils.setField(factory, "historyLookbackDays", 60);
         ReflectionTestUtils.setField(factory, "historyTimeoutMs", 800L);
