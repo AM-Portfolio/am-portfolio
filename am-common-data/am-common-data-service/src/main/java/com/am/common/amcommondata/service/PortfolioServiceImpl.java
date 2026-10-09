@@ -5,6 +5,7 @@ import com.am.common.amcommondata.document.portfolio.PortfolioDocument;
 import com.am.common.amcommondata.mapper.PortfolioMapper;
 import com.am.common.amcommondata.model.HoldingAllocation;
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.repository.portfolio.PortfolioDocumentRepository;
 import com.am.common.amcommondata.repository.ledger.AllocationLedgerRepository;
@@ -14,6 +15,7 @@ import com.am.common.amcommondata.model.ledger.AllocationLedgerEventType;
 
 import lombok.RequiredArgsConstructor;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
@@ -21,7 +23,9 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -37,12 +41,123 @@ public class PortfolioServiceImpl implements PortfolioService {
     private final PortfolioMapper portfolioMapper;
     private final AllocationLedgerRepository allocationLedgerRepository;
 
+    /** Optional — portfolio-kafka publishes DELETE so analysis/trade drop the orphan UUID. */
+    @Autowired(required = false)
+    private BrokerPortfolioCleanupListener brokerPortfolioCleanupListener;
+
+    /**
+     * Lists the owner's portfolios. BROKER rows that are the same logical book
+     * (GROW + GROWW, or same display name) are healed: extras deleted, one kept.
+     * Baskets are never collapsed.
+     */
     @Override
+    @Transactional
     public List<PortfolioModelV1> getPortfoliosByUserId(String userId) {
-        return portfolioDocumentRepository.findByOwner(userId).stream()
+        List<PortfolioDocument> docs = portfolioDocumentRepository.findByOwner(userId).stream()
                 .filter(doc -> doc.getPortfolioKind() != PortfolioKind.DELETED)
-                .map(portfolioMapper::toModel)
                 .collect(Collectors.toList());
+
+        List<PortfolioDocument> brokers = new ArrayList<>();
+        List<PortfolioDocument> others = new ArrayList<>();
+        for (PortfolioDocument doc : docs) {
+            if (PortfolioKind.isBroker(doc.getPortfolioKind())) {
+                brokers.add(doc);
+            } else {
+                others.add(doc);
+            }
+        }
+
+        List<PortfolioDocument> keptBrokers = healDuplicateBrokerDocuments(userId, brokers);
+        List<PortfolioDocument> surviving = new ArrayList<>(keptBrokers.size() + others.size());
+        surviving.addAll(keptBrokers);
+        surviving.addAll(others);
+        return surviving.stream().map(portfolioMapper::toModel).collect(Collectors.toList());
+    }
+
+    /**
+     * Keep one BROKER doc per logical identity; delete the rest.
+     * Identity: canonical broker (GROW/GROWW → GROWW), else case-insensitive name.
+     */
+    private List<PortfolioDocument> healDuplicateBrokerDocuments(String owner, List<PortfolioDocument> brokers) {
+        if (brokers == null || brokers.size() <= 1) {
+            return brokers == null ? List.of() : brokers;
+        }
+
+        Map<String, List<PortfolioDocument>> byIdentity = new LinkedHashMap<>();
+        for (PortfolioDocument doc : brokers) {
+            if (doc == null) {
+                continue;
+            }
+            byIdentity.computeIfAbsent(brokerIdentityKey(doc), k -> new ArrayList<>()).add(doc);
+        }
+
+        List<PortfolioDocument> kept = new ArrayList<>();
+        for (Map.Entry<String, List<PortfolioDocument>> entry : byIdentity.entrySet()) {
+            List<PortfolioDocument> group = entry.getValue();
+            if (group.size() == 1) {
+                kept.add(persistGrowCanonical(group.get(0)));
+                continue;
+            }
+            PortfolioDocument canonical = pickCanonicalBroker(group);
+            for (PortfolioDocument extra : group) {
+                if (extra.getId() != null && extra.getId().equals(canonical.getId())) {
+                    continue;
+                }
+                log.info("Healing duplicate BROKER portfolio id={} name={} broker={} for owner={} identity={}",
+                        extra.getId(), extra.getName(), extra.getBrokerType(), owner, entry.getKey());
+                portfolioDocumentRepository.delete(extra);
+                notifyDuplicateRemoved(owner, extra);
+            }
+            kept.add(persistGrowCanonical(canonical));
+        }
+        return kept;
+    }
+
+    /** Persist GROW → GROWW so the unique owner+broker index cannot recreate a twin. */
+    private PortfolioDocument persistGrowCanonical(PortfolioDocument doc) {
+        if (doc == null || doc.getBrokerType() != BrokerType.GROW) {
+            return doc;
+        }
+        doc.setBrokerType(BrokerType.GROWW);
+        if (doc.getName() == null || doc.getName().isBlank() || "Grow".equalsIgnoreCase(doc.getName())) {
+            doc.setName(BrokerType.GROWW.getCode());
+        }
+        return portfolioDocumentRepository.save(doc);
+    }
+
+    private void notifyDuplicateRemoved(String owner, PortfolioDocument extra) {
+        if (brokerPortfolioCleanupListener == null || extra == null || extra.getId() == null) {
+            return;
+        }
+        try {
+            brokerPortfolioCleanupListener.onDuplicateBrokerRemoved(owner, extra.getId(), extra.getName());
+        } catch (Exception e) {
+            log.warn("Duplicate-broker cleanup notify failed owner={} id={}: {}",
+                    owner, extra.getId(), e.getMessage());
+        }
+    }
+
+    /** Same logical broker book → one key (GROW/GROWW share Groww). */
+    static String brokerIdentityKey(PortfolioDocument doc) {
+        if (doc == null) {
+            return "unknown";
+        }
+        BrokerType bt = doc.getBrokerType();
+        if (bt == BrokerType.GROW || bt == BrokerType.GROWW) {
+            return "broker:GROWW";
+        }
+        if (bt != null) {
+            return "broker:" + bt.name();
+        }
+        String name = doc.getName();
+        if (name != null && !name.isBlank()) {
+            String n = name.trim().toLowerCase(Locale.ROOT);
+            if (n.contains("grow")) {
+                return "broker:GROWW";
+            }
+            return "name:" + n;
+        }
+        return "id:" + doc.getId();
     }
 
     @Override
@@ -389,6 +504,7 @@ public class PortfolioServiceImpl implements PortfolioService {
                     log.info("Cleaning duplicate BROKER portfolio id={} name={} for owner={}",
                             extra.getId(), extra.getName(), owner);
                     portfolioDocumentRepository.delete(extra);
+                    notifyDuplicateRemoved(owner, extra);
                 }
             }
             // Normalize legacy GROW enum on the kept doc
