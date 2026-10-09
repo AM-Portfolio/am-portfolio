@@ -278,26 +278,6 @@ class HealthScoreEngineTest {
                 .orElse(null);
     }
 
-    @Test
-    void concentrationReason_includesTop1SymbolWhenPresent() {
-        PortfolioIntelligenceSnapshot withSymbol = PortfolioIntelligenceSnapshot.builder()
-                .top1Pct(60.06)
-                .top1Symbol("VIKRAMSOLAR")
-                .maxSectorPct(99.99)
-                .build();
-        assertEquals(
-                "Top1 VIKRAMSOLAR 60.06%, max sector 99.99%",
-                HealthScoreEngine.concentrationReason(withSymbol));
-
-        PortfolioIntelligenceSnapshot withoutSymbol = PortfolioIntelligenceSnapshot.builder()
-                .top1Pct(25.0)
-                .maxSectorPct(35.0)
-                .build();
-        assertEquals(
-                "Top1 25.0%, max sector 35.0%",
-                HealthScoreEngine.concentrationReason(withoutSymbol));
-    }
-
     private static PortfolioIntelligenceSnapshot.Holding holding(
             String symbol, double value, double weightPct, String sector, String cap, String assetClass) {
         return PortfolioIntelligenceSnapshot.Holding.builder()
