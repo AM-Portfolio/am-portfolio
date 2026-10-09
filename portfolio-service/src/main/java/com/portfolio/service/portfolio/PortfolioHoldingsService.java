@@ -304,9 +304,8 @@ public class PortfolioHoldingsService {
                 if (isin == null || isin.isBlank()) {
                     continue;
                 }
-                if (sym == null || sym.isBlank()
-                        || sym.trim().length() <= 4
-                        || TradingSymbolResolver.looksLikeIsin(sym)) {
+                // Only heal blank symbols or ISIN-as-symbol — never length≤4 (valid NSE: ITC, SBIN).
+                if (sym == null || sym.isBlank() || TradingSymbolResolver.looksLikeIsin(sym)) {
                     needsHeal = true;
                     break;
                 }
@@ -316,7 +315,8 @@ public class PortfolioHoldingsService {
             }
             try {
                 if (portfolioEquitySymbolNormalizer.normalizePortfolioAndDetectChange(portfolio)) {
-                    portfolioService.upsertDocumentPortfolio(portfolio);
+                    // savePortfolioDocument updates this id only — does NOT run broker twin dedupe.
+                    portfolioService.savePortfolioDocument(portfolio);
                     log.info("Healed short/ISIN equity symbols for portfolio {}", portfolio.getId());
                 }
             } catch (Exception ex) {

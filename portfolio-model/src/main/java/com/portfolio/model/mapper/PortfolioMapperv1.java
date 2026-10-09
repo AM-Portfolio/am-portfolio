@@ -25,16 +25,18 @@ public class PortfolioMapperv1 {
   private final Optional<TradingSymbolResolver> tradingSymbolResolver;
 
     public PortfolioModelV1 toPortfolioModelV1(PortfolioUpdateEvent portfolioEvent) {
+        BrokerType brokerType = canonicalizeBrokerType(portfolioEvent.getBrokerType());
+
         // null list = omit on soft-merge upsert; empty list = clear that class
         List<EquityModel> mappedEquities = portfolioEvent.getEquities() != null
-                ? mapToEquityModels(portfolioEvent, portfolioEvent.getBrokerType())
+                ? mapToEquityModels(portfolioEvent, brokerType)
                 : null;
 
         List<com.am.common.amcommondata.model.asset.AssetModel> mappedFunds = null;
         if (portfolioEvent.getMutualFunds() != null) {
             mappedFunds = portfolioEvent.getMutualFunds().stream()
                     .filter(f -> f != null)
-                    .map(f -> mapToAsset(f, portfolioEvent.getBrokerType()))
+                    .map(f -> mapToAsset(f, brokerType))
                     .collect(Collectors.toList());
         }
 
@@ -47,7 +49,7 @@ public class PortfolioMapperv1 {
                 .id(portfolioEvent.getId())
                 .name(portfolioEvent.getPortfolioId())
                 .owner(portfolioEvent.getUserId())
-                .brokerType(portfolioEvent.getBrokerType())
+                .brokerType(brokerType)
                 .fundType(FundType.DEFAULT)
                 .status("Active")
                 .createdBy(portfolioEvent.getUserId())
@@ -60,6 +62,17 @@ public class PortfolioMapperv1 {
                 .totalValue(equityValue + mfValue)
                 .version(0L)
                 .build();
+    }
+
+    /** GROW (legacy) and GROWW are one broker — document upsert must not create two Mongo books. */
+    private BrokerType canonicalizeBrokerType(BrokerType brokerType) {
+        if (brokerType == null) {
+            return null;
+        }
+        if (brokerType == BrokerType.GROW || brokerType == BrokerType.GROWW) {
+            return BrokerType.GROWW;
+        }
+        return brokerType;
     }
 
     public PortfolioModelV1 toPortfolioModelV1(com.portfolio.model.events.trade.TradePortfolioSyncEvent tradeEvent) {
