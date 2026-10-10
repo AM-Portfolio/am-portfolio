@@ -460,44 +460,34 @@ public class PortfolioOverviewService {
             double dayPct;
             String mode;
 
-            // Prefer close−open on the last session row (correct weekend freeze once EOD stores true open).
-            double lastOpen = snapshotOpen(lastSession, portfolioId);
-            if (lastOpen > 0 && isDistinctWealth(lastWealth, lastOpen)) {
-                dayGain = lastWealth - lastOpen;
-                dayPct = (dayGain / lastOpen) * 100.0;
-                summary.setTodayGainLoss(dayGain);
-                summary.setTodayGainLossPercentage(dayPct);
-                log.info("[Overview] Filled todayGainLoss via session OHLC {} open={} close={} gain={}",
-                        lastSession.getSnapshotDate(), lastOpen, lastWealth, dayGain);
-                return;
-            }
-
-            if (priorSessions.size() >= 2) {
-                PortfolioSnapshotModel priorSession = priorSessions.get(1);
-                double priorWealth = snapshotWealth(priorSession, portfolioId);
-                if (priorWealth > 0) {
-                    // Frozen last-session day move (works on weekends when current≈lastWealth).
+            // 1) LTP mark moved vs last EOD — show that (never prefer flat two-session 0 over LTP).
+            if (isDistinctWealth(currentValue, lastWealth)) {
+                dayGain = currentValue - lastWealth;
+                dayPct = (dayGain / lastWealth) * 100.0;
+                mode = "ltp-vs-last " + lastSession.getSnapshotDate();
+            } else {
+                // 2) Mark ≈ last EOD (weekend): freeze last cash session via OHLC or two snaps.
+                double lastOpen = snapshotOpen(lastSession, portfolioId);
+                if (lastOpen > 0 && isDistinctWealth(lastWealth, lastOpen)) {
+                    dayGain = lastWealth - lastOpen;
+                    dayPct = (dayGain / lastOpen) * 100.0;
+                    mode = "session-OHLC " + lastSession.getSnapshotDate();
+                } else if (priorSessions.size() >= 2) {
+                    PortfolioSnapshotModel priorSession = priorSessions.get(1);
+                    double priorWealth = snapshotWealth(priorSession, portfolioId);
+                    if (priorWealth <= 0 || !isDistinctWealth(lastWealth, priorWealth)) {
+                        log.info("[Overview] No distinct prior session for day P&L freeze date={} wealth={}",
+                                lastSession.getSnapshotDate(), lastWealth);
+                        return; // do not publish fake 0
+                    }
                     dayGain = lastWealth - priorWealth;
                     dayPct = (dayGain / priorWealth) * 100.0;
                     mode = "two-session " + priorSession.getSnapshotDate() + "→" + lastSession.getSnapshotDate();
-                } else if (isDistinctWealth(currentValue, lastWealth)) {
-                    dayGain = currentValue - lastWealth;
-                    dayPct = (dayGain / lastWealth) * 100.0;
-                    mode = "current-vs-last (prior wealth missing)";
                 } else {
-                    log.info("[Overview] Cannot freeze day P&L — prior session wealth missing date={}",
-                            priorSession.getSnapshotDate());
+                    log.info("[Overview] Single snapshot equals LTP mark; cannot freeze day P&L date={} wealth={}",
+                            lastSession.getSnapshotDate(), lastWealth);
                     return;
                 }
-            } else if (isDistinctWealth(currentValue, lastWealth)) {
-                dayGain = currentValue - lastWealth;
-                dayPct = (dayGain / lastWealth) * 100.0;
-                mode = "current-vs-last " + lastSession.getSnapshotDate();
-            } else {
-                // Single snap equals mark — weekend/holiday with no prior session row.
-                log.info("[Overview] Single snapshot equals mark; cannot freeze day P&L date={} wealth={}",
-                        lastSession.getSnapshotDate(), lastWealth);
-                return;
             }
 
             summary.setTodayGainLoss(dayGain);
