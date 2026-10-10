@@ -544,8 +544,14 @@ public class PortfolioOverviewService {
         if (a <= 0 || b <= 0) {
             return false;
         }
-        double rel = Math.abs(a - b) / Math.max(Math.abs(a), Math.abs(b));
-        return rel > 0.0005; // >5 bps
+        double abs = Math.abs(a - b);
+        // Absolute rupee floor: small books and large books both need LTP ticks to count
+        // (₹75 on ₹6.3L is only ~1.2 bps — must not be treated as flat).
+        if (abs >= 0.5) {
+            return true;
+        }
+        double rel = abs / Math.max(Math.abs(a), Math.abs(b));
+        return rel > 0.0005; // >5 bps for tiny noise on micro portfolios
     }
 
     /** True when day P&L is unknown or a collapsed AS_OF zero (not a trusted live flat day). */
