@@ -274,6 +274,8 @@ public class PortfolioOverviewService {
                     ? portfolioHoldingsService.getPortfolioHoldings(userId, interval, true)
                     : portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, interval, true);
             if (ph == null || ph.getEquityHoldings() == null || ph.getEquityHoldings().isEmpty()) {
+                // Still freeze day P&L from snapshots when holdings reprice is unavailable.
+                applySessionDayGainLossIfMissing(cached, userId, portfolioId);
                 return cached;
             }
             double investmentValue = cached.getInvestmentValue() != null
@@ -305,6 +307,7 @@ public class PortfolioOverviewService {
             return cached;
         } catch (Exception e) {
             log.warn("Summary price overlay failed; serving cached KPIs: {}", e.getMessage());
+            applySessionDayGainLossIfMissing(cached, userId, portfolioId);
             return cached;
         }
     }
@@ -351,25 +354,15 @@ public class PortfolioOverviewService {
                                           String portfolioId, TimeInterval interval) {
         if (interval == null || interval == TimeInterval.OVERALL) return;
 
-        // Fetch snapshot history for the timeframe window
+        // Fetch snapshot history for the timeframe window (1D lookback already spans weekends).
         List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(
             userId, portfolioId, interval.getCode()
         );
 
         if (history == null || history.isEmpty()) {
-            // For 1D: walk back up to 7 days to handle weekends/holidays
-            if (TimeInterval.ONE_DAY.equals(interval)) {
-                LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
-                for (int i = 1; i <= 7; i++) {
-                    List<PortfolioSnapshotModel> fallback = portfolioSnapshotService.getHistory(
-                        userId, portfolioId, "1W" // broader window to find last trading day
-                    );
-                    if (fallback != null && !fallback.isEmpty()) {
-                        history = fallback; break;
-                    }
-                }
-            }
-            if (history == null || history.isEmpty()) return; // no snapshots at all
+            // Broader windows when the interval window is empty (new portfolios / catch-up lag).
+            history = loadSnapshotHistory(userId, portfolioId);
+            if (history == null || history.isEmpty()) return;
         }
 
         // For 1D: find the most recent snapshot NOT from today
@@ -421,8 +414,10 @@ public class PortfolioOverviewService {
     }
 
     /**
-     * Industry pattern when quote previousClose is collapsed/missing after hours:
-     * day P&L = current wealth − last non-today portfolio snapshot (prior session close).
+     * Industry freeze when quote previousClose is collapsed/missing after hours:
+     * day P&L = last cash-session close − prior cash-session close.
+     * On weekends, {@code current ≈ last session}, so using current−lastSnap yields ~0 —
+     * prefer two non-today snapshots when available.
      * Only fills when per-symbol todayGainLoss is still null — never overwrites a live baseline.
      */
     private void applySessionDayGainLossIfMissing(
@@ -434,48 +429,129 @@ public class PortfolioOverviewService {
             return;
         }
         try {
-            List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(userId, portfolioId, "1W");
-            if (history == null || history.isEmpty()) {
-                history = portfolioSnapshotService.getHistory(userId, null, "1W");
-            }
+            List<PortfolioSnapshotModel> history = loadSnapshotHistory(userId, portfolioId);
             if (history == null || history.isEmpty()) {
                 log.info("[Overview] No snapshot history for day P&L fallback user={}", userId);
                 return;
             }
             LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
-            PortfolioSnapshotModel baselineSnap = history.stream()
+            List<PortfolioSnapshotModel> priorSessions = history.stream()
                     .filter(s -> s.getSnapshotDate() != null && !today.equals(s.getSnapshotDate()))
-                    .max(Comparator.comparing(PortfolioSnapshotModel::getSnapshotDate))
-                    .orElse(null);
-            if (baselineSnap == null) {
+                    .sorted(Comparator.comparing(PortfolioSnapshotModel::getSnapshotDate).reversed())
+                    .toList();
+            if (priorSessions.isEmpty()) {
                 log.info("[Overview] No non-today snapshot for day P&L fallback user={} today={}", userId, today);
                 return;
             }
-            double baselineWealth = 0.0;
-            if (portfolioId != null && !portfolioId.isEmpty()
-                    && baselineSnap.getPortfolios() != null) {
-                baselineWealth = baselineSnap.getPortfolios().stream()
-                        .filter(p -> portfolioId.equals(p.getPortfolioId()))
-                        .mapToDouble(p -> p.getClose() != null ? p.getClose() : 0.0)
-                        .sum();
-            }
-            if (baselineWealth <= 0 && baselineSnap.getTotalUserWealth() != null) {
-                baselineWealth = baselineSnap.getTotalUserWealth();
-            }
-            if (baselineWealth <= 0) {
+
+            PortfolioSnapshotModel lastSession = priorSessions.get(0);
+            double lastWealth = snapshotWealth(lastSession, portfolioId);
+            if (lastWealth <= 0) {
                 log.info("[Overview] Snapshot baseline wealth <= 0 date={} portfolioId={}",
-                        baselineSnap.getSnapshotDate(), portfolioId);
+                        lastSession.getSnapshotDate(), portfolioId);
                 return;
             }
+
             double currentValue = summary.getCurrentValue() != null ? summary.getCurrentValue() : 0.0;
-            double dayGain = currentValue - baselineWealth;
-            double dayPct = (dayGain / baselineWealth) * 100.0;
+            double dayGain;
+            double dayPct;
+            String mode;
+
+            // Prefer close−open on the last session row (correct weekend freeze once EOD stores true open).
+            double lastOpen = snapshotOpen(lastSession, portfolioId);
+            if (lastOpen > 0 && isDistinctWealth(lastWealth, lastOpen)) {
+                dayGain = lastWealth - lastOpen;
+                dayPct = (dayGain / lastOpen) * 100.0;
+                summary.setTodayGainLoss(dayGain);
+                summary.setTodayGainLossPercentage(dayPct);
+                log.info("[Overview] Filled todayGainLoss via session OHLC {} open={} close={} gain={}",
+                        lastSession.getSnapshotDate(), lastOpen, lastWealth, dayGain);
+                return;
+            }
+
+            if (priorSessions.size() >= 2) {
+                PortfolioSnapshotModel priorSession = priorSessions.get(1);
+                double priorWealth = snapshotWealth(priorSession, portfolioId);
+                if (priorWealth > 0) {
+                    // Frozen last-session day move (works on weekends when current≈lastWealth).
+                    dayGain = lastWealth - priorWealth;
+                    dayPct = (dayGain / priorWealth) * 100.0;
+                    mode = "two-session " + priorSession.getSnapshotDate() + "→" + lastSession.getSnapshotDate();
+                } else if (isDistinctWealth(currentValue, lastWealth)) {
+                    dayGain = currentValue - lastWealth;
+                    dayPct = (dayGain / lastWealth) * 100.0;
+                    mode = "current-vs-last (prior wealth missing)";
+                } else {
+                    log.info("[Overview] Cannot freeze day P&L — prior session wealth missing date={}",
+                            priorSession.getSnapshotDate());
+                    return;
+                }
+            } else if (isDistinctWealth(currentValue, lastWealth)) {
+                dayGain = currentValue - lastWealth;
+                dayPct = (dayGain / lastWealth) * 100.0;
+                mode = "current-vs-last " + lastSession.getSnapshotDate();
+            } else {
+                // Single snap equals mark — weekend/holiday with no prior session row.
+                log.info("[Overview] Single snapshot equals mark; cannot freeze day P&L date={} wealth={}",
+                        lastSession.getSnapshotDate(), lastWealth);
+                return;
+            }
+
             summary.setTodayGainLoss(dayGain);
             summary.setTodayGainLossPercentage(dayPct);
-            log.info("[Overview] Filled todayGainLoss from prior-session snapshot date={} gain={}",
-                    baselineSnap.getSnapshotDate(), dayGain);
+            log.info("[Overview] Filled todayGainLoss via {} gain={}", mode, dayGain);
         } catch (Exception e) {
             log.warn("[Overview] Snapshot day P&L fallback failed: {}", e.getMessage());
         }
+    }
+
+    private List<PortfolioSnapshotModel> loadSnapshotHistory(String userId, String portfolioId) {
+        List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(userId, portfolioId, "1M");
+        if (history == null || history.isEmpty()) {
+            history = portfolioSnapshotService.getHistory(userId, null, "1M");
+        }
+        if (history == null || history.isEmpty()) {
+            history = portfolioSnapshotService.getHistory(userId, portfolioId, "1W");
+        }
+        if (history == null || history.isEmpty()) {
+            history = portfolioSnapshotService.getHistory(userId, null, "1W");
+        }
+        return history;
+    }
+
+    private static double snapshotWealth(PortfolioSnapshotModel snap, String portfolioId) {
+        double wealth = 0.0;
+        if (portfolioId != null && !portfolioId.isEmpty() && snap.getPortfolios() != null) {
+            wealth = snap.getPortfolios().stream()
+                    .filter(p -> portfolioId.equals(p.getPortfolioId()))
+                    .mapToDouble(p -> p.getClose() != null ? p.getClose() : 0.0)
+                    .sum();
+        }
+        if (wealth <= 0 && snap.getTotalUserWealth() != null) {
+            wealth = snap.getTotalUserWealth();
+        }
+        return wealth;
+    }
+
+    private static double snapshotOpen(PortfolioSnapshotModel snap, String portfolioId) {
+        double open = 0.0;
+        if (portfolioId != null && !portfolioId.isEmpty() && snap.getPortfolios() != null) {
+            open = snap.getPortfolios().stream()
+                    .filter(p -> portfolioId.equals(p.getPortfolioId()))
+                    .mapToDouble(p -> p.getOpen() != null ? p.getOpen() : 0.0)
+                    .sum();
+        }
+        if (open <= 0 && snap.getTotalUserWealthOpen() != null) {
+            open = snap.getTotalUserWealthOpen();
+        }
+        return open;
+    }
+
+    private static boolean isDistinctWealth(double a, double b) {
+        if (a <= 0 || b <= 0) {
+            return false;
+        }
+        double rel = Math.abs(a - b) / Math.max(Math.abs(a), Math.abs(b));
+        return rel > 0.0005; // >5 bps
     }
 }

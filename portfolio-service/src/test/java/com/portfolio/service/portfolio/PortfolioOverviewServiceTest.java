@@ -88,15 +88,68 @@ class PortfolioOverviewServiceTest {
                         .currentValue(1393.51)
                         .todayGainLoss(null)
                         .build());
-        when(portfolioSnapshotService.getHistory(eq(userId), isNull(), eq("1W")))
+        when(portfolioSnapshotService.getHistory(eq(userId), isNull(), eq("1M")))
                 .thenReturn(List.of(snap));
-        when(portfolioSnapshotService.getHistory(eq(userId), isNull(), eq("1D")))
+        lenient().when(portfolioSnapshotService.getHistory(eq(userId), isNull(), eq("1W")))
+                .thenReturn(List.of(snap));
+        lenient().when(portfolioSnapshotService.getHistory(eq(userId), isNull(), eq("1D")))
                 .thenReturn(List.of(snap));
         lenient().when(flowLogger.start(anyString(), any())).thenReturn(mock(FlowSpan.class));
 
         PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, TimeInterval.ONE_DAY);
 
         assertNotNull(result.getTodayGainLoss());
+        assertEquals(-50.28, result.getTodayGainLoss(), 0.01);
+    }
+
+    @Test
+    void overviewPortfolio_freezesDayPnLFromTwoPriorSessions_whenMarkUnchanged() {
+        String userId = "user-1";
+        PortfolioSummaryV1 cached = PortfolioSummaryV1.builder()
+                .investmentValue(1443.79)
+                .currentValue(1393.51)
+                .build();
+        com.portfolio.model.portfolio.PortfolioHoldings holdings =
+                com.portfolio.model.portfolio.PortfolioHoldings.builder()
+                        .equityHoldings(List.of(
+                                com.portfolio.model.portfolio.EquityHoldings.builder()
+                                        .symbol("PWL")
+                                        .investmentCost(1443.79)
+                                        .currentValue(1393.51)
+                                        .todayGainLoss(null)
+                                        .build()))
+                        .priceFreshness("AS_OF")
+                        .build();
+        com.am.common.amcommondata.model.PortfolioSnapshotModel thursday =
+                mock(com.am.common.amcommondata.model.PortfolioSnapshotModel.class);
+        when(thursday.getSnapshotDate()).thenReturn(java.time.LocalDate.of(2026, 10, 8));
+        when(thursday.getTotalUserWealth()).thenReturn(1443.79);
+        when(thursday.getPortfolios()).thenReturn(List.of());
+        com.am.common.amcommondata.model.PortfolioSnapshotModel friday =
+                mock(com.am.common.amcommondata.model.PortfolioSnapshotModel.class);
+        when(friday.getSnapshotDate()).thenReturn(java.time.LocalDate.of(2026, 10, 9));
+        when(friday.getTotalUserWealth()).thenReturn(1393.51);
+        when(friday.getPortfolios()).thenReturn(List.of());
+
+        when(portfolioSummaryRedisService.getLatestSummary(userId, TimeInterval.ONE_DAY))
+                .thenReturn(Optional.of(cached));
+        when(portfolioHoldingsService.getPortfolioHoldings(userId, TimeInterval.ONE_DAY, true))
+                .thenReturn(holdings);
+        when(portfolioCalculator.calculateSummary(anyList(), anyDouble()))
+                .thenReturn(PortfolioSummaryV1.builder()
+                        .currentValue(1393.51)
+                        .todayGainLoss(null)
+                        .build());
+        when(portfolioSnapshotService.getHistory(eq(userId), isNull(), eq("1M")))
+                .thenReturn(List.of(thursday, friday));
+        lenient().when(portfolioSnapshotService.getHistory(eq(userId), isNull(), eq("1D")))
+                .thenReturn(List.of(thursday, friday));
+        lenient().when(flowLogger.start(anyString(), any())).thenReturn(mock(FlowSpan.class));
+
+        PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, TimeInterval.ONE_DAY);
+
+        assertNotNull(result.getTodayGainLoss());
+        // Frozen Friday session: 1393.51 − 1443.79
         assertEquals(-50.28, result.getTodayGainLoss(), 0.01);
     }
 

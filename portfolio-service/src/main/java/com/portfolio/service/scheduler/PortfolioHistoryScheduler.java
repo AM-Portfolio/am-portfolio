@@ -108,13 +108,16 @@ public class PortfolioHistoryScheduler {
                 double portGainLoss = portValue - portInvestment;
                 double portGainLossPct = portInvestment > 0 ? (portGainLoss / portInvestment) * 100.0 : 0.0;
 
+                // Session open = prior trading-day close so weekend UIs can freeze day P&L as close−open.
+                double sessionOpen = priorSessionClose(userId, portfolioId, date, portValue);
+
                 entries.add(PortfolioSnapshotEntry.builder()
                         .portfolioId(portfolioId)
                         .portfolioName(portfolio.getName())
                         .brokerType(portfolio.getBrokerType() != null ? portfolio.getBrokerType().name() : null)
-                        .open(portValue)
-                        .high(portValue)
-                        .low(portValue)
+                        .open(sessionOpen)
+                        .high(Math.max(sessionOpen, portValue))
+                        .low(Math.min(sessionOpen, portValue))
                         .close(portValue)
                         .totalInvestment(portInvestment)
                         .totalGainLoss(portGainLoss)
@@ -134,6 +137,39 @@ public class PortfolioHistoryScheduler {
             }
         } catch (Exception e) {
             log.error("Failed to generate history for user: {} on date: {}", userId, date, e);
+        }
+    }
+
+    /** Prior cash-session close for this portfolio (most recent snap before {@code asOf}). */
+    private double priorSessionClose(String userId, String portfolioId, LocalDate asOf, double fallback) {
+        try {
+            var history = portfolioSnapshotService.getHistory(userId, portfolioId, "1M");
+            if (history == null || history.isEmpty()) {
+                history = portfolioSnapshotService.getHistory(userId, null, "1M");
+            }
+            if (history == null || history.isEmpty()) {
+                return fallback;
+            }
+            return history.stream()
+                    .filter(s -> s.getSnapshotDate() != null && s.getSnapshotDate().isBefore(asOf))
+                    .max(java.util.Comparator.comparing(com.am.common.amcommondata.model.PortfolioSnapshotModel::getSnapshotDate))
+                    .map(s -> {
+                        if (s.getPortfolios() != null) {
+                            double close = s.getPortfolios().stream()
+                                    .filter(p -> portfolioId.equals(p.getPortfolioId()))
+                                    .mapToDouble(p -> p.getClose() != null ? p.getClose() : 0.0)
+                                    .sum();
+                            if (close > 0) {
+                                return close;
+                            }
+                        }
+                        return s.getTotalUserWealth() != null && s.getTotalUserWealth() > 0
+                                ? s.getTotalUserWealth() : fallback;
+                    })
+                    .orElse(fallback);
+        } catch (Exception e) {
+            log.debug("priorSessionClose lookup failed user={}: {}", userId, e.getMessage());
+            return fallback;
         }
     }
 

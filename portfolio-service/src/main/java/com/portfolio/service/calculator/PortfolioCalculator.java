@@ -399,7 +399,12 @@ public class PortfolioCalculator {
     }
 
     private boolean isCashOpen() {
-        return cashSessionClock == null || cashSessionClock.isCashOpen();
+        if (cashSessionClock != null) {
+            return cashSessionClock.isCashOpen();
+        }
+        // Unknown clock: use IST cash hours — never assume open (weekend would fake day P&L ≈ 0).
+        return com.portfolio.service.portfolio.PortfolioHoldingsService.isCashOpenIst(
+                LocalDateTime.now(java.time.ZoneId.of("Asia/Kolkata")));
     }
 
     public void calculateWeights(List<EquityHoldings> holdings) {

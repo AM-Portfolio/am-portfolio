@@ -74,13 +74,23 @@ public class SnapshotCatchUpService {
                 LocalDate lastSnapshotDate = lastSnapshot.getSnapshotDate();
 
                 // Gap is from the day after the last snapshot up to (not including) today.
-                // If the last snapshot is yesterday or today, we're up to date.
-                if (!lastSnapshotDate.isBefore(today.minusDays(1))) {
-                    log.info("[CatchUp] Snapshots are up to date for userId={}. Last: {}", userId, lastSnapshotDate);
+                boolean tipFresh = !lastSnapshotDate.isBefore(today.minusDays(1));
+                // Day-P&L freeze needs ≥2 prior sessions; fill holes in the last ~10 calendar days.
+                long recentSessions = portfolioSnapshotRepository
+                        .findByUserIdAndSnapshotDateBetween(userId, today.minusDays(10), today)
+                        .size();
+                if (tipFresh && recentSessions >= 2) {
+                    log.info("[CatchUp] Snapshots are up to date for userId={}. Last: {} recentSessions={}",
+                            userId, lastSnapshotDate, recentSessions);
                     return;
                 }
-
-                backfillStart = lastSnapshotDate.plusDays(1);
+                if (tipFresh) {
+                    log.info("[CatchUp] Tip fresh but only {} session(s) in 10d — backfilling gaps for day-P&L freeze userId={}",
+                            recentSessions, userId);
+                    backfillStart = today.minusDays(10);
+                } else {
+                    backfillStart = lastSnapshotDate.plusDays(1);
+                }
                 // Enforce the max backfill window
                 LocalDate hardCap = today.minusDays(maxBackfillDays);
                 if (backfillStart.isBefore(hardCap)) {
@@ -223,6 +233,8 @@ public class SnapshotCatchUpService {
 
             // Track "last known price" per symbol to carry-forward over weekends/holidays
             Map<String, Double> lastKnownPrice = new HashMap<>();
+            // Prior portfolio close → next day's session open (weekend day-P&L freeze).
+            Map<String, Double> lastPortClose = new HashMap<>();
 
             for (LocalDate date = backfillStart; date.isBefore(today); date = date.plusDays(1)) {
                 // Skip dates that already have a snapshot (idempotency)
@@ -276,21 +288,21 @@ public class SnapshotCatchUpService {
                     String brokerStr = holdings.isEmpty() ? null : holdings.get(0).brokerType;
                     String portfolioName = holdings.isEmpty() ? null : holdings.get(0).portfolioName;
 
-                    // For catch-up snapshots: open = close = high = low (daily close value)
-                    // We don't have intra-day data for historical reconstruction.
+                    double sessionOpen = lastPortClose.getOrDefault(portfolioId, portValue);
                     entries.add(PortfolioSnapshotEntry.builder()
                             .portfolioId(portfolioId)
                             .portfolioName(portfolioName)
                             .brokerType(brokerStr)
-                            .open(portValue)
-                            .high(portValue)
-                            .low(portValue)
+                            .open(sessionOpen)
+                            .high(Math.max(sessionOpen, portValue))
+                            .low(Math.min(sessionOpen, portValue))
                             .close(portValue)
                             .totalInvestment(portInvestment)
                             .totalGainLoss(portGainLoss)
                             .totalGainLossPercentage(portGainLossPct)
                             .holdings(catchUpHoldings)
                             .build());
+                    lastPortClose.put(portfolioId, portValue);
 
                     totalWealth += portValue;
                     totalInvestment += portInvestment;

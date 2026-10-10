@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -23,8 +24,14 @@ public class PortfolioSnapshotService {
 
     private final PortfolioSnapshotRepository portfolioSnapshotRepository;
 
+    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+
+    /**
+     * 1D must look back across weekends/holidays (Sat to Fri needs more than 1 calendar day).
+     * Chart/summary callers still pick the latest non-today baseline from the window.
+     */
     private static final java.util.Map<String, java.time.Period> TIMEFRAME_PERIODS = java.util.Map.of(
-        "1D",  java.time.Period.ofDays(1),
+        "1D",  java.time.Period.ofDays(10),
         "1W",  java.time.Period.ofWeeks(1),
         "1M",  java.time.Period.ofMonths(1),
         "3M",  java.time.Period.ofMonths(3),
@@ -100,7 +107,7 @@ public class PortfolioSnapshotService {
     @org.springframework.cache.annotation.Cacheable(value = "portfolioHistory", key = "#userId + '_' + (#portfolioId != null ? #portfolioId : 'all') + '_' + #timeFrame + '_v3'")
     public List<PortfolioSnapshotModel> getHistory(String userId, String portfolioId, String timeFrame) {
         String frame = timeFrame != null ? timeFrame.toUpperCase() : "1M";
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(IST);
         List<PortfolioSnapshotDocument> documents;
 
         if ("ALL".equals(frame)) {
