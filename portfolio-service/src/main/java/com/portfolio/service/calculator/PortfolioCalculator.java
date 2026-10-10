@@ -12,15 +12,17 @@ import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
+import com.portfolio.redis.session.CashSessionClock;
 import com.am.common.amcommondata.service.price.StockPriceMongoService;
 import com.am.common.amcommondata.document.price.StockPriceDocument;
 import com.am.common.amcommondata.service.marketcap.MarketCapMongoService;
 import com.am.common.amcommondata.document.marketcap.MarketCapDocument;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
+
+import org.springframework.lang.Nullable;
 
 import io.micrometer.observation.annotation.Observed;
 
@@ -33,18 +35,21 @@ public class PortfolioCalculator {
     private final StockPriceMongoService stockPriceMongoService;
     private final com.portfolio.basket.client.EtfApiClient etfApiClient;
     private final java.util.concurrent.Executor taskExecutor;
+    private final CashSessionClock cashSessionClock;
 
     public PortfolioCalculator(
             MarketDataService marketDataService,
             MarketCapMongoService marketCapMongoService,
             StockPriceMongoService stockPriceMongoService,
             com.portfolio.basket.client.EtfApiClient etfApiClient,
-            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
+            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
+            @Nullable CashSessionClock cashSessionClock) {
         this.marketDataService = marketDataService;
         this.marketCapMongoService = marketCapMongoService;
         this.stockPriceMongoService = stockPriceMongoService;
         this.etfApiClient = etfApiClient;
         this.taskExecutor = taskExecutor;
+        this.cashSessionClock = cashSessionClock;
     }
 
     /**
@@ -239,7 +244,13 @@ public class PortfolioCalculator {
                 
                 Double prevClose = apiItem.getPreviousClose();
                 if (prevClose != null && prevClose > 0) {
-                    previousClosePrice = prevClose;
+                    // After hours, last≈prev usually means broker rolled close — not a flat session.
+                    // MarketDataService already tried hist repair; if still collapsed, omit day P&L.
+                    if (!isCashOpen() && MarketDataService.needsPriorSessionClose(apiItem)) {
+                        log.warn("[Holdings] {} excluded from Today's P&L — collapsed last≈prev after hours (repair miss).", symbol);
+                    } else {
+                        previousClosePrice = prevClose;
+                    }
                 } else {
                     log.warn("[Holdings] {} excluded from Today's P&L — no previousClose (OHLC open is not a day baseline).", symbol);
                 }
@@ -250,8 +261,8 @@ public class PortfolioCalculator {
             }
         }
 
-        // Fallback Tier 2: Check MongoDB StockPriceDocument if available
-        if (currentPrice == null && stockPriceMongoService != null && symbol != null) {
+        // Fallback Tier 2: Mongo for last and/or previousClose when live data is incomplete
+        if ((currentPrice == null || previousClosePrice == null) && stockPriceMongoService != null && symbol != null) {
             try {
                 Map<String, StockPriceDocument> priceDocs = stockPriceMongoService.getPrices(List.of(symbol, cleanSymbol(symbol)));
                 if (priceDocs != null && !priceDocs.isEmpty()) {
@@ -259,10 +270,18 @@ public class PortfolioCalculator {
                     if (priceDoc == null) {
                         priceDoc = priceDocs.get(cleanSymbol(symbol));
                     }
-                    if (priceDoc != null && priceDoc.getLastPrice() != null && priceDoc.getLastPrice() > 0) {
-                        currentPrice = priceDoc.getLastPrice();
+                    if (priceDoc != null) {
+                        if (currentPrice == null && priceDoc.getLastPrice() != null && priceDoc.getLastPrice() > 0) {
+                            currentPrice = priceDoc.getLastPrice();
+                        }
                         if (previousClosePrice == null && priceDoc.getPreviousClose() != null && priceDoc.getPreviousClose() > 0) {
-                            previousClosePrice = priceDoc.getPreviousClose();
+                            Double mongoPrev = priceDoc.getPreviousClose();
+                            if (!isCashOpen() && currentPrice != null
+                                    && !MarketDataService.isDistinctPrior(mongoPrev, currentPrice)) {
+                                log.warn("[Holdings] {} Mongo previousClose still collapsed after hours — omit day P&L.", symbol);
+                            } else {
+                                previousClosePrice = mongoPrev;
+                            }
                         }
                     }
                 }
@@ -342,13 +361,19 @@ public class PortfolioCalculator {
         double totalGainLoss = currentValue - totalInvestmentValue;
         double totalGainLossPct = totalInvestmentValue > 0 ? (totalGainLoss / totalInvestmentValue) * 100 : 0.0;
 
-        double todayGainLoss = enrichedHoldings.stream()
-                .filter(h -> h.getTodayGainLoss() != null)
-                .mapToDouble(EquityHoldings::getTodayGainLoss)
-                .sum();
-
-        double previousValue = currentValue - todayGainLoss;
-        double todayGainLossPct = previousValue > 0 ? (todayGainLoss / previousValue) * 100 : 0.0;
+        // Missing baselines must stay null — never collapse to 0.0 (looks like a flat session).
+        boolean anyDayBaseline = enrichedHoldings.stream().anyMatch(h -> h.getTodayGainLoss() != null);
+        Double todayGainLoss = null;
+        Double todayGainLossPct = null;
+        if (anyDayBaseline) {
+            double daySum = enrichedHoldings.stream()
+                    .filter(h -> h.getTodayGainLoss() != null)
+                    .mapToDouble(EquityHoldings::getTodayGainLoss)
+                    .sum();
+            double previousValue = currentValue - daySum;
+            todayGainLoss = round(daySum);
+            todayGainLossPct = previousValue > 0 ? round((daySum / previousValue) * 100) : 0.0;
+        }
 
         int gainers = count(enrichedHoldings, false, true);
         int losers = count(enrichedHoldings, false, false);
@@ -360,8 +385,8 @@ public class PortfolioCalculator {
                 .currentValue(round(currentValue))
                 .totalGainLoss(round(totalGainLoss))
                 .totalGainLossPercentage(round(totalGainLossPct))
-                .todayGainLoss(round(todayGainLoss))
-                .todayGainLossPercentage(round(todayGainLossPct))
+                .todayGainLoss(todayGainLoss)
+                .todayGainLossPercentage(todayGainLossPct)
                 .totalAssets((int) enrichedHoldings.stream().filter(h -> h.getQuantity() != null && h.getQuantity() > 0).count())
                 .gainersCount(gainers)
                 .losersCount(losers)
@@ -371,6 +396,10 @@ public class PortfolioCalculator {
                 .marketCapHoldings(groupMarketCap(enrichedHoldings))
                 .sectorialHoldings(groupSector(enrichedHoldings))
                 .build();
+    }
+
+    private boolean isCashOpen() {
+        return cashSessionClock == null || cashSessionClock.isCashOpen();
     }
 
     public void calculateWeights(List<EquityHoldings> holdings) {

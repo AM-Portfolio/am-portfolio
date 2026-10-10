@@ -282,6 +282,7 @@ public class PortfolioOverviewService {
             PortfolioSummaryV1 live = portfolioCalculator.calculateSummary(ph.getEquityHoldings(), investmentValue);
             cached.setInvestmentValue(investmentValue);
             cached.setCurrentValue(live.getCurrentValue());
+            // Cost-basis overlay as fallback; period return re-applied below for 1W/1M/…
             cached.setTotalGainLoss(live.getTotalGainLoss());
             cached.setTotalGainLossPercentage(live.getTotalGainLossPercentage());
             cached.setTodayGainLoss(live.getTodayGainLoss());
@@ -296,6 +297,8 @@ public class PortfolioOverviewService {
             cached.setPriceSource(ph.getPriceSource());
             cached.setSessionDate(ph.getSessionDate());
             cached.setLastUpdated(java.time.LocalDateTime.now(ZoneId.of("Asia/Kolkata")));
+            // Keep interval-scoped Total Return (snapshot baseline), not all-time cost-basis.
+            applyTimeframeGainLoss(cached, userId, portfolioId, interval);
             return cached;
         } catch (Exception e) {
             log.warn("Summary price overlay failed; serving cached KPIs: {}", e.getMessage());

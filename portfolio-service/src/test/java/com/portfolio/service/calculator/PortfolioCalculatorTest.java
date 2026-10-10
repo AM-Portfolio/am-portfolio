@@ -48,7 +48,7 @@ class PortfolioCalculatorTest {
 
     @BeforeEach
     void setUp() {
-        portfolioCalculator = new PortfolioCalculator(marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run);
+        portfolioCalculator = new PortfolioCalculator(marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run, null);
         holding = new EquityHoldings();
         holding.setSymbol("TCS");
         holding.setQuantity(10.0);
@@ -182,6 +182,62 @@ class PortfolioCalculatorTest {
         assertEquals(1, summary.getTodayGainersCount());
         assertNotNull(summary.getMarketCapHoldings());
         assertNotNull(summary.getSectorialHoldings());
+    }
+
+    @Test
+    void calculateSummary_nullTodayGainLoss_whenNoHoldingBaselines() {
+        holding.setCurrentValue(33000.0);
+        holding.setTodayGainLoss(null);
+        holding.setGainLoss(3000.0);
+
+        PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(List.of(holding), 30000.0);
+
+        assertNull(summary.getTodayGainLoss());
+        assertNull(summary.getTodayGainLossPercentage());
+        assertEquals(3000.0, summary.getTotalGainLoss());
+    }
+
+    @Test
+    void enrichHolding_omitsDayPnL_whenCashClosedAndLastEqualsPrev() {
+        com.portfolio.redis.session.CashSessionClock clock =
+                org.mockito.Mockito.mock(com.portfolio.redis.session.CashSessionClock.class);
+        when(clock.isCashOpen()).thenReturn(false);
+        portfolioCalculator = new PortfolioCalculator(
+                marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run, clock);
+
+        MarketData data = MarketData.builder()
+                .symbol("TCS")
+                .lastPrice(3300.0)
+                .previousClose(3300.0)
+                .build();
+        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", data));
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+
+        List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
+
+        assertNull(results.get(0).getTodayGainLoss());
+        assertEquals(3300.0, results.get(0).getCurrentPrice());
+    }
+
+    @Test
+    void enrichHolding_keepsDayPnL_whenCashOpenAndLastEqualsPrev() {
+        com.portfolio.redis.session.CashSessionClock clock =
+                org.mockito.Mockito.mock(com.portfolio.redis.session.CashSessionClock.class);
+        when(clock.isCashOpen()).thenReturn(true);
+        portfolioCalculator = new PortfolioCalculator(
+                marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run, clock);
+
+        MarketData data = MarketData.builder()
+                .symbol("TCS")
+                .lastPrice(3300.0)
+                .previousClose(3300.0)
+                .build();
+        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", data));
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+
+        List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
+
+        assertEquals(0.0, results.get(0).getTodayGainLoss());
     }
 
     @Test
