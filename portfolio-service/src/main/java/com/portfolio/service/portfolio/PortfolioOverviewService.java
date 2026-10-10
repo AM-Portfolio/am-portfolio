@@ -391,12 +391,19 @@ public class PortfolioOverviewService {
 
         if (baselineSnap == null) return;
 
-        double baselineWealth = (portfolioId != null && !portfolioId.isEmpty())
+        double baselineWealth = (portfolioId != null && !portfolioId.isEmpty()
+                && baselineSnap.getPortfolios() != null)
             ? (baselineSnap.getPortfolios().stream()
                   .filter(p -> portfolioId.equals(p.getPortfolioId()))
                   .mapToDouble(p -> p.getClose() != null ? p.getClose() : 0.0).sum())
             : (baselineSnap.getTotalUserWealth() != null ? baselineSnap.getTotalUserWealth() : 0.0);
 
+        if (baselineWealth <= 0
+                && baselineSnap.getTotalUserWealth() != null
+                && baselineSnap.getTotalUserWealth() > 0) {
+            // Portfolio id may be missing from snapshot entries — use user wealth.
+            baselineWealth = baselineSnap.getTotalUserWealth();
+        }
         if (baselineWealth <= 0) return;
 
         double currentValue = summary.getCurrentValue() != null ? summary.getCurrentValue() : 0.0;
@@ -405,6 +412,12 @@ public class PortfolioOverviewService {
 
         summary.setTotalGainLoss(gainLoss);
         summary.setTotalGainLossPercentage(gainLossPct);
+        // 1D period return is the session change — also fill Today's P&L when quotes lack previousClose.
+        if (TimeInterval.ONE_DAY.equals(interval) && summary.getTodayGainLoss() == null) {
+            summary.setTodayGainLoss(gainLoss);
+            summary.setTodayGainLossPercentage(gainLossPct);
+            log.info("[Overview] Mirrored 1D timeframe gain into todayGainLoss={}", gainLoss);
+        }
     }
 
     /**
@@ -423,6 +436,10 @@ public class PortfolioOverviewService {
         try {
             List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(userId, portfolioId, "1W");
             if (history == null || history.isEmpty()) {
+                history = portfolioSnapshotService.getHistory(userId, null, "1W");
+            }
+            if (history == null || history.isEmpty()) {
+                log.info("[Overview] No snapshot history for day P&L fallback user={}", userId);
                 return;
             }
             LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
@@ -431,15 +448,23 @@ public class PortfolioOverviewService {
                     .max(Comparator.comparing(PortfolioSnapshotModel::getSnapshotDate))
                     .orElse(null);
             if (baselineSnap == null) {
+                log.info("[Overview] No non-today snapshot for day P&L fallback user={} today={}", userId, today);
                 return;
             }
-            double baselineWealth = (portfolioId != null && !portfolioId.isEmpty())
-                    ? baselineSnap.getPortfolios().stream()
-                            .filter(p -> portfolioId.equals(p.getPortfolioId()))
-                            .mapToDouble(p -> p.getClose() != null ? p.getClose() : 0.0)
-                            .sum()
-                    : (baselineSnap.getTotalUserWealth() != null ? baselineSnap.getTotalUserWealth() : 0.0);
+            double baselineWealth = 0.0;
+            if (portfolioId != null && !portfolioId.isEmpty()
+                    && baselineSnap.getPortfolios() != null) {
+                baselineWealth = baselineSnap.getPortfolios().stream()
+                        .filter(p -> portfolioId.equals(p.getPortfolioId()))
+                        .mapToDouble(p -> p.getClose() != null ? p.getClose() : 0.0)
+                        .sum();
+            }
+            if (baselineWealth <= 0 && baselineSnap.getTotalUserWealth() != null) {
+                baselineWealth = baselineSnap.getTotalUserWealth();
+            }
             if (baselineWealth <= 0) {
+                log.info("[Overview] Snapshot baseline wealth <= 0 date={} portfolioId={}",
+                        baselineSnap.getSnapshotDate(), portfolioId);
                 return;
             }
             double currentValue = summary.getCurrentValue() != null ? summary.getCurrentValue() : 0.0;
