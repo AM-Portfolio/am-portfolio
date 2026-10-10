@@ -1044,7 +1044,7 @@ public class MarketDataService {
      * Walk daily bars backward from the latest close to find a prior session close
      * distinct from the rolled session close (weekend / holiday collapse).
      */
-    static Double resolvePriorCloseFromHistorical(MarketData historical, Double sessionClose) {
+    public static Double resolvePriorCloseFromHistorical(MarketData historical, Double sessionClose) {
         if (historical == null) {
             return null;
         }

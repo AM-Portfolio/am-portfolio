@@ -1,5 +1,6 @@
 package com.portfolio.service.portfolio;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -12,8 +13,15 @@ import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.model.mapper.PortfolioMapperv1;
 import com.portfolio.model.TimeInterval;
+import com.portfolio.model.market.MarketData;
+import com.portfolio.model.market.TimeFrame;
+import com.portfolio.model.portfolio.EquityHoldings;
+import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.v1.BrokerPortfolioSummary;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
+import com.portfolio.marketdata.model.FilterType;
+import com.portfolio.marketdata.model.InstrumentType;
+import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.redis.service.PortfolioSummaryRedisService;
 import com.portfolio.service.calculator.PortfolioCalculator;
 import com.am.observability.flow.FlowLogger;
@@ -43,6 +51,9 @@ public class PortfolioOverviewService {
     private final PortfolioCalculator portfolioCalculator;
     private final FlowLogger flowLogger;
 
+    @org.springframework.lang.Nullable
+    private final MarketDataService marketDataService;
+
     public PortfolioOverviewService(
             PortfolioService portfolioService,
             PortfolioHoldingsService portfolioHoldingsService,
@@ -51,7 +62,8 @@ public class PortfolioOverviewService {
             PortfolioSnapshotService portfolioSnapshotService,
             PortfolioSummaryMongoService portfolioSummaryMongoService,
             PortfolioCalculator portfolioCalculator,
-            FlowLogger flowLogger) {
+            FlowLogger flowLogger,
+            @org.springframework.lang.Nullable MarketDataService marketDataService) {
         this.portfolioService = portfolioService;
         this.portfolioHoldingsService = portfolioHoldingsService;
         this.portfolioMapper = portfolioMapper;
@@ -60,6 +72,7 @@ public class PortfolioOverviewService {
         this.portfolioSummaryMongoService = portfolioSummaryMongoService;
         this.portfolioCalculator = portfolioCalculator;
         this.flowLogger = flowLogger;
+        this.marketDataService = marketDataService;
     }
 
     public PortfolioSummaryV1 overviewPortfolio(String userId, TimeInterval interval) {
@@ -215,7 +228,8 @@ public class PortfolioOverviewService {
         // Apply timeframe overrides before caching
         applyTimeframeGainLoss(finalSummary, userId, portfolioId, interval);
         // When per-symbol previousClose repair misses after hours, freeze day P&L from prior-session snapshot.
-        applySessionDayGainLossIfMissing(finalSummary, userId, portfolioId);
+        applySessionDayGainLossIfMissing(finalSummary, userId, portfolioId, interval);
+        mirrorSessionDayIntoOneDayTotal(finalSummary, interval);
 
         // Store in cache
         log.debug("Caching portfolio summary for user: {}", userId);
@@ -276,7 +290,8 @@ public class PortfolioOverviewService {
                     : portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, interval, true);
             if (ph == null || ph.getEquityHoldings() == null || ph.getEquityHoldings().isEmpty()) {
                 // Still freeze day P&L from snapshots when holdings reprice is unavailable.
-                applySessionDayGainLossIfMissing(cached, userId, portfolioId);
+                applySessionDayGainLossIfMissing(cached, userId, portfolioId, interval);
+                mirrorSessionDayIntoOneDayTotal(cached, interval);
                 return cached;
             }
             double investmentValue = cached.getInvestmentValue() != null
@@ -306,11 +321,13 @@ public class PortfolioOverviewService {
             clearCollapsedAsOfTodayGain(cached);
             // Keep interval-scoped Total Return (snapshot baseline), not all-time cost-basis.
             applyTimeframeGainLoss(cached, userId, portfolioId, interval);
-            applySessionDayGainLossIfMissing(cached, userId, portfolioId);
+            applySessionDayGainLossIfMissing(cached, userId, portfolioId, interval);
+            mirrorSessionDayIntoOneDayTotal(cached, interval);
             return cached;
         } catch (Exception e) {
             log.warn("Summary price overlay failed; serving cached KPIs: {}", e.getMessage());
-            applySessionDayGainLossIfMissing(cached, userId, portfolioId);
+            applySessionDayGainLossIfMissing(cached, userId, portfolioId, interval);
+            mirrorSessionDayIntoOneDayTotal(cached, interval);
             return cached;
         }
     }
@@ -408,8 +425,11 @@ public class PortfolioOverviewService {
 
         summary.setTotalGainLoss(gainLoss);
         summary.setTotalGainLossPercentage(gainLossPct);
-        // 1D period return is the session change — also fill Today's P&L when quotes lack previousClose.
-        if (TimeInterval.ONE_DAY.equals(interval) && needsSessionDayFill(summary)) {
+        // 1D period return is the session change — fill Today's P&L when quotes lack previousClose.
+        // Skip ~0 (weekend mark == last EOD): leave null so session/hist freeze can run.
+        if (TimeInterval.ONE_DAY.equals(interval)
+                && needsSessionDayFill(summary)
+                && Math.abs(gainLoss) >= 0.005) {
             summary.setTodayGainLoss(gainLoss);
             summary.setTodayGainLossPercentage(gainLossPct);
             log.info("[Overview] Mirrored 1D timeframe gain into todayGainLoss={}", gainLoss);
@@ -420,82 +440,221 @@ public class PortfolioOverviewService {
      * Industry freeze when quote previousClose is collapsed/missing after hours:
      * day P&L = last cash-session close − prior cash-session close (LTP mark when distinct).
      * On weekends, {@code current ≈ last session}, so using current−lastSnap yields ~0 —
-     * prefer two non-today snapshots when available.
+     * prefer two non-today snapshots when available; else holdings LTP vs hist priorClose.
      * Fills when todayGainLoss is null or a collapsed AS_OF zero — never overwrites a live non-zero day.
      */
     private void applySessionDayGainLossIfMissing(
-            PortfolioSummaryV1 summary, String userId, String portfolioId) {
+            PortfolioSummaryV1 summary, String userId, String portfolioId, TimeInterval interval) {
         if (summary == null || !needsSessionDayFill(summary)) {
             return;
         }
-        if (portfolioSnapshotService == null || userId == null || userId.isBlank()) {
+        if (userId == null || userId.isBlank()) {
             return;
         }
         try {
-            List<PortfolioSnapshotModel> history = loadSnapshotHistory(userId, portfolioId);
-            if (history == null || history.isEmpty()) {
-                log.info("[Overview] No snapshot history for day P&L fallback user={}", userId);
+            if (tryFillDayGainFromSnapshots(summary, userId, portfolioId)) {
                 return;
             }
-            LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
-            List<PortfolioSnapshotModel> priorSessions = history.stream()
-                    .filter(s -> s.getSnapshotDate() != null && !today.equals(s.getSnapshotDate()))
-                    .sorted(Comparator.comparing(PortfolioSnapshotModel::getSnapshotDate).reversed())
-                    .toList();
-            if (priorSessions.isEmpty()) {
-                log.info("[Overview] No non-today snapshot for day P&L fallback user={} today={}", userId, today);
-                return;
-            }
-
-            PortfolioSnapshotModel lastSession = priorSessions.get(0);
-            double lastWealth = snapshotWealth(lastSession, portfolioId);
-            if (lastWealth <= 0) {
-                log.info("[Overview] Snapshot baseline wealth <= 0 date={} portfolioId={}",
-                        lastSession.getSnapshotDate(), portfolioId);
-                return;
-            }
-
-            double currentValue = summary.getCurrentValue() != null ? summary.getCurrentValue() : 0.0;
-            double dayGain;
-            double dayPct;
-            String mode;
-
-            // 1) LTP mark moved vs last EOD — show that (never prefer flat two-session 0 over LTP).
-            if (isDistinctWealth(currentValue, lastWealth)) {
-                dayGain = currentValue - lastWealth;
-                dayPct = (dayGain / lastWealth) * 100.0;
-                mode = "ltp-vs-last " + lastSession.getSnapshotDate();
-            } else {
-                // 2) Mark ≈ last EOD (weekend): freeze last cash session via OHLC or two snaps.
-                double lastOpen = snapshotOpen(lastSession, portfolioId);
-                if (lastOpen > 0 && isDistinctWealth(lastWealth, lastOpen)) {
-                    dayGain = lastWealth - lastOpen;
-                    dayPct = (dayGain / lastOpen) * 100.0;
-                    mode = "session-OHLC " + lastSession.getSnapshotDate();
-                } else if (priorSessions.size() >= 2) {
-                    PortfolioSnapshotModel priorSession = priorSessions.get(1);
-                    double priorWealth = snapshotWealth(priorSession, portfolioId);
-                    if (priorWealth <= 0 || !isDistinctWealth(lastWealth, priorWealth)) {
-                        log.info("[Overview] No distinct prior session for day P&L freeze date={} wealth={}",
-                                lastSession.getSnapshotDate(), lastWealth);
-                        return; // do not publish fake 0
-                    }
-                    dayGain = lastWealth - priorWealth;
-                    dayPct = (dayGain / priorWealth) * 100.0;
-                    mode = "two-session " + priorSession.getSnapshotDate() + "→" + lastSession.getSnapshotDate();
-                } else {
-                    log.info("[Overview] Single snapshot equals LTP mark; cannot freeze day P&L date={} wealth={}",
-                            lastSession.getSnapshotDate(), lastWealth);
-                    return;
-                }
-            }
-
-            summary.setTodayGainLoss(dayGain);
-            summary.setTodayGainLossPercentage(dayPct);
-            log.info("[Overview] Filled todayGainLoss via {} gain={}", mode, dayGain);
+            fillDayGainFromHoldingsMarketData(summary, userId, portfolioId);
         } catch (Exception e) {
-            log.warn("[Overview] Snapshot day P&L fallback failed: {}", e.getMessage());
+            log.warn("[Overview] Session day P&L fallback failed: {}", e.getMessage());
         }
+    }
+
+    /** @return true if todayGainLoss was set from snapshots */
+    private boolean tryFillDayGainFromSnapshots(
+            PortfolioSummaryV1 summary, String userId, String portfolioId) {
+        if (portfolioSnapshotService == null) {
+            return false;
+        }
+        List<PortfolioSnapshotModel> history = loadSnapshotHistory(userId, portfolioId);
+        if (history == null || history.isEmpty()) {
+            log.info("[Overview] No snapshot history for day P&L fallback user={}", userId);
+            return false;
+        }
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+        List<PortfolioSnapshotModel> priorSessions = history.stream()
+                .filter(s -> s.getSnapshotDate() != null && !today.equals(s.getSnapshotDate()))
+                .sorted(Comparator.comparing(PortfolioSnapshotModel::getSnapshotDate).reversed())
+                .toList();
+        if (priorSessions.isEmpty()) {
+            log.info("[Overview] No non-today snapshot for day P&L fallback user={} today={}", userId, today);
+            return false;
+        }
+
+        PortfolioSnapshotModel lastSession = priorSessions.get(0);
+        double lastWealth = snapshotWealth(lastSession, portfolioId);
+        if (lastWealth <= 0) {
+            log.info("[Overview] Snapshot baseline wealth <= 0 date={} portfolioId={}",
+                    lastSession.getSnapshotDate(), portfolioId);
+            return false;
+        }
+
+        double currentValue = summary.getCurrentValue() != null ? summary.getCurrentValue() : 0.0;
+        double dayGain;
+        double dayPct;
+        String mode;
+
+        if (isDistinctWealth(currentValue, lastWealth)) {
+            dayGain = currentValue - lastWealth;
+            dayPct = (dayGain / lastWealth) * 100.0;
+            mode = "ltp-vs-last " + lastSession.getSnapshotDate();
+        } else {
+            double lastOpen = snapshotOpen(lastSession, portfolioId);
+            if (lastOpen > 0 && isDistinctWealth(lastWealth, lastOpen)) {
+                dayGain = lastWealth - lastOpen;
+                dayPct = (dayGain / lastOpen) * 100.0;
+                mode = "session-OHLC " + lastSession.getSnapshotDate();
+            } else if (priorSessions.size() >= 2) {
+                PortfolioSnapshotModel priorSession = priorSessions.get(1);
+                double priorWealth = snapshotWealth(priorSession, portfolioId);
+                if (priorWealth <= 0 || !isDistinctWealth(lastWealth, priorWealth)) {
+                    log.info("[Overview] No distinct prior session for day P&L freeze date={} wealth={}",
+                            lastSession.getSnapshotDate(), lastWealth);
+                    return false;
+                }
+                dayGain = lastWealth - priorWealth;
+                dayPct = (dayGain / priorWealth) * 100.0;
+                mode = "two-session " + priorSession.getSnapshotDate() + "→" + lastSession.getSnapshotDate();
+            } else {
+                log.info("[Overview] Single snapshot equals LTP mark; trying holdings hist user={}", userId);
+                return false;
+            }
+        }
+
+        summary.setTodayGainLoss(dayGain);
+        summary.setTodayGainLossPercentage(dayPct);
+        log.info("[Overview] Filled todayGainLoss via {} gain={}", mode, dayGain);
+        return true;
+    }
+
+    /**
+     * Last-resort freeze: sum qty × (LTP − hist priorClose) using MarketDataService repair.
+     * Never uses investment cost as a day baseline.
+     */
+    private void fillDayGainFromHoldingsMarketData(
+            PortfolioSummaryV1 summary, String userId, String portfolioId) {
+        if (!needsSessionDayFill(summary) || marketDataService == null || portfolioHoldingsService == null) {
+            return;
+        }
+        PortfolioHoldings ph;
+        try {
+            ph = (portfolioId == null || portfolioId.isBlank())
+                    ? portfolioHoldingsService.getPortfolioHoldings(userId, TimeInterval.ONE_DAY, true)
+                    : portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, TimeInterval.ONE_DAY, true);
+        } catch (Exception e) {
+            log.warn("[Overview] Holdings load for day P&L hist failed: {}", e.getMessage());
+            return;
+        }
+        if (ph == null || ph.getEquityHoldings() == null || ph.getEquityHoldings().isEmpty()) {
+            return;
+        }
+
+        List<String> symbols = new ArrayList<>();
+        for (EquityHoldings h : ph.getEquityHoldings()) {
+            if (h.getSymbol() != null && !h.getSymbol().isBlank()) {
+                symbols.add(h.getSymbol());
+            }
+        }
+        if (symbols.isEmpty()) {
+            return;
+        }
+
+        Map<String, MarketData> quotes;
+        try {
+            quotes = marketDataService.getMarketData(symbols);
+        } catch (Exception e) {
+            log.warn("[Overview] getMarketData for day P&L failed: {}", e.getMessage());
+            return;
+        }
+        if (quotes == null || quotes.isEmpty()) {
+            return;
+        }
+
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+        Map<String, MarketData> hist = Map.of();
+        try {
+            hist = marketDataService.getHistoricalData(
+                    symbols,
+                    today.minusDays(14),
+                    today,
+                    TimeFrame.DAY,
+                    InstrumentType.STOCK,
+                    FilterType.ALL,
+                    null,
+                    null,
+                    Boolean.FALSE);
+        } catch (Exception e) {
+            log.debug("[Overview] Daily hist for priorClose skipped: {}", e.getMessage());
+        }
+
+        double daySum = 0.0;
+        double priorWealth = 0.0;
+        int counted = 0;
+        for (EquityHoldings h : ph.getEquityHoldings()) {
+            if (h.getSymbol() == null || h.getQuantity() == null || h.getQuantity() <= 0) {
+                continue;
+            }
+            MarketData md = lookupMarketData(quotes, h.getSymbol());
+            Double ltp = h.getCurrentPrice();
+            if ((ltp == null || ltp <= 0) && md != null) {
+                ltp = md.getLastPrice();
+            }
+            if (ltp == null || ltp <= 0) {
+                continue;
+            }
+            Double prior = md != null ? md.getPreviousClose() : null;
+            if (prior == null || !MarketDataService.isDistinctPrior(prior, ltp)) {
+                MarketData hbar = lookupMarketData(hist, h.getSymbol());
+                prior = MarketDataService.resolvePriorCloseFromHistorical(hbar, ltp);
+            }
+            if (prior == null || !MarketDataService.isDistinctPrior(prior, ltp)) {
+                continue;
+            }
+            daySum += (ltp - prior) * h.getQuantity();
+            priorWealth += prior * h.getQuantity();
+            counted++;
+        }
+        if (counted == 0 || priorWealth <= 0) {
+            log.info("[Overview] Holdings hist day P&L unavailable user={} counted={}", userId, counted);
+            return;
+        }
+        summary.setTodayGainLoss(daySum);
+        summary.setTodayGainLossPercentage((daySum / priorWealth) * 100.0);
+        if (summary.getPriceFreshness() == null) {
+            summary.setPriceFreshness("AS_OF");
+        }
+        log.info("[Overview] Filled todayGainLoss via holdings-hist symbols={}/{} gain={}",
+                counted, symbols.size(), daySum);
+    }
+
+    private static MarketData lookupMarketData(Map<String, MarketData> map, String symbol) {
+        if (map == null || symbol == null) {
+            return null;
+        }
+        MarketData md = map.get(symbol);
+        if (md != null) {
+            return md;
+        }
+        String cleaned = symbol;
+        int colon = symbol.indexOf(':');
+        if (colon > 0 && colon < symbol.length() - 1) {
+            cleaned = symbol.substring(colon + 1);
+        }
+        md = map.get(cleaned);
+        if (md != null) {
+            return md;
+        }
+        return map.get(cleaned.toUpperCase(java.util.Locale.ROOT));
+    }
+
+    /** 1D Total Return should match Today's session P&L once freeze filled it. */
+    private static void mirrorSessionDayIntoOneDayTotal(PortfolioSummaryV1 summary, TimeInterval interval) {
+        if (summary == null || !TimeInterval.ONE_DAY.equals(interval) || summary.getTodayGainLoss() == null) {
+            return;
+        }
+        summary.setTotalGainLoss(summary.getTodayGainLoss());
+        summary.setTotalGainLossPercentage(summary.getTodayGainLossPercentage());
     }
 
     private List<PortfolioSnapshotModel> loadSnapshotHistory(String userId, String portfolioId) {
