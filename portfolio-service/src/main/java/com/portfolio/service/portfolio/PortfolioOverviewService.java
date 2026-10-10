@@ -211,6 +211,7 @@ public class PortfolioOverviewService {
         log.info("Total portfolio value for user {} and {}: {}",
                 userId, context, finalSummary.getInvestmentValue());
 
+        clearCollapsedAsOfTodayGain(finalSummary);
         // Apply timeframe overrides before caching
         applyTimeframeGainLoss(finalSummary, userId, portfolioId, interval);
         // When per-symbol previousClose repair misses after hours, freeze day P&L from prior-session snapshot.
@@ -301,6 +302,8 @@ public class PortfolioOverviewService {
             cached.setPriceSource(ph.getPriceSource());
             cached.setSessionDate(ph.getSessionDate());
             cached.setLastUpdated(java.time.LocalDateTime.now(ZoneId.of("Asia/Kolkata")));
+            // AS_OF + today==0 is collapsed quote math, not a known flat session — clear for freeze.
+            clearCollapsedAsOfTodayGain(cached);
             // Keep interval-scoped Total Return (snapshot baseline), not all-time cost-basis.
             applyTimeframeGainLoss(cached, userId, portfolioId, interval);
             applySessionDayGainLossIfMissing(cached, userId, portfolioId);
@@ -406,7 +409,7 @@ public class PortfolioOverviewService {
         summary.setTotalGainLoss(gainLoss);
         summary.setTotalGainLossPercentage(gainLossPct);
         // 1D period return is the session change — also fill Today's P&L when quotes lack previousClose.
-        if (TimeInterval.ONE_DAY.equals(interval) && summary.getTodayGainLoss() == null) {
+        if (TimeInterval.ONE_DAY.equals(interval) && needsSessionDayFill(summary)) {
             summary.setTodayGainLoss(gainLoss);
             summary.setTodayGainLossPercentage(gainLossPct);
             log.info("[Overview] Mirrored 1D timeframe gain into todayGainLoss={}", gainLoss);
@@ -415,14 +418,14 @@ public class PortfolioOverviewService {
 
     /**
      * Industry freeze when quote previousClose is collapsed/missing after hours:
-     * day P&L = last cash-session close − prior cash-session close.
+     * day P&L = last cash-session close − prior cash-session close (LTP mark when distinct).
      * On weekends, {@code current ≈ last session}, so using current−lastSnap yields ~0 —
      * prefer two non-today snapshots when available.
-     * Only fills when per-symbol todayGainLoss is still null — never overwrites a live baseline.
+     * Fills when todayGainLoss is null or a collapsed AS_OF zero — never overwrites a live non-zero day.
      */
     private void applySessionDayGainLossIfMissing(
             PortfolioSummaryV1 summary, String userId, String portfolioId) {
-        if (summary == null || summary.getTodayGainLoss() != null) {
+        if (summary == null || !needsSessionDayFill(summary)) {
             return;
         }
         if (portfolioSnapshotService == null || userId == null || userId.isBlank()) {
@@ -553,5 +556,25 @@ public class PortfolioOverviewService {
         }
         double rel = Math.abs(a - b) / Math.max(Math.abs(a), Math.abs(b));
         return rel > 0.0005; // >5 bps
+    }
+
+    /** True when day P&L is unknown or a collapsed AS_OF zero (not a trusted live flat day). */
+    private static boolean needsSessionDayFill(PortfolioSummaryV1 summary) {
+        if (summary.getTodayGainLoss() == null) {
+            return true;
+        }
+        return isAsOf(summary) && Math.abs(summary.getTodayGainLoss()) < 0.005;
+    }
+
+    private static boolean isAsOf(PortfolioSummaryV1 summary) {
+        String freshness = summary.getPriceFreshness();
+        return freshness == null || !"LIVE".equalsIgnoreCase(freshness);
+    }
+
+    private static void clearCollapsedAsOfTodayGain(PortfolioSummaryV1 summary) {
+        if (summary != null && needsSessionDayFill(summary) && summary.getTodayGainLoss() != null) {
+            summary.setTodayGainLoss(null);
+            summary.setTodayGainLossPercentage(null);
+        }
     }
 }

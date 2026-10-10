@@ -370,9 +370,16 @@ public class PortfolioCalculator {
                     .filter(h -> h.getTodayGainLoss() != null)
                     .mapToDouble(EquityHoldings::getTodayGainLoss)
                     .sum();
-            double previousValue = currentValue - daySum;
-            todayGainLoss = round(daySum);
-            todayGainLossPct = previousValue > 0 ? round((daySum / previousValue) * 100) : 0.0;
+            // After hours, last≈prev quotes often sum to ~0 — treat as missing so overview can
+            // freeze day P&L from LTP mark vs prior session (not a fake flat day).
+            if (!isCashOpen() && Math.abs(daySum) < 0.005) {
+                todayGainLoss = null;
+                todayGainLossPct = null;
+            } else {
+                double previousValue = currentValue - daySum;
+                todayGainLoss = round(daySum);
+                todayGainLossPct = previousValue > 0 ? round((daySum / previousValue) * 100) : 0.0;
+            }
         }
 
         int gainers = count(enrichedHoldings, false, true);

@@ -103,6 +103,53 @@ class PortfolioOverviewServiceTest {
     }
 
     @Test
+    void overviewPortfolio_overwritesAsOfZeroTodayGain_withLtpVsPriorSession() {
+        String userId = "user-1";
+        PortfolioSummaryV1 cached = PortfolioSummaryV1.builder()
+                .investmentValue(634072.0)
+                .currentValue(630180.26)
+                .todayGainLoss(0.0)
+                .todayGainLossPercentage(0.0)
+                .build();
+        com.portfolio.model.portfolio.PortfolioHoldings holdings =
+                com.portfolio.model.portfolio.PortfolioHoldings.builder()
+                        .equityHoldings(List.of(
+                                com.portfolio.model.portfolio.EquityHoldings.builder()
+                                        .symbol("RELIANCE")
+                                        .investmentCost(634072.0)
+                                        .currentValue(630255.63)
+                                        .todayGainLoss(0.0)
+                                        .build()))
+                        .priceFreshness("AS_OF")
+                        .build();
+        com.am.common.amcommondata.model.PortfolioSnapshotModel friday =
+                mock(com.am.common.amcommondata.model.PortfolioSnapshotModel.class);
+        when(friday.getSnapshotDate()).thenReturn(java.time.LocalDate.of(2026, 10, 9));
+        when(friday.getTotalUserWealth()).thenReturn(630180.26);
+        when(friday.getPortfolios()).thenReturn(List.of());
+
+        when(portfolioSummaryRedisService.getLatestSummary(userId, TimeInterval.ONE_WEEK))
+                .thenReturn(Optional.of(cached));
+        when(portfolioHoldingsService.getPortfolioHoldings(userId, TimeInterval.ONE_WEEK, true))
+                .thenReturn(holdings);
+        when(portfolioCalculator.calculateSummary(anyList(), anyDouble()))
+                .thenReturn(PortfolioSummaryV1.builder()
+                        .currentValue(630255.63)
+                        .todayGainLoss(0.0)
+                        .todayGainLossPercentage(0.0)
+                        .build());
+        when(portfolioSnapshotService.getHistory(eq(userId), isNull(), eq("1M")))
+                .thenReturn(List.of(friday));
+        lenient().when(flowLogger.start(anyString(), any())).thenReturn(mock(FlowSpan.class));
+
+        PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, TimeInterval.ONE_WEEK);
+
+        assertNotNull(result.getTodayGainLoss());
+        // LTP mark − last session close (not stuck at 0)
+        assertEquals(75.37, result.getTodayGainLoss(), 0.01);
+    }
+
+    @Test
     void overviewPortfolio_freezesDayPnLFromTwoPriorSessions_whenMarkUnchanged() {
         String userId = "user-1";
         PortfolioSummaryV1 cached = PortfolioSummaryV1.builder()
