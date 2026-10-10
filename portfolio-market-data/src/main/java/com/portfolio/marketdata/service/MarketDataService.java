@@ -1016,7 +1016,7 @@ public class MarketDataService {
         }
     }
 
-    static boolean needsPriorSessionClose(MarketData md) {
+    public static boolean needsPriorSessionClose(MarketData md) {
         if (md == null) {
             return false;
         }
@@ -1032,7 +1032,7 @@ public class MarketDataService {
     }
 
     /** True when prior differs from session last by at least 1 bp (relative). */
-    static boolean isDistinctPrior(Double prior, Double sessionClose) {
+    public static boolean isDistinctPrior(Double prior, Double sessionClose) {
         if (prior == null || prior <= 0 || sessionClose == null || sessionClose <= 0) {
             return false;
         }
