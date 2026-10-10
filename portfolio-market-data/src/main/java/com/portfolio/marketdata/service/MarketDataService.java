@@ -77,9 +77,10 @@ public class MarketDataService {
      * Symbols where prior-close hist was already attempted this TTL window.
      * Kept separate from {@link #priorCloseCache} so a miss never poisons day% with last≈prev.
      */
+    /** Sticky miss TTL: short so weekend hist/API blips do not freeze day% for a full session. */
     private final com.github.benmanes.caffeine.cache.Cache<String, Boolean> priorClosePrefetchAttempted =
             com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
-            .expireAfterWrite(18, java.util.concurrent.TimeUnit.HOURS)
+            .expireAfterWrite(15, java.util.concurrent.TimeUnit.MINUTES)
             .maximumSize(20000)
             .build();
 

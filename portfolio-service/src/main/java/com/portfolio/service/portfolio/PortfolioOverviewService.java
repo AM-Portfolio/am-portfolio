@@ -213,6 +213,8 @@ public class PortfolioOverviewService {
 
         // Apply timeframe overrides before caching
         applyTimeframeGainLoss(finalSummary, userId, portfolioId, interval);
+        // When per-symbol previousClose repair misses after hours, freeze day P&L from prior-session snapshot.
+        applySessionDayGainLossIfMissing(finalSummary, userId, portfolioId);
 
         // Store in cache
         log.debug("Caching portfolio summary for user: {}", userId);
@@ -299,6 +301,7 @@ public class PortfolioOverviewService {
             cached.setLastUpdated(java.time.LocalDateTime.now(ZoneId.of("Asia/Kolkata")));
             // Keep interval-scoped Total Return (snapshot baseline), not all-time cost-basis.
             applyTimeframeGainLoss(cached, userId, portfolioId, interval);
+            applySessionDayGainLossIfMissing(cached, userId, portfolioId);
             return cached;
         } catch (Exception e) {
             log.warn("Summary price overlay failed; serving cached KPIs: {}", e.getMessage());
@@ -402,5 +405,52 @@ public class PortfolioOverviewService {
 
         summary.setTotalGainLoss(gainLoss);
         summary.setTotalGainLossPercentage(gainLossPct);
+    }
+
+    /**
+     * Industry pattern when quote previousClose is collapsed/missing after hours:
+     * day P&L = current wealth − last non-today portfolio snapshot (prior session close).
+     * Only fills when per-symbol todayGainLoss is still null — never overwrites a live baseline.
+     */
+    private void applySessionDayGainLossIfMissing(
+            PortfolioSummaryV1 summary, String userId, String portfolioId) {
+        if (summary == null || summary.getTodayGainLoss() != null) {
+            return;
+        }
+        if (portfolioSnapshotService == null || userId == null || userId.isBlank()) {
+            return;
+        }
+        try {
+            List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(userId, portfolioId, "1W");
+            if (history == null || history.isEmpty()) {
+                return;
+            }
+            LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+            PortfolioSnapshotModel baselineSnap = history.stream()
+                    .filter(s -> s.getSnapshotDate() != null && !today.equals(s.getSnapshotDate()))
+                    .max(Comparator.comparing(PortfolioSnapshotModel::getSnapshotDate))
+                    .orElse(null);
+            if (baselineSnap == null) {
+                return;
+            }
+            double baselineWealth = (portfolioId != null && !portfolioId.isEmpty())
+                    ? baselineSnap.getPortfolios().stream()
+                            .filter(p -> portfolioId.equals(p.getPortfolioId()))
+                            .mapToDouble(p -> p.getClose() != null ? p.getClose() : 0.0)
+                            .sum()
+                    : (baselineSnap.getTotalUserWealth() != null ? baselineSnap.getTotalUserWealth() : 0.0);
+            if (baselineWealth <= 0) {
+                return;
+            }
+            double currentValue = summary.getCurrentValue() != null ? summary.getCurrentValue() : 0.0;
+            double dayGain = currentValue - baselineWealth;
+            double dayPct = (dayGain / baselineWealth) * 100.0;
+            summary.setTodayGainLoss(dayGain);
+            summary.setTodayGainLossPercentage(dayPct);
+            log.info("[Overview] Filled todayGainLoss from prior-session snapshot date={} gain={}",
+                    baselineSnap.getSnapshotDate(), dayGain);
+        } catch (Exception e) {
+            log.warn("[Overview] Snapshot day P&L fallback failed: {}", e.getMessage());
+        }
     }
 }
