@@ -110,6 +110,15 @@ public class PortfolioHistoryScheduler {
 
                 // Session open = prior trading-day close so weekend UIs can freeze day P&L as close−open.
                 double sessionOpen = priorSessionClose(userId, portfolioId, date, portValue);
+                Double sessionDayGain = null;
+                Double sessionDayPct = null;
+                if (sessionOpen > 0) {
+                    double rawDay = portValue - sessionOpen;
+                    if (Math.abs(rawDay) >= 0.005) {
+                        sessionDayGain = rawDay;
+                        sessionDayPct = (rawDay / sessionOpen) * 100.0;
+                    }
+                }
 
                 entries.add(PortfolioSnapshotEntry.builder()
                         .portfolioId(portfolioId)
@@ -122,6 +131,8 @@ public class PortfolioHistoryScheduler {
                         .totalInvestment(portInvestment)
                         .totalGainLoss(portGainLoss)
                         .totalGainLossPercentage(portGainLossPct)
+                        .sessionDayGainLoss(sessionDayGain)
+                        .sessionDayGainLossPercentage(sessionDayPct)
                         .holdings(snapshotHoldings)
                         .build());
                         

@@ -50,6 +50,7 @@ public class PortfolioSnapshotService {
     public void saveUserSnapshot(String userId, Double totalUserWealth, Double totalUserInvestment, Double totalUserGainLoss, Double totalUserGainLossPercentage, List<PortfolioSnapshotEntry> entries, LocalDate snapshotDate) {
         Optional<PortfolioSnapshotDocument> existing = portfolioSnapshotRepository.findByUserIdAndSnapshotDate(userId, snapshotDate);
         PortfolioSnapshotDocument snapshot;
+        Double[] sessionDay = sumSessionDayGain(entries);
         
         if (existing.isPresent()) {
             // Update existing snapshot for the given date (Upsert)
@@ -58,6 +59,8 @@ public class PortfolioSnapshotService {
             snapshot.setTotalUserInvestment(totalUserInvestment);
             snapshot.setTotalUserGainLoss(totalUserGainLoss);
             snapshot.setTotalUserGainLossPercentage(totalUserGainLossPercentage);
+            snapshot.setSessionDayGainLoss(sessionDay[0]);
+            snapshot.setSessionDayGainLossPercentage(sessionDay[1]);
             snapshot.setPortfolios(entries);
             snapshot.setCreatedAt(LocalDateTime.now());
         } else {
@@ -72,6 +75,8 @@ public class PortfolioSnapshotService {
                     .totalUserInvestment(totalUserInvestment)
                     .totalUserGainLoss(totalUserGainLoss)
                     .totalUserGainLossPercentage(totalUserGainLossPercentage)
+                    .sessionDayGainLoss(sessionDay[0])
+                    .sessionDayGainLossPercentage(sessionDay[1])
                     .portfolios(entries)
                     .createdAt(LocalDateTime.now())
                     .build();
@@ -79,6 +84,31 @@ public class PortfolioSnapshotService {
 
         portfolioSnapshotRepository.save(snapshot);
         log.info("Successfully upserted User-Centric snapshot for user {} on date {} totalWealth={}", userId, snapshotDate, totalUserWealth);
+    }
+
+    /** [0]=sum gain, [1]=pct vs sum of opens; nulls when no entry freeze. */
+    private static Double[] sumSessionDayGain(List<PortfolioSnapshotEntry> entries) {
+        if (entries == null || entries.isEmpty()) {
+            return new Double[] { null, null };
+        }
+        double gain = 0.0;
+        double prior = 0.0;
+        int n = 0;
+        for (PortfolioSnapshotEntry e : entries) {
+            if (e.getSessionDayGainLoss() == null) {
+                continue;
+            }
+            gain += e.getSessionDayGainLoss();
+            if (e.getOpen() != null && e.getOpen() > 0) {
+                prior += e.getOpen();
+            }
+            n++;
+        }
+        if (n == 0) {
+            return new Double[] { null, null };
+        }
+        Double pct = prior > 0 ? (gain / prior) * 100.0 : null;
+        return new Double[] { gain, pct };
     }
 
     public Optional<PortfolioSnapshotModel> getLatestFreshSnapshot(String userId, int freshnessMinutes) {
@@ -139,6 +169,9 @@ public class PortfolioSnapshotService {
 
     private PortfolioSnapshotModel toModel(PortfolioSnapshotDocument doc, String targetPortfolioId) {
         double wealth = 0.0, investment = 0.0, open = 0.0, high = 0.0, low = 0.0;
+        double sessionDaySum = 0.0;
+        double sessionPriorWealth = 0.0;
+        int sessionDayCounted = 0;
         List<PortfolioSnapshotEntryModel> entryModels = new java.util.ArrayList<>();
 
         if (doc.getPortfolios() != null) {
@@ -152,6 +185,14 @@ public class PortfolioSnapshotService {
                 low        += p.getLow()    != null ? p.getLow()    : close;
                 wealth     += close;
                 investment += p.getTotalInvestment() != null ? p.getTotalInvestment() : 0.0;
+                if (p.getSessionDayGainLoss() != null) {
+                    sessionDaySum += p.getSessionDayGainLoss();
+                    double entryOpen = p.getOpen() != null ? p.getOpen() : 0.0;
+                    if (entryOpen > 0) {
+                        sessionPriorWealth += entryOpen;
+                    }
+                    sessionDayCounted++;
+                }
                 entryModels.add(toEntryModel(p));
             }
         } else if (targetPortfolioId == null) {
@@ -159,6 +200,11 @@ public class PortfolioSnapshotService {
             double fallback = doc.getTotalUserWealth() != null ? doc.getTotalUserWealth() : 0.0;
             wealth = fallback; open = fallback; high = fallback; low = fallback;
             investment = doc.getTotalUserInvestment() != null ? doc.getTotalUserInvestment() : 0.0;
+            if (doc.getSessionDayGainLoss() != null) {
+                sessionDaySum = doc.getSessionDayGainLoss();
+                sessionDayCounted = 1;
+                sessionPriorWealth = open > 0 ? open : 0.0;
+            }
         }
 
         if (wealth == 0.0 && investment == 0.0 && targetPortfolioId != null) {
@@ -167,6 +213,14 @@ public class PortfolioSnapshotService {
 
         double gainLoss    = wealth - investment;
         double gainLossPct = investment > 0 ? (gainLoss / investment) * 100.0 : 0.0;
+        // Keep both ternary arms as Double — mixing double + Double unboxes null → NPE.
+        Double sessionDay = sessionDayCounted > 0 ? Double.valueOf(sessionDaySum) : doc.getSessionDayGainLoss();
+        Double sessionDayPct = null;
+        if (sessionDay != null && sessionPriorWealth > 0) {
+            sessionDayPct = (sessionDay / sessionPriorWealth) * 100.0;
+        } else if (sessionDay != null && doc.getSessionDayGainLossPercentage() != null) {
+            sessionDayPct = doc.getSessionDayGainLossPercentage();
+        }
 
         return PortfolioSnapshotModel.builder()
                 .snapshotId(doc.getSnapshotId())
@@ -178,6 +232,8 @@ public class PortfolioSnapshotService {
                 .totalUserInvestment(round2(investment))
                 .totalUserGainLoss(round2(gainLoss))
                 .totalUserGainLossPercentage(round2(gainLossPct))
+                .sessionDayGainLoss(round2(sessionDay))
+                .sessionDayGainLossPercentage(round2(sessionDayPct))
                 .portfolios(entryModels)
                 .createdAt(doc.getCreatedAt())
                 .build();
@@ -199,6 +255,8 @@ public class PortfolioSnapshotService {
                 .totalInvestment(round2(entry.getTotalInvestment()))
                 .totalGainLoss(round2(entry.getTotalGainLoss()))
                 .totalGainLossPercentage(round2(entry.getTotalGainLossPercentage()))
+                .sessionDayGainLoss(round2(entry.getSessionDayGainLoss()))
+                .sessionDayGainLossPercentage(round2(entry.getSessionDayGainLossPercentage()))
                 .build();
     }
 

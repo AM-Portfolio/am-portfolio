@@ -60,7 +60,8 @@ class PortfolioHistorySchedulerTest {
         scheduler.runEndOfDayJob();
 
         verify(portfolioSnapshotService).saveUserSnapshot(
-                eq("user1"), anyDouble(), anyDouble(), anyDouble(), anyDouble(), argThat(entries -> entries.size() == 1));
+                eq("user1"), anyDouble(), anyDouble(), anyDouble(), anyDouble(),
+                argThat(entries -> entries.size() == 1), any(java.time.LocalDate.class));
         verify(portfolioHoldingsService, never()).getPortfolioHoldings(
                 eq("user2"), anyString(), any(), anyBoolean());
     }
@@ -94,7 +95,8 @@ class PortfolioHistorySchedulerTest {
         scheduler.runEndOfDayJob();
 
         verify(portfolioSnapshotService).saveUserSnapshot(
-                eq("success-user"), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyList());
+                eq("success-user"), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyList(),
+                any(java.time.LocalDate.class));
     }
 
     @Test
@@ -104,5 +106,79 @@ class PortfolioHistorySchedulerTest {
         scheduler.runEndOfDayJob();
 
         verifyNoInteractions(portfolioHoldingsService, portfolioSnapshotService);
+    }
+
+    @Test
+    void whenPriorSessionExists_thenEntryHasSessionDayGainLossCloseMinusOpen() {
+        UUID portfolioId = UUID.randomUUID();
+        String pid = portfolioId.toString();
+        when(portfolioService.getAllUserIds()).thenReturn(List.of("user1"));
+        when(portfolioService.getPortfoliosByUserId("user1"))
+                .thenReturn(List.of(PortfolioModelV1.builder().id(portfolioId).name("P1").build()));
+
+        EquityHoldings equity = EquityHoldings.builder()
+                .symbol("TCS")
+                .quantity(10.0)
+                .averageBuyingPrice(100.0)
+                .currentPrice(110.0)
+                .build();
+        when(portfolioHoldingsService.getPortfolioHoldings(
+                eq("user1"), eq(pid), eq(TimeInterval.ONE_DAY), eq(true)))
+                .thenReturn(PortfolioHoldings.builder().equityHoldings(List.of(equity)).build());
+
+        com.am.common.amcommondata.model.PortfolioSnapshotEntryModel priorEntry =
+                com.am.common.amcommondata.model.PortfolioSnapshotEntryModel.builder()
+                        .portfolioId(pid)
+                        .close(1000.0)
+                        .build();
+        com.am.common.amcommondata.model.PortfolioSnapshotModel prior =
+                com.am.common.amcommondata.model.PortfolioSnapshotModel.builder()
+                        .snapshotDate(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).minusDays(1))
+                        .totalUserWealth(1000.0)
+                        .portfolios(List.of(priorEntry))
+                        .build();
+        when(portfolioSnapshotService.getHistory(eq("user1"), eq(pid), anyString()))
+                .thenReturn(List.of(prior));
+
+        scheduler.runEndOfDayJob();
+
+        verify(portfolioSnapshotService).saveUserSnapshot(
+                eq("user1"), anyDouble(), anyDouble(), anyDouble(), anyDouble(),
+                argThat(entries -> {
+                    var e = entries.get(0);
+                    return e.getOpen() != null && Math.abs(e.getOpen() - 1000.0) < 0.01
+                            && e.getClose() != null && Math.abs(e.getClose() - 1100.0) < 0.01
+                            && e.getSessionDayGainLoss() != null
+                            && Math.abs(e.getSessionDayGainLoss() - 100.0) < 0.01;
+                }),
+                any(java.time.LocalDate.class));
+    }
+
+    @Test
+    void whenFirstDayNoPrior_thenSessionDayGainLossIsNull() {
+        UUID portfolioId = UUID.randomUUID();
+        String pid = portfolioId.toString();
+        when(portfolioService.getAllUserIds()).thenReturn(List.of("user1"));
+        when(portfolioService.getPortfoliosByUserId("user1"))
+                .thenReturn(List.of(PortfolioModelV1.builder().id(portfolioId).name("P1").build()));
+
+        EquityHoldings equity = EquityHoldings.builder()
+                .symbol("TCS")
+                .quantity(10.0)
+                .averageBuyingPrice(100.0)
+                .currentPrice(110.0)
+                .build();
+        when(portfolioHoldingsService.getPortfolioHoldings(
+                eq("user1"), eq(pid), eq(TimeInterval.ONE_DAY), eq(true)))
+                .thenReturn(PortfolioHoldings.builder().equityHoldings(List.of(equity)).build());
+        when(portfolioSnapshotService.getHistory(eq("user1"), any(), anyString()))
+                .thenReturn(List.of());
+
+        scheduler.runEndOfDayJob();
+
+        verify(portfolioSnapshotService).saveUserSnapshot(
+                eq("user1"), anyDouble(), anyDouble(), anyDouble(), anyDouble(),
+                argThat(entries -> entries.get(0).getSessionDayGainLoss() == null),
+                any(java.time.LocalDate.class));
     }
 }

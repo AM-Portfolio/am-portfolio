@@ -44,6 +44,12 @@ public class PortfolioSnapshotModel {
     private Double totalUserGainLoss;
     @JsonSerialize(using = TwoDecimalSerializer.class)
     private Double totalUserGainLossPercentage;
+
+    /** Sum of per-portfolio frozen session day P&L when all matching entries have it. */
+    @JsonSerialize(using = TwoDecimalSerializer.class)
+    private Double sessionDayGainLoss;
+    @JsonSerialize(using = TwoDecimalSerializer.class)
+    private Double sessionDayGainLossPercentage;
     
     // Nested Portfolio Details
     private List<PortfolioSnapshotEntryModel> portfolios;

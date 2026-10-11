@@ -42,6 +42,12 @@ public class PortfolioSnapshotDocument extends BaseDocument {
     @Field("totalUserGainLossPercentage")
     private Double totalUserGainLossPercentage;
 
+    @Field("sessionDayGainLoss")
+    private Double sessionDayGainLoss;
+
+    @Field("sessionDayGainLossPercentage")
+    private Double sessionDayGainLossPercentage;
+
     @Field("portfolios")
     private List<PortfolioSnapshotEntry> portfolios;
 

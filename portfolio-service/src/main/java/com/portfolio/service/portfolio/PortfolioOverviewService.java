@@ -471,9 +471,32 @@ public class PortfolioOverviewService {
             return false;
         }
         LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
-        List<PortfolioSnapshotModel> priorSessions = history.stream()
-                .filter(s -> s.getSnapshotDate() != null && !today.equals(s.getSnapshotDate()))
+        List<PortfolioSnapshotModel> sessionsNewestFirst = history.stream()
+                .filter(s -> s.getSnapshotDate() != null)
                 .sorted(Comparator.comparing(PortfolioSnapshotModel::getSnapshotDate).reversed())
+                .toList();
+
+        // Prefer explicit EOD freeze (includes today's snap after EOD write).
+        for (PortfolioSnapshotModel session : sessionsNewestFirst) {
+            SessionDayFreeze freeze = readSessionDayFreeze(session, portfolioId);
+            if (freeze == null) {
+                continue;
+            }
+            summary.setTodayGainLoss(freeze.gain);
+            summary.setTodayGainLossPercentage(freeze.pct);
+            if (summary.getPriceFreshness() == null) {
+                summary.setPriceFreshness("AS_OF");
+            }
+            if (summary.getSessionDate() == null) {
+                summary.setSessionDate(session.getSnapshotDate());
+            }
+            log.info("[Overview] Filled todayGainLoss via snapshot-freeze date={} gain={}",
+                    session.getSnapshotDate(), freeze.gain);
+            return true;
+        }
+
+        List<PortfolioSnapshotModel> priorSessions = sessionsNewestFirst.stream()
+                .filter(s -> !today.equals(s.getSnapshotDate()))
                 .toList();
         if (priorSessions.isEmpty()) {
             log.info("[Overview] No non-today snapshot for day P&L fallback user={} today={}", userId, today);
@@ -526,6 +549,69 @@ public class PortfolioOverviewService {
         return true;
     }
 
+    private static final class SessionDayFreeze {
+        final double gain;
+        final Double pct;
+
+        SessionDayFreeze(double gain, Double pct) {
+            this.gain = gain;
+            this.pct = pct;
+        }
+    }
+
+    /**
+     * Explicit EOD freeze on snapshot entry (or user rollup when portfolioId blank).
+     * Near-zero values are ignored (same threshold as EOD write) so AS_OF collapsed 0
+     * never blocks reconstruction / holdings-hist fallbacks.
+     */
+    private static SessionDayFreeze readSessionDayFreeze(PortfolioSnapshotModel session, String portfolioId) {
+        if (session == null) {
+            return null;
+        }
+        if (portfolioId != null && !portfolioId.isBlank() && session.getPortfolios() != null) {
+            for (var p : session.getPortfolios()) {
+                if (p != null && portfolioId.equals(p.getPortfolioId())) {
+                    return usableFreeze(p.getSessionDayGainLoss(), p.getSessionDayGainLossPercentage());
+                }
+            }
+            return null;
+        }
+        SessionDayFreeze rollup = usableFreeze(
+                session.getSessionDayGainLoss(), session.getSessionDayGainLossPercentage());
+        if (rollup != null) {
+            return rollup;
+        }
+        if (session.getPortfolios() == null || session.getPortfolios().isEmpty()) {
+            return null;
+        }
+        double sum = 0.0;
+        double prior = 0.0;
+        int n = 0;
+        for (var p : session.getPortfolios()) {
+            if (p == null || p.getSessionDayGainLoss() == null
+                    || Math.abs(p.getSessionDayGainLoss()) < 0.005) {
+                continue;
+            }
+            sum += p.getSessionDayGainLoss();
+            if (p.getOpen() != null && p.getOpen() > 0) {
+                prior += p.getOpen();
+            }
+            n++;
+        }
+        if (n == 0) {
+            return null;
+        }
+        Double pct = prior > 0 ? (sum / prior) * 100.0 : null;
+        return new SessionDayFreeze(sum, pct);
+    }
+
+    private static SessionDayFreeze usableFreeze(Double gain, Double pct) {
+        if (gain == null || Math.abs(gain) < 0.005) {
+            return null;
+        }
+        return new SessionDayFreeze(gain, pct);
+    }
+
     /**
      * Last-resort freeze: sum qty × (LTP − hist priorClose) using MarketDataService repair.
      * Never uses investment cost as a day baseline.
@@ -549,9 +635,14 @@ public class PortfolioOverviewService {
         }
 
         List<String> symbols = new ArrayList<>();
+        List<String> querySymbols = new ArrayList<>();
         for (EquityHoldings h : ph.getEquityHoldings()) {
             if (h.getSymbol() != null && !h.getSymbol().isBlank()) {
                 symbols.add(h.getSymbol());
+                addQuerySymbol(querySymbols, h.getSymbol());
+            }
+            if (h.getIsin() != null && !h.getIsin().isBlank()) {
+                addQuerySymbol(querySymbols, h.getIsin());
             }
         }
         if (symbols.isEmpty()) {
@@ -560,7 +651,7 @@ public class PortfolioOverviewService {
 
         Map<String, MarketData> quotes;
         try {
-            quotes = marketDataService.getMarketData(symbols);
+            quotes = marketDataService.getMarketData(querySymbols);
         } catch (Exception e) {
             log.warn("[Overview] getMarketData for day P&L failed: {}", e.getMessage());
             return;
@@ -570,30 +661,32 @@ public class PortfolioOverviewService {
         }
 
         LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
-        Map<String, MarketData> hist = Map.of();
-        try {
-            hist = marketDataService.getHistoricalData(
-                    symbols,
-                    today.minusDays(14),
-                    today,
-                    TimeFrame.DAY,
-                    InstrumentType.STOCK,
-                    FilterType.ALL,
-                    null,
-                    null,
-                    Boolean.FALSE);
-        } catch (Exception e) {
-            log.debug("[Overview] Daily hist for priorClose skipped: {}", e.getMessage());
+        // EQ + forceRefresh: STOCK enum and cached empty waves return 0/N for many Upstox names.
+        Map<String, MarketData> hist = fetchDailyHistForPriorClose(querySymbols, today);
+        if (hist.isEmpty()) {
+            List<String> isins = new ArrayList<>();
+            for (EquityHoldings h : ph.getEquityHoldings()) {
+                if (h.getIsin() != null && !h.getIsin().isBlank()) {
+                    addQuerySymbol(isins, h.getIsin());
+                }
+            }
+            if (!isins.isEmpty()) {
+                hist = fetchDailyHistForPriorClose(isins, today);
+            }
         }
 
         double daySum = 0.0;
         double priorWealth = 0.0;
         int counted = 0;
+        int skippedNoPrior = 0;
         for (EquityHoldings h : ph.getEquityHoldings()) {
             if (h.getSymbol() == null || h.getQuantity() == null || h.getQuantity() <= 0) {
                 continue;
             }
             MarketData md = lookupMarketData(quotes, h.getSymbol());
+            if (md == null && h.getIsin() != null) {
+                md = lookupMarketData(quotes, h.getIsin());
+            }
             Double ltp = h.getCurrentPrice();
             if ((ltp == null || ltp <= 0) && md != null) {
                 ltp = md.getLastPrice();
@@ -604,7 +697,18 @@ public class PortfolioOverviewService {
             Double prior = md != null ? md.getPreviousClose() : null;
             if (prior == null || !MarketDataService.isDistinctPrior(prior, ltp)) {
                 MarketData hbar = lookupMarketData(hist, h.getSymbol());
+                if (hbar == null && h.getIsin() != null) {
+                    hbar = lookupMarketData(hist, h.getIsin());
+                }
                 prior = MarketDataService.resolvePriorCloseFromHistorical(hbar, ltp);
+            }
+            // Last resort: session open when hist priorClose is missing (collapsed after-hours).
+            if ((prior == null || !MarketDataService.isDistinctPrior(prior, ltp))
+                    && md != null && md.getOhlc() != null && md.getOhlc().getOpen() > 0) {
+                double open = md.getOhlc().getOpen();
+                if (MarketDataService.isDistinctPrior(open, ltp)) {
+                    prior = open;
+                }
             }
             if (prior != null && MarketDataService.isDistinctPrior(prior, ltp)) {
                 daySum += (ltp - prior) * h.getQuantity();
@@ -612,13 +716,19 @@ public class PortfolioOverviewService {
                 counted++;
             } else if (h.getTodayGainLoss() != null && Math.abs(h.getTodayGainLoss()) >= 0.005) {
                 daySum += h.getTodayGainLoss();
-                double curVal = (h.getCurrentValue() != null && h.getCurrentValue() > 0) ? h.getCurrentValue() : (ltp * h.getQuantity());
+                double curVal = (h.getCurrentValue() != null && h.getCurrentValue() > 0)
+                        ? h.getCurrentValue() : (ltp * h.getQuantity());
                 priorWealth += Math.max(0.0, curVal - h.getTodayGainLoss());
                 counted++;
+            } else {
+                skippedNoPrior++;
             }
         }
         if (counted == 0 || priorWealth <= 0) {
-            log.info("[Overview] Holdings hist day P&L unavailable user={} counted={}", userId, counted);
+            log.info("[Overview] Holdings hist day P&L unavailable user={} counted=0 skippedNoPrior={} histKeys={} quoteKeys={}",
+                    userId, skippedNoPrior,
+                    hist != null ? hist.size() : 0,
+                    quotes.size());
             return;
         }
         summary.setTodayGainLoss(daySum);
@@ -630,6 +740,52 @@ public class PortfolioOverviewService {
                 counted, symbols.size(), daySum);
     }
 
+    private Map<String, MarketData> fetchDailyHistForPriorClose(List<String> symbols, LocalDate today) {
+        if (symbols == null || symbols.isEmpty() || marketDataService == null) {
+            return Map.of();
+        }
+        try {
+            Map<String, MarketData> hist = marketDataService.getHistoricalData(
+                    symbols,
+                    today.minusDays(21),
+                    today,
+                    TimeFrame.DAY,
+                    InstrumentType.EQ,
+                    FilterType.ALL,
+                    null,
+                    null,
+                    Boolean.TRUE);
+            return hist != null ? hist : Map.of();
+        } catch (Exception e) {
+            log.debug("[Overview] Daily hist for priorClose skipped: {}", e.getMessage());
+            return Map.of();
+        }
+    }
+
+    private static void addQuerySymbol(List<String> out, String raw) {
+        if (raw == null || raw.isBlank()) {
+            return;
+        }
+        String trimmed = raw.trim();
+        if (!out.contains(trimmed)) {
+            out.add(trimmed);
+        }
+        String normalized = com.portfolio.model.util.SymbolResolver.normalize(trimmed);
+        if (normalized != null && !normalized.isBlank()) {
+            if (!out.contains(normalized)) {
+                out.add(normalized);
+            }
+            String nseEq = "NSE_EQ:" + normalized;
+            if (!out.contains(nseEq)) {
+                out.add(nseEq);
+            }
+            String nse = "NSE:" + normalized;
+            if (!out.contains(nse)) {
+                out.add(nse);
+            }
+        }
+    }
+
     private static MarketData lookupMarketData(Map<String, MarketData> map, String symbol) {
         if (map == null || symbol == null) {
             return null;
@@ -639,12 +795,20 @@ public class PortfolioOverviewService {
             return md;
         }
         String normalized = com.portfolio.model.util.SymbolResolver.normalize(symbol);
-        if (normalized != null && !normalized.equalsIgnoreCase(symbol)) {
+        if (normalized != null && !normalized.isBlank()) {
             md = map.get(normalized);
             if (md != null) {
                 return md;
             }
             md = map.get(normalized.toUpperCase(java.util.Locale.ROOT));
+            if (md != null) {
+                return md;
+            }
+            md = map.get("NSE_EQ:" + normalized);
+            if (md != null) {
+                return md;
+            }
+            md = map.get("NSE:" + normalized);
             if (md != null) {
                 return md;
             }
@@ -658,7 +822,25 @@ public class PortfolioOverviewService {
         if (md != null) {
             return md;
         }
-        return map.get(cleaned.toUpperCase(java.util.Locale.ROOT));
+        md = map.get(cleaned.toUpperCase(java.util.Locale.ROOT));
+        if (md != null) {
+            return md;
+        }
+        // Fuzzy: match any map key that normalizes to the same ticker / ISIN.
+        String want = normalized != null ? normalized : cleaned;
+        if (want != null) {
+            String wantUpper = want.toUpperCase(java.util.Locale.ROOT);
+            for (Map.Entry<String, MarketData> e : map.entrySet()) {
+                if (e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                String keyNorm = com.portfolio.model.util.SymbolResolver.normalize(e.getKey());
+                if (wantUpper.equalsIgnoreCase(e.getKey()) || wantUpper.equalsIgnoreCase(keyNorm)) {
+                    return e.getValue();
+                }
+            }
+        }
+        return null;
     }
 
     /**

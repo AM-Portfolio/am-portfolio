@@ -85,6 +85,7 @@ class PortfolioOverviewServiceTest {
         when(snap.getSnapshotDate()).thenReturn(java.time.LocalDate.of(2026, 10, 9));
         when(snap.getTotalUserWealth()).thenReturn(1443.79);
         lenient().when(snap.getPortfolios()).thenReturn(List.of());
+        lenient().when(snap.getSessionDayGainLoss()).thenReturn(null);
 
         when(portfolioSummaryRedisService.getLatestSummary(userId, TimeInterval.ONE_DAY))
                 .thenReturn(Optional.of(cached));
@@ -134,6 +135,7 @@ class PortfolioOverviewServiceTest {
         when(friday.getSnapshotDate()).thenReturn(java.time.LocalDate.of(2026, 10, 9));
         when(friday.getTotalUserWealth()).thenReturn(630180.26);
         lenient().when(friday.getPortfolios()).thenReturn(List.of());
+        lenient().when(friday.getSessionDayGainLoss()).thenReturn(null);
 
         when(portfolioSummaryRedisService.getLatestSummary(userId, TimeInterval.ONE_WEEK))
                 .thenReturn(Optional.of(cached));
@@ -154,6 +156,69 @@ class PortfolioOverviewServiceTest {
         assertNotNull(result.getTodayGainLoss());
         // LTP mark − last session close (not stuck at 0)
         assertEquals(75.37, result.getTodayGainLoss(), 0.01);
+    }
+
+    @Test
+    void overviewPortfolio_prefersSnapshotSessionDayFreeze_whenOpenEqualsCloseAndHistEmpty() {
+        String userId = "user-freeze";
+        String portfolioId = "a63054e7-582c-4f45-aa0b-e5d7adceedc2";
+        PortfolioSummaryV1 cached = PortfolioSummaryV1.builder()
+                .investmentValue(1443.79)
+                .currentValue(1393.51)
+                .totalGainLoss(-50.28)
+                .build();
+        com.portfolio.model.portfolio.PortfolioHoldings holdings =
+                com.portfolio.model.portfolio.PortfolioHoldings.builder()
+                        .equityHoldings(List.of(
+                                com.portfolio.model.portfolio.EquityHoldings.builder()
+                                        .symbol("PWL")
+                                        .quantity(10.0)
+                                        .currentPrice(139.351)
+                                        .investmentCost(1443.79)
+                                        .currentValue(1393.51)
+                                        .todayGainLoss(null)
+                                        .build()))
+                        .priceFreshness("AS_OF")
+                        .build();
+        com.am.common.amcommondata.model.PortfolioSnapshotEntryModel entry =
+                com.am.common.amcommondata.model.PortfolioSnapshotEntryModel.builder()
+                        .portfolioId(portfolioId)
+                        .open(1393.51)
+                        .close(1393.51)
+                        .sessionDayGainLoss(-12.34)
+                        .sessionDayGainLossPercentage(-0.88)
+                        .build();
+        com.am.common.amcommondata.model.PortfolioSnapshotModel friday =
+                com.am.common.amcommondata.model.PortfolioSnapshotModel.builder()
+                        .snapshotDate(java.time.LocalDate.of(2026, 10, 9))
+                        .totalUserWealth(1393.51)
+                        .totalUserWealthOpen(1393.51)
+                        .portfolios(List.of(entry))
+                        .sessionDayGainLoss(-12.34)
+                        .sessionDayGainLossPercentage(-0.88)
+                        .build();
+
+        when(portfolioSummaryRedisService.getLatestSummary(userId, TimeInterval.ONE_DAY, portfolioId))
+                .thenReturn(Optional.of(cached));
+        when(portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, TimeInterval.ONE_DAY, true))
+                .thenReturn(holdings);
+        when(portfolioCalculator.calculateSummary(anyList(), anyDouble()))
+                .thenReturn(PortfolioSummaryV1.builder()
+                        .currentValue(1393.51)
+                        .investmentValue(1443.79)
+                        .totalGainLoss(-50.28)
+                        .todayGainLoss(null)
+                        .build());
+        lenient().when(portfolioSnapshotService.getHistory(eq(userId), any(), anyString()))
+                .thenReturn(List.of(friday));
+        lenient().when(flowLogger.start(anyString(), any())).thenReturn(mock(FlowSpan.class));
+
+        PortfolioSummaryV1 result =
+                portfolioOverviewService.overviewPortfolio(userId, portfolioId, TimeInterval.ONE_DAY);
+
+        assertEquals(-12.34, result.getTodayGainLoss(), 0.01);
+        assertEquals(-50.28, result.getTotalGainLoss(), 0.01);
+        verify(marketDataService, never()).getMarketData(anyList());
     }
 
     @Test
@@ -184,6 +249,7 @@ class PortfolioOverviewServiceTest {
         when(friday.getSnapshotDate()).thenReturn(java.time.LocalDate.of(2026, 10, 9));
         when(friday.getTotalUserWealth()).thenReturn(1393.51);
         when(friday.getPortfolios()).thenReturn(List.of());
+        lenient().when(friday.getSessionDayGainLoss()).thenReturn(null);
 
         MarketData quote = MarketData.builder()
                 .symbol("PWL")
@@ -253,11 +319,13 @@ class PortfolioOverviewServiceTest {
         when(thursday.getSnapshotDate()).thenReturn(java.time.LocalDate.of(2026, 10, 8));
         when(thursday.getTotalUserWealth()).thenReturn(1443.79);
         lenient().when(thursday.getPortfolios()).thenReturn(List.of());
+        lenient().when(thursday.getSessionDayGainLoss()).thenReturn(null);
         com.am.common.amcommondata.model.PortfolioSnapshotModel friday =
                 mock(com.am.common.amcommondata.model.PortfolioSnapshotModel.class);
         when(friday.getSnapshotDate()).thenReturn(java.time.LocalDate.of(2026, 10, 9));
         when(friday.getTotalUserWealth()).thenReturn(1393.51);
         lenient().when(friday.getPortfolios()).thenReturn(List.of());
+        lenient().when(friday.getSessionDayGainLoss()).thenReturn(null);
 
         when(portfolioSummaryRedisService.getLatestSummary(userId, TimeInterval.ONE_DAY))
                 .thenReturn(Optional.of(cached));
