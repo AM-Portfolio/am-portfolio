@@ -606,12 +606,16 @@ public class PortfolioOverviewService {
                 MarketData hbar = lookupMarketData(hist, h.getSymbol());
                 prior = MarketDataService.resolvePriorCloseFromHistorical(hbar, ltp);
             }
-            if (prior == null || !MarketDataService.isDistinctPrior(prior, ltp)) {
-                continue;
+            if (prior != null && MarketDataService.isDistinctPrior(prior, ltp)) {
+                daySum += (ltp - prior) * h.getQuantity();
+                priorWealth += prior * h.getQuantity();
+                counted++;
+            } else if (h.getTodayGainLoss() != null && Math.abs(h.getTodayGainLoss()) >= 0.005) {
+                daySum += h.getTodayGainLoss();
+                double curVal = (h.getCurrentValue() != null && h.getCurrentValue() > 0) ? h.getCurrentValue() : (ltp * h.getQuantity());
+                priorWealth += Math.max(0.0, curVal - h.getTodayGainLoss());
+                counted++;
             }
-            daySum += (ltp - prior) * h.getQuantity();
-            priorWealth += prior * h.getQuantity();
-            counted++;
         }
         if (counted == 0 || priorWealth <= 0) {
             log.info("[Overview] Holdings hist day P&L unavailable user={} counted={}", userId, counted);
@@ -633,6 +637,17 @@ public class PortfolioOverviewService {
         MarketData md = map.get(symbol);
         if (md != null) {
             return md;
+        }
+        String normalized = com.portfolio.model.util.SymbolResolver.normalize(symbol);
+        if (normalized != null && !normalized.equalsIgnoreCase(symbol)) {
+            md = map.get(normalized);
+            if (md != null) {
+                return md;
+            }
+            md = map.get(normalized.toUpperCase(java.util.Locale.ROOT));
+            if (md != null) {
+                return md;
+            }
         }
         String cleaned = symbol;
         int colon = symbol.indexOf(':');
