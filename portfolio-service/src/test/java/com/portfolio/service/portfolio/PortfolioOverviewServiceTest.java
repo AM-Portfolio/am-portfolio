@@ -93,6 +93,8 @@ class PortfolioOverviewServiceTest {
         when(portfolioCalculator.calculateSummary(anyList(), anyDouble()))
                 .thenReturn(PortfolioSummaryV1.builder()
                         .currentValue(1393.51)
+                        .investmentValue(1443.79)
+                        .totalGainLoss(-50.28)
                         .todayGainLoss(null)
                         .build());
         lenient().when(portfolioSnapshotService.getHistory(eq(userId), any(), anyString()))
@@ -103,6 +105,8 @@ class PortfolioOverviewServiceTest {
 
         assertNotNull(result.getTodayGainLoss());
         assertEquals(-50.28, result.getTodayGainLoss(), 0.01);
+        // Total Return stays overall (mark − invested), independent of session day fill
+        assertEquals(-50.28, result.getTotalGainLoss(), 0.01);
     }
 
     @Test
@@ -220,9 +224,10 @@ class PortfolioOverviewServiceTest {
                 portfolioOverviewService.overviewPortfolio(userId, portfolioId, TimeInterval.ONE_DAY);
 
         assertNotNull(result.getTodayGainLoss());
-        // 10 × (139.351 − 144.379) = −50.28; 1D total mirrors session day (not cost-basis masquerade)
+        // Today = session LTP vs hist priorClose; Total Return = overall (mark − invested)
         assertEquals(-50.28, result.getTodayGainLoss(), 0.02);
         assertEquals(-50.28, result.getTotalGainLoss(), 0.02);
+        assertEquals(1393.51 - 1443.79, result.getTotalGainLoss(), 0.02);
     }
 
     @Test
@@ -261,6 +266,8 @@ class PortfolioOverviewServiceTest {
         when(portfolioCalculator.calculateSummary(anyList(), anyDouble()))
                 .thenReturn(PortfolioSummaryV1.builder()
                         .currentValue(1393.51)
+                        .investmentValue(1443.79)
+                        .totalGainLoss(-50.28)
                         .todayGainLoss(null)
                         .build());
         lenient().when(portfolioSnapshotService.getHistory(eq(userId), any(), anyString()))
@@ -272,6 +279,7 @@ class PortfolioOverviewServiceTest {
         assertNotNull(result.getTodayGainLoss());
         // Frozen Friday session: 1393.51 − 1443.79
         assertEquals(-50.28, result.getTodayGainLoss(), 0.01);
+        assertEquals(-50.28, result.getTotalGainLoss(), 0.01);
     }
 
     @Test

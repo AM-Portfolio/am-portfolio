@@ -225,11 +225,12 @@ public class PortfolioOverviewService {
                 userId, context, finalSummary.getInvestmentValue());
 
         clearCollapsedAsOfTodayGain(finalSummary);
-        // Apply timeframe overrides before caching
+        // Optional 1D today backfill from distinct snapshot baseline (does not touch Total Return).
         applyTimeframeGainLoss(finalSummary, userId, portfolioId, interval);
-        // When per-symbol previousClose repair misses after hours, freeze day P&L from prior-session snapshot.
+        // When previousClose is collapsed after hours, freeze Today's P&L from session/hist LTP.
         applySessionDayGainLossIfMissing(finalSummary, userId, portfolioId, interval);
-        mirrorSessionDayIntoOneDayTotal(finalSummary, interval);
+        // Total Return is always overall (mark − invested), never session/period.
+        ensureOverallTotalGainLoss(finalSummary);
 
         // Store in cache
         log.debug("Caching portfolio summary for user: {}", userId);
@@ -291,7 +292,7 @@ public class PortfolioOverviewService {
             if (ph == null || ph.getEquityHoldings() == null || ph.getEquityHoldings().isEmpty()) {
                 // Still freeze day P&L from snapshots when holdings reprice is unavailable.
                 applySessionDayGainLossIfMissing(cached, userId, portfolioId, interval);
-                mirrorSessionDayIntoOneDayTotal(cached, interval);
+                ensureOverallTotalGainLoss(cached);
                 return cached;
             }
             double investmentValue = cached.getInvestmentValue() != null
@@ -302,7 +303,7 @@ public class PortfolioOverviewService {
             PortfolioSummaryV1 live = portfolioCalculator.calculateSummary(ph.getEquityHoldings(), investmentValue);
             cached.setInvestmentValue(investmentValue);
             cached.setCurrentValue(live.getCurrentValue());
-            // Cost-basis overlay as fallback; period return re-applied below for 1W/1M/…
+            // Overall Total Return from calculator; session day may still be null when quotes collapse.
             cached.setTotalGainLoss(live.getTotalGainLoss());
             cached.setTotalGainLossPercentage(live.getTotalGainLossPercentage());
             cached.setTodayGainLoss(live.getTodayGainLoss());
@@ -319,15 +320,14 @@ public class PortfolioOverviewService {
             cached.setLastUpdated(java.time.LocalDateTime.now(ZoneId.of("Asia/Kolkata")));
             // AS_OF + today==0 is collapsed quote math, not a known flat session — clear for freeze.
             clearCollapsedAsOfTodayGain(cached);
-            // Keep interval-scoped Total Return (snapshot baseline), not all-time cost-basis.
             applyTimeframeGainLoss(cached, userId, portfolioId, interval);
             applySessionDayGainLossIfMissing(cached, userId, portfolioId, interval);
-            mirrorSessionDayIntoOneDayTotal(cached, interval);
+            ensureOverallTotalGainLoss(cached);
             return cached;
         } catch (Exception e) {
             log.warn("Summary price overlay failed; serving cached KPIs: {}", e.getMessage());
             applySessionDayGainLossIfMissing(cached, userId, portfolioId, interval);
-            mirrorSessionDayIntoOneDayTotal(cached, interval);
+            ensureOverallTotalGainLoss(cached);
             return cached;
         }
     }
@@ -423,16 +423,14 @@ public class PortfolioOverviewService {
         double gainLoss = currentValue - baselineWealth;
         double gainLossPct = (gainLoss / baselineWealth) * 100.0;
 
-        summary.setTotalGainLoss(gainLoss);
-        summary.setTotalGainLossPercentage(gainLossPct);
-        // 1D period return is the session change — fill Today's P&L when quotes lack previousClose.
+        // Total Return stays overall (mark − invested). Only backfill Today's session when distinct.
         // Skip ~0 (weekend mark == last EOD): leave null so session/hist freeze can run.
         if (TimeInterval.ONE_DAY.equals(interval)
                 && needsSessionDayFill(summary)
                 && Math.abs(gainLoss) >= 0.005) {
             summary.setTodayGainLoss(gainLoss);
             summary.setTodayGainLossPercentage(gainLossPct);
-            log.info("[Overview] Mirrored 1D timeframe gain into todayGainLoss={}", gainLoss);
+            log.info("[Overview] Mirrored 1D snapshot baseline into todayGainLoss={}", gainLoss);
         }
     }
 
@@ -648,13 +646,22 @@ public class PortfolioOverviewService {
         return map.get(cleaned.toUpperCase(java.util.Locale.ROOT));
     }
 
-    /** 1D Total Return should match Today's session P&L once freeze filled it. */
-    private static void mirrorSessionDayIntoOneDayTotal(PortfolioSummaryV1 summary, TimeInterval interval) {
-        if (summary == null || !TimeInterval.ONE_DAY.equals(interval) || summary.getTodayGainLoss() == null) {
+    /**
+     * Total Return = overall unrealized P&amp;L (current mark − invested), for every interval.
+     * Today's P&amp;L is session-scoped and must not overwrite this field.
+     */
+    private static void ensureOverallTotalGainLoss(PortfolioSummaryV1 summary) {
+        if (summary == null) {
             return;
         }
-        summary.setTotalGainLoss(summary.getTodayGainLoss());
-        summary.setTotalGainLossPercentage(summary.getTodayGainLossPercentage());
+        Double current = summary.getCurrentValue();
+        Double invested = summary.getInvestmentValue();
+        if (current == null || invested == null) {
+            return;
+        }
+        double overall = current - invested;
+        summary.setTotalGainLoss(overall);
+        summary.setTotalGainLossPercentage(invested > 0 ? (overall / invested) * 100.0 : 0.0);
     }
 
     private List<PortfolioSnapshotModel> loadSnapshotHistory(String userId, String portfolioId) {
