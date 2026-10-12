@@ -250,6 +250,11 @@ market-data:
     read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:45000}
     connection-timeout: 3000
     max-retry-attempts: 0
+    # Cash equity segment for hist keys (Vault/env override — avoid hardcoding in Java callers)
+    equity-instrument-prefix: ${MARKET_DATA_EQUITY_INSTRUMENT_PREFIX:NSE_EQ}
+    passthrough-instrument-prefixes: ${MARKET_DATA_PASSTHROUGH_INSTRUMENT_PREFIXES:NSE_FO,NSE_INDEX,BSE_EQ,BSE_FO,BSE_INDEX,MCX_FO}
+    # Caffeine miss-marker TTL (not Redis); successful priorClose stays ~18h
+    prior-close-miss-ttl-minutes: ${MARKET_DATA_PRIOR_CLOSE_MISS_TTL_MINUTES:15}
     batch:
       chunk-size: ${MARKET_DATA_BATCH_CHUNK_SIZE:50}
       parallel-batching-enabled: ${MARKET_DATA_PARALLEL_BATCHING:true}
@@ -362,6 +367,9 @@ cache:
 portfolio:
   redis:
     enabled: ${PORTFOLIO_REDIS_ENABLED:false}
+  snapshot:
+    # 1D lookback must span weekends/holidays; callers still pick latest prior-session snap.
+    one-day-lookback-days: ${PORTFOLIO_SNAPSHOT_ONE_DAY_LOOKBACK_DAYS:10}
   intelligence:
     # Primary history benchmark (beta / relative return). Use "SENSEX" or "NIFTY 50".
     primary-benchmark-symbol: ${PORTFOLIO_INTEL_BENCHMARK:NIFTY 50}

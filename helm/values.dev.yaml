@@ -75,10 +75,9 @@ env:
   KAFKA_BOOTSTRAP_SERVERS: "kafka.infra-dev.svc.cluster.local:9092"
   KAFKA_SECURITY_PROTOCOL: "SASL_PLAINTEXT"
   KAFKA_SASL_MECHANISM: "SCRAM-SHA-256"
-  # Dig Vault market URL was pinned to prod (am.asrax.in) → hist data=null / "Failed to retrieve batch".
-  # Use dig ingress (am-dev); in-cluster also works for OHLC but hist sometimes NPE/UDAPI1021 under load.
-  MARKET_DATA_API_URL: "https://am-dev.asrax.in/market"
-  MARKET_DATA_CALENDAR_BASE_URL: "https://am-dev.asrax.in/market"
+  # MARKET_DATA_API_URL / MARKET_DATA_CALENDAR_BASE_URL come from Vault
+  # (vault-mappings.yaml → apps/{env}/services/am-market-data URL). Do not hardcode here —
+  # dig Vault must point at dig market (am-dev / in-cluster), not prod am.asrax.in.
 
 resources:
   limits:

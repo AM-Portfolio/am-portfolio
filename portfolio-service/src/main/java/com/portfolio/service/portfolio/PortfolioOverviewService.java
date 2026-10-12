@@ -19,10 +19,13 @@ import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.v1.BrokerPortfolioSummary;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
+import com.portfolio.marketdata.config.MarketDataApiConfig;
 import com.portfolio.marketdata.model.FilterType;
 import com.portfolio.marketdata.model.InstrumentType;
 import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.model.util.InstrumentKeys;
 import com.portfolio.redis.service.PortfolioSummaryRedisService;
+import com.portfolio.redis.session.CashSessionClock;
 import com.portfolio.service.calculator.PortfolioCalculator;
 import com.am.observability.flow.FlowLogger;
 import com.am.common.amcommondata.service.PortfolioSnapshotService;
@@ -54,6 +57,12 @@ public class PortfolioOverviewService {
     @org.springframework.lang.Nullable
     private final MarketDataService marketDataService;
 
+    @org.springframework.lang.Nullable
+    private final CashSessionClock cashSessionClock;
+
+    @org.springframework.lang.Nullable
+    private final MarketDataApiConfig marketDataApiConfig;
+
     public PortfolioOverviewService(
             PortfolioService portfolioService,
             PortfolioHoldingsService portfolioHoldingsService,
@@ -63,7 +72,9 @@ public class PortfolioOverviewService {
             PortfolioSummaryMongoService portfolioSummaryMongoService,
             PortfolioCalculator portfolioCalculator,
             FlowLogger flowLogger,
-            @org.springframework.lang.Nullable MarketDataService marketDataService) {
+            @org.springframework.lang.Nullable MarketDataService marketDataService,
+            @org.springframework.lang.Nullable CashSessionClock cashSessionClock,
+            @org.springframework.lang.Nullable MarketDataApiConfig marketDataApiConfig) {
         this.portfolioService = portfolioService;
         this.portfolioHoldingsService = portfolioHoldingsService;
         this.portfolioMapper = portfolioMapper;
@@ -73,6 +84,8 @@ public class PortfolioOverviewService {
         this.portfolioCalculator = portfolioCalculator;
         this.flowLogger = flowLogger;
         this.marketDataService = marketDataService;
+        this.cashSessionClock = cashSessionClock;
+        this.marketDataApiConfig = marketDataApiConfig;
     }
 
     public PortfolioSummaryV1 overviewPortfolio(String userId, TimeInterval interval) {
@@ -385,14 +398,18 @@ public class PortfolioOverviewService {
             if (history == null || history.isEmpty()) return;
         }
 
-        // For 1D: find the most recent snapshot NOT from today
+        // For 1D: prefer calendar prior-session date (CashSessionClock); else latest non-today snap
         // For other timeframes: find the oldest snapshot (period start)
         LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
         PortfolioSnapshotModel baselineSnap;
 
         if (TimeInterval.ONE_DAY.equals(interval)) {
+            LocalDate priorSession = resolvePriorSessionDate(today);
             baselineSnap = history.stream()
-                .filter(s -> s.getSnapshotDate() != null && !today.equals(s.getSnapshotDate()))
+                .filter(s -> s.getSnapshotDate() != null)
+                .filter(s -> priorSession != null
+                        ? !s.getSnapshotDate().isAfter(priorSession)
+                        : !today.equals(s.getSnapshotDate()))
                 .max(Comparator.comparing(PortfolioSnapshotModel::getSnapshotDate))
                 .orElse(null);
         } else {
@@ -762,7 +779,29 @@ public class PortfolioOverviewService {
         }
     }
 
-    private static void addQuerySymbol(List<String> out, String raw) {
+    /** Prefer calendar prior session; null if clock unavailable (caller falls back to non-today). */
+    private LocalDate resolvePriorSessionDate(LocalDate today) {
+        if (cashSessionClock == null) {
+            return null;
+        }
+        try {
+            LocalDate prior = cashSessionClock.priorSessionDate();
+            if (prior != null && !prior.isAfter(today)) {
+                return prior;
+            }
+        } catch (Exception e) {
+            log.debug("[Overview] priorSessionDate unavailable: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    private String equityInstrumentPrefix() {
+        return marketDataApiConfig != null
+                ? marketDataApiConfig.getEquityInstrumentPrefix()
+                : InstrumentKeys.DEFAULT_EQUITY_PREFIX;
+    }
+
+    private void addQuerySymbol(List<String> out, String raw) {
         if (raw == null || raw.isBlank()) {
             return;
         }
@@ -775,9 +814,9 @@ public class PortfolioOverviewService {
             if (!out.contains(normalized)) {
                 out.add(normalized);
             }
-            String nseEq = "NSE_EQ:" + normalized;
-            if (!out.contains(nseEq)) {
-                out.add(nseEq);
+            String equity = InstrumentKeys.equityKey(normalized, equityInstrumentPrefix());
+            if (!out.contains(equity)) {
+                out.add(equity);
             }
             String nse = "NSE:" + normalized;
             if (!out.contains(nse)) {
@@ -786,7 +825,7 @@ public class PortfolioOverviewService {
         }
     }
 
-    private static MarketData lookupMarketData(Map<String, MarketData> map, String symbol) {
+    private MarketData lookupMarketData(Map<String, MarketData> map, String symbol) {
         if (map == null || symbol == null) {
             return null;
         }
@@ -804,7 +843,7 @@ public class PortfolioOverviewService {
             if (md != null) {
                 return md;
             }
-            md = map.get("NSE_EQ:" + normalized);
+            md = map.get(InstrumentKeys.equityKey(normalized, equityInstrumentPrefix()));
             if (md != null) {
                 return md;
             }

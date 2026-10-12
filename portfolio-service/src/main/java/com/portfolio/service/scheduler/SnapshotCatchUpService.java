@@ -22,8 +22,10 @@ import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.repository.portfolio.PortfolioSnapshotRepository;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.marketdata.client.MarketDataApiClient;
+import com.portfolio.marketdata.config.MarketDataApiConfig;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
 import com.portfolio.marketdata.model.HistoricalDataResponseWrapper;
+import com.portfolio.model.util.InstrumentKeys;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,6 +49,7 @@ public class SnapshotCatchUpService {
     private final PortfolioSnapshotRepository portfolioSnapshotRepository;
     private final PortfolioService portfolioService;
     private final MarketDataApiClient marketDataApiClient;
+    private final MarketDataApiConfig marketDataApiConfig;
 
     /**
      * Triggered from UserLoginConsumerService after a login event.
@@ -175,23 +178,13 @@ public class SnapshotCatchUpService {
                     allSymbols.size(), portfolioHoldings.size(), userId);
 
             // --- STEP 3: Fetch historical daily prices from Market Data API (SINGLE batch call) ---
-            // Prefer NSE_EQ:TICKER so am-market InstrumentUtils / Upstox resolver hit cash EQ keys.
+            // Cash segment from market-data.api.equity-instrument-prefix (default NSE_EQ).
+            String equityPrefix = marketDataApiConfig.getEquityInstrumentPrefix();
+            var passthrough = InstrumentKeys.parsePassthroughPrefixes(
+                    marketDataApiConfig.getPassthroughInstrumentPrefixes());
             String symbolsParam = allSymbols.stream()
                     .filter(s -> s != null && !s.isBlank())
-                    .map(s -> {
-                        String t = s.trim().toUpperCase(java.util.Locale.ROOT);
-                        if (t.startsWith("NSE_EQ:") || t.startsWith("NSE_FO:") || t.startsWith("NSE_INDEX:")
-                                || t.startsWith("BSE_EQ:") || t.startsWith("BSE_FO:")) {
-                            return t;
-                        }
-                        if (t.startsWith("NSE:")) {
-                            return "NSE_EQ:" + t.substring(4);
-                        }
-                        if (t.contains(":")) {
-                            return t;
-                        }
-                        return "NSE_EQ:" + t;
-                    })
+                    .map(s -> InstrumentKeys.toInstrumentKey(s, equityPrefix, passthrough))
                     .distinct()
                     .collect(Collectors.joining(","));
             HistoricalDataRequest request = HistoricalDataRequest.builder()

@@ -76,13 +76,9 @@ public class MarketDataService {
     /**
      * Symbols where prior-close hist was already attempted this TTL window.
      * Kept separate from {@link #priorCloseCache} so a miss never poisons day% with last≈prev.
+     * TTL from {@code market-data.api.prior-close-miss-ttl-minutes} (Caffeine, not Redis).
      */
-    /** Sticky miss TTL: short so weekend hist/API blips do not freeze day% for a full session. */
-    private final com.github.benmanes.caffeine.cache.Cache<String, Boolean> priorClosePrefetchAttempted =
-            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
-            .expireAfterWrite(15, java.util.concurrent.TimeUnit.MINUTES)
-            .maximumSize(20000)
-            .build();
+    private final com.github.benmanes.caffeine.cache.Cache<String, Boolean> priorClosePrefetchAttempted;
 
     private final com.github.benmanes.caffeine.cache.Cache<String, com.portfolio.marketdata.model.HistoricalData> chartCache = 
             com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
@@ -128,6 +124,13 @@ public class MarketDataService {
         this.taskExecutor = taskExecutor;
         this.externalApiExecutor = externalApiExecutor;
         this.config = config;
+        int missTtlMinutes = (config != null && config.getPriorCloseMissTtlMinutes() > 0)
+                ? config.getPriorCloseMissTtlMinutes()
+                : 15;
+        this.priorClosePrefetchAttempted = com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+                .expireAfterWrite(missTtlMinutes, java.util.concurrent.TimeUnit.MINUTES)
+                .maximumSize(20000)
+                .build();
     }
 
     // Constants

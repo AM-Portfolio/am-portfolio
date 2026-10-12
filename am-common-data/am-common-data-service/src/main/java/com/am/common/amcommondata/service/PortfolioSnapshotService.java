@@ -27,11 +27,14 @@ public class PortfolioSnapshotService {
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
     /**
-     * 1D must look back across weekends/holidays (Sat to Fri needs more than 1 calendar day).
-     * Chart/summary callers still pick the latest non-today baseline from the window.
+     * 1D lookback must span weekends/holidays. Config:
+     * {@code portfolio.snapshot.one-day-lookback-days} (default 10).
+     * Callers still pick the latest prior-session baseline from the window.
      */
+    @org.springframework.beans.factory.annotation.Value("${portfolio.snapshot.one-day-lookback-days:10}")
+    private int oneDayLookbackDays;
+
     private static final java.util.Map<String, java.time.Period> TIMEFRAME_PERIODS = java.util.Map.of(
-        "1D",  java.time.Period.ofDays(10),
         "1W",  java.time.Period.ofWeeks(1),
         "1M",  java.time.Period.ofMonths(1),
         "3M",  java.time.Period.ofMonths(3),
@@ -149,8 +152,14 @@ public class PortfolioSnapshotService {
             documents = portfolioSnapshotRepository
                 .findByUserIdAndSnapshotDateBetweenOrderBySnapshotDateAsc(userId, fromDate, today.plusDays(1));
         } else {
-            // Real date math: 1M = exactly 1 calendar month ago
-            java.time.Period period = TIMEFRAME_PERIODS.getOrDefault(frame, java.time.Period.ofMonths(1));
+            // Real date math: 1M = exactly 1 calendar month ago; 1D = configurable lookback days
+            java.time.Period period;
+            if ("1D".equals(frame)) {
+                int days = Math.max(1, oneDayLookbackDays);
+                period = java.time.Period.ofDays(days);
+            } else {
+                period = TIMEFRAME_PERIODS.getOrDefault(frame, java.time.Period.ofMonths(1));
+            }
             LocalDate fromDate = today.minus(period);
             documents = portfolioSnapshotRepository
                 .findByUserIdAndSnapshotDateBetweenOrderBySnapshotDateAsc(userId, fromDate, today.plusDays(1));

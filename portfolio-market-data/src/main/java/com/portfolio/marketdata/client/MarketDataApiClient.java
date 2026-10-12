@@ -147,19 +147,17 @@ public class MarketDataApiClient extends AbstractApiClient {
                 if (request.getSymbols() != null && !request.getSymbols().isEmpty()) {
                         String[] parts = request.getSymbols().split(",");
                         java.util.List<String> updated = new java.util.ArrayList<>();
+                        String equityPrefix = config.getEquityInstrumentPrefix();
+                        java.util.Set<String> passthrough = com.portfolio.model.util.InstrumentKeys
+                                        .parsePassthroughPrefixes(config.getPassthroughInstrumentPrefixes());
                         for (String part : parts) {
                                 String s = part.trim();
-                                if (!s.contains(":") && !s.contains(" ")) {
-                                        // Cash EQ keys (NSE_EQ:) resolve on dig Upstox; bare NSE: often merges 0/N.
-                                        updated.add("NSE_EQ:" + s);
-                                } else if (s.regionMatches(true, 0, "NSE:", 0, 4)
-                                        && !s.regionMatches(true, 0, "NSE_EQ:", 0, 7)
-                                        && !s.regionMatches(true, 0, "NSE_FO:", 0, 7)
-                                        && !s.regionMatches(true, 0, "NSE_INDEX:", 0, 10)) {
-                                        updated.add("NSE_EQ:" + s.substring(4));
-                                } else {
-                                        updated.add(s);
+                                if (s.isEmpty()) {
+                                        continue;
                                 }
+                                // Config-driven cash prefix (default NSE_EQ); FO/INDEX/BSE passthrough preserved.
+                                updated.add(com.portfolio.model.util.InstrumentKeys.toInstrumentKey(
+                                                s, equityPrefix, passthrough));
                         }
                         request.setSymbols(String.join(",", updated));
                 }
