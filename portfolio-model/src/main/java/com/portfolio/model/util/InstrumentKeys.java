@@ -49,9 +49,13 @@ public final class InstrumentKeys {
             if (pass.contains(head) || cash.equalsIgnoreCase(head)) {
                 return head + ":" + tail;
             }
-            // Legacy bare exchange: NSE:RELIANCE → NSE_EQ:RELIANCE (or configured cash prefix)
-            if ("NSE".equals(head) || "BSE".equals(head)) {
+            // Legacy bare exchange: NSE:RELIANCE → NSE_EQ:RELIANCE (configured cash prefix).
+            // BSE: stays on BSE cash segment — never rewrite to NSE_EQ (would break BSE-only names).
+            if ("NSE".equals(head)) {
                 return cash + ":" + SymbolResolver.normalize(tail);
+            }
+            if ("BSE".equals(head)) {
+                return "BSE_EQ:" + SymbolResolver.normalize(tail);
             }
             return s;
         }

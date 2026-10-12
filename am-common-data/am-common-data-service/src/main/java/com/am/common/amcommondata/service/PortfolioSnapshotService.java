@@ -155,7 +155,8 @@ public class PortfolioSnapshotService {
             // Real date math: 1M = exactly 1 calendar month ago; 1D = configurable lookback days
             java.time.Period period;
             if ("1D".equals(frame)) {
-                int days = Math.max(1, oneDayLookbackDays);
+                // @Value default 10; guard 0 from non-Spring construction
+                int days = oneDayLookbackDays > 0 ? oneDayLookbackDays : 10;
                 period = java.time.Period.ofDays(days);
             } else {
                 period = TIMEFRAME_PERIODS.getOrDefault(frame, java.time.Period.ofMonths(1));

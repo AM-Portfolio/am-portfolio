@@ -18,6 +18,11 @@ class InstrumentKeysTest {
     }
 
     @Test
+    void legacyBsePrefix_rewrittenToBseEq_notNse() {
+        assertEquals("BSE_EQ:RELIANCE", InstrumentKeys.toInstrumentKey("BSE:RELIANCE", "NSE_EQ"));
+    }
+
+    @Test
     void foAndIndex_passthrough() {
         assertEquals("NSE_FO:NIFTY25APRFUT", InstrumentKeys.toInstrumentKey("NSE_FO:NIFTY25APRFUT", "NSE_EQ"));
         assertEquals("NSE_INDEX:NIFTY 50", InstrumentKeys.toInstrumentKey("NSE_INDEX:NIFTY 50", "NSE_EQ"));
