@@ -146,11 +146,12 @@ public class PortfolioCalculationService {
             event.setTotalInvestment(summary.getInvestmentValue());
             event.setTotalGainLoss(summary.getTotalGainLoss());
             event.setTotalGainLossPercentage(summary.getTotalGainLossPercentage());
-            if (summary.getTodayGainLoss() != null && summary.getTodayGainLoss() != 0.0) {
+            // Suppress only unavailable (null). True flat day (0.0) must still broadcast.
+            if (summary.getTodayGainLoss() != null) {
                 event.setTodayGainLoss(summary.getTodayGainLoss());
                 event.setTodayGainLossPercentage(summary.getTodayGainLossPercentage());
             } else {
-                log.warn("[Kafka] Suppressing todayGainLoss broadcast (was null or 0.0) for portfolioId={}", portfolioId);
+                log.warn("[Kafka] Suppressing todayGainLoss broadcast (null / unavailable) for portfolioId={}", portfolioId);
             }
         }
 

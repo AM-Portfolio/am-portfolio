@@ -14,10 +14,15 @@ import java.util.TreeMap;
 import org.springframework.stereotype.Service;
 
 import com.am.common.amcommondata.service.PortfolioSnapshotService;
+import com.portfolio.marketdata.model.FilterType;
+import com.portfolio.marketdata.model.InstrumentType;
 import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.model.market.MarketData;
+import com.portfolio.model.market.TimeFrame;
 import com.portfolio.redis.service.PortfolioIntradayRedisService;
 import com.portfolio.redis.session.CashSessionClock;
 import com.portfolio.model.TimeInterval;
+import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.IntradayDataPoint;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.PortfolioIntradayEntry;
@@ -128,6 +133,19 @@ public class PortfolioIntradayService {
             }
         }
 
+        // When cash is closed, quotes often omit day P&L — rebuild session baseline from hist priorClose
+        // so the chart end % matches Today's card (not a flat 0% LTP line).
+        if (!marketOpen && Math.abs(liveTodayGainLoss) < 0.005
+                && liveHoldings != null
+                && liveHoldings.getEquityHoldings() != null
+                && !liveHoldings.getEquityHoldings().isEmpty()) {
+            Double sessionDay = estimateSessionDayGainFromHist(liveHoldings.getEquityHoldings());
+            if (sessionDay != null) {
+                liveTodayGainLoss = sessionDay;
+                log.info("[Intraday] Session day baseline from holdings-hist gain={}", sessionDay);
+            }
+        }
+
         // The opening wealth is simply the current wealth minus today's gain/loss
         double baselineWealth = liveTotalValue - liveTodayGainLoss;
         double missingAssetValue = 0.0;
@@ -145,29 +163,20 @@ public class PortfolioIntradayService {
         List<String> symbols = new ArrayList<>(symbolQty.keySet());
         com.portfolio.marketdata.model.HistoricalChartsResponse chartResponse = null;
 
-        java.time.DayOfWeek dayOfWeek = today.getDayOfWeek();
-        boolean isWeekend = dayOfWeek == java.time.DayOfWeek.SATURDAY || dayOfWeek == java.time.DayOfWeek.SUNDAY;
-        boolean preMarket = nowIST.isBefore(MARKET_OPEN);
-        boolean skipCharts = cashSessionClock != null
-                ? !cashSessionClock.isCashOpen()
-                : (isWeekend || preMarket);
-
-        if (skipCharts) {
-            log.info("[Intraday] Skipping 1D chart fetch because cash session is closed (reason={}).",
-                    cashSessionClock != null ? cashSessionClock.reason() : "weekend/pre-market");
-        } else {
-            try {
-                chartResponse = marketDataService.getHistoricalCharts(symbols, "1D");
-                if (chartResponse != null && chartResponse.getData() != null) {
-                    int totalParsed = chartResponse.getData().values().stream()
-                            .filter(hd -> hd != null && hd.getDataPoints() != null)
-                            .mapToInt(hd -> hd.getDataPoints().size())
-                            .sum();
-                    log.info("[Intraday] Fetched historical charts for {} symbols, total points parsed: {}", symbols.size(), totalParsed);
-                }
-            } catch (Exception e) {
-                log.error("[Intraday] Failed to fetch historical charts: {}", e.getMessage());
+        // Always fetch 1D candles — market-data resolves last trading day when cash is closed
+        // (same idea as NIFTY overlay). Flat LTP is only a last-resort fallback below.
+        try {
+            chartResponse = marketDataService.getHistoricalCharts(symbols, "1D");
+            if (chartResponse != null && chartResponse.getData() != null) {
+                int totalParsed = chartResponse.getData().values().stream()
+                        .filter(hd -> hd != null && hd.getDataPoints() != null)
+                        .mapToInt(hd -> hd.getDataPoints().size())
+                        .sum();
+                log.info("[Intraday] Fetched historical charts for {} symbols, total points parsed: {}",
+                        symbols.size(), totalParsed);
             }
+        } catch (Exception e) {
+            log.error("[Intraday] Failed to fetch historical charts: {}", e.getMessage());
         }
 
         // ── STEP 4: Build time-series: candle time → {symbol → closePrice} ───
@@ -236,18 +245,19 @@ public class PortfolioIntradayService {
         // Fallback: If STILL empty, generate a flat chart using the last known prices
         if (priceSeries.isEmpty()) {
             if (livePrices != null && !livePrices.isEmpty()) {
+                log.warn("[Intraday] No 1D candles — using flat LTP fallback (last resort)");
                 LocalTime t = MARKET_OPEN;
-                
-                dayOfWeek = today.getDayOfWeek();
-                isWeekend = dayOfWeek == java.time.DayOfWeek.SATURDAY || dayOfWeek == java.time.DayOfWeek.SUNDAY;
-                
+                java.time.DayOfWeek dayOfWeek = today.getDayOfWeek();
+                boolean isWeekend = dayOfWeek == java.time.DayOfWeek.SATURDAY
+                        || dayOfWeek == java.time.DayOfWeek.SUNDAY;
+
                 LocalTime limit;
                 if (isWeekend || nowIST.isAfter(MARKET_CLOSE)) {
-                    limit = MARKET_CLOSE; // Full day flatline
+                    limit = MARKET_CLOSE;
                 } else if (nowIST.isBefore(MARKET_OPEN)) {
-                    limit = MARKET_OPEN; // Only the opening point
+                    limit = MARKET_OPEN;
                 } else {
-                    limit = nowIST; // Fill up to current time
+                    limit = nowIST;
                 }
 
                 while (!t.isAfter(limit)) {
@@ -380,5 +390,96 @@ public class PortfolioIntradayService {
                     .build());
         }
         return entries;
+    }
+
+    /**
+     * Sum qty × (LTP − hist priorClose) when holdings lack todayGainLoss after hours.
+     * Never uses investment cost as the day baseline.
+     */
+    private Double estimateSessionDayGainFromHist(List<EquityHoldings> holdings) {
+        if (marketDataService == null || holdings == null || holdings.isEmpty()) {
+            return null;
+        }
+        List<String> symbols = new ArrayList<>();
+        for (EquityHoldings h : holdings) {
+            if (h.getSymbol() != null && !h.getSymbol().isBlank()) {
+                symbols.add(h.getSymbol());
+            }
+        }
+        if (symbols.isEmpty()) {
+            return null;
+        }
+        Map<String, MarketData> quotes;
+        try {
+            quotes = marketDataService.getMarketData(symbols);
+        } catch (Exception e) {
+            log.debug("[Intraday] getMarketData for session baseline failed: {}", e.getMessage());
+            return null;
+        }
+        if (quotes == null || quotes.isEmpty()) {
+            return null;
+        }
+        LocalDate today = LocalDate.now(IST);
+        Map<String, MarketData> hist = Map.of();
+        try {
+            hist = marketDataService.getHistoricalData(
+                    symbols,
+                    today.minusDays(14),
+                    today,
+                    TimeFrame.DAY,
+                    InstrumentType.STOCK,
+                    FilterType.ALL,
+                    null,
+                    null,
+                    Boolean.FALSE);
+        } catch (Exception e) {
+            log.debug("[Intraday] Daily hist for session baseline skipped: {}", e.getMessage());
+        }
+
+        double daySum = 0.0;
+        int counted = 0;
+        for (EquityHoldings h : holdings) {
+            if (h.getSymbol() == null || h.getQuantity() == null || h.getQuantity() <= 0) {
+                continue;
+            }
+            MarketData md = lookupMd(quotes, h.getSymbol());
+            Double ltp = h.getCurrentPrice();
+            if ((ltp == null || ltp <= 0) && md != null) {
+                ltp = md.getLastPrice();
+            }
+            if (ltp == null || ltp <= 0) {
+                continue;
+            }
+            Double prior = md != null ? md.getPreviousClose() : null;
+            if (prior == null || !MarketDataService.isDistinctPrior(prior, ltp)) {
+                prior = MarketDataService.resolvePriorCloseFromHistorical(lookupMd(hist, h.getSymbol()), ltp);
+            }
+            if (prior == null || !MarketDataService.isDistinctPrior(prior, ltp)) {
+                continue;
+            }
+            daySum += (ltp - prior) * h.getQuantity();
+            counted++;
+        }
+        return counted > 0 ? daySum : null;
+    }
+
+    private static MarketData lookupMd(Map<String, MarketData> map, String symbol) {
+        if (map == null || symbol == null) {
+            return null;
+        }
+        MarketData md = map.get(symbol);
+        if (md != null) {
+            return md;
+        }
+        String cleaned = symbol;
+        int colon = symbol.indexOf(':');
+        if (colon > 0 && colon < symbol.length() - 1) {
+            cleaned = symbol.substring(colon + 1);
+        }
+        md = map.get(cleaned);
+        if (md != null) {
+            return md;
+        }
+        return map.get(cleaned.toUpperCase(java.util.Locale.ROOT));
     }
 }

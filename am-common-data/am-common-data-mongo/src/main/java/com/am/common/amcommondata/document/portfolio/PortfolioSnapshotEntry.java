@@ -44,6 +44,13 @@ public class PortfolioSnapshotEntry {
     @Field("totalGainLossPercentage")
     private Double totalGainLossPercentage;
 
+    /** Frozen cash-session day P&L (close − prior-session open). Null when prior missing or flat. */
+    @Field("sessionDayGainLoss")
+    private Double sessionDayGainLoss;
+
+    @Field("sessionDayGainLossPercentage")
+    private Double sessionDayGainLossPercentage;
+
     @Field("holdings")
     private List<HoldingSnapshotItem> holdings;
 }

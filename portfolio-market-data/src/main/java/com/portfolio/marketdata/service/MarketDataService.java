@@ -76,12 +76,9 @@ public class MarketDataService {
     /**
      * Symbols where prior-close hist was already attempted this TTL window.
      * Kept separate from {@link #priorCloseCache} so a miss never poisons day% with last≈prev.
+     * TTL from {@code market-data.api.prior-close-miss-ttl-minutes} (Caffeine, not Redis).
      */
-    private final com.github.benmanes.caffeine.cache.Cache<String, Boolean> priorClosePrefetchAttempted =
-            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
-            .expireAfterWrite(18, java.util.concurrent.TimeUnit.HOURS)
-            .maximumSize(20000)
-            .build();
+    private final com.github.benmanes.caffeine.cache.Cache<String, Boolean> priorClosePrefetchAttempted;
 
     private final com.github.benmanes.caffeine.cache.Cache<String, com.portfolio.marketdata.model.HistoricalData> chartCache = 
             com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
@@ -127,6 +124,13 @@ public class MarketDataService {
         this.taskExecutor = taskExecutor;
         this.externalApiExecutor = externalApiExecutor;
         this.config = config;
+        int missTtlMinutes = (config != null && config.getPriorCloseMissTtlMinutes() > 0)
+                ? config.getPriorCloseMissTtlMinutes()
+                : 15;
+        this.priorClosePrefetchAttempted = com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+                .expireAfterWrite(missTtlMinutes, java.util.concurrent.TimeUnit.MINUTES)
+                .maximumSize(20000)
+                .build();
     }
 
     // Constants
@@ -1016,7 +1020,7 @@ public class MarketDataService {
         }
     }
 
-    static boolean needsPriorSessionClose(MarketData md) {
+    public static boolean needsPriorSessionClose(MarketData md) {
         if (md == null) {
             return false;
         }
@@ -1032,7 +1036,7 @@ public class MarketDataService {
     }
 
     /** True when prior differs from session last by at least 1 bp (relative). */
-    static boolean isDistinctPrior(Double prior, Double sessionClose) {
+    public static boolean isDistinctPrior(Double prior, Double sessionClose) {
         if (prior == null || prior <= 0 || sessionClose == null || sessionClose <= 0) {
             return false;
         }
@@ -1043,7 +1047,7 @@ public class MarketDataService {
      * Walk daily bars backward from the latest close to find a prior session close
      * distinct from the rolled session close (weekend / holiday collapse).
      */
-    static Double resolvePriorCloseFromHistorical(MarketData historical, Double sessionClose) {
+    public static Double resolvePriorCloseFromHistorical(MarketData historical, Double sessionClose) {
         if (historical == null) {
             return null;
         }
