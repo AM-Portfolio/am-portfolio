@@ -34,6 +34,11 @@ public class PortfolioSnapshotEntryModel {
     private Double totalGainLoss;
     @JsonSerialize(using = TwoDecimalSerializer.class)
     private Double totalGainLossPercentage;
+    /** Frozen cash-session day P&L (close − prior-session open). */
+    @JsonSerialize(using = TwoDecimalSerializer.class)
+    private Double sessionDayGainLoss;
+    @JsonSerialize(using = TwoDecimalSerializer.class)
+    private Double sessionDayGainLossPercentage;
     /** Kept for in-process use; history JSON must not emit this. Catch-up reads Mongo documents. */
     @JsonIgnore
     private List<HoldingSnapshotItemModel> holdings;

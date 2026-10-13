@@ -113,7 +113,10 @@ App listens on `SERVER_PORT` (default **8072** in template/mapper — avoids Win
 | `SPRING_PROFILES_ACTIVE` | — | `preprod` or `dev` |
 | `SERVER_PORT` | — | Local HTTP port (not in Vault); default `8072` |
 | `ETF_API_URL` | `apps/{env}/services/am-parser` → `URL` | Fallback: `https://am-preprod.asrax.in/parser` / `https://am-dev.asrax.in/parser` |
-| `MARKET_DATA_API_URL` | `apps/{env}/services/am-market-data` → `URL` | In-cluster `http://am-market-data...` rewritten to public gateway URL |
+| `MARKET_DATA_API_URL` | `apps/{env}/services/am-market-data` → `URL` | In-cluster `http://am-market-data...` or dig gateway `https://am-dev.asrax.in/market`. **Must match the env** — dig Vault pointed at prod (`am.asrax.in`) caused hist `data=null`. Not hardcoded in `values.dev.yaml`. |
+| `MARKET_DATA_EQUITY_INSTRUMENT_PREFIX` | — | Cash hist key segment (default `NSE_EQ`). FO/INDEX passthrough via `MARKET_DATA_PASSTHROUGH_INSTRUMENT_PREFIXES`. |
+| `MARKET_DATA_PRIOR_CLOSE_MISS_TTL_MINUTES` | — | Caffeine miss-marker TTL for prior-close prefetch (default `15`); successful priorClose stays ~18h |
+| `PORTFOLIO_SNAPSHOT_ONE_DAY_LOOKBACK_DAYS` | — | 1D snapshot Mongo lookback window (default `10`) so weekends/holidays still find a prior session |
 | `BASKET_HOLDINGS_ENRICHMENT` | — | `true` = resolve constituent ISINs via market batch-search |
 | `MARKET_DATA_CONNECT_TIMEOUT_MS` | — | HTTP connect timeout (ms) |
 | `MARKET_DATA_READ_TIMEOUT_MS` | — | HTTP read timeout (ms); batch-search can be slow |

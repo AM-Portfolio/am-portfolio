@@ -22,8 +22,10 @@ import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.repository.portfolio.PortfolioSnapshotRepository;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.marketdata.client.MarketDataApiClient;
+import com.portfolio.marketdata.config.MarketDataApiConfig;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
 import com.portfolio.marketdata.model.HistoricalDataResponseWrapper;
+import com.portfolio.model.util.InstrumentKeys;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,6 +49,7 @@ public class SnapshotCatchUpService {
     private final PortfolioSnapshotRepository portfolioSnapshotRepository;
     private final PortfolioService portfolioService;
     private final MarketDataApiClient marketDataApiClient;
+    private final MarketDataApiConfig marketDataApiConfig;
 
     /**
      * Triggered from UserLoginConsumerService after a login event.
@@ -74,13 +77,24 @@ public class SnapshotCatchUpService {
                 LocalDate lastSnapshotDate = lastSnapshot.getSnapshotDate();
 
                 // Gap is from the day after the last snapshot up to (not including) today.
-                // If the last snapshot is yesterday or today, we're up to date.
-                if (!lastSnapshotDate.isBefore(today.minusDays(1))) {
-                    log.info("[CatchUp] Snapshots are up to date for userId={}. Last: {}", userId, lastSnapshotDate);
+                boolean tipFresh = !lastSnapshotDate.isBefore(today.minusDays(1));
+                // Day-P&L freeze needs ≥2 prior sessions; fill holes in the last ~10 calendar days.
+                List<PortfolioSnapshotDocument> recentSnaps = portfolioSnapshotRepository
+                        .findByUserIdAndSnapshotDateBetween(userId, today.minusDays(10), today);
+                long recentSessions = recentSnaps.size();
+                boolean freezeMissing = recentSnaps.stream().anyMatch(SnapshotCatchUpService::needsSessionDayFreezeRepair);
+                if (tipFresh && recentSessions >= 2 && !freezeMissing) {
+                    log.info("[CatchUp] Snapshots are up to date for userId={}. Last: {} recentSessions={}",
+                            userId, lastSnapshotDate, recentSessions);
                     return;
                 }
-
-                backfillStart = lastSnapshotDate.plusDays(1);
+                if (tipFresh || freezeMissing) {
+                    log.info("[CatchUp] Tip fresh/gaps/freeze-repair recentSessions={} freezeMissing={} userId={}",
+                            recentSessions, freezeMissing, userId);
+                    backfillStart = today.minusDays(10);
+                } else {
+                    backfillStart = lastSnapshotDate.plusDays(1);
+                }
                 // Enforce the max backfill window
                 LocalDate hardCap = today.minusDays(maxBackfillDays);
                 if (backfillStart.isBefore(hardCap)) {
@@ -164,14 +178,28 @@ public class SnapshotCatchUpService {
                     allSymbols.size(), portfolioHoldings.size(), userId);
 
             // --- STEP 3: Fetch historical daily prices from Market Data API (SINGLE batch call) ---
-            String symbolsParam = String.join(",", allSymbols);
+            // Cash segment from market-data.api.equity-instrument-prefix (default NSE_EQ).
+            String equityPrefix = marketDataApiConfig.getEquityInstrumentPrefix();
+            var passthrough = InstrumentKeys.parsePassthroughPrefixes(
+                    marketDataApiConfig.getPassthroughInstrumentPrefixes());
+            String symbolsParam = allSymbols.stream()
+                    .filter(s -> s != null && !s.isBlank())
+                    .map(s -> InstrumentKeys.toInstrumentKey(s, equityPrefix, passthrough))
+                    .distinct()
+                    .collect(Collectors.joining(","));
             HistoricalDataRequest request = HistoricalDataRequest.builder()
                     .symbols(symbolsParam)
                     .fromDate(backfillStart != null ? backfillStart.toString() : null)
                     .toDate(today.minusDays(1).toString()) // up to yesterday (market closed)
-                    .interval("day")
-                    .forceRefresh(false)
+                    // am-market flow logs / Upstox path expect 1D (alias of day).
+                    .interval("1D")
+                    .instrumentType("EQ")
+                    // Dig Mongo hist can be cold for these symbols; force provider fill.
+                    .forceRefresh(true)
                     .build();
+
+            log.info("[CatchUp] Requesting hist userId={} symbols={} from={} to={} interval=1D forceRefresh=true",
+                    userId, symbolsParam, request.getFromDate(), request.getToDate());
 
             HistoricalDataResponseWrapper histResponse;
             try {
@@ -182,7 +210,9 @@ public class SnapshotCatchUpService {
             }
 
             if (histResponse == null || histResponse.getData() == null || histResponse.getData().isEmpty()) {
-                log.warn("[CatchUp] Market Data API returned empty response for userId={}. Aborting.", userId);
+                log.warn("[CatchUp] Market Data API returned empty response for userId={} symbols={} wrapperNull={} dataNull={}",
+                        userId, symbolsParam, histResponse == null,
+                        histResponse == null || histResponse.getData() == null);
                 return;
             }
 
@@ -195,50 +225,70 @@ public class SnapshotCatchUpService {
                     : histResponse.getData().entrySet()) {
                 String symbol = entry.getKey();
                 com.portfolio.marketdata.model.HistoricalDataResponse symbolData = entry.getValue();
-                if (symbolData == null || symbolData.getData() == null
-                        || symbolData.getData().getDataPoints() == null) {
+                if (symbolData == null) {
                     continue;
                 }
-                for (com.am.common.investment.model.historical.OHLCVTPoint point
-                        : symbolData.getData().getDataPoints()) {
+                // Prefer flat am-market dataPoints; nested legacy envelope still works.
+                java.util.List<com.am.common.investment.model.historical.OHLCVTPoint> points =
+                        symbolData.effectiveDataPoints();
+                if (points == null || points.isEmpty()) {
+                    continue;
+                }
+                // Bare ticker key for holding lookup (NSE_EQ:PWL → PWL).
+                String bare = symbol.contains(":")
+                        ? symbol.substring(symbol.lastIndexOf(':') + 1)
+                        : symbol;
+                for (com.am.common.investment.model.historical.OHLCVTPoint point : points) {
                     if (point == null || point.getClose() == null || point.getTime() == null) {
                         continue;
                     }
                     LocalDate date = point.getTime().toLocalDate();
-                    priceLookup.computeIfAbsent(date, k -> new HashMap<>()).put(symbol, point.getClose());
+                    Map<String, Double> dayMap = priceLookup.computeIfAbsent(date, k -> new HashMap<>());
+                    dayMap.put(symbol, point.getClose());
+                    dayMap.put(bare, point.getClose());
+                    if (bare != null) {
+                        dayMap.put(bare.toUpperCase(java.util.Locale.ROOT), point.getClose());
+                    }
                 }
             }
 
             log.info("[CatchUp] Built price lookup map for {} trading days for userId={}.", priceLookup.size(), userId);
 
-            // --- STEP 5: Load existing snapshot dates in bulk (single DB query, idempotency) ---
-            Set<LocalDate> existingDates = portfolioSnapshotRepository
+            // --- STEP 5: Load existing snapshots in bulk (idempotency + freeze repair) ---
+            Map<LocalDate, PortfolioSnapshotDocument> existingByDate = portfolioSnapshotRepository
                     .findByUserIdAndSnapshotDateBetween(userId, backfillStart, today.minusDays(1))
                     .stream()
-                    .map(PortfolioSnapshotDocument::getSnapshotDate)
-                    .collect(Collectors.toSet());
+                    .filter(d -> d.getSnapshotDate() != null)
+                    .collect(Collectors.toMap(PortfolioSnapshotDocument::getSnapshotDate, d -> d, (a, b) -> a));
 
-            // --- STEP 6: Loop through each missing day and reconstruct snapshots ---
+            // --- STEP 6: Loop through each missing / repairable day and reconstruct snapshots ---
             List<PortfolioSnapshotDocument> batch = new ArrayList<>();
 
             // Track "last known price" per symbol to carry-forward over weekends/holidays
             Map<String, Double> lastKnownPrice = new HashMap<>();
+            // Prior portfolio close → next day's session open (weekend day-P&L freeze).
+            Map<String, Double> lastPortClose = new HashMap<>();
 
             for (LocalDate date = backfillStart; date.isBefore(today); date = date.plusDays(1)) {
-                // Skip dates that already have a snapshot (idempotency)
-                if (existingDates.contains(date)) {
-                    log.debug("[CatchUp] Snapshot already exists for date={}, userId={}. Skipping.", date, userId);
-                    continue;
-                }
-
                 // Update last known price for each symbol if today is a trading day
                 Map<String, Double> dayPrices = priceLookup.getOrDefault(date, Collections.emptyMap());
                 lastKnownPrice.putAll(dayPrices);
+
+                PortfolioSnapshotDocument existingDoc = existingByDate.get(date);
+                if (existingDoc != null && !needsSessionDayFreezeRepair(existingDoc)) {
+                    // Seed prior closes so the next day can freeze correctly.
+                    seedLastPortClose(lastPortClose, existingDoc);
+                    log.debug("[CatchUp] Snapshot already exists for date={}, userId={}. Skipping.", date, userId);
+                    continue;
+                }
 
                 // If we have no price data at all yet (e.g. API has no data for this range),
                 // use the last snapshot's close as the final fallback.
                 // This ensures even weekends before any trading data still produce valid snapshots.
                 if (lastKnownPrice.isEmpty()) {
+                    if (existingDoc != null) {
+                        seedLastPortClose(lastPortClose, existingDoc);
+                    }
                     log.debug("[CatchUp] No price data available yet for date={}. Skipping this date.", date);
                     continue;
                 }
@@ -276,21 +326,34 @@ public class SnapshotCatchUpService {
                     String brokerStr = holdings.isEmpty() ? null : holdings.get(0).brokerType;
                     String portfolioName = holdings.isEmpty() ? null : holdings.get(0).portfolioName;
 
-                    // For catch-up snapshots: open = close = high = low (daily close value)
-                    // We don't have intra-day data for historical reconstruction.
+                    double sessionOpen = lastPortClose.getOrDefault(portfolioId, portValue);
+                    Double sessionDayGain = null;
+                    Double sessionDayPct = null;
+                    // Only freeze when we had a real prior close (not first-day open=close fallback).
+                    boolean hadPrior = lastPortClose.containsKey(portfolioId);
+                    if (hadPrior && sessionOpen > 0) {
+                        double rawDay = portValue - sessionOpen;
+                        if (Math.abs(rawDay) >= 0.005) {
+                            sessionDayGain = rawDay;
+                            sessionDayPct = (rawDay / sessionOpen) * 100.0;
+                        }
+                    }
                     entries.add(PortfolioSnapshotEntry.builder()
                             .portfolioId(portfolioId)
                             .portfolioName(portfolioName)
                             .brokerType(brokerStr)
-                            .open(portValue)
-                            .high(portValue)
-                            .low(portValue)
+                            .open(sessionOpen)
+                            .high(Math.max(sessionOpen, portValue))
+                            .low(Math.min(sessionOpen, portValue))
                             .close(portValue)
                             .totalInvestment(portInvestment)
                             .totalGainLoss(portGainLoss)
                             .totalGainLossPercentage(portGainLossPct)
+                            .sessionDayGainLoss(sessionDayGain)
+                            .sessionDayGainLossPercentage(sessionDayPct)
                             .holdings(catchUpHoldings)
                             .build());
+                    lastPortClose.put(portfolioId, portValue);
 
                     totalWealth += portValue;
                     totalInvestment += portInvestment;
@@ -302,23 +365,49 @@ public class SnapshotCatchUpService {
 
                 double totalGainLoss = totalWealth - totalInvestment;
                 double totalGainLossPct = totalInvestment > 0 ? (totalGainLoss / totalInvestment) * 100.0 : 0.0;
+                Double userSessionDay = null;
+                Double userSessionDayPct = null;
+                double sessionDaySum = 0.0;
+                double sessionOpenSum = 0.0;
+                int sessionDayN = 0;
+                for (PortfolioSnapshotEntry e : entries) {
+                    if (e.getSessionDayGainLoss() == null) {
+                        continue;
+                    }
+                    sessionDaySum += e.getSessionDayGainLoss();
+                    if (e.getOpen() != null && e.getOpen() > 0) {
+                        sessionOpenSum += e.getOpen();
+                    }
+                    sessionDayN++;
+                }
+                if (sessionDayN > 0) {
+                    userSessionDay = sessionDaySum;
+                    userSessionDayPct = sessionOpenSum > 0 ? (sessionDaySum / sessionOpenSum) * 100.0 : null;
+                }
 
-                String snapshotId = UUID.randomUUID().toString();
+                String snapshotId = existingDoc != null && existingDoc.getId() != null
+                        ? existingDoc.getId()
+                        : UUID.randomUUID().toString();
+                String publicSnapshotId = existingDoc != null && existingDoc.getSnapshotId() != null
+                        ? existingDoc.getSnapshotId()
+                        : snapshotId;
                 batch.add(PortfolioSnapshotDocument.builder()
                         .id(snapshotId)
-                        .snapshotId(snapshotId)
+                        .snapshotId(publicSnapshotId)
                         .userId(userId)
                         .snapshotDate(date)
                         .totalUserWealth(totalWealth)
                         .totalUserInvestment(totalInvestment)
                         .totalUserGainLoss(totalGainLoss)
                         .totalUserGainLossPercentage(totalGainLossPct)
+                        .sessionDayGainLoss(userSessionDay)
+                        .sessionDayGainLossPercentage(userSessionDayPct)
                         .portfolios(entries)
                         .createdAt(LocalDateTime.now())
                         .build());
             }
 
-            // --- STEP 7: Bulk insert all reconstructed snapshots in a single DB call ---
+            // --- STEP 7: Bulk upsert reconstructed / freeze-repaired snapshots ---
             if (!batch.isEmpty()) {
                 portfolioSnapshotRepository.saveAll(batch);
                 log.info("[CatchUp] ✅ Completed historical catch-up for userId={}. Saved {} snapshots (from {} to {}).",
@@ -329,6 +418,44 @@ public class SnapshotCatchUpService {
 
         } catch (Exception e) {
             log.error("[CatchUp] Unexpected failure during snapshot catch-up for userId={}", userId, e);
+        }
+    }
+
+    /** True when a snap lacks usable sessionDayGainLoss (legacy open=close / null freeze). */
+    static boolean needsSessionDayFreezeRepair(PortfolioSnapshotDocument doc) {
+        if (doc == null || doc.getPortfolios() == null || doc.getPortfolios().isEmpty()) {
+            return doc == null || doc.getSessionDayGainLoss() == null
+                    || Math.abs(doc.getSessionDayGainLoss()) < 0.005;
+        }
+        for (PortfolioSnapshotEntry e : doc.getPortfolios()) {
+            if (e == null) {
+                continue;
+            }
+            Double day = e.getSessionDayGainLoss();
+            if (day != null && Math.abs(day) >= 0.005) {
+                continue;
+            }
+            Double open = e.getOpen();
+            Double close = e.getClose();
+            if (open != null && close != null && Math.abs(open - close) < 0.005) {
+                return true;
+            }
+            if (day == null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void seedLastPortClose(Map<String, Double> lastPortClose, PortfolioSnapshotDocument doc) {
+        if (doc == null || doc.getPortfolios() == null) {
+            return;
+        }
+        for (PortfolioSnapshotEntry e : doc.getPortfolios()) {
+            if (e == null || e.getPortfolioId() == null || e.getClose() == null || e.getClose() <= 0) {
+                continue;
+            }
+            lastPortClose.put(e.getPortfolioId(), e.getClose());
         }
     }
 

@@ -204,7 +204,7 @@ public class PortfolioHoldingsService {
         }
     }
 
-    static boolean isCashOpenIst(LocalDateTime nowIst) {
+    public static boolean isCashOpenIst(LocalDateTime nowIst) {
         var t = nowIst.toLocalTime();
         var day = nowIst.getDayOfWeek();
         if (day.getValue() >= 6) {

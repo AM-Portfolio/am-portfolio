@@ -9,9 +9,12 @@ import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.portfolio.marketdata.client.base.AbstractApiClient;
 import com.portfolio.marketdata.config.MarketDataApiConfig;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
+import com.portfolio.marketdata.model.HistoricalDataResponse;
 import com.portfolio.marketdata.model.HistoricalDataResponseWrapper;
 import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.model.MarketDataResponseWrapper;
@@ -29,6 +32,16 @@ import org.springframework.web.reactive.function.client.WebClient;
 @Slf4j
 @Component
 public class MarketDataApiClient extends AbstractApiClient {
+
+        private static final ObjectMapper HIST_MAPPER = createHistMapper();
+
+        private static ObjectMapper createHistMapper() {
+                ObjectMapper mapper = new ObjectMapper();
+                mapper.registerModule(new JavaTimeModule());
+                mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+                mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+                return mapper;
+        }
 
         /**
          * Creates a new MarketDataApiClient with the specified configuration.
@@ -134,13 +147,17 @@ public class MarketDataApiClient extends AbstractApiClient {
                 if (request.getSymbols() != null && !request.getSymbols().isEmpty()) {
                         String[] parts = request.getSymbols().split(",");
                         java.util.List<String> updated = new java.util.ArrayList<>();
+                        String equityPrefix = config.getEquityInstrumentPrefix();
+                        java.util.Set<String> passthrough = com.portfolio.model.util.InstrumentKeys
+                                        .parsePassthroughPrefixes(config.getPassthroughInstrumentPrefixes());
                         for (String part : parts) {
                                 String s = part.trim();
-                                if (!s.contains(":") && !s.contains(" ")) {
-                                        updated.add("NSE:" + s);
-                                } else {
-                                        updated.add(s);
+                                if (s.isEmpty()) {
+                                        continue;
                                 }
+                                // Config-driven cash prefix (default NSE_EQ); FO/INDEX/BSE passthrough preserved.
+                                updated.add(com.portfolio.model.util.InstrumentKeys.toInstrumentKey(
+                                                s, equityPrefix, passthrough));
                         }
                         request.setSymbols(String.join(",", updated));
                 }
@@ -149,11 +166,54 @@ public class MarketDataApiClient extends AbstractApiClient {
                                 request.getSymbols(), request.getFromDate(), request.getToDate(),
                                 request.getInterval(), request.getFilterType(), request.getForceRefresh());
 
-                // Use POST with the request body
-                return post(config.getHistoricalDataEndpoint(), request, HistoricalDataResponseWrapper.class)
-                                .doOnSuccess(data -> log.debug(
-                                                "Successfully fetched historical data for {} with {} data points",
-                                                request.getSymbols(), data.getTotalDataPoints()))
+                // Same Map unwrap as OHLC: typed bodyToMono(HistoricalDataResponseWrapper) can bind
+                // data=null on dig (flat am-market candles + LocalDateTime points). Map + convertValue
+                // with JavaTimeModule reliably fills dataPoints.
+                return post(config.getHistoricalDataEndpoint(), request, Map.class)
+                                .map(rawMap -> {
+                                        HistoricalDataResponseWrapper wrapper = new HistoricalDataResponseWrapper();
+                                        Map<String, HistoricalDataResponse> dataMap = new HashMap<>();
+                                        if (rawMap == null) {
+                                                wrapper.setData(dataMap);
+                                                return wrapper;
+                                        }
+                                        Object actualData = rawMap.containsKey("data") ? rawMap.get("data") : rawMap;
+                                        if (actualData instanceof Map<?, ?> dataToProcess) {
+                                                for (Object key : dataToProcess.keySet()) {
+                                                        try {
+                                                                Object value = dataToProcess.get(key);
+                                                                if (value == null) {
+                                                                        continue;
+                                                                }
+                                                                HistoricalDataResponse response = HIST_MAPPER.convertValue(
+                                                                                value, HistoricalDataResponse.class);
+                                                                dataMap.put(String.valueOf(key), response);
+                                                        } catch (Exception e) {
+                                                                log.warn("Error converting hist response for symbol {}: {}",
+                                                                                key, e.getMessage());
+                                                        }
+                                                }
+                                        } else if (actualData != null) {
+                                                log.warn("Hist payload data was {} not Map; keys={}",
+                                                                actualData.getClass().getSimpleName(),
+                                                                rawMap.keySet());
+                                        } else {
+                                                log.warn("Hist API returned null data field; topKeys={} error={}",
+                                                                rawMap.keySet(), rawMap.get("error"));
+                                        }
+                                        wrapper.setData(dataMap);
+                                        wrapper.setTotalDataPoints(dataMap.values().stream()
+                                                        .mapToInt(r -> r == null ? 0 : r.effectiveDataPoints().size())
+                                                        .sum());
+                                        wrapper.setSuccessfulSymbols(dataMap.size());
+                                        wrapper.setTotalSymbols(dataMap.size());
+                                        return wrapper;
+                                })
+                                .doOnSuccess(data -> log.info(
+                                                "Fetched historical data for {} → symbols={} points={}",
+                                                request.getSymbols(),
+                                                data.getData() != null ? data.getData().size() : 0,
+                                                data.getTotalDataPoints()))
                                 .doOnError(e -> log.error("Failed to fetch historical data for {}: {}",
                                                 request.getSymbols(), e.getMessage()));
         }
