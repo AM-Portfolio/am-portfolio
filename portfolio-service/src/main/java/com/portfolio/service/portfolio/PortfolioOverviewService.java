@@ -296,50 +296,29 @@ public class PortfolioOverviewService {
         return summary;
     }
 
+    /**
+     * Warm path: return cached summary KPIs without synchronous holdings OHLC reprice.
+     * Prevents Overview 30s / gateway 524 when market enrichment is slow. Marks freshness AS_OF
+     * so clients do not treat skipped overlay as LIVE. Avoids session helpers that call market data.
+     */
     private PortfolioSummaryV1 repriceCachedSummary(
             PortfolioSummaryV1 cached, String userId, String portfolioId, TimeInterval interval) {
+        log.info(
+                "Serving cached portfolio summary without sync market reprice - User: {}, Portfolio: {}",
+                userId, portfolioId);
+        cached.setPriceFreshness("AS_OF");
+        if (cached.getPriceSource() == null || cached.getPriceSource().isBlank()) {
+            cached.setPriceSource("CACHE");
+        }
+        cached.setLastUpdated(java.time.LocalDateTime.now(ZoneId.of("Asia/Kolkata")));
         try {
-            com.portfolio.model.portfolio.PortfolioHoldings ph = portfolioId == null
-                    ? portfolioHoldingsService.getPortfolioHoldings(userId, interval, true)
-                    : portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, interval, true);
-            if (ph == null || ph.getEquityHoldings() == null || ph.getEquityHoldings().isEmpty()) {
-                // Still freeze day P&L from snapshots when holdings reprice is unavailable.
-                applySessionDayGainLossIfMissing(cached, userId, portfolioId, interval);
-                ensureOverallTotalGainLoss(cached);
-                return cached;
+            if (needsSessionDayFill(cached) && tryFillDayGainFromSnapshots(cached, userId, portfolioId)) {
+                log.debug("[Overview] Warm cache: filled todayGainLoss from snapshots");
             }
-            double investmentValue = cached.getInvestmentValue() != null
-                    ? cached.getInvestmentValue()
-                    : ph.getEquityHoldings().stream()
-                            .mapToDouble(h -> h.getInvestmentCost() != null ? h.getInvestmentCost() : 0.0)
-                            .sum();
-            PortfolioSummaryV1 live = portfolioCalculator.calculateSummary(ph.getEquityHoldings(), investmentValue);
-            cached.setInvestmentValue(investmentValue);
-            cached.setCurrentValue(live.getCurrentValue());
-            // Overall Total Return from calculator; session day may still be null when quotes collapse.
-            cached.setTotalGainLoss(live.getTotalGainLoss());
-            cached.setTotalGainLossPercentage(live.getTotalGainLossPercentage());
-            cached.setTodayGainLoss(live.getTodayGainLoss());
-            cached.setTodayGainLossPercentage(live.getTodayGainLossPercentage());
-            cached.setTotalAssets(live.getTotalAssets());
-            cached.setGainersCount(live.getGainersCount());
-            cached.setLosersCount(live.getLosersCount());
-            cached.setTodayGainersCount(live.getTodayGainersCount());
-            cached.setTodayLosersCount(live.getTodayLosersCount());
-            cached.setAsOf(ph.getAsOf());
-            cached.setPriceFreshness(ph.getPriceFreshness());
-            cached.setPriceSource(ph.getPriceSource());
-            cached.setSessionDate(ph.getSessionDate());
-            cached.setLastUpdated(java.time.LocalDateTime.now(ZoneId.of("Asia/Kolkata")));
-            // AS_OF + today==0 is collapsed quote math, not a known flat session — clear for freeze.
-            clearCollapsedAsOfTodayGain(cached);
-            applyTimeframeGainLoss(cached, userId, portfolioId, interval);
-            applySessionDayGainLossIfMissing(cached, userId, portfolioId, interval);
             ensureOverallTotalGainLoss(cached);
             return cached;
         } catch (Exception e) {
-            log.warn("Summary price overlay failed; serving cached KPIs: {}", e.getMessage());
-            applySessionDayGainLossIfMissing(cached, userId, portfolioId, interval);
+            log.warn("Cached summary finalize failed; returning cached KPIs: {}", e.getMessage());
             ensureOverallTotalGainLoss(cached);
             return cached;
         }

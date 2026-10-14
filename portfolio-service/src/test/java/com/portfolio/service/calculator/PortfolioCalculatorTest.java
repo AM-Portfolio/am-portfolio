@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
@@ -65,7 +66,7 @@ class PortfolioCalculatorTest {
 
     @Test
     void enrichHoldings_Success() {
-        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", marketData));
+        when(marketDataService.getMarketData(anyList(), anyBoolean())).thenReturn(Map.of("TCS", marketData));
         
         BatchSearchResponse.SecurityMatch match = new BatchSearchResponse.SecurityMatch();
         match.setMarketCapValue(100000000000L);
@@ -90,7 +91,7 @@ class PortfolioCalculatorTest {
         apiData.setSymbol("TCS");
         apiData.setLastPrice(3100.0);
         
-        lenient().when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", apiData));
+        lenient().when(marketDataService.getMarketData(anyList(), anyBoolean())).thenReturn(Map.of("TCS", apiData));
         lenient().when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
         lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Collections.emptyMap());
 
@@ -101,7 +102,7 @@ class PortfolioCalculatorTest {
 
     @Test
     void enrichHoldings_CostBasisFallback() {
-        when(marketDataService.getMarketData(anyList())).thenReturn(Collections.emptyMap());
+        when(marketDataService.getMarketData(anyList(), anyBoolean())).thenReturn(Collections.emptyMap());
         when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
         lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
 
@@ -121,7 +122,7 @@ class PortfolioCalculatorTest {
             .ohlc(OhlcData.builder().open(3200.0).close(3250.0).build())
             // NO previousClose — open must NOT be used as day baseline
             .build();
-        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", data));
+        when(marketDataService.getMarketData(anyList(), anyBoolean())).thenReturn(Map.of("TCS", data));
         lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
 
         holding.setTodayGainLoss(500.0);
@@ -145,7 +146,7 @@ class PortfolioCalculatorTest {
             .ohlc(OhlcData.builder().close(3250.0).build())
             // NO previousClose or open set
             .build();
-        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", data));
+        when(marketDataService.getMarketData(anyList(), anyBoolean())).thenReturn(Map.of("TCS", data));
         lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
         
         // Seed holding with stale P&L metrics
@@ -210,7 +211,7 @@ class PortfolioCalculatorTest {
                 .lastPrice(3300.0)
                 .previousClose(3300.0)
                 .build();
-        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", data));
+        when(marketDataService.getMarketData(anyList(), anyBoolean())).thenReturn(Map.of("TCS", data));
         lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
 
         List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
@@ -232,7 +233,7 @@ class PortfolioCalculatorTest {
                 .lastPrice(3300.0)
                 .previousClose(3300.0)
                 .build();
-        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", data));
+        when(marketDataService.getMarketData(anyList(), anyBoolean())).thenReturn(Map.of("TCS", data));
         lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
 
         List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));

@@ -30,6 +30,9 @@ import io.micrometer.observation.annotation.Observed;
 @Slf4j
 public class PortfolioCalculator {
 
+    /** Wall-clock budget for interactive holdings enrich/reprice (Overview summary). */
+    static final long HOLDINGS_MARKET_DATA_BUDGET_MS = 3000L;
+
     private final MarketDataService marketDataService;
     private final MarketCapMongoService marketCapMongoService;
     private final StockPriceMongoService stockPriceMongoService;
@@ -107,14 +110,8 @@ public class PortfolioCalculator {
         }
 
 
-        // 2. Data Lookup (Redis -> Mongo -> API handled automatically by MarketDataService)
-        Map<String, MarketData> apiData = Map.of();
-        try {
-            apiData = marketDataService.getMarketData(symbols);
-        } catch (Exception e) {
-            log.error("MarketDataService fetch failed: {}", e.getMessage());
-        }
-        
+        // 2. Data Lookup with hard budget (skip after-hours hist repair on interactive path)
+        Map<String, MarketData> apiData = fetchMarketDataWithinBudget(symbols);
         final Map<String, MarketData> finalApiDataForEnrich = (apiData == null) ? Map.of() : apiData;
 
         // Market Cap: do not block holdings first paint (apply when already done)
@@ -146,16 +143,35 @@ public class PortfolioCalculator {
                 .filter(symbol -> symbol != null)
                 .filter(symbol -> !symbol.endsWith("-F"))
                 .collect(Collectors.toList());
-        Map<String, MarketData> apiData = Map.of();
-        try {
-            apiData = marketDataService.getMarketData(symbols);
-        } catch (Exception e) {
-            log.error("MarketDataService reprice failed: {}", e.getMessage());
-        }
+        Map<String, MarketData> apiData = fetchMarketDataWithinBudget(symbols);
         final Map<String, MarketData> finalApiData = (apiData == null) ? Map.of() : apiData;
         return equityHoldings.stream()
                 .map(holding -> enrichHolding(holding, finalApiData, Map.of(), Map.of()))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Interactive path: skip hist repair and abandon wait after {@link #HOLDINGS_MARKET_DATA_BUDGET_MS}.
+     * Does not cancel in-flight OHLC HTTP; returns empty map so Tier-2/3 fallbacks apply.
+     */
+    Map<String, MarketData> fetchMarketDataWithinBudget(List<String> symbols) {
+        if (symbols == null || symbols.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            return java.util.concurrent.CompletableFuture
+                    .supplyAsync(() -> marketDataService.getMarketData(symbols, true), taskExecutor)
+                    .orTimeout(HOLDINGS_MARKET_DATA_BUDGET_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+                    .exceptionally(ex -> {
+                        log.warn("MarketDataService budget/fail after {}ms: {}",
+                                HOLDINGS_MARKET_DATA_BUDGET_MS, ex.getMessage());
+                        return Map.of();
+                    })
+                    .join();
+        } catch (Exception e) {
+            log.error("MarketDataService fetch failed: {}", e.getMessage());
+            return Map.of();
+        }
     }
 
     private EquityHoldings enrichHolding(EquityHoldings holding, 

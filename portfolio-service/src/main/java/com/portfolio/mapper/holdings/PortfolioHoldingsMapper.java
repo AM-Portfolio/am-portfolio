@@ -185,8 +185,14 @@ public class PortfolioHoldingsMapper {
                     continue; // Skip zero/negative quantity or closed positions
                 }
 
-                double addedCost = (equity.getAvgBuyingPrice() != null)
-                    ? equity.getAvgBuyingPrice() * addedQty : 0.0;
+                double addedCost;
+                if (equity.getAvgBuyingPrice() != null && equity.getAvgBuyingPrice() > 0) {
+                    addedCost = equity.getAvgBuyingPrice() * addedQty;
+                } else if (equity.getInvestmentValue() != null && equity.getInvestmentValue() > 0) {
+                    addedCost = equity.getInvestmentValue();
+                } else {
+                    addedCost = 0.0;
+                }
 
                 // If this is the first time we're seeing this symbol, create a new holding
                 if (!equityHoldingsMap.containsKey(symbol)) {
