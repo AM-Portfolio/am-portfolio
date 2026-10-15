@@ -83,6 +83,25 @@ private final RedisTemplate<String, Heatmap> portfolioHeatmapRedisTemplate;
         return Optional.empty();
     }
 
+    /**
+     * Drop all heatmap keys for a portfolio (all timeframes). Used after import/trade/delete.
+     */
+    public void evictPortfolio(String portfolioId) {
+        if (!isRedisEnabled || portfolioId == null || portfolioId.isBlank()) {
+            return;
+        }
+        try {
+            String pattern = portfolioHeatmapKeyPrefix + portfolioId + ":*";
+            java.util.Set<String> keys = portfolioHeatmapRedisTemplate.keys(pattern);
+            if (keys != null && !keys.isEmpty()) {
+                portfolioHeatmapRedisTemplate.delete(keys);
+                log.info("Evicted {} heatmap cache keys for portfolio={}", keys.size(), portfolioId);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to evict heatmap cache for portfolio={}: {}", portfolioId, e.getMessage());
+        }
+    }
+
     private String buildKey(String portfolioId, TimeFrameRequest interval) {
         String intervalCode = interval != null && interval.getTimeFrame() != null ? interval.getTimeFrame().getValue() : "all";
         String fromDate = interval != null && interval.getFromDate() != null ? interval.getFromDate().toString() : "null";

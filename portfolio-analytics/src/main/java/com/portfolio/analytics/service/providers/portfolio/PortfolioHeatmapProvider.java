@@ -139,6 +139,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 log.info("Generated heatmap with {} sectors for portfolio: {}", sectorPerformances.size(), portfolioId);
                 
                 if (heatmapRedisService != null
+                        && request.isAllowHeatmapRedisWrite()
                         && heatmap.getSectors() != null
                         && !heatmap.getSectors().isEmpty()) {
                     heatmapRedisService.cacheHeatmap(heatmap, portfolioId, request);

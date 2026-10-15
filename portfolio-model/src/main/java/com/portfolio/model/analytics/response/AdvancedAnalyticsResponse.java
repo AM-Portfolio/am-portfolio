@@ -32,6 +32,12 @@ public class AdvancedAnalyticsResponse {
     private LocalDate endDate;
     
     private Instant timestamp;
+
+    /**
+     * LIVE / WARMING = painted from OHLC (period hist not ready).
+     * PERIOD = heatmap/allocations from cached START_END hist.
+     */
+    private String analyticsFreshness;
     
     private AnalyticsComponent analytics;
     

@@ -39,25 +39,37 @@ import java.math.RoundingMode;
 @Service
 @Slf4j
 public class PortfolioAnalyticsFacade {
+
+    public static final String FRESHNESS_LIVE = "LIVE";
+    public static final String FRESHNESS_WARMING = "WARMING";
+    public static final String FRESHNESS_PERIOD = "PERIOD";
+
+    private static final long ADVANCED_DEADLINE_MS = 900L;
+    private static final long L1_PERIOD_TTL_MS = 60_000L;
+    private static final long L1_LIVE_TTL_MS = 3_000L;
     
     private final AnalyticsFactory analyticsFactory;
     private final Executor taskExecutor;
     private final PortfolioService portfolioService;
     private final MarketDataService marketDataService;
     private final com.portfolio.analytics.service.utils.SecurityDetailsService securityDetailsService;
+    private final AdvancedPeriodWarmService advancedPeriodWarmService;
+    private final com.portfolio.redis.service.PortfolioHeatmapRedisService heatmapRedisService;
     private final Map<String, CachedResponse> fastCache = new ConcurrentHashMap<>();
 
     private static class CachedResponse {
         final AdvancedAnalyticsResponse response;
         final long createdAt;
+        final long ttlMs;
 
-        CachedResponse(AdvancedAnalyticsResponse response) {
+        CachedResponse(AdvancedAnalyticsResponse response, long ttlMs) {
             this.response = response;
             this.createdAt = System.currentTimeMillis();
+            this.ttlMs = ttlMs;
         }
 
         boolean isExpired() {
-            return System.currentTimeMillis() - createdAt > 60_000; // 60s TTL for L1 Cache
+            return System.currentTimeMillis() - createdAt > ttlMs;
         }
     }
 
@@ -65,12 +77,25 @@ public class PortfolioAnalyticsFacade {
                                     @Qualifier("taskExecutor") Executor taskExecutor,
                                     PortfolioService portfolioService,
                                     MarketDataService marketDataService,
-                                    com.portfolio.analytics.service.utils.SecurityDetailsService securityDetailsService) {
+                                    com.portfolio.analytics.service.utils.SecurityDetailsService securityDetailsService,
+                                    @org.springframework.context.annotation.Lazy AdvancedPeriodWarmService advancedPeriodWarmService,
+                                    @org.springframework.lang.Nullable
+                                    com.portfolio.redis.service.PortfolioHeatmapRedisService heatmapRedisService) {
         this.analyticsFactory = analyticsFactory;
         this.taskExecutor = taskExecutor;
         this.portfolioService = portfolioService;
         this.marketDataService = marketDataService;
         this.securityDetailsService = securityDetailsService;
+        this.advancedPeriodWarmService = advancedPeriodWarmService;
+        this.heatmapRedisService = heatmapRedisService;
+    }
+
+    /** Drop L1 entries for a portfolio (after period warm or holdings change). */
+    public void invalidateL1(String portfolioId) {
+        if (portfolioId == null) {
+            return;
+        }
+        fastCache.keySet().removeIf(k -> k.startsWith(portfolioId + "|"));
     }
     
     /**
@@ -121,6 +146,8 @@ public class PortfolioAnalyticsFacade {
     public AdvancedAnalyticsResponse calculateAdvancedAnalytics(AdvancedAnalyticsRequest request) {
         log.info("Calculating advanced analytics for portfolio: {} from {} to {}", 
                 request.getCoreIdentifiers().getPortfolioId(), request.getFromDate(), request.getToDate());
+
+        final long deadlineAt = System.nanoTime() + ADVANCED_DEADLINE_MS * 1_000_000L;
         
         // Generate a cache key based on the request parameters (include TF enum)
         String tfCode = request.getTimeFrame() != null ? request.getTimeFrame().getValue() : "live";
@@ -140,9 +167,22 @@ public class PortfolioAnalyticsFacade {
             return cached.response;
         }
 
+        boolean periodHeatmapReady = false;
+        String portfolioId = request.getCoreIdentifiers().getPortfolioId();
+        if (heatmapRedisService != null && request.getFeatureToggles().isIncludeHeatmap()) {
+            try {
+                periodHeatmapReady = heatmapRedisService
+                        .getCachedHeatmap(portfolioId, request)
+                        .filter(h -> h.getSectors() != null && !h.getSectors().isEmpty())
+                        .isPresent();
+            } catch (Exception e) {
+                log.debug("[AdvancedAnalytics] heatmap Redis probe failed: {}", e.getMessage());
+            }
+        }
+
         // Start building the response
         AdvancedAnalyticsResponse.AdvancedAnalyticsResponseBuilder responseBuilder = AdvancedAnalyticsResponse.builder()
-                .portfolioId(request.getCoreIdentifiers().getPortfolioId())
+                .portfolioId(portfolioId)
                 .startDate(request.getFromDate())
                 .endDate(request.getToDate())
                 .timestamp(java.time.Instant.now());
@@ -151,12 +191,20 @@ public class PortfolioAnalyticsFacade {
         if (request.getCoreIdentifiers().getComparisonIndexSymbol() != null && !request.getCoreIdentifiers().getComparisonIndexSymbol().isEmpty()) {
             responseBuilder.comparisonIndexSymbol(request.getCoreIdentifiers().getComparisonIndexSymbol());
         }
+
+        boolean sameDay = com.portfolio.marketdata.util.HistoricalDataRequestFactory
+                .isSameDayLiveWindow(request.getTimeFrameRequest());
+        String freshness = periodHeatmapReady && !sameDay
+                ? FRESHNESS_PERIOD
+                : (sameDay ? FRESHNESS_LIVE : FRESHNESS_WARMING);
+        responseBuilder.analyticsFreshness(freshness);
         
-        // --- PREFETCH MARKET DATA ONCE ---
+        // --- OHLC-ONLY PREFETCH (never block HTTP on START_END hist) ---
+        request.setAllowHeatmapRedisWrite(false);
         try {
             PortfolioModelV1 portfolio = request.getPrefetchedPortfolio();
             if (portfolio == null) {
-                String pid = request.getCoreIdentifiers().getPortfolioId();
+                String pid = portfolioId;
                 if (pid != null && !pid.isBlank()
                         && !AggregatePortfolioKeys.RESPONSE_PORTFOLIO_ID.equalsIgnoreCase(pid)) {
                     UUID portfolioUuid = UUID.fromString(pid);
@@ -166,73 +214,57 @@ public class PortfolioAnalyticsFacade {
                     }
                 }
             }
-            if (portfolio != null) {
-                if (portfolio.getEquityModels() != null && !portfolio.getEquityModels().isEmpty()) {
-                    List<String> symbols = portfolio.getEquityModels().stream()
-                            .map(EquityModel::getSymbol)
-                            .filter(s -> s != null && !s.isEmpty())
-                            .collect(Collectors.toList());
-                    
-                    if (!symbols.isEmpty()) {
-                        log.info("[Optimization] Prefetching market data once for {} symbols", symbols.size());
-                        boolean needsHist = request.getTimeFrameRequest() != null
-                                && (request.getFeatureToggles().isIncludeHeatmap()
-                                    || request.getFeatureToggles().isIncludeSectorAllocation()
-                                    || request.getFeatureToggles().isIncludeMarketCapAllocation());
-                        // Live always: movers day%, summary today%, and live/1D primary path.
-                        Map<String, MarketData> livePrefetch = marketDataService.getMarketData(symbols);
-                        Map<String, MarketData> periodPrefetch = null;
+            if (portfolio != null
+                    && portfolio.getEquityModels() != null
+                    && !portfolio.getEquityModels().isEmpty()) {
+                List<String> symbols = portfolio.getEquityModels().stream()
+                        .map(EquityModel::getSymbol)
+                        .filter(s -> s != null && !s.isEmpty())
+                        .collect(Collectors.toList());
 
-                        if (needsHist) {
-                            var tfr = request.getTimeFrameRequest();
-                            if (com.portfolio.marketdata.util.HistoricalDataRequestFactory.isSameDayLiveWindow(tfr)) {
-                                log.info("[SmartRoute] Same-day hist window — using live for period prefetch");
-                                periodPrefetch = livePrefetch;
-                            } else {
-                                var histReq = com.portfolio.marketdata.util.HistoricalDataRequestFactory
-                                        .forPeriodEndpoints(symbols, tfr);
-                                periodPrefetch = marketDataService.getHistoricalData(histReq);
-                            }
-                        }
-
-                        Map<String, MarketData> primary = needsHist ? periodPrefetch : livePrefetch;
-                        Map<String, MarketData> normalizedPrimary = normalizePrefetch(primary);
-                        Map<String, MarketData> normalizedLive = normalizePrefetch(livePrefetch);
-
-                        // Never put live into period primary — that makes period % = day %.
-                        // Live stays on prefetchedLiveMarketData for movers / summary / structure paint.
-                        if (needsHist && (normalizedPrimary == null || normalizedPrimary.isEmpty())) {
-                            log.warn(
-                                    "[Optimization] Hist prefetch empty — not using live as period primary "
-                                            + "(providers may fan out; live kept for movers/summary only)");
-                            request.setPrefetchAttempted(false);
-                        } else if (normalizedPrimary != null && !normalizedPrimary.isEmpty()) {
-                            request.setPrefetchAttempted(true);
-                            request.setPrefetchedMarketData(normalizedPrimary);
-                        } else {
-                            request.setPrefetchAttempted(false);
-                            log.warn("[Optimization] Primary prefetch empty — providers may fan out with corrected requests");
-                        }
-                        if (normalizedLive != null && !normalizedLive.isEmpty()) {
-                            request.setPrefetchedLiveMarketData(normalizedLive);
-                        }
-
-                        // Movers-only: skip security-details prefetch (not used by TopMovers).
-                        boolean moversOnly = request.getFeatureToggles().isIncludeMovers()
-                                && !request.getFeatureToggles().isIncludeHeatmap()
-                                && !request.getFeatureToggles().isIncludeSectorAllocation()
-                                && !request.getFeatureToggles().isIncludeMarketCapAllocation();
-                        if (!moversOnly) {
-                            log.info("[Optimization] Prefetching security details once for {} symbols", symbols.size());
-                            Map<String, com.am.common.amcommondata.model.security.SecurityModel> prefetchedSecurities =
-                                securityDetailsService.getSecurityDetails(symbols);
-                            request.setPrefetchedSecurityDetails(prefetchedSecurities);
-                        }
+                if (!symbols.isEmpty()) {
+                    log.info("[Optimization] OHLC prefetch (skipHistRepair) for {} symbols", symbols.size());
+                    long remainMs = Math.max(50L, (deadlineAt - System.nanoTime()) / 1_000_000L);
+                    CompletableFuture<Map<String, MarketData>> liveFuture = CompletableFuture.supplyAsync(
+                            () -> marketDataService.getMarketData(symbols, true), taskExecutor);
+                    boolean moversOnly = request.getFeatureToggles().isIncludeMovers()
+                            && !request.getFeatureToggles().isIncludeHeatmap()
+                            && !request.getFeatureToggles().isIncludeSectorAllocation()
+                            && !request.getFeatureToggles().isIncludeMarketCapAllocation();
+                    CompletableFuture<Map<String, com.am.common.amcommondata.model.security.SecurityModel>> secFuture =
+                            moversOnly
+                                    ? CompletableFuture.completedFuture(Collections.emptyMap())
+                                    : CompletableFuture.supplyAsync(
+                                            () -> securityDetailsService.getSecurityDetails(symbols), taskExecutor);
+                    try {
+                        liveFuture.get(remainMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    } catch (Exception e) {
+                        log.warn("[AdvancedAnalytics] OHLC prefetch budget hit: {}", e.getMessage());
+                    }
+                    Map<String, MarketData> normalizedLive = normalizePrefetch(liveFuture.getNow(Collections.emptyMap()));
+                    // Always mark attempted so providers never fan out hist on the HTTP path.
+                    request.setPrefetchAttempted(true);
+                    if (!normalizedLive.isEmpty()) {
+                        request.setPrefetchedLiveMarketData(normalizedLive);
+                        // Paint structure from live; PERIOD heatmap comes from Redis when warm.
+                        request.setPrefetchedMarketData(normalizedLive);
+                    }
+                    try {
+                        long secRemain = Math.max(20L, (deadlineAt - System.nanoTime()) / 1_000_000L);
+                        secFuture.get(secRemain, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    } catch (Exception ignored) {
+                        // fail-open
+                    }
+                    Map<String, com.am.common.amcommondata.model.security.SecurityModel> secs =
+                            secFuture.getNow(Collections.emptyMap());
+                    if (secs != null && !secs.isEmpty()) {
+                        request.setPrefetchedSecurityDetails(secs);
                     }
                 }
             }
         } catch (Exception e) {
-            log.warn("Failed to prefetch market data in facade. Providers will fallback to fetching individually.", e);
+            log.warn("Failed to prefetch OHLC in facade; providers may return empty.", e);
+            request.setPrefetchAttempted(true);
         }
         // ---------------------------------
 
@@ -262,7 +294,7 @@ public class PortfolioAnalyticsFacade {
             marketCapAllocationFuture = CompletableFuture.supplyAsync(() -> calculateMarketCapAllocations(frozenRequest), taskExecutor);
         }
         
-        // Join futures and populate builder
+        // Join futures and populate builder — remaining deadline only (never 60s)
         java.util.List<CompletableFuture<?>> allFutures = java.util.stream.Stream
             .of(heatmapFuture, moversFuture, sectorAllocationFuture, marketCapAllocationFuture)
             .filter(java.util.Objects::nonNull)
@@ -270,11 +302,13 @@ public class PortfolioAnalyticsFacade {
             
         try {
             if (!allFutures.isEmpty()) {
+                long joinMs = Math.max(50L, (deadlineAt - System.nanoTime()) / 1_000_000L);
                 CompletableFuture.allOf(allFutures.toArray(new CompletableFuture[0]))
-                    .get(60, java.util.concurrent.TimeUnit.SECONDS);
+                    .get(joinMs, java.util.concurrent.TimeUnit.MILLISECONDS);
             }
         } catch (java.util.concurrent.TimeoutException e) {
-            log.warn("[AdvancedAnalytics] Partial timeout after 60s — returning completed components only");
+            log.warn("[AdvancedAnalytics] Partial timeout after {}ms — returning completed components only",
+                    ADVANCED_DEADLINE_MS);
         } catch (Exception e) {
             log.error("[AdvancedAnalytics] Error joining futures", e);
         }
@@ -283,20 +317,8 @@ public class PortfolioAnalyticsFacade {
             analyticsBuilder.heatmap(heatmapFuture.getNow(null));
         }
         
-        // Movers get an isolated extra wait so a slow heatmap/allocation does not null them out
-        if (moversFuture != null) {
-            try {
-                if (!moversFuture.isDone()) {
-                    moversFuture.get(12, java.util.concurrent.TimeUnit.SECONDS);
-                }
-                if (moversFuture.isDone() && !moversFuture.isCompletedExceptionally()) {
-                    analyticsBuilder.movers(moversFuture.getNow(null));
-                }
-            } catch (java.util.concurrent.TimeoutException e) {
-                log.warn("[AdvancedAnalytics] Movers still running after extra wait — leaving null for client fallback");
-            } catch (Exception e) {
-                log.warn("[AdvancedAnalytics] Movers future error: {}", e.getMessage());
-            }
+        if (moversFuture != null && moversFuture.isDone() && !moversFuture.isCompletedExceptionally()) {
+            analyticsBuilder.movers(moversFuture.getNow(null));
         }
         
         if (sectorAllocationFuture != null && sectorAllocationFuture.isDone() && !sectorAllocationFuture.isCompletedExceptionally()) {
@@ -388,7 +410,19 @@ public class PortfolioAnalyticsFacade {
         }
         
         AdvancedAnalyticsResponse finalResponse = responseBuilder.build();
-        // Never L1-cache empty heatmap/movers — CB/timeouts/collapsed day% must not poison 60s.
+
+        // Kick background START_END warm (never await) when period not yet ready.
+        if (!FRESHNESS_PERIOD.equals(finalResponse.getAnalyticsFreshness())
+                && request.getPrefetchedPortfolio() != null
+                && advancedPeriodWarmService != null) {
+            try {
+                advancedPeriodWarmService.warmAsync(request);
+            } catch (Exception e) {
+                log.debug("[AdvancedAnalytics] warm enqueue failed: {}", e.getMessage());
+            }
+        }
+
+        // Never L1-cache empty heatmap/movers — CB/timeouts must not poison cache.
         boolean emptyHeatmap = finalResponse.getAnalytics() == null
                 || finalResponse.getAnalytics().getHeatmap() == null
                 || finalResponse.getAnalytics().getHeatmap().getSectors() == null
@@ -407,7 +441,10 @@ public class PortfolioAnalyticsFacade {
                 && emptyHeatmap)
                 || (moversRequested && emptyMovers);
         if (!skipL1) {
-            fastCache.put(cacheKey, new CachedResponse(finalResponse));
+            long ttl = FRESHNESS_PERIOD.equals(finalResponse.getAnalyticsFreshness())
+                    ? L1_PERIOD_TTL_MS
+                    : L1_LIVE_TTL_MS;
+            fastCache.put(cacheKey, new CachedResponse(finalResponse, ttl));
         } else {
             log.warn("[Optimization] Skipping L1 cache (emptyHeatmap={} emptyMovers={} key={})",
                     emptyHeatmap, emptyMovers, cacheKey);

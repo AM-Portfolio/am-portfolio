@@ -45,6 +45,13 @@ public class AdvancedAnalyticsRequest extends TimeFrameRequest {
     @com.fasterxml.jackson.annotation.JsonIgnore
     private transient boolean prefetchAttempted = false;
 
+    /**
+     * When true, heatmap provider may write Redis (background period warm only).
+     * HTTP OHLC paint must leave this false so LIVE heatmaps do not poison PERIOD cache.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private transient boolean allowHeatmapRedisWrite = false;
+
     public AdvancedAnalyticsRequest() {
         this.coreIdentifiers = new CoreIdentifiers();
         this.pagination = new PaginationRequest();

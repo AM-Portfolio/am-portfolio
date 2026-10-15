@@ -55,6 +55,20 @@ public class AsyncConfig {
         return executor;
     }
 
+    /** Bounded pool for advanced period hist warm — must not starve HTTP taskExecutor. */
+    @Bean(name = "advancedWarmExecutor")
+    public Executor advancedWarmExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("AdvancedWarm-");
+        executor.setTaskDecorator(new MdcTaskDecorator());
+        executor.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy());
+        executor.initialize();
+        return executor;
+    }
+
     /**
      * Copies the calling thread's MDC snapshot into the worker thread before
      * execution and restores the worker's original MDC afterwards.

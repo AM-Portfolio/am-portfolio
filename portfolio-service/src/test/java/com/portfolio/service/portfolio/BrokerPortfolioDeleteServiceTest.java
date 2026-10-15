@@ -45,6 +45,7 @@ class BrokerPortfolioDeleteServiceTest {
                 holdingsRedisService,
                 summaryRedisService,
                 intelligenceRedisService,
+                null,
                 deleteNotifier);
     }
 
@@ -148,6 +149,7 @@ class BrokerPortfolioDeleteServiceTest {
                 holdingsRedisService,
                 summaryRedisService,
                 intelligenceRedisService,
+                null,
                 null);
         UUID portfolioId = UUID.randomUUID();
         String ownerId = "owner-" + UUID.randomUUID();

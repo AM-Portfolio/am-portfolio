@@ -3,6 +3,7 @@ package com.portfolio.service.portfolio;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.service.PortfolioService;
+import com.portfolio.redis.service.PortfolioHeatmapRedisService;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
 import com.portfolio.redis.service.PortfolioIntelligenceRedisService;
 import com.portfolio.redis.service.PortfolioSummaryRedisService;
@@ -31,6 +32,8 @@ public class BrokerPortfolioDeleteService {
     private final PortfolioSummaryRedisService summaryRedisService;
     private final PortfolioIntelligenceRedisService intelligenceRedisService;
     @Nullable
+    private final PortfolioHeatmapRedisService heatmapRedisService;
+    @Nullable
     private final PortfolioDeleteNotifier deleteNotifier;
 
     public BrokerPortfolioDeleteService(
@@ -38,11 +41,13 @@ public class BrokerPortfolioDeleteService {
             PortfolioHoldingsRedisService holdingsRedisService,
             PortfolioSummaryRedisService summaryRedisService,
             PortfolioIntelligenceRedisService intelligenceRedisService,
+            @Autowired(required = false) PortfolioHeatmapRedisService heatmapRedisService,
             @Autowired(required = false) PortfolioDeleteNotifier deleteNotifier) {
         this.portfolioService = portfolioService;
         this.holdingsRedisService = holdingsRedisService;
         this.summaryRedisService = summaryRedisService;
         this.intelligenceRedisService = intelligenceRedisService;
+        this.heatmapRedisService = heatmapRedisService;
         this.deleteNotifier = deleteNotifier;
     }
 
@@ -87,6 +92,9 @@ public class BrokerPortfolioDeleteService {
         }
         intelligenceRedisService.evict(idStr);
         intelligenceRedisService.evictAggregateForUser(ownerId);
+        if (heatmapRedisService != null) {
+            heatmapRedisService.evictPortfolio(idStr);
+        }
 
         if (deleteNotifier != null) {
             deleteNotifier.notifyDeleted(ownerId, idStr, name, DELETE_SOURCE);

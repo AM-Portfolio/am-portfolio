@@ -19,10 +19,7 @@ import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.analytics.request.CoreIdentifiers;
 import com.portfolio.model.analytics.request.FeatureToggles;
 import com.portfolio.model.analytics.response.AdvancedAnalyticsResponse;
-import com.portfolio.model.TimeInterval;
-import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.redis.service.PortfolioIntelligenceRedisService;
-import com.portfolio.service.PortfolioDashboardService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -48,7 +45,6 @@ import org.springframework.web.bind.annotation.*;
 public class PortfolioAnalyticsController {
 
     private final PortfolioAnalyticsFacade portfolioAnalyticsFacade;
-    private final PortfolioDashboardService portfolioDashboardService;
     private final PortfolioOwnerAssert portfolioOwnerAssert;
     private final PortfolioIntelligenceService portfolioIntelligenceService;
     private final AggregatePortfolioLoader aggregatePortfolioLoader;
@@ -67,23 +63,6 @@ public class PortfolioAnalyticsController {
         log.info("REST request for advanced analytics on ALL portfolios user={}", userId);
 
         AdvancedAnalyticsResponse response = portfolioAnalyticsFacade.calculateAdvancedAnalytics(request);
-        if (response.getSummary() == null) {
-            try {
-                TimeInterval interval = TimeInterval.ONE_DAY;
-                if (request.getTimeFrame() != null) {
-                    interval = TimeInterval.fromCode(request.getTimeFrame().name());
-                }
-                PortfolioSummaryV1 summary = portfolioDashboardService.overviewPortfolio(userId, interval);
-                if (summary != null) {
-                    summary.setMarketCapHoldings(null);
-                    summary.setSectorialHoldings(null);
-                    summary.setBrokerPortfolios(null);
-                    response.setSummary(summary);
-                }
-            } catch (Exception e) {
-                log.warn("Failed to attach all-portfolios summary to advanced analytics", e);
-            }
-        }
         response.setPortfolioId(AggregatePortfolioKeys.RESPONSE_PORTFOLIO_ID);
         return ResponseEntity.ok(response);
     }
@@ -159,34 +138,16 @@ public class PortfolioAnalyticsController {
             return ResponseEntity.badRequest().build();
         }
 
-        portfolioOwnerAssert.requireOwner(portfolioId);
+        var owned = portfolioOwnerAssert.requireOwner(portfolioId);
         request = normalizeAdvancedRequest(request, portfolioId);
+        request.setPrefetchedPortfolio(owned);
 
         log.info("REST request for advanced analytics on portfolio: {} with timeframe: {} to {}",
                 portfolioId, request.getTimeFrame());
 
+        // Progressive path: facade paints from OHLC ≤1s and warms hist in background.
+        // Do not attach cold overviewPortfolio here (that re-introduced multi-second waits).
         AdvancedAnalyticsResponse response = portfolioAnalyticsFacade.calculateAdvancedAnalytics(request);
-
-        if (response.getSummary() == null) {
-            try {
-                String userId = UserContext.getUserIdOrThrow();
-                TimeInterval interval = TimeInterval.ONE_DAY;
-                if (request.getTimeFrame() != null) {
-                    interval = TimeInterval.fromCode(request.getTimeFrame().name());
-                }
-                PortfolioSummaryV1 summary =
-                        portfolioDashboardService.overviewPortfolio(userId, portfolioId, interval);
-                if (summary != null) {
-                    summary.setMarketCapHoldings(null);
-                    summary.setSectorialHoldings(null);
-                    summary.setBrokerPortfolios(null);
-
-                    response.setSummary(summary);
-                }
-            } catch (Exception e) {
-                log.warn("Failed to attach portfolio summary to advanced analytics response", e);
-            }
-        }
 
         return ResponseEntity.ok(response);
     }
