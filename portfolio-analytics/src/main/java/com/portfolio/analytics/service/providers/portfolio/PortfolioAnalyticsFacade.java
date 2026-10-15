@@ -44,7 +44,12 @@ public class PortfolioAnalyticsFacade {
     public static final String FRESHNESS_WARMING = "WARMING";
     public static final String FRESHNESS_PERIOD = "PERIOD";
 
-    private static final long ADVANCED_DEADLINE_MS = 900L;
+    /** Soft budget for OHLC prefetch before providers start. */
+    private static final long ADVANCED_PREFETCH_MS = 700L;
+    /** Remaining wall budget for provider futures (heatmap needs this after prefetch). */
+    private static final long ADVANCED_JOIN_MS = 2000L;
+    /** Extra wait so LIVE heatmap is not dropped when movers already finished. */
+    private static final long HEATMAP_GRACE_MS = 1500L;
     private static final long L1_PERIOD_TTL_MS = 60_000L;
     private static final long L1_LIVE_TTL_MS = 3_000L;
     
@@ -147,7 +152,9 @@ public class PortfolioAnalyticsFacade {
         log.info("Calculating advanced analytics for portfolio: {} from {} to {}", 
                 request.getCoreIdentifiers().getPortfolioId(), request.getFromDate(), request.getToDate());
 
-        final long deadlineAt = System.nanoTime() + ADVANCED_DEADLINE_MS * 1_000_000L;
+        final long deadlineAt = System.nanoTime()
+                + (ADVANCED_PREFETCH_MS + ADVANCED_JOIN_MS) * 1_000_000L;
+        final long prefetchDeadlineAt = System.nanoTime() + ADVANCED_PREFETCH_MS * 1_000_000L;
         
         // Generate a cache key based on the request parameters (include TF enum)
         String tfCode = request.getTimeFrame() != null ? request.getTimeFrame().getValue() : "live";
@@ -224,7 +231,7 @@ public class PortfolioAnalyticsFacade {
 
                 if (!symbols.isEmpty()) {
                     log.info("[Optimization] OHLC prefetch (skipHistRepair) for {} symbols", symbols.size());
-                    long remainMs = Math.max(50L, (deadlineAt - System.nanoTime()) / 1_000_000L);
+                    long remainMs = Math.max(50L, (prefetchDeadlineAt - System.nanoTime()) / 1_000_000L);
                     CompletableFuture<Map<String, MarketData>> liveFuture = CompletableFuture.supplyAsync(
                             () -> marketDataService.getMarketData(symbols, true), taskExecutor);
                     boolean moversOnly = request.getFeatureToggles().isIncludeMovers()
@@ -328,10 +335,19 @@ public class PortfolioAnalyticsFacade {
                     .get(joinMs, java.util.concurrent.TimeUnit.MILLISECONDS);
             }
         } catch (java.util.concurrent.TimeoutException e) {
-            log.warn("[AdvancedAnalytics] Partial timeout after {}ms — returning completed components only",
-                    ADVANCED_DEADLINE_MS);
+            log.warn("[AdvancedAnalytics] Partial timeout — returning completed components; heatmap grace {}ms",
+                    HEATMAP_GRACE_MS);
         } catch (Exception e) {
             log.error("[AdvancedAnalytics] Error joining futures", e);
+        }
+
+        // Prefer a complete LIVE heatmap over dropping it when movers already finished.
+        if (heatmapFuture != null && !heatmapFuture.isDone()) {
+            try {
+                heatmapFuture.get(HEATMAP_GRACE_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (Exception e) {
+                log.warn("[AdvancedAnalytics] Heatmap grace miss: {}", e.getMessage());
+            }
         }
         
         if (heatmapFuture != null && heatmapFuture.isDone() && !heatmapFuture.isCompletedExceptionally()) {
@@ -506,10 +522,18 @@ public class PortfolioAnalyticsFacade {
                 continue;
             }
             Double px = eq.getCurrentPrice();
-            if (px == null || px <= 0) {
-                if (eq.getCurrentValue() != null && eq.getQuantity() != null && eq.getQuantity() > 0) {
-                    px = eq.getCurrentValue() / eq.getQuantity();
-                }
+            if ((px == null || px <= 0) && eq.getCurrentValue() != null
+                    && eq.getQuantity() != null && eq.getQuantity() > 0) {
+                px = eq.getCurrentValue() / eq.getQuantity();
+            }
+            // Broker holdings often lack live LTP on the model — use cost as weight proxy
+            // so LIVE heatmap still paints sectors (day% from todayProfitLossPercentage when set).
+            if ((px == null || px <= 0) && eq.getInvestmentValue() != null
+                    && eq.getQuantity() != null && eq.getQuantity() > 0) {
+                px = eq.getInvestmentValue() / eq.getQuantity();
+            }
+            if ((px == null || px <= 0) && eq.getAvgBuyingPrice() != null && eq.getAvgBuyingPrice() > 0) {
+                px = eq.getAvgBuyingPrice();
             }
             if (px == null || px <= 0) {
                 continue;

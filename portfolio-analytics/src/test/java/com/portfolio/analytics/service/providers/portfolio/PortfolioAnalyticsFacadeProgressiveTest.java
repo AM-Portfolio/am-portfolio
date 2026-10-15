@@ -168,4 +168,19 @@ class PortfolioAnalyticsFacadeProgressiveTest {
         assertEquals(4000.0, md.get("TCS").getLastPrice());
         assertTrue(md.get("TCS").getPreviousClose() > 0);
     }
+
+    @Test
+    void marketDataFromEquityHoldings_usesCostWhenNoLtp() {
+        EquityModel eq = new EquityModel();
+        eq.setSymbol("AARTIIND");
+        eq.setQuantity(10.0);
+        eq.setAvgBuyingPrice(566.26);
+        eq.setInvestmentValue(5662.55);
+        PortfolioModelV1 portfolio = new PortfolioModelV1();
+        portfolio.setEquityModels(List.of(eq));
+
+        Map<String, MarketData> md = PortfolioAnalyticsFacade.marketDataFromEquityHoldings(portfolio);
+        assertEquals(1, md.size());
+        assertTrue(md.get("AARTIIND").getLastPrice() > 500);
+    }
 }
