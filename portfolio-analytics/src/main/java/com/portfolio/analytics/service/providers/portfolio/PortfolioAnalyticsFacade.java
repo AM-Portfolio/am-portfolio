@@ -230,7 +230,10 @@ public class PortfolioAnalyticsFacade {
                         .collect(Collectors.toList());
 
                 if (!symbols.isEmpty()) {
-                    log.info("[Optimization] OHLC prefetch (skipHistRepair) for {} symbols", symbols.size());
+                    // Seed cost-basis prices immediately so heatmap never waits on OHLC fan-out.
+                    Map<String, MarketData> seeded = marketDataFromEquityHoldings(portfolio);
+                    log.info("[Optimization] OHLC prefetch (skipHistRepair) for {} symbols (equitySeed={})",
+                            symbols.size(), seeded.size());
                     long remainMs = Math.max(50L, (prefetchDeadlineAt - System.nanoTime()) / 1_000_000L);
                     CompletableFuture<Map<String, MarketData>> liveFuture = CompletableFuture.supplyAsync(
                             () -> marketDataService.getMarketData(symbols, true), taskExecutor);
@@ -249,8 +252,7 @@ public class PortfolioAnalyticsFacade {
                         log.warn("[AdvancedAnalytics] OHLC prefetch budget hit: {}", e.getMessage());
                     }
                     Map<String, MarketData> normalizedLive = normalizePrefetch(liveFuture.getNow(Collections.emptyMap()));
-                    // Timeout discards in-flight Redis/Mongo hits inside getMarketData — paint from caches
-                    // (no OHLC wait) so LIVE heatmap is not empty sectors[].
+                    // Timeout discards in-flight Redis/Mongo hits — overlay cache-only (no OHLC wait).
                     if (normalizedLive.isEmpty()) {
                         try {
                             normalizedLive = normalizePrefetch(marketDataService.getMarketDataFromCaches(symbols));
@@ -260,16 +262,12 @@ public class PortfolioAnalyticsFacade {
                             log.debug("[AdvancedAnalytics] cache-only paint failed: {}", e.getMessage());
                         }
                     }
-                    if (normalizedLive.size() < symbols.size()) {
-                        Map<String, MarketData> fromHoldings = marketDataFromEquityHoldings(portfolio);
-                        if (!fromHoldings.isEmpty()) {
-                            Map<String, MarketData> merged = new java.util.HashMap<>(fromHoldings);
-                            merged.putAll(normalizedLive); // live/cache wins over holdings
-                            normalizedLive = merged;
-                            log.info("[AdvancedAnalytics] equity-price fallback merged to {} symbols",
-                                    normalizedLive.size());
-                        }
-                    }
+                    // Cost seed first, then live/cache wins — heatmap always has weights.
+                    Map<String, MarketData> merged = new java.util.HashMap<>(seeded);
+                    merged.putAll(normalizedLive);
+                    normalizedLive = merged;
+                    log.info("[AdvancedAnalytics] paint map {}/{} symbols (seeded={})",
+                            normalizedLive.size(), symbols.size(), seeded.size());
                     // Always mark attempted so providers never fan out hist on the HTTP path.
                     request.setPrefetchAttempted(true);
                     if (!normalizedLive.isEmpty()) {

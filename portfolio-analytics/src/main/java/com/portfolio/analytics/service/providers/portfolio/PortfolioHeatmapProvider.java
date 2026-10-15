@@ -62,8 +62,16 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 // Create a map of symbol to holding quantity
                 Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
                 
-                // Retrieve market cap and sector data using the new helper
-                Map<String, com.am.common.amcommondata.model.security.SecurityModel> securityDetails = getSecurityDetails(portfolioSymbols, request);
+                // Never block LIVE paint on a cold security-details Mongo/ETF fan-out (30s+).
+                // EquityModel.sector fill below covers gaps; Unknown is acceptable for first paint.
+                Map<String, com.am.common.amcommondata.model.security.SecurityModel> securityDetails;
+                if (request.isPrefetchAttempted()
+                        && (request.getPrefetchedSecurityDetails() == null
+                                || request.getPrefetchedSecurityDetails().isEmpty())) {
+                    securityDetails = Collections.emptyMap();
+                } else {
+                    securityDetails = getSecurityDetails(portfolioSymbols, request);
+                }
                 
                 // Align with sector allocation: group by security metadata sectors.
                 Map<String, List<String>> sectorToStocks = securityDetailsService
@@ -182,15 +190,13 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         return super.resolvePrefetchedMarketData(request);
     }
 
-    /** LIVE/1D: allow one live OHLC fan-out if prefetch stayed empty (never hist). */
+    /**
+     * Do not fan out OHLC on HTTP path — facade seeds cost/cache paint.
+     * Fan-out was causing 30s+ hangs that dropped heatmap after join timeout.
+     */
     @Override
     protected boolean allowsPrefetchFanOut() {
-        return true;
-    }
-
-    @Override
-    protected boolean preferLiveMarketDataOnFanOut() {
-        return true;
+        return false;
     }
     
     /**
