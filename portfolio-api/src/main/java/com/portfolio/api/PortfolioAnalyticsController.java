@@ -279,6 +279,10 @@ public class PortfolioAnalyticsController {
             toggles.setIncludeSectorAllocation(true);
             toggles.setIncludeMarketCapAllocation(true);
         }
+        // UI often POSTs {} / omits timeFrame — treat as live 1D (same-day OHLC path).
+        if (request.getTimeFrame() == null) {
+            request.setTimeFrame(com.portfolio.model.market.TimeFrame.DAY);
+        }
         request.getCoreIdentifiers().setPortfolioId(portfolioId);
         return request;
     }

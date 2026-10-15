@@ -68,4 +68,10 @@ class HistoricalDataRequestFactoryTest {
         assertEquals(today, resolved.getToDate());
         assertTrue(HistoricalDataRequestFactory.isSameDayLiveWindow(tfr));
     }
+
+    @Test
+    void isSameDayLiveWindow_nullOrMissingTimeFrameIsLive() {
+        assertTrue(HistoricalDataRequestFactory.isSameDayLiveWindow(null));
+        assertTrue(HistoricalDataRequestFactory.isSameDayLiveWindow(TimeFrameRequest.builder().build()));
+    }
 }

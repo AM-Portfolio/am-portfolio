@@ -44,9 +44,16 @@ public final class HistoricalDataRequestFactory {
 
     /**
      * True when the resolved window is today→today (use live market data instead of hist).
+     * Null / missing timeframe is treated as live (OHLC paint path).
      */
     public static boolean isSameDayLiveWindow(TimeFrameRequest tfr) {
+        if (tfr == null || tfr.getTimeFrame() == null) {
+            return true;
+        }
         TimeFrameRequest resolved = resolveWindow(tfr);
+        if (resolved == null) {
+            return true;
+        }
         LocalDate today = LocalDate.now(MARKET_ZONE);
         return resolved.getFromDate() != null
                 && resolved.getToDate() != null
