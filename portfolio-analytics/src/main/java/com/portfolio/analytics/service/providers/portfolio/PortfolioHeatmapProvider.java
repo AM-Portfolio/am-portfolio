@@ -171,6 +171,27 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         com.portfolio.model.market.TimeFrame tf = request.getTimeFrame();
         return tf == null || tf == com.portfolio.model.market.TimeFrame.DAY;
     }
+
+    @Override
+    protected Map<String, MarketData> resolvePrefetchedMarketData(AdvancedAnalyticsRequest request) {
+        if (request != null
+                && request.getPrefetchedLiveMarketData() != null
+                && !request.getPrefetchedLiveMarketData().isEmpty()) {
+            return request.getPrefetchedLiveMarketData();
+        }
+        return super.resolvePrefetchedMarketData(request);
+    }
+
+    /** LIVE/1D: allow one live OHLC fan-out if prefetch stayed empty (never hist). */
+    @Override
+    protected boolean allowsPrefetchFanOut() {
+        return true;
+    }
+
+    @Override
+    protected boolean preferLiveMarketDataOnFanOut() {
+        return true;
+    }
     
     /**
      * Create a map of symbol to holding quantity

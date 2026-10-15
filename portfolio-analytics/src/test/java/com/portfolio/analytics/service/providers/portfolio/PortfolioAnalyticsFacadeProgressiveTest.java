@@ -22,6 +22,7 @@ import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -103,5 +104,68 @@ class PortfolioAnalyticsFacadeProgressiveTest {
         verify(marketDataService, atLeastOnce()).getMarketData(anyList(), eq(true));
         verify(marketDataService, never()).getHistoricalData(ArgumentMatchers.any());
         verify(warmService, atLeastOnce()).warmAsync(any());
+    }
+
+    @Test
+    void calculateAdvanced_emptyOhlcUsesCacheThenEquityFallback_forLiveHeatmapPaint() {
+        UUID id = UUID.randomUUID();
+        EquityModel eq = new EquityModel();
+        eq.setSymbol("RELIANCE");
+        eq.setQuantity(10.0);
+        eq.setCurrentPrice(2500.0);
+        eq.setTodayProfitLossPercentage(1.5);
+        eq.setSector("Energy");
+        PortfolioModelV1 portfolio = new PortfolioModelV1();
+        portfolio.setId(id);
+        portfolio.setEquityModels(List.of(eq));
+
+        AdvancedAnalyticsRequest request = new AdvancedAnalyticsRequest();
+        request.setCoreIdentifiers(CoreIdentifiers.builder().portfolioId(id.toString()).build());
+        request.setTimeFrame(TimeFrame.DAY);
+        FeatureToggles toggles = new FeatureToggles();
+        toggles.setIncludeHeatmap(true);
+        toggles.setIncludeMovers(false);
+        toggles.setIncludeSectorAllocation(false);
+        toggles.setIncludeMarketCapAllocation(false);
+        request.setFeatureToggles(toggles);
+        request.setPrefetchedPortfolio(portfolio);
+
+        when(marketDataService.getMarketData(anyList(), eq(true))).thenReturn(Collections.emptyMap());
+        when(marketDataService.getMarketDataFromCaches(anyList())).thenReturn(Collections.emptyMap());
+        when(heatmapRedisService.getCachedHeatmap(any(), any())).thenReturn(Optional.empty());
+        when(analyticsFactory.generatePortfolioAnalytics(eq(AnalyticsType.SECTOR_HEATMAP), any()))
+                .thenAnswer(inv -> {
+                    AdvancedAnalyticsRequest req = inv.getArgument(1);
+                    assertTrue(req.getPrefetchedMarketData() != null
+                            && req.getPrefetchedMarketData().containsKey("RELIANCE"));
+                    return Heatmap.builder()
+                            .portfolioId(id.toString())
+                            .sectors(List.of(Heatmap.SectorPerformance.builder()
+                                    .sectorName("Energy")
+                                    .performance(1.5)
+                                    .totalValue(java.math.BigDecimal.valueOf(25000.0))
+                                    .build()))
+                            .build();
+                });
+
+        AdvancedAnalyticsResponse response = facade.calculateAdvancedAnalytics(request);
+        assertEquals(PortfolioAnalyticsFacade.FRESHNESS_LIVE, response.getAnalyticsFreshness());
+        verify(marketDataService).getMarketDataFromCaches(anyList());
+    }
+
+    @Test
+    void marketDataFromEquityHoldings_buildsUsableLastPrice() {
+        EquityModel eq = new EquityModel();
+        eq.setSymbol("TCS");
+        eq.setQuantity(2.0);
+        eq.setCurrentPrice(4000.0);
+        eq.setTodayProfitLossPercentage(2.0);
+        PortfolioModelV1 portfolio = new PortfolioModelV1();
+        portfolio.setEquityModels(List.of(eq));
+
+        Map<String, MarketData> md = PortfolioAnalyticsFacade.marketDataFromEquityHoldings(portfolio);
+        assertEquals(1, md.size());
+        assertEquals(4000.0, md.get("TCS").getLastPrice());
+        assertTrue(md.get("TCS").getPreviousClose() > 0);
     }
 }

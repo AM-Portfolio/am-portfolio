@@ -242,6 +242,27 @@ public class PortfolioAnalyticsFacade {
                         log.warn("[AdvancedAnalytics] OHLC prefetch budget hit: {}", e.getMessage());
                     }
                     Map<String, MarketData> normalizedLive = normalizePrefetch(liveFuture.getNow(Collections.emptyMap()));
+                    // Timeout discards in-flight Redis/Mongo hits inside getMarketData — paint from caches
+                    // (no OHLC wait) so LIVE heatmap is not empty sectors[].
+                    if (normalizedLive.isEmpty()) {
+                        try {
+                            normalizedLive = normalizePrefetch(marketDataService.getMarketDataFromCaches(symbols));
+                            log.info("[AdvancedAnalytics] cache-only paint {}/{} symbols",
+                                    normalizedLive.size(), symbols.size());
+                        } catch (Exception e) {
+                            log.debug("[AdvancedAnalytics] cache-only paint failed: {}", e.getMessage());
+                        }
+                    }
+                    if (normalizedLive.size() < symbols.size()) {
+                        Map<String, MarketData> fromHoldings = marketDataFromEquityHoldings(portfolio);
+                        if (!fromHoldings.isEmpty()) {
+                            Map<String, MarketData> merged = new java.util.HashMap<>(fromHoldings);
+                            merged.putAll(normalizedLive); // live/cache wins over holdings
+                            normalizedLive = merged;
+                            log.info("[AdvancedAnalytics] equity-price fallback merged to {} symbols",
+                                    normalizedLive.size());
+                        }
+                    }
                     // Always mark attempted so providers never fan out hist on the HTTP path.
                     request.setPrefetchAttempted(true);
                     if (!normalizedLive.isEmpty()) {
@@ -469,5 +490,55 @@ public class PortfolioAnalyticsFacade {
             normalized.put(cleaned, entry.getValue());
         }
         return normalized;
+    }
+
+    /**
+     * LIVE heatmap paint from broker holdings prices when market caches are cold.
+     * Day% still comes from EquityModel.todayProfitLossPercentage in HeatmapProvider.
+     */
+    static Map<String, MarketData> marketDataFromEquityHoldings(PortfolioModelV1 portfolio) {
+        if (portfolio == null || portfolio.getEquityModels() == null) {
+            return Collections.emptyMap();
+        }
+        Map<String, MarketData> out = new java.util.HashMap<>();
+        for (EquityModel eq : portfolio.getEquityModels()) {
+            if (eq == null || eq.getSymbol() == null || eq.getSymbol().isBlank()) {
+                continue;
+            }
+            Double px = eq.getCurrentPrice();
+            if (px == null || px <= 0) {
+                if (eq.getCurrentValue() != null && eq.getQuantity() != null && eq.getQuantity() > 0) {
+                    px = eq.getCurrentValue() / eq.getQuantity();
+                }
+            }
+            if (px == null || px <= 0) {
+                continue;
+            }
+            Double prev = null;
+            if (eq.getTodayProfitLossPercentage() != null) {
+                double factor = 1.0 + (eq.getTodayProfitLossPercentage() / 100.0);
+                if (factor > 0.01) {
+                    prev = px / factor;
+                }
+            }
+            if (prev == null || prev <= 0) {
+                prev = eq.getAvgBuyingPrice() != null && eq.getAvgBuyingPrice() > 0
+                        ? eq.getAvgBuyingPrice()
+                        : px;
+            }
+            String sym = com.portfolio.model.util.SymbolResolver.normalize(eq.getSymbol());
+            out.put(sym, MarketData.builder()
+                    .symbol(sym)
+                    .lastPrice(px)
+                    .previousClose(prev)
+                    .ohlc(com.portfolio.model.market.OhlcData.builder()
+                            .open(prev)
+                            .high(Math.max(prev, px))
+                            .low(Math.min(prev, px))
+                            .close(px)
+                            .build())
+                    .build());
+        }
+        return out;
     }
 }
