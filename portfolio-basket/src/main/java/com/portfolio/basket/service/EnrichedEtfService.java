@@ -80,7 +80,7 @@ public class EnrichedEtfService {
         String key = normalizeKey(symbolOrIsin);
 
         EtfData l1 = l1Cache.getIfPresent(key);
-        if (l1 != null) {
+        if (l1 != null && hasUsableHoldings(l1)) {
             EtfData copy = copyEtf(l1);
             if (completePerformanceIfNeeded(copy, key)) {
                 log.info("enrichment.cache=L1_PERF_REPAIR key={}", key);
@@ -89,16 +89,24 @@ public class EnrichedEtfService {
             }
             return copy;
         }
+        if (l1 != null) {
+            l1Cache.invalidate(key);
+            log.info("enrichment.cache=L1_STALE_EMPTY key={} — refetch", key);
+        }
 
         if (basketEtfRedisService != null) {
             try {
                 var cached = basketEtfRedisService.getEnrichedEtf(key);
                 if (cached.isPresent()) {
                     EtfData fromL2 = fromCached(cached.get());
-                    completePerformanceIfNeeded(fromL2, key);
-                    store(key, fromL2);
-                    log.info("enrichment.cache=L2 key={}", key);
-                    return copyEtf(fromL2);
+                    if (!hasUsableHoldings(fromL2)) {
+                        log.info("enrichment.cache=L2_STALE_EMPTY key={} — refetch", key);
+                    } else {
+                        completePerformanceIfNeeded(fromL2, key);
+                        store(key, fromL2);
+                        log.info("enrichment.cache=L2 key={}", key);
+                        return copyEtf(fromL2);
+                    }
                 }
             } catch (Exception e) {
                 log.warn("enrichment.cache=L2_FAIL key={} — fail-open: {}", key, e.getMessage());
@@ -151,7 +159,7 @@ public class EnrichedEtfService {
             }
             String key = normalizeKey(q);
             EtfData l1 = l1Cache.getIfPresent(key);
-            if (l1 != null) {
+            if (l1 != null && hasUsableHoldings(l1)) {
                 EtfData copy = copyEtf(l1);
                 if (EtfPerformanceEnricher.needsPerformanceFill(copy)) {
                     cachedNeedingPerf.add(copy);
@@ -162,20 +170,27 @@ public class EnrichedEtfService {
                 }
                 continue;
             }
+            if (l1 != null) {
+                l1Cache.invalidate(key);
+                log.info("enrichment.cache=L1_STALE_EMPTY key={} — refetch", key);
+            }
             if (basketEtfRedisService != null) {
                 try {
                     var cached = basketEtfRedisService.getEnrichedEtf(key);
                     if (cached.isPresent()) {
                         EtfData fromL2 = fromCached(cached.get());
-                        if (EtfPerformanceEnricher.needsPerformanceFill(fromL2)) {
+                        if (!hasUsableHoldings(fromL2)) {
+                            log.info("enrichment.cache=L2_STALE_EMPTY key={} — refetch", key);
+                        } else if (EtfPerformanceEnricher.needsPerformanceFill(fromL2)) {
                             cachedNeedingPerf.add(fromL2);
                             out.put(q, fromL2);
+                            continue;
                         } else {
                             l1Cache.put(key, fromL2);
                             out.put(q, copyEtf(fromL2));
                             log.info("enrichment.cache=L2 key={}", key);
+                            continue;
                         }
-                        continue;
                     }
                 } catch (Exception e) {
                     log.warn("enrichment.cache=L2_FAIL key={} — fail-open: {}", key, e.getMessage());
@@ -286,8 +301,17 @@ public class EnrichedEtfService {
         return (double) ok / holdings.size();
     }
 
+    /** Empty parser stubs must not poison L1/L2 or Discover stays at 0 held forever. */
+    static boolean hasUsableHoldings(EtfData data) {
+        return data != null && data.getHoldings() != null && !data.getHoldings().isEmpty();
+    }
+
     private void store(String key, EtfData data) {
         if (data == null) {
+            return;
+        }
+        if (!hasUsableHoldings(data)) {
+            log.info("enrichment.cache=SKIP_EMPTY key={}", key);
             return;
         }
         EtfData snapshot = copyEtf(data);
