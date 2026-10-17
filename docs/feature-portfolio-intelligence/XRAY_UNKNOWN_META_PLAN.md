@@ -58,11 +58,16 @@ So: no book meta + thin security master ⇒ **Unknown**.
 
 ### C. Cap defaults to **MICRO_CAP** when type is missing
 
-`MarketCapType` parsing (am-common-data) **falls through to `MICRO_CAP`** for unrecognized/null values. Snapshot `resolveMarketCap` then emits that label. UI shows **100% Micro Cap** even for TCS/HDFC — not a UI bug; **bad default**.
+Two layers:
 
-### D. UI is faithful
+1. `SecurityDetailsService.parseMarketCapType(null|empty|bad)` → **`MarketCapType.MICRO_CAP`** (same fallthrough in `MarketCapType.fromMarketCap(String)`).
+2. Snapshot factory: if equity/security has a typed cap, that wins; if truly absent it returns `"UNKNOWN"`. Live Cap pie at **100% Micro Cap** means holdings are getting a **real `MICRO_CAP` enum** from market-cap Mongo / parse default — not the UNKNOWN path.
 
-Flutter X-Ray binds `intelligence.xray.*` weights. Sector list omitting the yellow “Unknown” slice in one paint is a **presentation quirk**; Industry tab correctly shows Unknown 99.6%. Fix belongs in **backend meta enrichment**, not chart cosmetics.
+So Cap looks “classified” while Sector/Industry stay Unknown: docs exist for symbols but **sector/industry empty**, **cap type null → MICRO_CAP**.
+
+### D. UI hides Unknown on Sector tab only
+
+`portfolio_xray_panel.dart` filters `name == unknown` **only for Sector** (`_tab == 0`). Industry keeps Unknown 99.6%. Chart still paints the yellow ring from full weights before/beside that filter — Sector list looks “tiny % only” while total stays ₹8.9L.
 
 ---
 
