@@ -43,6 +43,7 @@ class EnrichedEtfServiceTest {
     void setUp() {
         service = new EnrichedEtfService(etfApiClient, basketEtfRedisService, catalogService, performanceEnricher);
         ReflectionTestUtils.setField(service, "etfL1TtlSeconds", 86400L);
+        ReflectionTestUtils.setField(service, "discoverSkipPerfHist", true);
         service.initL1();
         lenient().when(performanceEnricher.fillMissing(any())).thenReturn(0);
     }
@@ -120,6 +121,39 @@ class EnrichedEtfServiceTest {
 
         assertEquals(2, result.size());
         verify(etfApiClient, times(1)).enrichHoldings(any());
+        verify(performanceEnricher, times(1)).fillMissing(any());
+    }
+
+    @Test
+    void discoverBatch_skipsEnrichAndPerfHist() {
+        when(basketEtfRedisService.getEnrichedEtf(anyString())).thenReturn(Optional.empty());
+
+        EtfData a = sampleEtf("NIFTYBEES");
+        EtfData b = sampleEtf("BANKBEES");
+        when(etfApiClient.fetchEtfHoldingsBatch(any())).thenReturn(Map.of(
+                "NIFTYBEES", a,
+                "BANKBEES", b));
+
+        Map<String, EtfData> result = service.getEnrichedEtfsBatch(List.of("NIFTYBEES", "BANKBEES"), true);
+
+        assertEquals(2, result.size());
+        verify(etfApiClient, times(1)).fetchEtfHoldingsBatch(any());
+        verify(etfApiClient, never()).enrichHoldings(any());
+        verify(performanceEnricher, never()).fillMissing(any());
+    }
+
+    @Test
+    void discoverBatch_l1HitNeedingPerf_doesNotCallFillMissing() {
+        EtfData cached = sampleEtf("ITBEES");
+        // missing returns → would normally need perf fill
+        cached.setReturn1Y(null);
+        ReflectionTestUtils.invokeMethod(service, "store", "ITBEES", cached);
+
+        Map<String, EtfData> result = service.getEnrichedEtfsBatch(List.of("ITBEES"), true);
+
+        assertEquals(1, result.size());
+        verify(etfApiClient, never()).fetchEtfHoldingsBatch(any());
+        verify(performanceEnricher, never()).fillMissing(any());
     }
 
     @Test
