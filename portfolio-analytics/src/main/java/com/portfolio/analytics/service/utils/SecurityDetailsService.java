@@ -8,18 +8,24 @@ import com.am.common.amcommondata.service.SecurityService;
 import com.am.common.amcommondata.service.marketcap.MarketCapMongoService;
 import com.am.common.amcommondata.document.marketcap.MarketCapDocument;
 import com.portfolio.marketdata.model.BatchSearchResponse;
+import com.portfolio.marketdata.model.indices.IndexConstituent;
 import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.marketdata.service.NseIndicesService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -35,6 +41,8 @@ public class SecurityDetailsService {
     private final MarketCapMongoService marketCapMongoService;
     private final com.portfolio.basket.client.EtfApiClient etfApiClient;
     private final MarketDataService marketDataService;
+    @Nullable
+    private final NseIndicesService nseIndicesService;
   
     /**
      * Retrieves security details for a list of symbols with caching and fallback mechanisms
@@ -134,17 +142,24 @@ public class SecurityDetailsService {
                 }
             }
 
+            int indexCapHits = enrichMarketCapFromIndices(resultMap, symbols);
+            int peerCapHits = enrichMarketCapFromPeerHarvest(resultMap, symbols);
+
             int unknownSector = 0;
+            int unknownCap = 0;
             for (String s : symbols) {
                 if (isMissingSectorMeta(resultMap.get(s))) {
                     unknownSector++;
                 }
+                if (isMissingMarketCap(resultMap.get(s))) {
+                    unknownCap++;
+                }
             }
 
             log.info(
-                    "SecurityDetails coverage symbols={} securityHits={} mongoMc={} apiHits={} unknownSector={} durationMs={}",
-                    symbols.size(), securityHits, mongoMcHits, apiHits, unknownSector,
-                    System.currentTimeMillis() - startMs);
+                    "SecurityDetails coverage symbols={} securityHits={} mongoMc={} apiHits={} indexCap={} peerCap={} unknownSector={} unknownCap={} durationMs={}",
+                    symbols.size(), securityHits, mongoMcHits, apiHits, indexCapHits, peerCapHits,
+                    unknownSector, unknownCap, System.currentTimeMillis() - startMs);
 
             List<String> missingSymbols = new ArrayList<>(symbols);
             missingSymbols.removeAll(resultMap.keySet());
@@ -266,6 +281,176 @@ public class SecurityDetailsService {
      */
     MarketCapType parseMarketCapType(String typeStr) {
         return MarketCapType.fromMarketCap(typeStr);
+    }
+
+    static boolean isMissingMarketCap(SecurityModel sm) {
+        return sm == null || sm.getMetadata() == null || sm.getMetadata().getMarketCapType() == null;
+    }
+
+    /**
+     * SEBI-style buckets via NSE index membership when market-data omits marketCapType.
+     * Large = Nifty 50 + Next 50; Mid = Midcap 150; Small = Smallcap 250.
+     */
+    int enrichMarketCapFromIndices(Map<String, SecurityModel> resultMap, List<String> symbols) {
+        if (nseIndicesService == null || symbols == null || symbols.isEmpty()) {
+            return 0;
+        }
+        List<String> need = symbols.stream().filter(s -> isMissingMarketCap(resultMap.get(s))).toList();
+        if (need.isEmpty()) {
+            return 0;
+        }
+        try {
+            Set<String> large = new HashSet<>();
+            large.addAll(loadIndexSymbols("NIFTY 50"));
+            large.addAll(loadIndexSymbols("NIFTY NEXT 50"));
+            Set<String> mid = loadIndexSymbols("NIFTY MIDCAP 150");
+            Set<String> small = loadIndexSymbols("NIFTY SMLCAP 250");
+            if (large.isEmpty() && mid.isEmpty() && small.isEmpty()) {
+                log.info("Index cap enrich skipped — no constituents loaded");
+                return 0;
+            }
+            int hits = 0;
+            List<MarketCapDocument> persist = new ArrayList<>();
+            for (String sym : need) {
+                String key = normalizeSymbolKey(sym);
+                MarketCapType type = null;
+                if (large.contains(key)) {
+                    type = MarketCapType.LARGE_CAP;
+                } else if (mid.contains(key)) {
+                    type = MarketCapType.MID_CAP;
+                } else if (small.contains(key)) {
+                    type = MarketCapType.SMALL_CAP;
+                }
+                if (type != null) {
+                    applyCapTypeOnly(resultMap, sym, type, null);
+                    hits++;
+                    persist.add(MarketCapDocument.builder()
+                            .symbol(sym)
+                            .marketCapType(type.getName())
+                            .updatedAt(LocalDateTime.now())
+                            .build());
+                }
+            }
+            writeThroughCaps(persist);
+            return hits;
+        } catch (Exception e) {
+            log.warn("Index market-cap enrich failed: {}", e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Fundamentals peers expose company market-cap (crore INR) under sectorMarketCapInr.
+     * Seed with holdings that still lack a cap type; apply harvested peer caps.
+     */
+    int enrichMarketCapFromPeerHarvest(Map<String, SecurityModel> resultMap, List<String> symbols) {
+        if (marketDataService == null || symbols == null || symbols.isEmpty()) {
+            return 0;
+        }
+        List<String> need = symbols.stream().filter(s -> isMissingMarketCap(resultMap.get(s))).toList();
+        if (need.isEmpty()) {
+            return 0;
+        }
+        try {
+            Map<String, Double> croresBySymbol = marketDataService.harvestPeerMarketCapCrores(need);
+            if (croresBySymbol == null || croresBySymbol.isEmpty()) {
+                return 0;
+            }
+            int hits = 0;
+            List<MarketCapDocument> persist = new ArrayList<>();
+            for (String sym : need) {
+                Double crores = croresBySymbol.get(normalizeSymbolKey(sym));
+                if (crores == null) {
+                    continue;
+                }
+                MarketCapType type = MarketCapType.fromMarketCapCrores(crores);
+                if (type == null) {
+                    continue;
+                }
+                double absolute = crores * 10_000_000D;
+                applyCapTypeOnly(resultMap, sym, type, absolute);
+                hits++;
+                persist.add(MarketCapDocument.builder()
+                        .symbol(sym)
+                        .marketCapType(type.getName())
+                        .marketCapValue(absolute)
+                        .updatedAt(LocalDateTime.now())
+                        .build());
+            }
+            writeThroughCaps(persist);
+            return hits;
+        } catch (Exception e) {
+            log.warn("Peer market-cap harvest enrich failed: {}", e.getMessage());
+            return 0;
+        }
+    }
+
+    private Set<String> loadIndexSymbols(String indexSymbol) {
+        try {
+            List<IndexConstituent> constituents = nseIndicesService.getIndexConstituents(indexSymbol);
+            if (constituents == null || constituents.isEmpty()) {
+                return Set.of();
+            }
+            Set<String> out = new HashSet<>();
+            for (IndexConstituent c : constituents) {
+                if (c == null || c.getSymbol() == null) {
+                    continue;
+                }
+                out.add(normalizeSymbolKey(c.getSymbol()));
+            }
+            return out;
+        } catch (Exception e) {
+            log.debug("Index {} constituents unavailable: {}", indexSymbol, e.getMessage());
+            return Set.of();
+        }
+    }
+
+    private static String normalizeSymbolKey(String symbol) {
+        if (symbol == null) {
+            return "";
+        }
+        String s = symbol.trim().toUpperCase(Locale.ROOT);
+        int colon = s.lastIndexOf(':');
+        if (colon >= 0 && colon < s.length() - 1) {
+            s = s.substring(colon + 1);
+        }
+        return s;
+    }
+
+    private void applyCapTypeOnly(
+            Map<String, SecurityModel> resultMap, String sym, MarketCapType type, Double absoluteValue) {
+        SecurityModel existing = resultMap.get(sym);
+        if (existing == null) {
+            SecurityMetadataModel meta = SecurityMetadataModel.builder()
+                    .marketCapType(type)
+                    .marketCapValue(absoluteValue)
+                    .build();
+            resultMap.put(sym, SecurityModel.builder()
+                    .key(SecurityKeyModel.builder().symbol(sym).build())
+                    .metadata(meta)
+                    .build());
+            return;
+        }
+        if (existing.getMetadata() == null) {
+            existing.setMetadata(SecurityMetadataModel.builder().build());
+        }
+        if (existing.getMetadata().getMarketCapType() == null) {
+            existing.getMetadata().setMarketCapType(type);
+        }
+        if (absoluteValue != null && existing.getMetadata().getMarketCapValue() == null) {
+            existing.getMetadata().setMarketCapValue(absoluteValue);
+        }
+    }
+
+    private void writeThroughCaps(List<MarketCapDocument> persist) {
+        if (persist == null || persist.isEmpty() || marketCapMongoService == null) {
+            return;
+        }
+        try {
+            marketCapMongoService.saveAll(persist);
+        } catch (Exception e) {
+            log.warn("Failed to write-through {} cap docs: {}", persist.size(), e.getMessage());
+        }
     }
 
     /**
