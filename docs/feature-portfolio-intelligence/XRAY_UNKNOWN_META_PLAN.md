@@ -15,7 +15,11 @@
 | confidence | ~0.55 |
 | Book | Zerodha `5dd51534-1dd3-4377-996f-36a21c2cb6e0` |
 | Equity meta on book | 111/111 sector/industry/cap null |
-| Notes | `kubeconfig.dev` absent on this laptop; deploy via `am deploy --env dev` / VPS nonprod kubeconfig |
+| Notes | `kubeconfig.dev` installed from Downloads; context `dev-apps` |
+| MARKET_DATA_API_URL (pod) | in-cluster `http://am-market-data-dev.am-apps-dev.svc.cluster.local:8080` |
+| Deployed image (iter 1) | `ghcr.io/.../am-portfolio:39030242353` (branch enrich) |
+| Market batch-search (public) | TCS/HDFCBANK/TITAN return real **sector/industry**; `marketCapType`/`marketCapValue` often null |
+| API gate measure | **Blocked** — prior Bearer expired; need fresh token for `rjsahim7001` book |
 
 ---
 
