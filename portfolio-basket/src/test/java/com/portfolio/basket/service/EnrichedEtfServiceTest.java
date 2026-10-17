@@ -125,11 +125,11 @@ class EnrichedEtfServiceTest {
     }
 
     @Test
-    void discoverBatch_skipsEnrichAndPerfHist() {
+    void discoverBatch_skipsEnrichAndPerfHist_whenIsinsPresent() {
         when(basketEtfRedisService.getEnrichedEtf(anyString())).thenReturn(Optional.empty());
 
-        EtfData a = sampleEtf("NIFTYBEES");
-        EtfData b = sampleEtf("BANKBEES");
+        EtfData a = sampleEtfWithIsin("NIFTYBEES");
+        EtfData b = sampleEtfWithIsin("BANKBEES");
         when(etfApiClient.fetchEtfHoldingsBatch(any())).thenReturn(Map.of(
                 "NIFTYBEES", a,
                 "BANKBEES", b));
@@ -143,8 +143,22 @@ class EnrichedEtfServiceTest {
     }
 
     @Test
+    void discoverBatch_enrichesWhenIsinsMissing() {
+        when(basketEtfRedisService.getEnrichedEtf(anyString())).thenReturn(Optional.empty());
+
+        EtfData a = sampleEtf("NIFTYBEES"); // no ISIN → match would be 0 without enrich
+        when(etfApiClient.fetchEtfHoldingsBatch(any())).thenReturn(Map.of("NIFTYBEES", a));
+
+        Map<String, EtfData> result = service.getEnrichedEtfsBatch(List.of("NIFTYBEES"), true);
+
+        assertEquals(1, result.size());
+        verify(etfApiClient, times(1)).enrichHoldings(any());
+        verify(performanceEnricher, never()).fillMissing(any());
+    }
+
+    @Test
     void discoverBatch_l1HitNeedingPerf_doesNotCallFillMissing() {
-        EtfData cached = sampleEtf("ITBEES");
+        EtfData cached = sampleEtfWithIsin("ITBEES");
         // missing returns → would normally need perf fill
         cached.setReturn1Y(null);
         ReflectionTestUtils.invokeMethod(service, "store", "ITBEES", cached);
@@ -187,6 +201,12 @@ class EnrichedEtfServiceTest {
         h.setSymbol("RELIANCE");
         h.setWeight(5.0);
         data.setHoldings(List.of(h));
+        return data;
+    }
+
+    private static EtfData sampleEtfWithIsin(String symbol) {
+        EtfData data = sampleEtf(symbol);
+        data.getHoldings().get(0).setIsin("INE002A01018");
         return data;
     }
 }
