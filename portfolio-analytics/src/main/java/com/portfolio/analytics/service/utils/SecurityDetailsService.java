@@ -7,17 +7,19 @@ import com.am.common.amcommondata.model.security.SecurityModel;
 import com.am.common.amcommondata.service.SecurityService;
 import com.am.common.amcommondata.service.marketcap.MarketCapMongoService;
 import com.am.common.amcommondata.document.marketcap.MarketCapDocument;
+import com.portfolio.marketdata.model.BatchSearchResponse;
+import com.portfolio.marketdata.service.MarketDataService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -32,6 +34,7 @@ public class SecurityDetailsService {
     private final SecurityService securityService;
     private final MarketCapMongoService marketCapMongoService;
     private final com.portfolio.basket.client.EtfApiClient etfApiClient;
+    private final MarketDataService marketDataService;
   
     /**
      * Retrieves security details for a list of symbols with caching and fallback mechanisms
@@ -45,127 +48,220 @@ public class SecurityDetailsService {
             log.info("No symbols provided for security details lookup");
             return Collections.emptyMap();
         }
-        
+
+        long startMs = System.currentTimeMillis();
         log.info("Fetching security details for {} symbols", symbols.size());
         log.debug("Symbols to fetch: {}", symbols);
-        
+
         try {
-            // Attempt to retrieve security details from the service using the raw symbols
             List<SecurityModel> securityModels = securityService.findBySymbols(symbols);
-            
-            // Convert list to map using the exact symbol as key
+
             Map<String, SecurityModel> resultMap = new HashMap<>();
             if (securityModels != null) {
                 for (SecurityModel model : securityModels) {
                     if (model != null && model.getKey() != null && model.getKey().getSymbol() != null) {
                         String sym = model.getKey().getSymbol();
-                        boolean currentValid = model.getMetadata() != null
-                                && model.getMetadata().getSector() != null
-                                && !model.getMetadata().getSector().trim().isEmpty()
-                                && !model.getMetadata().getSector().trim().equals("-");
+                        boolean currentValid = !isMissingSector(
+                                model.getMetadata() != null ? model.getMetadata().getSector() : null);
                         if (!resultMap.containsKey(sym) || currentValid) {
                             resultMap.put(sym, model);
                         }
                     }
                 }
             }
+            int securityHits = resultMap.size();
 
-            // Identify symbols that are missing or have missing/invalid sector metadata
             List<String> missingOrIncomplete = symbols.stream()
-                    .filter(s -> {
-                        SecurityModel sm = resultMap.get(s);
-                        return sm == null || sm.getMetadata() == null || sm.getMetadata().getSector() == null
-                                || sm.getMetadata().getSector().trim().isEmpty()
-                                || sm.getMetadata().getSector().trim().equals("-");
-                    })
+                    .filter(s -> isMissingSectorMeta(resultMap.get(s)))
                     .collect(Collectors.toList());
 
+            int mongoMcHits = 0;
             if (!missingOrIncomplete.isEmpty() && marketCapMongoService != null) {
                 try {
                     Map<String, MarketCapDocument> marketCapDocs = marketCapMongoService.getBySymbols(missingOrIncomplete);
                     if (marketCapDocs != null && !marketCapDocs.isEmpty()) {
+                        mongoMcHits = marketCapDocs.size();
                         for (Map.Entry<String, MarketCapDocument> entry : marketCapDocs.entrySet()) {
-                            String sym = entry.getKey();
-                            MarketCapDocument doc = entry.getValue();
-                            if (doc != null) {
-                                SecurityModel existing = resultMap.get(sym);
-                                if (existing == null) {
-                                    MarketCapType mcType = parseMarketCapType(doc.getMarketCapType());
-                                    SecurityMetadataModel meta = SecurityMetadataModel.builder()
-                                            .securityName(doc.getCompanyName())
-                                            .sector(doc.getSector())
-                                            .industry(doc.getIndustry())
-                                            .marketCapType(mcType)
-                                            .marketCapValue(doc.getMarketCapValue())
-                                            .build();
-                                    SecurityModel synthetic = SecurityModel.builder()
-                                            .key(SecurityKeyModel.builder().symbol(sym).build())
-                                            .metadata(meta)
-                                            .build();
-                                    resultMap.put(sym, synthetic);
-                                } else {
-                                    if (existing.getMetadata() == null) {
-                                        existing.setMetadata(SecurityMetadataModel.builder().build());
-                                    }
-                                    SecurityMetadataModel meta = existing.getMetadata();
-                                    if ((meta.getSector() == null || meta.getSector().trim().isEmpty() || meta.getSector().trim().equals("-")) && doc.getSector() != null) {
-                                        meta.setSector(doc.getSector());
-                                    }
-                                    if ((meta.getIndustry() == null || meta.getIndustry().trim().isEmpty() || meta.getIndustry().trim().equals("-")) && doc.getIndustry() != null) {
-                                        meta.setIndustry(doc.getIndustry());
-                                    }
-                                    if (meta.getMarketCapType() == null && doc.getMarketCapType() != null) {
-                                        meta.setMarketCapType(parseMarketCapType(doc.getMarketCapType()));
-                                    }
-                                    if (meta.getMarketCapValue() == null && doc.getMarketCapValue() != null) {
-                                        meta.setMarketCapValue(doc.getMarketCapValue());
-                                    }
-                                    if (meta.getSecurityName() == null && doc.getCompanyName() != null) {
-                                        meta.setSecurityName(doc.getCompanyName());
-                                    }
-                                }
-                            }
+                            applyMarketCapDocument(resultMap, entry.getKey(), entry.getValue());
                         }
                     }
                 } catch (Exception e) {
                     log.warn("Error fetching fallback market cap details for symbols: {}", missingOrIncomplete, e);
                 }
             }
-            
-            log.info("Successfully retrieved {} security models out of {} requested symbols", 
-                    resultMap.size(), symbols.size());
-            
-            // Check for missing symbols and log them
+
+            List<String> stillMissing = symbols.stream()
+                    .filter(s -> isMissingSectorMeta(resultMap.get(s)))
+                    .collect(Collectors.toList());
+
+            int apiHits = 0;
+            if (!stillMissing.isEmpty() && marketDataService != null) {
+                try {
+                    Map<String, BatchSearchResponse.SecurityMatch> apiMatches =
+                            marketDataService.getMarketCapData(stillMissing);
+                    if (apiMatches != null && !apiMatches.isEmpty()) {
+                        apiHits = apiMatches.size();
+                        List<MarketCapDocument> toPersist = new ArrayList<>();
+                        for (Map.Entry<String, BatchSearchResponse.SecurityMatch> entry : apiMatches.entrySet()) {
+                            String sym = entry.getKey();
+                            BatchSearchResponse.SecurityMatch match = entry.getValue();
+                            if (match == null) {
+                                continue;
+                            }
+                            applySecurityMatch(resultMap, sym, match);
+                            toPersist.add(MarketCapDocument.builder()
+                                    .symbol(sym)
+                                    .sector(match.getSector())
+                                    .industry(match.getIndustry())
+                                    .marketCapType(match.getMarketCapType())
+                                    .marketCapValue(match.getMarketCapValue() != null
+                                            ? match.getMarketCapValue().doubleValue() : null)
+                                    .companyName(match.getCompanyName())
+                                    .updatedAt(LocalDateTime.now())
+                                    .build());
+                        }
+                        if (!toPersist.isEmpty() && marketCapMongoService != null) {
+                            try {
+                                marketCapMongoService.saveAll(toPersist);
+                            } catch (Exception e) {
+                                log.warn("Failed to write-through market_cap docs for {} symbols: {}",
+                                        toPersist.size(), e.getMessage());
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("Error fetching market-data fallback for symbols: {}", stillMissing, e);
+                }
+            }
+
+            int unknownSector = 0;
+            for (String s : symbols) {
+                if (isMissingSectorMeta(resultMap.get(s))) {
+                    unknownSector++;
+                }
+            }
+
+            log.info(
+                    "SecurityDetails coverage symbols={} securityHits={} mongoMc={} apiHits={} unknownSector={} durationMs={}",
+                    symbols.size(), securityHits, mongoMcHits, apiHits, unknownSector,
+                    System.currentTimeMillis() - startMs);
+
             List<String> missingSymbols = new ArrayList<>(symbols);
             missingSymbols.removeAll(resultMap.keySet());
-            
             if (!missingSymbols.isEmpty()) {
                 log.warn("Could not find security details for symbols: {}", missingSymbols);
             }
-            
+
             return resultMap;
         } catch (Exception e) {
             log.error("Error retrieving security details for symbols: {}", symbols, e);
-            
-            // Fallback: Try to retrieve symbols one by one to get partial results
             return retrieveWithFallback(symbols);
         }
     }
 
-    private MarketCapType parseMarketCapType(String typeStr) {
-        if (typeStr == null || typeStr.trim().isEmpty()) {
-            return MarketCapType.MICRO_CAP;
+    private void applyMarketCapDocument(Map<String, SecurityModel> resultMap, String sym, MarketCapDocument doc) {
+        if (doc == null) {
+            return;
         }
-        String normalized = typeStr.trim().toUpperCase().replace(" ", "_");
-        try {
-            return MarketCapType.valueOf(normalized);
-        } catch (Exception e) {
-            return MarketCapType.MICRO_CAP;
+        SecurityModel existing = resultMap.get(sym);
+        MarketCapType mcType = parseMarketCapType(doc.getMarketCapType());
+        if (existing == null) {
+            SecurityMetadataModel meta = SecurityMetadataModel.builder()
+                    .securityName(doc.getCompanyName())
+                    .sector(doc.getSector())
+                    .industry(doc.getIndustry())
+                    .marketCapType(mcType)
+                    .marketCapValue(doc.getMarketCapValue())
+                    .build();
+            resultMap.put(sym, SecurityModel.builder()
+                    .key(SecurityKeyModel.builder().symbol(sym).build())
+                    .metadata(meta)
+                    .build());
+            return;
+        }
+        if (existing.getMetadata() == null) {
+            existing.setMetadata(SecurityMetadataModel.builder().build());
+        }
+        SecurityMetadataModel meta = existing.getMetadata();
+        if (isMissingSector(meta.getSector()) && doc.getSector() != null) {
+            meta.setSector(doc.getSector());
+        }
+        if (isMissingSector(meta.getIndustry()) && doc.getIndustry() != null) {
+            meta.setIndustry(doc.getIndustry());
+        }
+        if (meta.getMarketCapType() == null && mcType != null) {
+            meta.setMarketCapType(mcType);
+        }
+        if (meta.getMarketCapValue() == null && doc.getMarketCapValue() != null) {
+            meta.setMarketCapValue(doc.getMarketCapValue());
+        }
+        if (meta.getSecurityName() == null && doc.getCompanyName() != null) {
+            meta.setSecurityName(doc.getCompanyName());
         }
     }
 
+    private void applySecurityMatch(
+            Map<String, SecurityModel> resultMap, String sym, BatchSearchResponse.SecurityMatch match) {
+        MarketCapType mcType = parseMarketCapType(match.getMarketCapType());
+        SecurityModel existing = resultMap.get(sym);
+        if (existing == null) {
+            SecurityMetadataModel meta = SecurityMetadataModel.builder()
+                    .securityName(match.getCompanyName())
+                    .sector(match.getSector())
+                    .industry(match.getIndustry())
+                    .marketCapType(mcType)
+                    .marketCapValue(match.getMarketCapValue() != null
+                            ? match.getMarketCapValue().doubleValue() : null)
+                    .build();
+            resultMap.put(sym, SecurityModel.builder()
+                    .key(SecurityKeyModel.builder().symbol(sym).build())
+                    .metadata(meta)
+                    .build());
+            return;
+        }
+        if (existing.getMetadata() == null) {
+            existing.setMetadata(SecurityMetadataModel.builder().build());
+        }
+        SecurityMetadataModel meta = existing.getMetadata();
+        if (isMissingSector(meta.getSector()) && match.getSector() != null) {
+            meta.setSector(match.getSector());
+        }
+        if (isMissingSector(meta.getIndustry()) && match.getIndustry() != null) {
+            meta.setIndustry(match.getIndustry());
+        }
+        if (meta.getMarketCapType() == null && mcType != null) {
+            meta.setMarketCapType(mcType);
+        }
+        if (meta.getMarketCapValue() == null && match.getMarketCapValue() != null) {
+            meta.setMarketCapValue(match.getMarketCapValue().doubleValue());
+        }
+        if (meta.getSecurityName() == null && match.getCompanyName() != null) {
+            meta.setSecurityName(match.getCompanyName());
+        }
+    }
 
-    
+    static boolean isMissingSector(String sector) {
+        if (sector == null) {
+            return true;
+        }
+        String t = sector.trim();
+        return t.isEmpty() || "-".equals(t) || "Unknown".equalsIgnoreCase(t);
+    }
+
+    private static boolean isMissingSectorMeta(SecurityModel sm) {
+        if (sm == null || sm.getMetadata() == null) {
+            return true;
+        }
+        return isMissingSector(sm.getMetadata().getSector());
+    }
+
+    /**
+     * Parse labeled cap type. Null/blank/unrecognized → null (never invent MICRO_CAP).
+     */
+    MarketCapType parseMarketCapType(String typeStr) {
+        return MarketCapType.fromMarketCap(typeStr);
+    }
+
     /**
      * Fallback method to retrieve security details one by one when bulk retrieval fails
      * 
