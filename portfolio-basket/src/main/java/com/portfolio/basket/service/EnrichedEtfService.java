@@ -135,7 +135,10 @@ public class EnrichedEtfService {
     }
 
     /**
-     * @param discoverFastPath when true, skip market enrichHoldings if ≥95% holdings have valid ISINs.
+     * @param discoverFastPath when true (Discover list): skip market enrichHoldings if ≥95% ISINs
+     *                         present, and fill 1Y/3Y/5Y + sparkline from hist.
+     *                         when false (FULL / preview-grade batch): skip hist performance —
+     *                         match/overlap only needs holdings (hist was ~20s+ for 9 ETFs on DEV).
      */
     public Map<String, EtfData> getEnrichedEtfsBatch(List<String> queries, boolean discoverFastPath) {
         Map<String, EtfData> out = new LinkedHashMap<>();
@@ -153,7 +156,7 @@ public class EnrichedEtfService {
             EtfData l1 = l1Cache.getIfPresent(key);
             if (l1 != null) {
                 EtfData copy = copyEtf(l1);
-                if (EtfPerformanceEnricher.needsPerformanceFill(copy)) {
+                if (discoverFastPath && EtfPerformanceEnricher.needsPerformanceFill(copy)) {
                     cachedNeedingPerf.add(copy);
                     out.put(q, copy);
                 } else {
@@ -167,7 +170,7 @@ public class EnrichedEtfService {
                     var cached = basketEtfRedisService.getEnrichedEtf(key);
                     if (cached.isPresent()) {
                         EtfData fromL2 = fromCached(cached.get());
-                        if (EtfPerformanceEnricher.needsPerformanceFill(fromL2)) {
+                        if (discoverFastPath && EtfPerformanceEnricher.needsPerformanceFill(fromL2)) {
                             cachedNeedingPerf.add(fromL2);
                             out.put(q, fromL2);
                         } else {
@@ -184,13 +187,16 @@ public class EnrichedEtfService {
             misses.add(q);
         }
 
-        if (!cachedNeedingPerf.isEmpty()) {
+        if (discoverFastPath && !cachedNeedingPerf.isEmpty()) {
             performanceEnricher.fillMissing(cachedNeedingPerf);
             for (EtfData repaired : cachedNeedingPerf) {
                 if (repaired.getSymbol() != null) {
                     store(normalizeKey(repaired.getSymbol()), repaired);
                 }
             }
+        } else if (!cachedNeedingPerf.isEmpty()) {
+            log.info("basket.opp.stage=perf skipped=true reason=fullMode cachedNeeding={}",
+                    cachedNeedingPerf.size());
         }
 
         if (misses.isEmpty()) {
@@ -209,9 +215,9 @@ public class EnrichedEtfService {
         long enrichStart = System.currentTimeMillis();
         boolean ranEnrich = false;
         if (!allHoldings.isEmpty()) {
-            if (discoverFastPath && isinCoverage(allHoldings) >= 0.95) {
-                log.info("basket.opp.stage=enrich skipped=true reason=isinCoverage discoverFastPath=true holdings={}",
-                        allHoldings.size());
+            if (isinCoverage(allHoldings) >= 0.95) {
+                log.info("basket.opp.stage=enrich skipped=true reason=isinCoverage holdings={} discoverFastPath={}",
+                        allHoldings.size(), discoverFastPath);
             } else {
                 etfApiClient.enrichHoldings(allHoldings);
                 ranEnrich = true;
@@ -234,7 +240,11 @@ public class EnrichedEtfService {
             }
             liveList.add(data);
         }
-        performanceEnricher.fillMissing(liveList);
+        if (discoverFastPath) {
+            performanceEnricher.fillMissing(liveList);
+        } else {
+            log.info("basket.opp.stage=perf skipped=true reason=fullMode live={}", liveList.size());
+        }
 
         for (String q : misses) {
             EtfData data = liveBatch.get(q);

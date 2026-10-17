@@ -120,6 +120,27 @@ class EnrichedEtfServiceTest {
 
         assertEquals(2, result.size());
         verify(etfApiClient, times(1)).enrichHoldings(any());
+        // FULL / default batch: no hist performance (was ~20s+ for 9 ETFs on DEV).
+        verify(performanceEnricher, never()).fillMissing(any());
+    }
+
+    @Test
+    void discoverBatch_fillsPerformance_fullBatch_skipsPerformance() {
+        when(basketEtfRedisService.getEnrichedEtf(anyString())).thenReturn(Optional.empty());
+        EtfData a = sampleEtf("NIFTYBEES");
+        when(etfApiClient.fetchEtfHoldingsBatch(any())).thenReturn(Map.of("NIFTYBEES", a));
+
+        service.getEnrichedEtfsBatch(List.of("NIFTYBEES"), true);
+        verify(performanceEnricher, times(1)).fillMissing(any());
+
+        clearInvocations(performanceEnricher);
+        lenient().when(performanceEnricher.fillMissing(any())).thenReturn(0);
+        when(basketEtfRedisService.getEnrichedEtf(anyString())).thenReturn(Optional.empty());
+        EtfData b = sampleEtf("BANKBEES");
+        when(etfApiClient.fetchEtfHoldingsBatch(any())).thenReturn(Map.of("BANKBEES", b));
+
+        service.getEnrichedEtfsBatch(List.of("BANKBEES"), false);
+        verify(performanceEnricher, never()).fillMissing(any());
     }
 
     @Test
