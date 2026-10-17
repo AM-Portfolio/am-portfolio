@@ -1136,6 +1136,80 @@ public class MarketDataService {
     }
 
     /**
+     * Harvest peer market-cap values (crore INR) from fundamentals responses.
+     * Each fundamentals call returns competitors with {@code sectorMarketCapInr} (company mcap).
+     * Seeds are queried in parallel; results keyed by peer trading symbol (uppercase).
+     */
+    public Map<String, Double> harvestPeerMarketCapCrores(List<String> seedSymbols) {
+        if (seedSymbols == null || seedSymbols.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<String> seeds = seedSymbols.stream()
+                .filter(s -> s != null && !s.isBlank())
+                .map(this::cleanSymbol)
+                .distinct()
+                .limit(40)
+                .collect(Collectors.toList());
+        if (seeds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        log.info("Harvesting peer market-cap crores from fundamentals for {} seeds", seeds.size());
+        Map<String, Double> out = new java.util.concurrent.ConcurrentHashMap<>();
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        for (String seed : seeds) {
+            futures.add(CompletableFuture.runAsync(() -> {
+                try {
+                    com.fasterxml.jackson.databind.JsonNode root = marketDataApiClient.getFundamentals(seed)
+                            .onErrorResume(e -> Mono.empty())
+                            .block(java.time.Duration.ofSeconds(4));
+                    if (root == null || !root.has("peers") || !root.get("peers").isArray()) {
+                        return;
+                    }
+                    for (com.fasterxml.jackson.databind.JsonNode peer : root.get("peers")) {
+                        String sym = peer.path("symbol").asText(null);
+                        if (sym == null || sym.isBlank()) {
+                            String key = peer.path("instrumentKey").asText(peer.path("instrument_key").asText(""));
+                            if (key != null && key.contains("|")) {
+                                // instrument key is ISIN-shaped — skip without symbol
+                                continue;
+                            }
+                        }
+                        if (sym == null || sym.isBlank()) {
+                            continue;
+                        }
+                        Double cap = null;
+                        if (peer.hasNonNull("sectorMarketCapInr")) {
+                            cap = peer.get("sectorMarketCapInr").asDouble();
+                        } else if (peer.hasNonNull("sector_market_cap_inr")) {
+                            com.fasterxml.jackson.databind.JsonNode n = peer.get("sector_market_cap_inr");
+                            if (n.isNumber()) {
+                                cap = n.asDouble();
+                            } else if (n.hasNonNull("value")) {
+                                cap = n.get("value").asDouble();
+                            }
+                        }
+                        if (cap != null && cap > 0) {
+                            out.put(sym.trim().toUpperCase(java.util.Locale.ROOT), cap);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.debug("Peer mcap harvest failed for seed {}: {}", seed, e.getMessage());
+                }
+            }, taskExecutor));
+        }
+        try {
+            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
+                    .orTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+                    .exceptionally(ex -> null)
+                    .join();
+        } catch (Exception e) {
+            log.warn("Peer mcap harvest wait ended: {}", e.getMessage());
+        }
+        log.info("Peer mcap harvest collected {} symbol caps from {} seeds", out.size(), seeds.size());
+        return out;
+    }
+
+    /**
      * Gets historical charts data for the specified symbols and range.
      * 
      * @param symbols list of symbols

@@ -22,16 +22,31 @@ public enum MarketCapType {
         return name;
     }
 
-    public static MarketCapType fromMarketCap(double marketCapInCrores) {
-        if (marketCapInCrores >= LARGE_CAP.minMarketCapInCrores) {
+    /**
+     * Classify from absolute market cap in INR (despite the historical field name).
+     * Thresholds: Large ≥ 1e12, Mid ≥ 2.5e11, Small ≥ 5e10, else Micro.
+     */
+    public static MarketCapType fromMarketCap(double marketCapInrAbsolute) {
+        if (marketCapInrAbsolute >= LARGE_CAP.minMarketCapInCrores) {
             return LARGE_CAP;
-        } else if (marketCapInCrores >= MID_CAP.minMarketCapInCrores) {
+        } else if (marketCapInrAbsolute >= MID_CAP.minMarketCapInCrores) {
             return MID_CAP;
-        } else if (marketCapInCrores >= SMALL_CAP.minMarketCapInCrores) {
+        } else if (marketCapInrAbsolute >= SMALL_CAP.minMarketCapInCrores) {
             return SMALL_CAP;
         } else {
             return MICRO_CAP;
         }
+    }
+
+    /**
+     * Classify from market cap in crore INR (fundamentals peer field).
+     * Null/non-positive → null (do not invent MICRO_CAP).
+     */
+    public static MarketCapType fromMarketCapCrores(double crores) {
+        if (crores <= 0 || Double.isNaN(crores) || Double.isInfinite(crores)) {
+            return null;
+        }
+        return fromMarketCap(crores * 10_000_000D);
     }
 
     /**

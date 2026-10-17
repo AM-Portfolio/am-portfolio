@@ -8,7 +8,9 @@ import com.am.common.amcommondata.model.security.SecurityModel;
 import com.am.common.amcommondata.service.SecurityService;
 import com.am.common.amcommondata.service.marketcap.MarketCapMongoService;
 import com.portfolio.marketdata.model.BatchSearchResponse;
+import com.portfolio.marketdata.model.indices.IndexConstituent;
 import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.marketdata.service.NseIndicesService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -20,6 +22,7 @@ import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -29,6 +32,7 @@ class SecurityDetailsServiceTest {
     @Mock private MarketCapMongoService marketCapMongoService;
     @Mock private com.portfolio.basket.client.EtfApiClient etfApiClient;
     @Mock private MarketDataService marketDataService;
+    @Mock private NseIndicesService nseIndicesService;
     @InjectMocks private SecurityDetailsService service;
 
     private SecurityModel buildSecurity(String symbol, String sector, String industry, MarketCapType cap) {
@@ -145,6 +149,35 @@ class SecurityDetailsServiceTest {
         assertNull(service.parseMarketCapType("garbage"));
         assertEquals(MarketCapType.LARGE_CAP, service.parseMarketCapType("LARGE_CAP"));
         assertEquals(MarketCapType.MICRO_CAP, service.parseMarketCapType("MICRO_CAP"));
+    }
+
+    @Test void getSecurityDetails_indexMembership_setsLargeCap() {
+        when(securityService.findBySymbols(List.of("TCS"))).thenReturn(List.of());
+        when(marketCapMongoService.getBySymbols(List.of("TCS"))).thenReturn(Map.of());
+        when(marketDataService.getMarketCapData(List.of("TCS"))).thenReturn(Map.of());
+        IndexConstituent c = new IndexConstituent();
+        c.setSymbol("TCS");
+        when(nseIndicesService.getIndexConstituents("NIFTY 50")).thenReturn(List.of(c));
+        when(nseIndicesService.getIndexConstituents("NIFTY NEXT 50")).thenReturn(List.of());
+        when(nseIndicesService.getIndexConstituents("NIFTY MIDCAP 150")).thenReturn(List.of());
+        when(nseIndicesService.getIndexConstituents("NIFTY SMLCAP 250")).thenReturn(List.of());
+        lenient().when(marketDataService.harvestPeerMarketCapCrores(anyList())).thenReturn(Map.of());
+
+        var result = service.getSecurityDetails(List.of("TCS"));
+        assertEquals(MarketCapType.LARGE_CAP, result.get("TCS").getMetadata().getMarketCapType());
+    }
+
+    @Test void getSecurityDetails_peerHarvest_setsLargeCapFromCrores() {
+        when(securityService.findBySymbols(List.of("TCS"))).thenReturn(List.of());
+        when(marketCapMongoService.getBySymbols(List.of("TCS"))).thenReturn(Map.of());
+        when(marketDataService.getMarketCapData(List.of("TCS"))).thenReturn(Map.of());
+        when(nseIndicesService.getIndexConstituents(anyString())).thenReturn(List.of());
+        when(marketDataService.harvestPeerMarketCapCrores(List.of("TCS")))
+                .thenReturn(Map.of("TCS", 750_000.0)); // crore INR → Large
+
+        var result = service.getSecurityDetails(List.of("TCS"));
+        assertEquals(MarketCapType.LARGE_CAP, result.get("TCS").getMetadata().getMarketCapType());
+        assertNotNull(result.get("TCS").getMetadata().getMarketCapValue());
     }
 
     @Test void getSymbolMapSectors_success() {
