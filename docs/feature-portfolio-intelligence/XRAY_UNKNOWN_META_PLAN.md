@@ -27,7 +27,7 @@ Measured book (token owner Sahim): Zerodha `552e95ce-30a3-4610-a5e7-4c3c4b6785b0
 | Warm latency | **1760–1827 ms** (pass ≤ 2000) |
 | MARKET_DATA_API_URL | in-cluster OK |
 
-**Cap follow-up (market-data):** seed `metadata.market_cap_type` / `market_cap_value` on securities Mongo (or fix indices APIs). Portfolio correctly refuses to invent Micro Cap.
+**Cap follow-up (portfolio, in progress):** batch-search still omits `marketCapType`/`value`. Portfolio now classifies Cap via (1) NSE index membership — Nifty 50+Next 50 → Large, Midcap 150 → Mid, Smallcap 250 → Small; (2) fundamentals peer `sectorMarketCapInr` (crore) harvest. Never invents Micro Cap for null. Await DEV image after `c9bb11a` to re-measure Cap pie.
 
 ---
 
