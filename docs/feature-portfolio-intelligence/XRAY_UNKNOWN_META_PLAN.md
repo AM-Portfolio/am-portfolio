@@ -3,7 +3,19 @@
 **Branch:** `fix/xray-unknown-sector-meta`  
 **Book:** Zerodha `5dd51534-1dd3-4377-996f-36a21c2cb6e0` (user `rjsahim7001@…`)  
 **Date:** 2026-10-17  
-**Status:** Analysis complete — implement only after approve
+**Status:** Implementation in progress (fix loop)
+
+### Baseline (Phase 0 — pre-fix, 2026-10-17)
+
+| Metric | Value |
+|--------|-------|
+| Sector Unknown | ~99.6% |
+| Industry Unknown | ~99.6% |
+| Cap | 100% MICRO_CAP (false default) |
+| confidence | ~0.55 |
+| Book | Zerodha `5dd51534-1dd3-4377-996f-36a21c2cb6e0` |
+| Equity meta on book | 111/111 sector/industry/cap null |
+| Notes | `kubeconfig.dev` absent on this laptop; deploy via `am deploy --env dev` / VPS nonprod kubeconfig |
 
 ---
 

@@ -34,16 +34,28 @@ public enum MarketCapType {
         }
     }
 
+    /**
+     * Parse a labeled cap type. Null/blank/unrecognized → null (do not invent MICRO_CAP).
+     * Numeric classification still uses {@link #fromMarketCap(double)}.
+     */
     public static MarketCapType fromMarketCap(String name) {
-        if (name.equals(LARGE_CAP.name)) {
+        if (name == null || name.trim().isEmpty()) {
+            return null;
+        }
+        String normalized = name.trim().toUpperCase().replace(' ', '_');
+        if (normalized.equals(LARGE_CAP.name) || normalized.contains("LARGE")) {
             return LARGE_CAP;
-        } else if (name.equals(MID_CAP.name)) {
+        }
+        if (normalized.equals(MID_CAP.name) || normalized.contains("MID")) {
             return MID_CAP;
-        } else if (name.equals(SMALL_CAP.name)) {
+        }
+        if (normalized.equals(SMALL_CAP.name) || normalized.contains("SMALL")) {
             return SMALL_CAP;
-        } else {
+        }
+        if (normalized.equals(MICRO_CAP.name) || normalized.contains("MICRO")) {
             return MICRO_CAP;
         }
+        return null;
     }
 }
 
