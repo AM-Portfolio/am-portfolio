@@ -108,18 +108,22 @@ public class PortfolioHoldingsService {
 
     public PortfolioHoldings getPortfolioHoldings(String userId, String portfolioId, TimeInterval interval,
             boolean enrich) {
-        log.info("Starting getPortfolioHoldings for specific portfolio - User: {}, Portfolio: {}, Interval: {}",
-                userId, portfolioId, interval != null ? interval.getCode() : "null");
+        log.info("Starting getPortfolioHoldings for specific portfolio - User: {}, Portfolio: {}, Interval: {}, Enrich: {}",
+                userId, portfolioId, interval != null ? interval.getCode() : "null", enrich);
 
         if (portfolioId == null || portfolioId.trim().isEmpty()) {
             throw new IllegalArgumentException("portfolioId cannot be blank");
         }
 
-        if (enrich) {
-            Optional<PortfolioHoldings> cachedHoldings = getCachedHoldings(userId, interval, portfolioId);
-            if (cachedHoldings.isPresent()) {
+        // Always prefer cache. Discover/basket (enrich=false) needs structure + ISINs only —
+        // skip price overlay so the request path stays sub-second.
+        Optional<PortfolioHoldings> cachedHoldings = getCachedHoldings(userId, interval, portfolioId);
+        if (cachedHoldings.isPresent()) {
+            if (enrich) {
                 return overlayAndReturn(cachedHoldings.get());
             }
+            log.info("Serving cached holdings structure (no price overlay) for portfolio {}", portfolioId);
+            return cachedHoldings.get();
         }
 
         log.info("Cache miss for specific portfolio holdings - User: {}, Portfolio: {}", userId, portfolioId);
@@ -218,7 +222,10 @@ public class PortfolioHoldingsService {
         String context = portfolioId != null ? "portfolio: " + portfolioId : "all portfolios";
         log.debug("Building portfolio holdings for user: {} and {}", userId, context);
 
-        healShortOrIsinSymbols(portfolios);
+        // Symbol heal hits market-data; skip on lean Discover/basket reads (ISINs already on book).
+        if (enrich) {
+            healShortOrIsinSymbols(portfolios);
+        }
 
         var portfolioHoldings = portfolioHoldingsMapper.toPortfolioHoldingsV1(portfolios);
         // Allocation availableQuantity is set in PortfolioHoldingsMapper — do not re-query ledger here
