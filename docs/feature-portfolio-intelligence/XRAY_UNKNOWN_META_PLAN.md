@@ -3,23 +3,31 @@
 **Branch:** `fix/xray-unknown-sector-meta`  
 **Book:** Zerodha `5dd51534-1dd3-4377-996f-36a21c2cb6e0` (user `rjsahim7001@…`)  
 **Date:** 2026-10-17  
-**Status:** Implementation in progress (fix loop)
+**Status:** DEV verify complete (Sector/Industry/latency pass; Cap honest Unknown — Large/Mid needs market-data seed)
 
-### Baseline (Phase 0 — pre-fix, 2026-10-17)
+### Baseline (Phase 0 — pre-fix)
 
 | Metric | Value |
 |--------|-------|
 | Sector Unknown | ~99.6% |
 | Industry Unknown | ~99.6% |
 | Cap | 100% MICRO_CAP (false default) |
-| confidence | ~0.55 |
-| Book | Zerodha `5dd51534-1dd3-4377-996f-36a21c2cb6e0` |
-| Equity meta on book | 111/111 sector/industry/cap null |
-| Notes | `kubeconfig.dev` installed from Downloads; context `dev-apps` |
-| MARKET_DATA_API_URL (pod) | in-cluster `http://am-market-data-dev.am-apps-dev.svc.cluster.local:8080` |
-| Deployed image (iter 1) | `ghcr.io/.../am-portfolio:39030242353` (branch enrich) |
-| Market batch-search (public) | TCS/HDFCBANK/TITAN return real **sector/industry**; `marketCapType`/`marketCapValue` often null |
-| API gate measure | **Blocked** — prior Bearer expired; need fresh token for `rjsahim7001` book |
+| Book (screenshots) | Zerodha ~₹8.9L / 111 names |
+
+### After (Phase 4 — 2026-10-17, image `39032038126`)
+
+Measured book (token owner Sahim): Zerodha `552e95ce-30a3-4610-a5e7-4c3c4b6785b0` (111 equities, totalValue ≈ 894695 — same shape as screenshot book).
+
+| Gate | Result |
+|------|--------|
+| Sector Unknown | **17.81%** (pass &lt; 20%) — top: Consumer Disc 19.4%, Financials 18.8%, IT 10.7%, … |
+| Industry Unknown | **17.81%** (pass) |
+| Cap | **0% Micro** / **100% UNKNOWN** — honesty pass; Large/Mid **not** filled (market batch-search returns null `marketCapType`/`marketCapValue` for TCS etc.) |
+| Cold latency | **3199 ms** (pass ≤ 5000) |
+| Warm latency | **1760–1827 ms** (pass ≤ 2000) |
+| MARKET_DATA_API_URL | in-cluster OK |
+
+**Cap follow-up (market-data):** seed `metadata.market_cap_type` / `market_cap_value` on securities Mongo (or fix indices APIs). Portfolio correctly refuses to invent Micro Cap.
 
 ---
 
