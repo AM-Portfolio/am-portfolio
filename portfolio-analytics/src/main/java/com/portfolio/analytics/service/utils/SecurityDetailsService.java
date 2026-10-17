@@ -165,6 +165,9 @@ public class SecurityDetailsService {
         }
         SecurityModel existing = resultMap.get(sym);
         MarketCapType mcType = parseMarketCapType(doc.getMarketCapType());
+        if (mcType == null && doc.getMarketCapValue() != null && doc.getMarketCapValue() > 0) {
+            mcType = MarketCapType.fromMarketCap(doc.getMarketCapValue());
+        }
         if (existing == null) {
             SecurityMetadataModel meta = SecurityMetadataModel.builder()
                     .securityName(doc.getCompanyName())
@@ -203,6 +206,9 @@ public class SecurityDetailsService {
     private void applySecurityMatch(
             Map<String, SecurityModel> resultMap, String sym, BatchSearchResponse.SecurityMatch match) {
         MarketCapType mcType = parseMarketCapType(match.getMarketCapType());
+        if (mcType == null && match.getMarketCapValue() != null && match.getMarketCapValue() > 0) {
+            mcType = MarketCapType.fromMarketCap(match.getMarketCapValue().doubleValue());
+        }
         SecurityModel existing = resultMap.get(sym);
         if (existing == null) {
             SecurityMetadataModel meta = SecurityMetadataModel.builder()
