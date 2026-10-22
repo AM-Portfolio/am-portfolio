@@ -227,6 +227,30 @@ public class PortfolioController {
     }
 
     /**
+     * Internal broker delete — called by am-trade-management when Trade has no local row
+     * (portfolio-only / Doc Intel book) so delete is synchronous Mongo+cache+Kafka fan-out
+     * instead of fire-and-forget Kafka alone.
+     */
+    @Hidden
+    @Operation(summary = "Delete broker portfolio (internal)", operationId = "deletePortfolioInternal")
+    @DeleteMapping("/internal/{portfolioId}")
+    public ResponseEntity<Void> deletePortfolioInternal(
+            @PathVariable String portfolioId,
+            @RequestParam String ownerId,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            log.warn("Unauthorized internal delete attempt rejected portfolioId={}", portfolioId);
+            return ResponseEntity.status(403).build();
+        }
+        if (ownerId == null || ownerId.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        log.info("PortfolioController - deletePortfolioInternal portfolioId={} ownerId={}", portfolioId, ownerId);
+        brokerPortfolioDeleteService.deleteOwnedPortfolio(portfolioId, ownerId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
      * Internal sync endpoint — called by am-trade-management when a portfolio is created or updated in trade.
      * This upserts the portfolio into am-portfolio's database so the user can see it in the Portfolio portal.
      * Uses the internal JWT secret to authenticate (service-to-service call).

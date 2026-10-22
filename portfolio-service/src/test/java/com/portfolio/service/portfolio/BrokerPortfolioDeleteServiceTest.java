@@ -1,6 +1,7 @@
 package com.portfolio.service.portfolio;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
 import com.portfolio.redis.service.PortfolioIntelligenceRedisService;
@@ -103,6 +104,23 @@ class BrokerPortfolioDeleteServiceTest {
                 ResponseStatusException.class,
                 () -> service.deleteOwnedPortfolio(portfolioId.toString(), "owner-1"));
         assertEquals(404, ex.getStatusCode().value());
+    }
+
+    @Test
+    void deleteOwnedPortfolio_basket_badRequest() {
+        UUID portfolioId = UUID.randomUUID();
+        PortfolioModelV1 portfolio = new PortfolioModelV1();
+        portfolio.setId(portfolioId);
+        portfolio.setOwner("owner-1");
+        portfolio.setPortfolioKind(PortfolioKind.BASKET);
+        when(portfolioService.getPortfolioById(portfolioId)).thenReturn(portfolio);
+
+        ResponseStatusException ex = assertThrows(
+                ResponseStatusException.class,
+                () -> service.deleteOwnedPortfolio(portfolioId.toString(), "owner-1"));
+        assertEquals(400, ex.getStatusCode().value());
+        verify(portfolioService, never()).deletePortfolioByIdAndOwner(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
