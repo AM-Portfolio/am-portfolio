@@ -75,9 +75,9 @@ env:
   KAFKA_BOOTSTRAP_SERVERS: "kafka.infra-dev.svc.cluster.local:9092"
   KAFKA_SECURITY_PROTOCOL: "SASL_PLAINTEXT"
   KAFKA_SASL_MECHANISM: "SCRAM-SHA-256"
-  # Prefer in-cluster market (Vault often still has public am-dev.asrax.in/market → nginx 405 on POST).
-  MARKET_DATA_API_URL: "http://am-market-data-dev.am-apps-dev.svc.cluster.local:8080"
-  MARKET_DATA_CALENDAR_BASE_URL: "http://am-market-data-dev.am-apps-dev.svc.cluster.local:8080"
+  # MARKET_DATA_API_URL / MARKET_DATA_CALENDAR_BASE_URL come from Vault
+  # (vault-mappings.yaml → apps/{env}/services/am-market-data URL). Do not hardcode here —
+  # dig Vault must point at dig market (am-dev / in-cluster), not prod am.asrax.in.
 
 resources:
   limits:
