@@ -513,8 +513,8 @@ public class SecurityDetailsService {
             SecurityModel security = securityDetails.get(symbol);
             String rawSector = (security != null && security.getMetadata() != null && security.getMetadata().getSector() != null) ? 
                     security.getMetadata().getSector() : null;
-            String sector = resolveSector(symbol, rawSector);
-            sectorMap.put(symbol, sector);
+            // Avoid ETF probe on map path; Unknown is fine for LIVE paint / allocations.
+            sectorMap.put(symbol, usableLabel(rawSector) ? rawSector.trim() : "Unknown");
         }
         
         return sectorMap;
@@ -544,12 +544,15 @@ public class SecurityDetailsService {
         }
         
         Map<String, List<String>> sectorToSymbols = new HashMap<>();
+        Map<String, SecurityModel> details = securityDetails != null ? securityDetails : Collections.emptyMap();
         
         for (String symbol : symbols) {
-            SecurityModel securityModel = securityDetails.get(symbol);
+            SecurityModel securityModel = details.get(symbol);
             String rawSector = (securityModel != null && securityModel.getMetadata() != null)
                 ? securityModel.getMetadata().getSector() : null;
-            String sector = resolveSector(symbol, rawSector);
+            // Do NOT call resolveSector → etfApiClient here. That is ~300ms × N and starves
+            // LIVE advanced heatmap. Callers (HeatmapProvider) remap Unknown via EquityModel.sector.
+            String sector = usableLabel(rawSector) ? rawSector.trim() : "Unknown";
             
             sectorToSymbols.computeIfAbsent(sector, k -> new ArrayList<>()).add(symbol);
         }
@@ -560,6 +563,13 @@ public class SecurityDetailsService {
         });
         
         return sectorToSymbols;
+    }
+
+    private static boolean usableLabel(String raw) {
+        return raw != null
+                && !raw.trim().isEmpty()
+                && !"-".equals(raw.trim())
+                && !"Unknown".equalsIgnoreCase(raw.trim());
     }
     
     /**
@@ -586,12 +596,14 @@ public class SecurityDetailsService {
         }
         
         Map<String, List<String>> industryToSymbols = new HashMap<>();
+        Map<String, SecurityModel> details = securityDetails != null ? securityDetails : Collections.emptyMap();
         
         for (String symbol : symbols) {
-            SecurityModel securityModel = securityDetails.get(symbol);
+            SecurityModel securityModel = details.get(symbol);
             String rawIndustry = (securityModel != null && securityModel.getMetadata() != null)
                 ? securityModel.getMetadata().getIndustry() : null;
-            String industry = resolveIndustry(symbol, rawIndustry);
+            // Same as sector grouping: never ETF-probe per symbol on the analytics hot path.
+            String industry = usableLabel(rawIndustry) ? rawIndustry.trim() : "Unknown";
             
             industryToSymbols.computeIfAbsent(industry, k -> new ArrayList<>()).add(symbol);
         }

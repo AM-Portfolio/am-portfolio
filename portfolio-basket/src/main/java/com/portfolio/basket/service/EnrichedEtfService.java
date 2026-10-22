@@ -38,6 +38,10 @@ public class EnrichedEtfService {
     @Value("${basket.cache.etf-ttl-seconds:86400}")
     private long etfL1TtlSeconds;
 
+    /** When true with discoverFastPath, never call market hist on the request path. */
+    @Value("${basket.opportunities.discover-skip-perf-hist:true}")
+    private boolean discoverSkipPerfHist;
+
     private Cache<String, EtfData> l1Cache;
 
     public EnrichedEtfService(
@@ -65,8 +69,9 @@ public class EnrichedEtfService {
         try {
             List<String> topEtfs = basketCatalogService.getTopEtfSymbols();
             if (topEtfs != null && !topEtfs.isEmpty()) {
-                log.info("Pre-warming ETF cache for {} ETFs", topEtfs.size());
-                getEnrichedEtfsBatch(topEtfs);
+                log.info("Pre-warming ETF cache for {} ETFs (with perf fill)", topEtfs.size());
+                // FULL path (discoverFastPath=false): parser + enrich + hist off request thread.
+                getEnrichedEtfsBatch(topEtfs, false);
             }
         } catch (Exception e) {
             log.warn("ETF cache warm-up failed (non-fatal): {}", e.getMessage());
@@ -80,7 +85,7 @@ public class EnrichedEtfService {
         String key = normalizeKey(symbolOrIsin);
 
         EtfData l1 = l1Cache.getIfPresent(key);
-        if (l1 != null) {
+        if (l1 != null && hasUsableHoldings(l1)) {
             EtfData copy = copyEtf(l1);
             if (completePerformanceIfNeeded(copy, key)) {
                 log.info("enrichment.cache=L1_PERF_REPAIR key={}", key);
@@ -89,16 +94,24 @@ public class EnrichedEtfService {
             }
             return copy;
         }
+        if (l1 != null) {
+            l1Cache.invalidate(key);
+            log.info("enrichment.cache=L1_STALE_EMPTY key={} — refetch", key);
+        }
 
         if (basketEtfRedisService != null) {
             try {
                 var cached = basketEtfRedisService.getEnrichedEtf(key);
                 if (cached.isPresent()) {
                     EtfData fromL2 = fromCached(cached.get());
-                    completePerformanceIfNeeded(fromL2, key);
-                    store(key, fromL2);
-                    log.info("enrichment.cache=L2 key={}", key);
-                    return copyEtf(fromL2);
+                    if (!hasUsableHoldings(fromL2)) {
+                        log.info("enrichment.cache=L2_STALE_EMPTY key={} — refetch", key);
+                    } else {
+                        completePerformanceIfNeeded(fromL2, key);
+                        store(key, fromL2);
+                        log.info("enrichment.cache=L2 key={}", key);
+                        return copyEtf(fromL2);
+                    }
                 }
             } catch (Exception e) {
                 log.warn("enrichment.cache=L2_FAIL key={} — fail-open: {}", key, e.getMessage());
@@ -135,13 +148,16 @@ public class EnrichedEtfService {
     }
 
     /**
-     * @param discoverFastPath when true, skip market enrichHoldings if ≥95% holdings have valid ISINs.
+     * @param discoverFastPath when true, skip market enrichHoldings and (when configured) hist perf fill
+     *                         so Discover opportunities stay on the ≤1s path.
      */
     public Map<String, EtfData> getEnrichedEtfsBatch(List<String> queries, boolean discoverFastPath) {
         Map<String, EtfData> out = new LinkedHashMap<>();
         if (queries == null || queries.isEmpty()) {
             return out;
         }
+
+        boolean skipPerfHist = discoverFastPath && discoverSkipPerfHist;
 
         List<String> misses = new ArrayList<>();
         List<EtfData> cachedNeedingPerf = new ArrayList<>();
@@ -151,9 +167,10 @@ public class EnrichedEtfService {
             }
             String key = normalizeKey(q);
             EtfData l1 = l1Cache.getIfPresent(key);
-            if (l1 != null) {
+            boolean l1Ok = discoverFastPath ? hasMatchReadyHoldings(l1) : hasUsableHoldings(l1);
+            if (l1 != null && l1Ok) {
                 EtfData copy = copyEtf(l1);
-                if (EtfPerformanceEnricher.needsPerformanceFill(copy)) {
+                if (!skipPerfHist && EtfPerformanceEnricher.needsPerformanceFill(copy)) {
                     cachedNeedingPerf.add(copy);
                     out.put(q, copy);
                 } else {
@@ -162,20 +179,29 @@ public class EnrichedEtfService {
                 }
                 continue;
             }
+            if (l1 != null) {
+                l1Cache.invalidate(key);
+                log.info("enrichment.cache=L1_STALE key={} discoverFastPath={} — refetch", key, discoverFastPath);
+            }
             if (basketEtfRedisService != null) {
                 try {
                     var cached = basketEtfRedisService.getEnrichedEtf(key);
                     if (cached.isPresent()) {
                         EtfData fromL2 = fromCached(cached.get());
-                        if (EtfPerformanceEnricher.needsPerformanceFill(fromL2)) {
+                        boolean l2Ok = discoverFastPath ? hasMatchReadyHoldings(fromL2) : hasUsableHoldings(fromL2);
+                        if (!l2Ok) {
+                            log.info("enrichment.cache=L2_STALE key={} discoverFastPath={} — refetch",
+                                    key, discoverFastPath);
+                        } else if (!skipPerfHist && EtfPerformanceEnricher.needsPerformanceFill(fromL2)) {
                             cachedNeedingPerf.add(fromL2);
                             out.put(q, fromL2);
+                            continue;
                         } else {
                             l1Cache.put(key, fromL2);
                             out.put(q, copyEtf(fromL2));
                             log.info("enrichment.cache=L2 key={}", key);
+                            continue;
                         }
-                        continue;
                     }
                 } catch (Exception e) {
                     log.warn("enrichment.cache=L2_FAIL key={} — fail-open: {}", key, e.getMessage());
@@ -191,6 +217,8 @@ public class EnrichedEtfService {
                     store(normalizeKey(repaired.getSymbol()), repaired);
                 }
             }
+        } else if (skipPerfHist) {
+            log.info("basket.opp.stage=perf skipped=true reason=discoverSkipPerfHist");
         }
 
         if (misses.isEmpty()) {
@@ -209,9 +237,11 @@ public class EnrichedEtfService {
         long enrichStart = System.currentTimeMillis();
         boolean ranEnrich = false;
         if (!allHoldings.isEmpty()) {
-            if (discoverFastPath && isinCoverage(allHoldings) >= 0.95) {
-                log.info("basket.opp.stage=enrich skipped=true reason=isinCoverage discoverFastPath=true holdings={}",
-                        allHoldings.size());
+            double cov = isinCoverage(allHoldings);
+            // Discover skips batch-search only when parser already supplied ISINs for match.
+            if (discoverFastPath && cov >= 0.5) {
+                log.info("basket.opp.stage=enrich skipped=true reason=discoverFastPath isinCoverage={} holdings={}",
+                        String.format(Locale.ROOT, "%.2f", cov), allHoldings.size());
             } else {
                 etfApiClient.enrichHoldings(allHoldings);
                 ranEnrich = true;
@@ -224,7 +254,7 @@ public class EnrichedEtfService {
         for (String q : misses) {
             EtfData data = liveBatch.get(q);
             if (data == null) {
-                // Parser miss (e.g. GOLDBEES holdings gap): still expose Discover card + hist returns.
+                // Parser miss (e.g. GOLDBEES holdings gap): still expose Discover card.
                 data = stubEtf(q);
                 liveBatch.put(q, data);
                 log.warn("enrichment.stub symbol={} reason=parser_miss", normalizeKey(q));
@@ -234,7 +264,9 @@ public class EnrichedEtfService {
             }
             liveList.add(data);
         }
-        performanceEnricher.fillMissing(liveList);
+        if (!skipPerfHist) {
+            performanceEnricher.fillMissing(liveList);
+        }
 
         for (String q : misses) {
             EtfData data = liveBatch.get(q);
@@ -244,8 +276,8 @@ public class EnrichedEtfService {
             store(normalizeKey(q), data);
             out.put(q, copyEtf(data));
         }
-        log.info("enrichment.cache=MISS batchSize={} resolved={} durationMs={} discoverFastPath={}",
-                misses.size(), liveBatch.size(), System.currentTimeMillis() - start, discoverFastPath);
+        log.info("enrichment.cache=MISS batchSize={} resolved={} durationMs={} discoverFastPath={} skipPerfHist={}",
+                misses.size(), liveBatch.size(), System.currentTimeMillis() - start, discoverFastPath, skipPerfHist);
         return out;
     }
 
@@ -286,8 +318,22 @@ public class EnrichedEtfService {
         return (double) ok / holdings.size();
     }
 
+    /** Empty parser stubs must not poison L1/L2 or Discover stays at 0 held forever. */
+    static boolean hasUsableHoldings(EtfData data) {
+        return data != null && data.getHoldings() != null && !data.getHoldings().isEmpty();
+    }
+
+    /** Discover match is ISIN-based — reject cache entries that lack constituent ISINs. */
+    static boolean hasMatchReadyHoldings(EtfData data) {
+        return hasUsableHoldings(data) && isinCoverage(data.getHoldings()) >= 0.5;
+    }
+
     private void store(String key, EtfData data) {
         if (data == null) {
+            return;
+        }
+        if (!hasUsableHoldings(data)) {
+            log.info("enrichment.cache=SKIP_EMPTY key={}", key);
             return;
         }
         EtfData snapshot = copyEtf(data);

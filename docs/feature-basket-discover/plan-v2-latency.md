@@ -73,3 +73,14 @@ mode=DISCOVER skips prices; Flutter sends DISCOVER; warm ETFs; enrich skip ≥95
 Test PROD with Postman collection AM Basket — Current (PROD Discover).
 Loop D-L13 until warm ≤1s. Deploy only after user confirm.
 ```
+
+## 7. DEV handoff — before/after (2026-10-17)
+
+| | Before | After (warm, 20 samples) |
+|--|--------|---------------------------|
+| Wall | ~15–17s (hist+enrich+holdings) | **min 371 / avg 382 / p95 398 / max 406 ms** |
+| Match | ITBEES 9.09 · NIFTYBEES 1.96 | **same** |
+| Stages | hist ~12s · enrich ~4.5s | holdings ~113ms · etf_batch ~105–115ms · enrich skipped · prices skipped |
+| Cluster | Wrong kubeconfig / Contabo pin lag | **`kubeconfig.dev`** image `:39025020403` + in-cluster `MARKET_DATA_API_URL` |
+
+**Ops note:** Vault `MARKET_DATA_API_URL=https://am-dev.asrax.in/market` causes batch-search **405**; Kind DEV needs `http://am-market-data-dev.am-apps-dev.svc.cluster.local:8080` (also in `helm/values.dev.yaml`).

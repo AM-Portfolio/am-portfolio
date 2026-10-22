@@ -80,7 +80,8 @@ public class BasketController {
         try {
             var top = basketCatalogService.getTopEtfSymbols();
             if (top != null && !top.isEmpty()) {
-                enrichedEtfService.getEnrichedEtfsBatch(top, true);
+                // Off-path warm: FULL batch so returns/spark land in L1/Redis
+                enrichedEtfService.getEnrichedEtfsBatch(top, false);
             }
         } catch (Exception e) {
             log.warn("ETF warm after catalog upsert failed (non-fatal): {}", e.getMessage());
