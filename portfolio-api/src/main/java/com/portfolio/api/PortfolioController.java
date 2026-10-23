@@ -227,6 +227,31 @@ public class PortfolioController {
     }
 
     /**
+     * Internal ownership check — called by am-trade-management before lazy local stub create.
+     */
+    @Hidden
+    @Operation(summary = "Verify broker portfolio ownership (internal)", operationId = "verifyPortfolioInternal")
+    @GetMapping("/internal/{portfolioId}")
+    public ResponseEntity<Void> verifyPortfolioInternal(
+            @PathVariable String portfolioId,
+            @RequestParam String ownerId,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            log.warn("Unauthorized internal verify attempt rejected portfolioId={}", portfolioId);
+            return ResponseEntity.status(403).build();
+        }
+        if (ownerId == null || ownerId.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        try {
+            brokerPortfolioDeleteService.assertOwnedBrokerPortfolio(portfolioId, ownerId);
+            return ResponseEntity.noContent().build();
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            return ResponseEntity.status(e.getStatusCode()).build();
+        }
+    }
+
+    /**
      * Internal broker delete — called by am-trade-management when Trade has no local row
      * (portfolio-only / Doc Intel book) so delete is synchronous Mongo+cache+Kafka fan-out
      * instead of fire-and-forget Kafka alone.

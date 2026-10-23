@@ -47,10 +47,9 @@ public class BrokerPortfolioDeleteService {
     }
 
     /**
-     * @param portfolioId path UUID
-     * @param ownerId     authenticated user id
+     * Verifies broker portfolio exists and is owned by {@code ownerId} (no delete).
      */
-    public void deleteOwnedPortfolio(String portfolioId, String ownerId) {
+    public void assertOwnedBrokerPortfolio(String portfolioId, String ownerId) {
         if (ownerId == null || ownerId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing user");
         }
@@ -68,10 +67,23 @@ public class BrokerPortfolioDeleteService {
         if (!ownerId.equals(portfolio.getOwner())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not owner of portfolio");
         }
-        // This endpoint is broker-only — never wipe baskets via DELETE /{portfolioId}.
+        // Broker-only path — baskets are not verified/deleted via this service.
         if (PortfolioKind.isBasket(portfolio.getPortfolioKind())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Basket portfolios cannot be deleted via broker delete");
+                    "Basket portfolios cannot be verified via broker ownership check");
+        }
+    }
+
+    /**
+     * @param portfolioId path UUID
+     * @param ownerId     authenticated user id
+     */
+    public void deleteOwnedPortfolio(String portfolioId, String ownerId) {
+        assertOwnedBrokerPortfolio(portfolioId, ownerId);
+        final UUID id = UUID.fromString(portfolioId);
+        PortfolioModelV1 portfolio = portfolioService.getPortfolioById(id);
+        if (portfolio == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Portfolio not found");
         }
 
         String name = portfolio.getName();
