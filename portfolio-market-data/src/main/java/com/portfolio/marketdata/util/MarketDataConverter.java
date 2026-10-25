@@ -67,43 +67,58 @@ public class MarketDataConverter {
     }
     
     /**
-     * Convert from HistoricalDataResponse to the unified MarketData model
-     * 
-     * @param response The HistoricalDataResponse to convert
-     * @return A new MarketData instance
+     * Convert {@link HistoricalDataResponse} (flat am-market or legacy nested) to MarketData.
      */
     public static MarketData fromHistoricalDataResponse(HistoricalDataResponse response) {
         if (response == null) {
             return null;
         }
-        List<OHLCVTPoint> sourcePoints = response.effectiveDataPoints();
-        if (sourcePoints.isEmpty()) {
+        HistoricalData series = response.getData();
+        if (series == null || series.getDataPoints() == null || series.getDataPoints().isEmpty()) {
+            var points = response.effectiveDataPoints();
+            if (points.isEmpty()) {
+                return null;
+            }
+            series = HistoricalData.builder()
+                    .tradingSymbol(response.effectiveSymbol())
+                    .interval(response.getInterval())
+                    .dataPoints(points)
+                    .dataPointCount(points.size())
+                    .build();
+        }
+        MarketData md = fromHistoricalData(series, response.effectiveSymbol());
+        if (md == null) {
+            return null;
+        }
+        if (response.getFromDate() != null) {
+            md.setFromDate(response.getFromDate());
+        }
+        if (response.getToDate() != null) {
+            md.setToDate(response.getToDate());
+        }
+        return md;
+    }
+
+    /**
+     * Convert am-market flat {@link HistoricalData} (per-symbol map value) to MarketData.
+     */
+    public static MarketData fromHistoricalData(HistoricalData series, String symbol) {
+        if (series == null || series.getDataPoints() == null || series.getDataPoints().isEmpty()) {
             return null;
         }
 
-        // Chronological order so first=period start and last=period end (START_END / unsorted binds).
-        List<OHLCVTPoint> ordered = new ArrayList<>(sourcePoints);
-        ordered.sort((a, b) -> {
-            if (a == null || a.getTime() == null) {
-                return (b == null || b.getTime() == null) ? 0 : 1;
-            }
-            if (b == null || b.getTime() == null) {
-                return -1;
-            }
-            return a.getTime().compareTo(b.getTime());
-        });
-
-        // Convert interval string to TimeFrame enum
         TimeFrame timeFrame = null;
-        if (response.getInterval() != null) {
-            timeFrame = TimeFrame.fromValue(response.getInterval());
+        String interval = series.getInterval();
+        if (interval != null) {
+            timeFrame = TimeFrame.fromValue(interval);
         }
 
-        // Convert data points
         List<MarketData.MarketDataPoint> dataPoints = new ArrayList<>();
-        for (OHLCVTPoint point : ordered) {
+        for (OHLCVTPoint point : series.getDataPoints()) {
             dataPoints.add(MarketData.MarketDataPoint.builder()
-                .timestamp(point.getTime() != null ? point.getTime().atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant() : Instant.now())
+                .timestamp(point.getTime() != null
+                        ? point.getTime().atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant()
+                        : Instant.now())
                 .ohlcData(OhlcData.builder()
                     .open(point.getOpen())
                     .high(point.getHigh())
@@ -114,31 +129,34 @@ public class MarketDataConverter {
                 .build());
         }
 
+        String resolvedSymbol = symbol != null ? symbol : series.getTradingSymbol();
         MarketDataBuilder builder = MarketData.builder()
-            .symbol(response.effectiveSymbol())
-            .fromDate(response.getFromDate())
-            .toDate(response.getToDate())
+            .symbol(resolvedSymbol)
             .timeFrame(timeFrame)
             .historical(true)
             .dataPoints(dataPoints);
 
         if (!dataPoints.isEmpty()) {
-            MarketData.MarketDataPoint latestPoint = dataPoints.get(dataPoints.size() - 1);
-            MarketData.MarketDataPoint firstPoint = dataPoints.get(0);
-            
+            // Derive first/last by candle time (payload order is not guaranteed).
+            List<MarketData.MarketDataPoint> ordered = new ArrayList<>(dataPoints);
+            ordered.sort(java.util.Comparator.comparing(
+                    MarketData.MarketDataPoint::getTimestamp,
+                    java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())));
+            MarketData.MarketDataPoint firstPoint = ordered.get(0);
+            MarketData.MarketDataPoint latestPoint = ordered.get(ordered.size() - 1);
+
             builder.ohlc(latestPoint.getOhlcData());
             if (latestPoint.getOhlcData() != null) {
                 builder.lastPrice(latestPoint.getOhlcData().getClose());
             }
-            // Period baseline: first bar open (START_END may return 1 or 2 points).
             if (firstPoint.getOhlcData() != null
-                    && firstPoint.getOhlcData().getOpen() > 0
                     && latestPoint.getOhlcData() != null
                     && latestPoint.getOhlcData().getClose() > 0) {
+                // Prior close = chronologically first bar open (incl. single-bar series).
                 builder.previousClose(firstPoint.getOhlcData().getOpen());
             }
         }
-        
+
         return builder.build();
     }
 }

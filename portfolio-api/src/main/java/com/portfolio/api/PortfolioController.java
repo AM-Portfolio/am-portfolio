@@ -9,9 +9,14 @@ import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.service.NewUserPortfolioFallbackService;
 import com.portfolio.service.PortfolioDashboardService;
+import com.portfolio.service.scheduler.PortfolioHistoryJobService;
 import com.portfolio.service.scheduler.PortfolioHistoryScheduler;
 import com.am.common.amcommondata.model.PortfolioSnapshotModel;
 import com.am.common.amcommondata.service.PortfolioSnapshotService;
+import com.portfolio.model.history.HistoryJobMode;
+import com.portfolio.model.history.HistoryStatus;
+import com.portfolio.model.history.PortfolioHistoryResponse;
+import com.portfolio.model.history.PortfolioHistoryStatusResponse;
 import com.portfolio.service.scheduler.SnapshotCatchUpService;
 
 import io.swagger.v3.oas.annotations.Hidden;
@@ -43,6 +48,7 @@ public class PortfolioController {
     private final PortfolioHistoryScheduler portfolioHistoryScheduler;
     private final PortfolioSnapshotService portfolioSnapshotService;
     private final SnapshotCatchUpService snapshotCatchUpService;
+    private final PortfolioHistoryJobService portfolioHistoryJobService;
     private final com.portfolio.service.portfolio.PortfolioIntradayService portfolioIntradayService;
     private final com.portfolio.redis.service.ActiveMarketSymbolPublisher activeMarketSymbolPublisher;
     private final com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer;
@@ -252,16 +258,33 @@ public class PortfolioController {
         try {
             // HTTP sync bypasses Kafka mapper — normalize symbols here before Mongo write.
             portfolioEquitySymbolNormalizer.normalizePortfolio(portfolioModel);
+            List<PortfolioModelV1> existing = portfolioService.getPortfoliosByUserId(portfolioModel.getOwner());
+            boolean brokerExisted = existing != null && existing.stream()
+                    .filter(p -> p.getPortfolioKind() == null
+                            || com.am.common.amcommondata.model.enums.PortfolioKind.isBroker(p.getPortfolioKind()))
+                    .anyMatch(p -> java.util.Objects.equals(p.getBrokerType(), portfolioModel.getBrokerType()));
+            boolean otherBrokers = existing != null && existing.stream()
+                    .filter(p -> p.getPortfolioKind() == null
+                            || com.am.common.amcommondata.model.enums.PortfolioKind.isBroker(p.getPortfolioKind()))
+                    .anyMatch(p -> portfolioModel.getBrokerType() == null
+                            || !java.util.Objects.equals(p.getBrokerType(), portfolioModel.getBrokerType()));
+
             PortfolioModelV1 saved = portfolioService.updateTradePortfolio(portfolioModel);
             if (saved != null) {
                 activeMarketSymbolPublisher.publishFromPortfolio(saved);
-                String pid = saved.getId() != null ? saved.getId().toString() : null;
-                if (pid != null && saved.getOwner() != null) {
-                    portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), pid);
-                    portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), pid);
-                    portfolioIntelligenceRedisService.evict(pid);
+                String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
+                if (portfolioId != null && saved.getOwner() != null) {
+                    portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
+                    portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
+                    portfolioIntelligenceRedisService.evict(portfolioId);
                     portfolioIntelligenceRedisService.evictAggregateForUser(saved.getOwner());
                     aggregatePortfolioLoader.evict(saved.getOwner());
+                }
+                HistoryJobMode mode = (!brokerExisted && otherBrokers)
+                        ? HistoryJobMode.MERGE_BROKER
+                        : HistoryJobMode.FULL;
+                if (!brokerExisted || "REPLACE_ALL".equals(portfolioModel.getLastTradeAction())) {
+                    portfolioHistoryJobService.enqueue(saved.getOwner(), mode, portfolioId);
                 }
             }
             log.info("PortfolioController - syncPortfolioFromTrade: saved portfolioId={}", saved != null ? saved.getId() : "null");
@@ -428,7 +451,7 @@ public class PortfolioController {
             @ApiResponse(responseCode = "404", description = "No history found for user")
     })
     @GetMapping("/history")
-    public ResponseEntity<List<PortfolioSnapshotModel>> getPortfolioHistory(
+    public ResponseEntity<PortfolioHistoryResponse> getPortfolioHistory(
             @RequestParam(required = false, defaultValue = "1M") String timeFrame) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
         NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, null);
@@ -436,9 +459,9 @@ public class PortfolioController {
 
         List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(res.userId(), res.portfolioId(), timeFrame);
         if (history == null) {
-            return ResponseEntity.ok(java.util.Collections.emptyList());
+            history = java.util.Collections.emptyList();
         }
-        return ResponseEntity.ok(history);
+        return ResponseEntity.ok(toHistoryResponse(res.userId(), history));
     }
 
     @Operation(summary = "Get specific portfolio history", description = "Retrieves the snapshot history of a specific portfolio for a user with the specified timeframe.", operationId = "getSpecificPortfolioHistory")
@@ -447,7 +470,7 @@ public class PortfolioController {
             @ApiResponse(responseCode = "404", description = "No history found for portfolio")
     })
     @GetMapping("/{portfolioId}/history")
-    public ResponseEntity<List<PortfolioSnapshotModel>> getSpecificPortfolioHistory(
+    public ResponseEntity<PortfolioHistoryResponse> getSpecificPortfolioHistory(
             @PathVariable String portfolioId,
             @RequestParam(required = false, defaultValue = "1M") String timeFrame) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
@@ -456,27 +479,66 @@ public class PortfolioController {
 
         List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(res.userId(), res.portfolioId(), timeFrame);
         if (history == null) {
-            return ResponseEntity.ok(java.util.Collections.emptyList());
+            history = java.util.Collections.emptyList();
         }
-        return ResponseEntity.ok(history);
+        return ResponseEntity.ok(toHistoryResponse(res.userId(), history));
+    }
+
+    @Operation(summary = "Get portfolio history build status", description = "Lightweight poll for chart sync UI while history is building.", operationId = "getPortfolioHistoryStatus")
+    @GetMapping("/history/status")
+    public ResponseEntity<PortfolioHistoryStatusResponse> getPortfolioHistoryStatus() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, null);
+        return ResponseEntity.ok(portfolioHistoryJobService.getStatus(res.userId()));
+    }
+
+    private PortfolioHistoryResponse toHistoryResponse(String userId, List<PortfolioSnapshotModel> points) {
+        PortfolioHistoryStatusResponse status = portfolioHistoryJobService.getStatus(userId);
+        HistoryStatus hs = status.getHistoryStatus();
+        if (hs == null || hs == HistoryStatus.EMPTY) {
+            hs = points.isEmpty() ? HistoryStatus.EMPTY : HistoryStatus.READY;
+        }
+        if (status.getPhase() != null
+                && status.getPhase() != com.portfolio.model.history.HistoryJobPhase.READY
+                && status.getPhase() != com.portfolio.model.history.HistoryJobPhase.FAILED) {
+            hs = HistoryStatus.BUILDING;
+        }
+        return PortfolioHistoryResponse.builder()
+                .points(points)
+                .historyStatus(hs)
+                .phase(status.getPhase())
+                .startedAt(status.getStartedAt())
+                .historyFrom(status.getHistoryFrom())
+                .historyTo(status.getHistoryTo())
+                .coverageDays(status.getCoverageDays())
+                .build();
     }
 
     /**
-     * DEV/ADMIN ONLY — Hidden from Swagger.
-     * Directly triggers historical snapshot catch-up for any given userId.
-     * Usage: POST /v1/portfolios/dev/trigger-catchup?userId=sahim99
+     * DEV/ADMIN ONLY — Directly triggers historical snapshot catch-up for any given userId.
+     * Usage: POST /v1/portfolios/dev/trigger-catchup?userId=…&mode=FULL&targetPortfolioId=…
+     * mode defaults to FULL (rebuild); GAP only fills missing calendar days.
      */
     @Hidden
     @PostMapping("/dev/trigger-catchup")
     public ResponseEntity<String> triggerCatchUpForUser(
             @RequestParam String userId,
+            @RequestParam(required = false, defaultValue = "FULL") String mode,
+            @RequestParam(required = false) String targetPortfolioId,
             @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
         if (secret == null || !internalSecret.equals(secret)) {
             return ResponseEntity.status(403).body("Forbidden");
         }
-        log.info("[DEV] Manual catch-up trigger for userId={}", userId);
-        snapshotCatchUpService.triggerCatchUp(userId);
-        return ResponseEntity.ok("CatchUp triggered for userId=" + userId + ". Check server logs for progress.");
+        HistoryJobMode jobMode;
+        try {
+            jobMode = HistoryJobMode.valueOf(mode.trim().toUpperCase());
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body("Invalid mode; use FULL, GAP, or MERGE_BROKER");
+        }
+        log.info("[DEV] Manual catch-up trigger for userId={} mode={} target={}", userId, jobMode, targetPortfolioId);
+        portfolioHistoryJobService.enqueue(userId, jobMode, targetPortfolioId);
+        return ResponseEntity.ok("HistoryJob enqueued userId=" + userId + " mode=" + jobMode
+                + (targetPortfolioId != null ? " target=" + targetPortfolioId : ""));
     }
 
     /**
@@ -590,6 +652,8 @@ public class PortfolioController {
         int updatedPortfolios = 0;
         int normalizedEquities = 0;
         int cachesEvicted = 0;
+        java.util.Set<String> ownersToRebuild = new java.util.LinkedHashSet<>();
+        java.util.Map<String, String> ownerTargetPortfolio = new java.util.HashMap<>();
         for (PortfolioModelV1 portfolio : portfolios) {
             if (portfolio == null || portfolio.getEquityModels() == null) {
                 continue;
@@ -600,6 +664,12 @@ public class PortfolioController {
                 portfolioService.upsertDocumentPortfolio(portfolio);
                 updatedPortfolios++;
                 normalizedEquities += portfolio.getEquityModels().size();
+                if (portfolio.getOwner() != null && !portfolio.getOwner().isBlank()) {
+                    ownersToRebuild.add(portfolio.getOwner());
+                    if (portfolio.getId() != null) {
+                        ownerTargetPortfolio.putIfAbsent(portfolio.getOwner(), portfolio.getId().toString());
+                    }
+                }
             }
             // Always evict caches so UI cannot keep serving ISIN-as-symbol holdings
             // even when Mongo had no delta (e.g. prior normalize without eviction).
@@ -622,11 +692,17 @@ public class PortfolioController {
             }
         }
 
-        log.info("[DEV] Symbol normalization complete: portfoliosUpdated={}, equitiesNormalized={}, cachesEvicted={}",
-                updatedPortfolios, normalizedEquities, cachesEvicted);
+        for (String owner : ownersToRebuild) {
+            String target = ownerTargetPortfolio.get(owner);
+            portfolioHistoryJobService.enqueue(owner, HistoryJobMode.FULL, target);
+        }
+
+        log.info("[DEV] Symbol normalization complete: portfoliosUpdated={}, equitiesNormalized={}, cachesEvicted={}, historyEnqueued={}",
+                updatedPortfolios, normalizedEquities, cachesEvicted, ownersToRebuild.size());
         return ResponseEntity.ok(java.util.Map.of(
                 "portfoliosUpdated", updatedPortfolios,
                 "equitiesNormalized", normalizedEquities,
-                "cachesEvicted", cachesEvicted));
+                "cachesEvicted", cachesEvicted,
+                "historyEnqueued", ownersToRebuild.size()));
     }
 }

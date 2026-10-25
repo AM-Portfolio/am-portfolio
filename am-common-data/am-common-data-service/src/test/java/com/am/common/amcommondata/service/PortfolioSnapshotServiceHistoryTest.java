@@ -79,6 +79,21 @@ class PortfolioSnapshotServiceHistoryTest {
     }
 
     @Test
+    void getHistory_1M_usesThirtyDayLookback() {
+        LocalDate today = LocalDate.now();
+        when(portfolioSnapshotRepository.findByUserIdAndSnapshotDateBetweenOrderBySnapshotDateAsc(
+                eq("user-1"), any(LocalDate.class), any(LocalDate.class)))
+                .thenAnswer(invocation -> {
+                    LocalDate from = invocation.getArgument(1);
+                    LocalDate expected = today.minusDays(30);
+                    assertEquals(expected, from);
+                    return List.of();
+                });
+
+        portfolioSnapshotService.getHistory("user-1", null, "1M");
+    }
+
+    @Test
     void getHistory_serializesMoneyToTwoDecimals() throws Exception {
         PortfolioSnapshotEntry entry = PortfolioSnapshotEntry.builder()
                 .portfolioId("065054d6-07af-445e-a795-755d872841c0")

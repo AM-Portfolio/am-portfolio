@@ -35,13 +35,14 @@ public class PortfolioSnapshotService {
     private int oneDayLookbackDays;
 
     private static final java.util.Map<String, java.time.Period> TIMEFRAME_PERIODS = java.util.Map.of(
-        "1W",  java.time.Period.ofWeeks(1),
-        "1M",  java.time.Period.ofMonths(1),
-        "3M",  java.time.Period.ofMonths(3),
-        "6M",  java.time.Period.ofMonths(6),
-        "1Y",  java.time.Period.ofYears(1),
-        "3Y",  java.time.Period.ofYears(3),
-        "5Y",  java.time.Period.ofYears(5)
+        "1D",  java.time.Period.ofDays(1),
+        "1W",  java.time.Period.ofDays(7),
+        "1M",  java.time.Period.ofDays(30),
+        "3M",  java.time.Period.ofDays(90),
+        "6M",  java.time.Period.ofDays(180),
+        "1Y",  java.time.Period.ofDays(365),
+        "3Y",  java.time.Period.ofDays(365 * 3),
+        "5Y",  java.time.Period.ofDays(365 * 5)
     );
 
     @org.springframework.cache.annotation.CacheEvict(value = "portfolioHistory", allEntries = true)
@@ -152,14 +153,14 @@ public class PortfolioSnapshotService {
             documents = portfolioSnapshotRepository
                 .findByUserIdAndSnapshotDateBetweenOrderBySnapshotDateAsc(userId, fromDate, today.plusDays(1));
         } else {
-            // Real date math: 1M = exactly 1 calendar month ago; 1D = configurable lookback days
+            // Fixed-day windows aligned with modern-ui TimeFrame.dateRange (1M=30d, …).
+            // 1D uses configurable lookback so weekends/holidays still yield a prior session.
             java.time.Period period;
             if ("1D".equals(frame)) {
-                // @Value default 10; guard 0 from non-Spring construction
                 int days = oneDayLookbackDays > 0 ? oneDayLookbackDays : 10;
                 period = java.time.Period.ofDays(days);
             } else {
-                period = TIMEFRAME_PERIODS.getOrDefault(frame, java.time.Period.ofMonths(1));
+                period = TIMEFRAME_PERIODS.getOrDefault(frame, java.time.Period.ofDays(30));
             }
             LocalDate fromDate = today.minus(period);
             documents = portfolioSnapshotRepository
