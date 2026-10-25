@@ -67,13 +67,26 @@ public class MarketDataConverter {
     }
     
     /**
-     * Convert from nested HistoricalDataResponse to the unified MarketData model.
+     * Convert {@link HistoricalDataResponse} (flat am-market or legacy nested) to MarketData.
      */
     public static MarketData fromHistoricalDataResponse(HistoricalDataResponse response) {
-        if (response == null || response.getData() == null) {
+        if (response == null) {
             return null;
         }
-        MarketData md = fromHistoricalData(response.getData(), response.getSymbol());
+        HistoricalData series = response.getData();
+        if (series == null || series.getDataPoints() == null || series.getDataPoints().isEmpty()) {
+            var points = response.effectiveDataPoints();
+            if (points.isEmpty()) {
+                return null;
+            }
+            series = HistoricalData.builder()
+                    .tradingSymbol(response.effectiveSymbol())
+                    .interval(response.getInterval())
+                    .dataPoints(points)
+                    .dataPointCount(points.size())
+                    .build();
+        }
+        MarketData md = fromHistoricalData(series, response.effectiveSymbol());
         if (md == null) {
             return null;
         }

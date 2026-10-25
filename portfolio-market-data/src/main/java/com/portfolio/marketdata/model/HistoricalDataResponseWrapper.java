@@ -33,11 +33,11 @@ public class HistoricalDataResponseWrapper {
     private LocalDate toDate;
     
     /**
-     * Map of symbols to their respective historical series.
-     * Matches am-market {@code HistoricalDataResponseV1}: flat {@link HistoricalData}
-     * per symbol (tradingSymbol / interval / dataPoints), not a nested wrapper.
+     * Map of symbols to per-symbol historical payloads.
+     * {@link HistoricalDataResponse} accepts am-market's flat candle shape
+     * ({@code tradingSymbol} / {@code dataPoints}) and legacy nested {@code data}.
      */
-    private Map<String, HistoricalData> data;
+    private Map<String, HistoricalDataResponse> data;
     
     /**
      * Time interval for the data points (e.g., "day", "15min")
