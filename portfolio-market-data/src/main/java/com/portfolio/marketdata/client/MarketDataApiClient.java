@@ -9,9 +9,12 @@ import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.portfolio.marketdata.client.base.AbstractApiClient;
 import com.portfolio.marketdata.config.MarketDataApiConfig;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
+import com.portfolio.marketdata.model.HistoricalDataResponse;
 import com.portfolio.marketdata.model.HistoricalDataResponseWrapper;
 import com.portfolio.marketdata.model.MarketDataResponse;
 import com.portfolio.marketdata.model.MarketDataResponseWrapper;
@@ -29,6 +32,16 @@ import org.springframework.web.reactive.function.client.WebClient;
 @Slf4j
 @Component
 public class MarketDataApiClient extends AbstractApiClient {
+
+        private static final ObjectMapper HIST_MAPPER = createHistMapper();
+
+        private static ObjectMapper createHistMapper() {
+                ObjectMapper mapper = new ObjectMapper();
+                mapper.registerModule(new JavaTimeModule());
+                mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+                mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+                return mapper;
+        }
 
         /**
          * Creates a new MarketDataApiClient with the specified configuration.
@@ -131,16 +144,76 @@ public class MarketDataApiClient extends AbstractApiClient {
         @io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker(name = "historicalDataApi")
         public Mono<HistoricalDataResponseWrapper> getHistoricalData(HistoricalDataRequest request) {
                 // Ensure we have a comma-separated string of symbols
+                if (request.getSymbols() != null && !request.getSymbols().isEmpty()) {
+                        String[] parts = request.getSymbols().split(",");
+                        java.util.List<String> updated = new java.util.ArrayList<>();
+                        String equityPrefix = config.getEquityInstrumentPrefix();
+                        java.util.Set<String> passthrough = com.portfolio.model.util.InstrumentKeys
+                                        .parsePassthroughPrefixes(config.getPassthroughInstrumentPrefixes());
+                        for (String part : parts) {
+                                String s = part.trim();
+                                if (s.isEmpty()) {
+                                        continue;
+                                }
+                                // Config-driven cash prefix (default NSE_EQ); FO/INDEX/BSE passthrough preserved.
+                                updated.add(com.portfolio.model.util.InstrumentKeys.toInstrumentKey(
+                                                s, equityPrefix, passthrough));
+                        }
+                        request.setSymbols(String.join(",", updated));
+                }
 
                 log.debug("Fetching historical data for {} from {} to {} with interval={}, filterType={}, forceRefresh={}",
                                 request.getSymbols(), request.getFromDate(), request.getToDate(),
                                 request.getInterval(), request.getFilterType(), request.getForceRefresh());
 
-                // Use POST with the request body
-                return post(config.getHistoricalDataEndpoint(), request, HistoricalDataResponseWrapper.class)
-                                .doOnSuccess(data -> log.debug(
-                                                "Successfully fetched historical data for {} with {} data points",
-                                                request.getSymbols(), data.getTotalDataPoints()))
+                // Same Map unwrap as OHLC: typed bodyToMono(HistoricalDataResponseWrapper) can bind
+                // data=null on dig (flat am-market candles + LocalDateTime points). Map + convertValue
+                // with JavaTimeModule reliably fills dataPoints.
+                return post(config.getHistoricalDataEndpoint(), request, Map.class)
+                                .map(rawMap -> {
+                                        HistoricalDataResponseWrapper wrapper = new HistoricalDataResponseWrapper();
+                                        Map<String, HistoricalDataResponse> dataMap = new HashMap<>();
+                                        if (rawMap == null) {
+                                                wrapper.setData(dataMap);
+                                                return wrapper;
+                                        }
+                                        Object actualData = rawMap.containsKey("data") ? rawMap.get("data") : rawMap;
+                                        if (actualData instanceof Map<?, ?> dataToProcess) {
+                                                for (Object key : dataToProcess.keySet()) {
+                                                        try {
+                                                                Object value = dataToProcess.get(key);
+                                                                if (value == null) {
+                                                                        continue;
+                                                                }
+                                                                HistoricalDataResponse response = HIST_MAPPER.convertValue(
+                                                                                value, HistoricalDataResponse.class);
+                                                                dataMap.put(String.valueOf(key), response);
+                                                        } catch (Exception e) {
+                                                                log.warn("Error converting hist response for symbol {}: {}",
+                                                                                key, e.getMessage());
+                                                        }
+                                                }
+                                        } else if (actualData != null) {
+                                                log.warn("Hist payload data was {} not Map; keys={}",
+                                                                actualData.getClass().getSimpleName(),
+                                                                rawMap.keySet());
+                                        } else {
+                                                log.warn("Hist API returned null data field; topKeys={} error={}",
+                                                                rawMap.keySet(), rawMap.get("error"));
+                                        }
+                                        wrapper.setData(dataMap);
+                                        wrapper.setTotalDataPoints(dataMap.values().stream()
+                                                        .mapToInt(r -> r == null ? 0 : r.effectiveDataPoints().size())
+                                                        .sum());
+                                        wrapper.setSuccessfulSymbols(dataMap.size());
+                                        wrapper.setTotalSymbols(dataMap.size());
+                                        return wrapper;
+                                })
+                                .doOnSuccess(data -> log.info(
+                                                "Fetched historical data for {} → symbols={} points={}",
+                                                request.getSymbols(),
+                                                data.getData() != null ? data.getData().size() : 0,
+                                                data.getTotalDataPoints()))
                                 .doOnError(e -> log.error("Failed to fetch historical data for {}: {}",
                                                 request.getSymbols(), e.getMessage()));
         }
@@ -182,60 +255,108 @@ public class MarketDataApiClient extends AbstractApiClient {
         }
 
         /**
-         * Resolves trading symbol for one ISIN via existing securities batch-search
-         * ({@code POST /v1/securities/batch-search}).
+         * Resolves the trading symbol from Market Data service dynamically for a given ISIN code.
+         * Used to map uploaded ISIN codes (like INF666M01IO8) to NSE/BSE tickers (like GROWWDEFNC)
+         * without hardcoding and respecting microservice database isolation.
+         *
+         * @param isin the ISIN code to resolve
+         * @return a Mono containing a map of isin and resolved symbol
          */
-        public Mono<Map<String, String>> resolveTickerByIsin(String isin) {
-                if (isin == null || isin.isBlank()) {
-                        return Mono.just(Map.of());
-                }
+        @SuppressWarnings({ "rawtypes", "unchecked" })
+        public Mono<Map> resolveTickerByIsin(String isin) {
                 return resolveTickersByIsins(List.of(isin.trim().toUpperCase()));
         }
 
         /**
-         * Resolves trading symbols for ISINs (and other queries) via existing
-         * {@code POST /v1/securities/batch-search} — same path used by basket ETF enrichment.
+         * Resolves multiple trading symbols from Market Data service dynamically in a single batch query.
+         * Uses the same {@code POST /v1/securities/batch-search} path as am-trade-management
+         * (proven for ISIN → ticker), not {@code /v1/instruments/search}.
          *
-         * @return map of query (ISIN) → best-match trading symbol
+         * @param isins list of ISIN codes to resolve
+         * @return a Mono containing a map of ISIN to resolved trading symbol
          */
-        public Mono<Map<String, String>> resolveTickersByIsins(List<String> isins) {
-                if (isins == null || isins.isEmpty()) {
+        @SuppressWarnings({ "rawtypes", "unchecked" })
+        public Mono<Map> resolveTickersByIsins(List<String> isins) {
+                log.info("Resolving batch of {} ticker symbols by ISINs via securities batch-search", isins.size());
+                com.portfolio.marketdata.model.BatchSearchRequest request = com.portfolio.marketdata.model.BatchSearchRequest
+                                .builder()
+                                .queries(isins)
+                                .limit(1)
+                                .searchFields(List.of("ISIN"))
+                                .minMatchScore(0.0)
+                                .build();
+                return batchSearch(request)
+                                .map(response -> {
+                                        Map<String, String> resultMap = new java.util.HashMap<>();
+                                        if (response != null && response.getResults() != null) {
+                                                for (com.portfolio.marketdata.model.BatchSearchResponse.QueryResult qr : response
+                                                                .getResults()) {
+                                                        if (qr == null || qr.getQuery() == null
+                                                                        || qr.getMatches() == null
+                                                                        || qr.getMatches().isEmpty()) {
+                                                                continue;
+                                                        }
+                                                        com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch match = qr
+                                                                        .getMatches().get(0);
+                                                        String ticker = match.getSymbol();
+                                                        if (ticker == null || ticker.isBlank()) {
+                                                                continue;
+                                                        }
+                                                        // Key by the query ISIN the caller sent (stable for batch map lookup)
+                                                        String isinKey = qr.getQuery().trim().toUpperCase();
+                                                        resultMap.put(isinKey, ticker.trim().toUpperCase());
+                                                }
+                                        }
+                                        return (Map) resultMap;
+                                })
+                                .doOnSuccess(data -> log.debug("Successfully resolved batch of {} ISINs",
+                                                data != null ? data.size() : 0))
+                                .doOnError(e -> log.error("Failed to resolve batch of ISINs: {}", e.getMessage()));
+        }
+
+        /**
+         * Generic securities batch-search (SYMBOL / NAME / ISIN) keyed by the original query.
+         */
+        @SuppressWarnings({ "rawtypes", "unchecked" })
+        public Mono<Map> resolveTickersByQueries(List<String> queries, List<String> searchFields) {
+                if (queries == null || queries.isEmpty()) {
                         return Mono.just(Map.of());
                 }
-                List<String> cleaned = isins.stream()
-                                .filter(i -> i != null && !i.isBlank())
-                                .map(i -> i.trim().toUpperCase())
-                                .distinct()
-                                .toList();
-                if (cleaned.isEmpty()) {
-                        return Mono.just(Map.of());
-                }
-                com.portfolio.marketdata.model.BatchSearchRequest request =
-                                com.portfolio.marketdata.model.BatchSearchRequest.builder()
-                                                .queries(cleaned)
-                                                .limit(1)
-                                                .minMatchScore(0.0)
-                                                .build();
-                log.info("Resolving {} ISINs via securities batch-search", cleaned.size());
-                return batchSearch(request).map(response -> {
-                        Map<String, String> result = new java.util.HashMap<>();
-                        if (response == null || response.getResults() == null) {
-                                return result;
-                        }
-                        for (com.portfolio.marketdata.model.BatchSearchResponse.QueryResult qr : response.getResults()) {
-                                if (qr == null || qr.getQuery() == null || qr.getMatches() == null
-                                                || qr.getMatches().isEmpty()) {
-                                        continue;
-                                }
-                                com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch best =
-                                                qr.getMatches().get(0);
-                                if (best.getSymbol() != null && !best.getSymbol().isBlank()) {
-                                        result.put(qr.getQuery().trim().toUpperCase(),
-                                                        best.getSymbol().trim().toUpperCase());
-                                }
-                        }
-                        return result;
-                });
+                List<String> fields = (searchFields == null || searchFields.isEmpty())
+                                ? List.of("SYMBOL", "NAME")
+                                : searchFields;
+                log.info("Resolving batch of {} queries via securities batch-search fields={}", queries.size(), fields);
+                com.portfolio.marketdata.model.BatchSearchRequest request = com.portfolio.marketdata.model.BatchSearchRequest
+                                .builder()
+                                .queries(queries)
+                                .limit(1)
+                                .searchFields(fields)
+                                .minMatchScore(0.0)
+                                .build();
+                return batchSearch(request)
+                                .map(response -> {
+                                        Map<String, String> resultMap = new java.util.HashMap<>();
+                                        if (response != null && response.getResults() != null) {
+                                                for (com.portfolio.marketdata.model.BatchSearchResponse.QueryResult qr : response
+                                                                .getResults()) {
+                                                        if (qr == null || qr.getQuery() == null
+                                                                        || qr.getMatches() == null
+                                                                        || qr.getMatches().isEmpty()) {
+                                                                continue;
+                                                        }
+                                                        com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch match = qr
+                                                                        .getMatches().get(0);
+                                                        String ticker = match.getSymbol();
+                                                        if (ticker == null || ticker.isBlank()) {
+                                                                continue;
+                                                        }
+                                                        resultMap.put(qr.getQuery().trim().toUpperCase(),
+                                                                        ticker.trim().toUpperCase());
+                                                }
+                                        }
+                                        return (Map) resultMap;
+                                })
+                                .doOnError(e -> log.error("Failed to resolve batch queries: {}", e.getMessage()));
         }
 }
 

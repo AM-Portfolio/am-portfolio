@@ -2,6 +2,7 @@ package com.portfolio.service.portfolio;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -14,15 +15,18 @@ import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.mapper.holdings.PortfolioHoldingsMapper;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.PortfolioHoldings;
+import com.portfolio.model.resolver.TradingSymbolResolver;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
 import com.portfolio.redis.session.CashSessionClock;
 import com.portfolio.service.calculator.PortfolioCalculator;
+import com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer;
 
 import io.micrometer.observation.annotation.Observed;
 import lombok.extern.slf4j.Slf4j;
@@ -43,6 +47,8 @@ public class PortfolioHoldingsService {
     private final java.util.concurrent.Executor taskExecutor;
     @Nullable
     private final CashSessionClock cashSessionClock;
+    @Nullable
+    private final PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer;
 
     public PortfolioHoldingsService(
             PortfolioService portfolioService,
@@ -51,7 +57,8 @@ public class PortfolioHoldingsService {
             PortfolioCalculator portfolioCalculator,
             PortfolioHoldingsMongoService portfolioHoldingsMongoService,
             @Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
-            @Nullable CashSessionClock cashSessionClock) {
+            @Nullable CashSessionClock cashSessionClock,
+            @Nullable PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer) {
         this.portfolioService = portfolioService;
         this.portfolioHoldingsMapper = portfolioHoldingsMapper;
         this.portfolioHoldingsRedisService = portfolioHoldingsRedisService;
@@ -59,6 +66,7 @@ public class PortfolioHoldingsService {
         this.portfolioHoldingsMongoService = portfolioHoldingsMongoService;
         this.taskExecutor = taskExecutor;
         this.cashSessionClock = cashSessionClock;
+        this.portfolioEquitySymbolNormalizer = portfolioEquitySymbolNormalizer;
     }
 
     @Value("${portfolio.redis.enabled:true}")
@@ -143,7 +151,18 @@ public class PortfolioHoldingsService {
         List<EquityHoldings> list = cached.getEquityHoldings();
         if (list != null && !list.isEmpty()) {
             try {
-                list = portfolioCalculator.repriceHoldings(list);
+                // Re-run full enrich when any sector is missing so X-Ray/holdings
+                // don't stay on "—" after a cold MD miss was cached.
+                boolean needsSectorEnrich = list.stream().anyMatch(h ->
+                        h.getSector() == null
+                                || h.getSector().isBlank()
+                                || "-".equals(h.getSector())
+                                || "Unknown".equalsIgnoreCase(h.getSector()));
+                if (needsSectorEnrich) {
+                    list = portfolioCalculator.enrichHoldings(list);
+                } else {
+                    list = portfolioCalculator.repriceHoldings(list);
+                }
                 portfolioCalculator.calculateWeights(list);
                 cached.setEquityHoldings(list);
             } catch (Exception e) {
@@ -185,7 +204,7 @@ public class PortfolioHoldingsService {
         }
     }
 
-    static boolean isCashOpenIst(LocalDateTime nowIst) {
+    public static boolean isCashOpenIst(LocalDateTime nowIst) {
         var t = nowIst.toLocalTime();
         var day = nowIst.getDayOfWeek();
         if (day.getValue() >= 6) {
@@ -199,6 +218,8 @@ public class PortfolioHoldingsService {
         String context = portfolioId != null ? "portfolio: " + portfolioId : "all portfolios";
         log.debug("Building portfolio holdings for user: {} and {}", userId, context);
 
+        healShortOrIsinSymbols(portfolios);
+
         var portfolioHoldings = portfolioHoldingsMapper.toPortfolioHoldingsV1(portfolios);
         // Allocation availableQuantity is set in PortfolioHoldingsMapper — do not re-query ledger here
 
@@ -206,9 +227,27 @@ public class PortfolioHoldingsService {
             log.info("Enriching stock prices for {} equity holdings for {}",
                     portfolioHoldings.getEquityHoldings() != null ? portfolioHoldings.getEquityHoldings().size() : 0,
                     context);
-            var enrichedHoldings = portfolioCalculator.enrichHoldings(portfolioHoldings.getEquityHoldings());
-            portfolioCalculator.calculateWeights(enrichedHoldings);
-            portfolioHoldings.setEquityHoldings(enrichedHoldings);
+            List<EquityHoldings> all = portfolioHoldings.getEquityHoldings() != null
+                    ? portfolioHoldings.getEquityHoldings()
+                    : List.of();
+            List<EquityHoldings> equities = new ArrayList<>();
+            List<EquityHoldings> classRows = new ArrayList<>();
+            for (EquityHoldings h : all) {
+                String cls = h.getAssetClass();
+                if (cls == null
+                        || cls.isBlank()
+                        || PortfolioHoldingsMapper.ASSET_EQUITY.equalsIgnoreCase(cls)) {
+                    equities.add(h);
+                } else {
+                    classRows.add(h);
+                }
+            }
+            equities = portfolioCalculator.enrichHoldings(equities);
+            List<EquityHoldings> merged = new ArrayList<>(equities.size() + classRows.size());
+            merged.addAll(equities);
+            merged.addAll(classRows);
+            portfolioCalculator.calculateWeights(merged);
+            portfolioHoldings.setEquityHoldings(merged);
             stampFreshness(portfolioHoldings, "OHLC");
         } else {
             stampFreshness(portfolioHoldings, "CACHE");
@@ -243,11 +282,70 @@ public class PortfolioHoldingsService {
         return portfolioHoldings;
     }
 
+    /**
+     * Narrow read-path heal: when ISIN is present and symbol is a short broker code (≤4)
+     * or still ISIN-shaped, re-run the equity normalizer and persist only on change.
+     */
+    private void healShortOrIsinSymbols(List<PortfolioModelV1> portfolios) {
+        if (portfolioEquitySymbolNormalizer == null || portfolios == null || portfolios.isEmpty()) {
+            return;
+        }
+        for (PortfolioModelV1 portfolio : portfolios) {
+            if (portfolio == null || portfolio.getEquityModels() == null) {
+                continue;
+            }
+            boolean needsHeal = false;
+            for (EquityModel e : portfolio.getEquityModels()) {
+                if (e == null) {
+                    continue;
+                }
+                String isin = e.getIsin();
+                String sym = e.getSymbol();
+                if (isin == null || isin.isBlank()) {
+                    continue;
+                }
+                // Only heal blank symbols or ISIN-as-symbol — never length≤4 (valid NSE: ITC, SBIN).
+                if (sym == null || sym.isBlank() || TradingSymbolResolver.looksLikeIsin(sym)) {
+                    needsHeal = true;
+                    break;
+                }
+            }
+            if (!needsHeal) {
+                continue;
+            }
+            try {
+                if (portfolioEquitySymbolNormalizer.normalizePortfolioAndDetectChange(portfolio)) {
+                    // savePortfolioDocument updates this id only — does NOT run broker twin dedupe.
+                    portfolioService.savePortfolioDocument(portfolio);
+                    log.info("Healed short/ISIN equity symbols for portfolio {}", portfolio.getId());
+                }
+            } catch (Exception ex) {
+                log.warn("Symbol heal skipped for portfolio {}: {}", portfolio.getId(), ex.getMessage());
+            }
+        }
+    }
+
     protected List<EquityHoldings> getHoldings(List<PortfolioModelV1> portfolios) {
-        var equityHoldings = portfolioHoldingsMapper.toEquityHoldings(portfolios);
-        equityHoldings = portfolioCalculator.enrichHoldings(equityHoldings);
-        portfolioCalculator.calculateWeights(equityHoldings);
-        return equityHoldings;
+        healShortOrIsinSymbols(portfolios);
+        var allHoldings = portfolioHoldingsMapper.toEquityHoldings(portfolios);
+        List<EquityHoldings> equities = new ArrayList<>();
+        List<EquityHoldings> classRows = new ArrayList<>();
+        for (EquityHoldings h : allHoldings) {
+            String cls = h.getAssetClass();
+            if (cls == null
+                    || cls.isBlank()
+                    || PortfolioHoldingsMapper.ASSET_EQUITY.equalsIgnoreCase(cls)) {
+                equities.add(h);
+            } else {
+                classRows.add(h);
+            }
+        }
+        equities = portfolioCalculator.enrichHoldings(equities);
+        List<EquityHoldings> merged = new ArrayList<>(equities.size() + classRows.size());
+        merged.addAll(equities);
+        merged.addAll(classRows);
+        portfolioCalculator.calculateWeights(merged);
+        return merged;
     }
 
     private Optional<PortfolioHoldings> getCachedHoldings(String userId, TimeInterval interval, String portfolioId) {

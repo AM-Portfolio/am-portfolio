@@ -1,0 +1,12 @@
+# Loaded by am-security-lib when AM_SECURITY_ENABLED=true.
+# Kube probes hit /actuator/health/* without a JWT — must stay public.
+am:
+  security:
+    public-paths:
+      - "/actuator/**"
+      - "/health"
+      - "/swagger-ui.html"
+      - "/swagger-ui/**"
+      - "/v3/api-docs/**"
+      - "/api-docs/**"
+    proxy-name: "portfolio"

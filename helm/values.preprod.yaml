@@ -24,6 +24,8 @@ vault:
       path: apps/data/preprod/services/am-portfolio
     parser:
       path: apps/data/preprod/services/am-parser
+    market:
+      path: apps/data/preprod/services/am-market-data
     logging:
       path: apps/data/preprod/services/logging
     mongodb:
@@ -54,3 +56,7 @@ ingress:
 
 env:
   SPRING_PROFILES_ACTIVE: "preprod,security"
+  REDIS_CACHE_ENABLED: "true"
+  PORTFOLIO_REDIS_ENABLED: "true"
+  # Diversification A/B/C + always emit Volatility (incl. insufficient-hist placeholder)
+  PORTFOLIO_INTEL_HEALTH_V2: "true"

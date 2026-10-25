@@ -35,6 +35,9 @@ public class HistoricalDataRequest {
     private Boolean continuous;
     @Builder.Default
     private Boolean forceRefresh = false;
+    /** Market-data main uses this to keep index series (true) vs expand to constituents (false). */
+    @JsonProperty("isIndexSymbol")
+    private Boolean isIndexSymbol;
     private Map<String, String> additionalParams;
 
     @JsonProperty("from")

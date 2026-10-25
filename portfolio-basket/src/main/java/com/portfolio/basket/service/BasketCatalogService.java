@@ -134,9 +134,21 @@ public class BasketCatalogService {
 
         var mongo = catalogMongoService.getCatalog();
         if (mongo.isPresent()) {
-            storeInCaches(mongo.get());
+            CachedBasketCatalog fromMongo = mongo.get();
+            var seed = catalogMongoService.loadClasspathSeed();
+            if (seed.isPresent() && seed.get().getCatalogVersion() > fromMongo.getCatalogVersion()) {
+                CachedBasketCatalog upgraded = seed.get();
+                catalogMongoService.upsert(upgraded);
+                storeInCaches(upgraded);
+                log.info("catalog.cache=SEED_MIGRATE fromVersion={} toVersion={} themes={}",
+                        fromMongo.getCatalogVersion(),
+                        upgraded.getCatalogVersion(),
+                        upgraded.getThemes() != null ? upgraded.getThemes().size() : 0);
+                return upgraded;
+            }
+            storeInCaches(fromMongo);
             log.info("catalog.cache=MONGO");
-            return mongo.get();
+            return fromMongo;
         }
 
         var seed = catalogMongoService.loadClasspathSeed();
@@ -219,7 +231,6 @@ public class BasketCatalogService {
                 .map(CachedBasketCatalog.Theme::getQuery)
                 .filter(q -> q != null && !q.isBlank())
                 .map(String::trim)
-                .limit(3)
                 .collect(Collectors.joining(","));
     }
 }

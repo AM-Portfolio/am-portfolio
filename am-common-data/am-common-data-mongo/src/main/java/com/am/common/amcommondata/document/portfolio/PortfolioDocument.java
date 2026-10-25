@@ -6,6 +6,7 @@ import java.util.List;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
+import com.am.common.amcommondata.document.asset.AssetDocument;
 import com.am.common.amcommondata.document.asset.equity.EquityDocument;
 import com.am.common.amcommondata.document.basket.BasketPortfolioDocument;
 import com.am.common.amcommondata.document.base.BaseDocument;
@@ -59,6 +60,19 @@ public class PortfolioDocument extends BaseDocument {
     
     @Field("equities")
     private List<EquityDocument> equities;
+
+    /** Option A multi-asset lists (default empty / absent). */
+    @Field("mutualFunds")
+    private List<AssetDocument> mutualFunds;
+
+    @Field("bonds")
+    private List<AssetDocument> bonds;
+
+    @Field("commodities")
+    private List<AssetDocument> commodities;
+
+    @Field("cash")
+    private List<AssetDocument> cash;
     
     @Field("totalValue")
     private Double totalValue;

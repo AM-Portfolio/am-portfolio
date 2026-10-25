@@ -80,6 +80,24 @@ public class MarketDataApiConfig {
     private int maxRetryAttempts = 2;
 
     /**
+     * Cash-equity instrument segment for hist/OHLC keys (Upstox / am-market).
+     * Override via {@code MARKET_DATA_EQUITY_INSTRUMENT_PREFIX} — do not hardcode in callers.
+     */
+    private String equityInstrumentPrefix = "NSE_EQ";
+
+    /**
+     * Comma-separated segment prefixes that must not be rewritten to cash equity
+     * (e.g. {@code NSE_FO,NSE_INDEX,BSE_EQ}).
+     */
+    private String passthroughInstrumentPrefixes = "NSE_FO,NSE_INDEX,BSE_EQ,BSE_FO,BSE_INDEX,MCX_FO";
+
+    /**
+     * In-process Caffeine TTL for prior-close <em>miss</em> markers (not Redis).
+     * Short so weekend/API blips can retry without poisoning successful prior-close cache.
+     */
+    private int priorCloseMissTtlMinutes = 15;
+
+    /**
      * Batch fetch configuration.
      */
     private BatchConfig batch = new BatchConfig();

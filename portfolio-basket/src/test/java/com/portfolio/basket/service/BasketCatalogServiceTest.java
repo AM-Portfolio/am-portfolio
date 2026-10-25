@@ -98,6 +98,32 @@ class BasketCatalogServiceTest {
         assertEquals("BANKBEES", service.preferredSymbolByAlias().get("nifty bank"));
     }
 
+    @Test
+    void mongoStaleVersion_migratesClasspathSeed() {
+        CachedBasketCatalog stale = sampleCatalog();
+        stale.setCatalogVersion(1);
+        CachedBasketCatalog seed = sampleCatalog();
+        seed.setCatalogVersion(2);
+        seed.setDefaultThemeIds(List.of("nifty-50", "bank", "it"));
+        CachedBasketCatalog.Theme t3 = new CachedBasketCatalog.Theme();
+        t3.setId("it");
+        t3.setLabel("IT");
+        t3.setQuery("ITBEES");
+        t3.setFeatured(true);
+        seed.setThemes(List.of(seed.getThemes().get(0), seed.getThemes().get(1), t3));
+
+        when(catalogRedisService.getCatalog()).thenReturn(Optional.empty());
+        when(catalogMongoService.getCatalog()).thenReturn(Optional.of(stale));
+        when(catalogMongoService.loadClasspathSeed()).thenReturn(Optional.of(seed));
+
+        BasketCatalogResponse response = service.getCatalog();
+
+        assertEquals("NIFTYBEES,BANKBEES,ITBEES", response.getDefaultQuery());
+        assertEquals(3, response.getThemes().size());
+        verify(catalogMongoService).upsert(seed);
+        verify(catalogRedisService).cacheCatalogAsync(seed);
+    }
+
     private static CachedBasketCatalog sampleCatalog() {
         CachedBasketCatalog.Theme t1 = new CachedBasketCatalog.Theme();
         t1.setId("nifty-50");
@@ -114,6 +140,7 @@ class BasketCatalogServiceTest {
         t2.setIndexAliases(List.of("nifty bank"));
 
         CachedBasketCatalog catalog = new CachedBasketCatalog();
+        catalog.setCatalogVersion(1);
         catalog.setDefaultThemeIds(List.of("nifty-50", "bank"));
         catalog.setThemes(List.of(t1, t2));
         return catalog;

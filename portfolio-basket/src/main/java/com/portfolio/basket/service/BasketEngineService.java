@@ -172,6 +172,7 @@ public class BasketEngineService {
     private List<BasketOpportunity> findOpportunitiesInternal(
             List<EquityHoldings> userHoldings, Set<String> etfQueries, OpportunityMode mode) {
         Map<String, EquityHoldings> userMap = userHoldings.stream()
+                .filter(h -> h.getIsin() != null && !h.getIsin().isBlank())
                 .collect(Collectors.toMap(EquityHoldings::getIsin, h -> h, (a, b) -> a));
 
         Map<String, List<EquityHoldings>> userSectorMap = userHoldings.stream()

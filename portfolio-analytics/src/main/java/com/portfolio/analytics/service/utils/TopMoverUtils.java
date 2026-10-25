@@ -95,15 +95,6 @@ public class TopMoverUtils {
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
 
-        if (topGainerSymbols.isEmpty() && !symbolToPerformance.isEmpty()) {
-            log.info("Zero daily gainers found. Falling back to ranking all {} available symbols", symbolToPerformance.size());
-            topGainerSymbols = symbolToPerformance.entrySet().stream()
-                    .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
-                    .limit(limit)
-                    .map(Map.Entry::getKey)
-                    .collect(Collectors.toList());
-        }
-                
         log.debug("Found {} gainers", topGainerSymbols.size());
         return createStockMovements(topGainerSymbols, marketData, symbolToChangePercent);
     }
@@ -131,15 +122,6 @@ public class TopMoverUtils {
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
 
-        if (topLoserSymbols.isEmpty() && !symbolToPerformance.isEmpty()) {
-            log.info("Zero daily losers found. Falling back to ranking all {} available symbols", symbolToPerformance.size());
-            topLoserSymbols = symbolToPerformance.entrySet().stream()
-                    .sorted(Map.Entry.comparingByValue())
-                    .limit(limit)
-                    .map(Map.Entry::getKey)
-                    .collect(Collectors.toList());
-        }
-                
         log.debug("Found {} losers", topLoserSymbols.size());
         return createStockMovements(topLoserSymbols, marketData, symbolToChangePercent);
     }
@@ -447,10 +429,37 @@ public class TopMoverUtils {
         }
         
         // Build and return the response
-        return GainerLoser.builder()
+        java.time.ZoneId ist = java.time.ZoneId.of("Asia/Kolkata");
+        java.time.ZonedDateTime now = java.time.ZonedDateTime.now(ist);
+        boolean cashOpen = now.getDayOfWeek().getValue() <= 5
+                && !now.toLocalTime().isBefore(java.time.LocalTime.of(9, 15))
+                && now.toLocalTime().isBefore(java.time.LocalTime.of(15, 30));
+        java.time.LocalDate session = now.toLocalDate();
+        if (!cashOpen) {
+            session = now.toLocalDate();
+            while (session.getDayOfWeek().getValue() >= 6) {
+                session = session.minusDays(1);
+            }
+            if (now.getDayOfWeek().getValue() <= 5
+                    && now.toLocalTime().isBefore(java.time.LocalTime.of(9, 15))) {
+                session = session.minusDays(1);
+                while (session.getDayOfWeek().getValue() >= 6) {
+                    session = session.minusDays(1);
+                }
+            }
+        }
+
+        GainerLoser.GainerLoserBuilder builder = GainerLoser.builder()
             .topGainers(gainers)
             .topLosers(losers)
             .timestamp(Instant.now())
-            .build();
+            .sessionDate(session.toString())
+            .priceFreshness(cashOpen ? "LIVE" : "AS_OF");
+        if (isPortfolio) {
+            builder.portfolioId(id);
+        } else {
+            builder.indexSymbol(id);
+        }
+        return builder.build();
     }
 }

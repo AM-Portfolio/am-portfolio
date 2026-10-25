@@ -170,6 +170,29 @@
         },
         {
           "name": "06 Stress single NIFTY_DOWN_10",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Stress single 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('has scenarios', () => pm.expect(b.scenarios && b.scenarios.length).to.be.above(0));",
+                  "const s = b.scenarios[0];",
+                  "pm.test('has method metadata', () => pm.expect(b.method).to.be.ok);",
+                  "pm.test('has betaAssumed flag', () => pm.expect(b).to.have.property('betaAssumed'));",
+                  "if (b.betaAssumed === false && b.betaUsed != null && Math.abs(b.betaUsed - 1) > 0.05) {",
+                  "  pm.test('Impact != shock when beta != 1', () => {",
+                  "    pm.expect(Math.abs(s.pctImpact - (-10))).to.be.above(0.2);",
+                  "    pm.expect(s.pctImpact).to.be.closeTo(b.betaUsed * (-10), 0.15);",
+                  "  });",
+                  "}",
+                  "console.log('durationMs', pm.response.responseTime, 'method', b.method, 'beta', b.betaUsed, 'impact', s.pctImpact);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],

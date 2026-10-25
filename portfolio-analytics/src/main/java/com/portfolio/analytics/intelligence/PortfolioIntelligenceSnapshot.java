@@ -26,6 +26,8 @@ public class PortfolioIntelligenceSnapshot {
     private int holdingsCount;
     private int distinctSectors;
     private double top1Pct;
+    /** Symbol / ticker of the largest holding by weight (may be null). */
+    private String top1Symbol;
     private double maxSectorPct;
     private String maxSectorName;
     private double liquidSharePct;
@@ -55,6 +57,8 @@ public class PortfolioIntelligenceSnapshot {
         private String sector;
         private String industry;
         private String marketCap;
+        /** EQUITY / FIXED_INCOME / COMMODITY / CASH / MUTUAL_FUND — default EQUITY when null. */
+        private String assetClass;
     }
 
     public PortfolioIntelligenceSnapshot deepCopy() {
@@ -68,6 +72,7 @@ public class PortfolioIntelligenceSnapshot {
                         .sector(h.getSector())
                         .industry(h.getIndustry())
                         .marketCap(h.getMarketCap())
+                        .assetClass(h.getAssetClass())
                         .build());
             }
         }
@@ -78,6 +83,7 @@ public class PortfolioIntelligenceSnapshot {
                 .holdingsCount(holdingsCount)
                 .distinctSectors(distinctSectors)
                 .top1Pct(top1Pct)
+                .top1Symbol(top1Symbol)
                 .maxSectorPct(maxSectorPct)
                 .maxSectorName(maxSectorName)
                 .liquidSharePct(liquidSharePct)

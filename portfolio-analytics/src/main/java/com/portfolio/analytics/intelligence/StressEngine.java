@@ -61,8 +61,34 @@ public class StressEngine {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "custom.shockPct is required and must be non-zero");
             }
-            String id = "CUSTOM_" + request.getCustom().getSector().replaceAll("\\s+", "_").toUpperCase(Locale.ROOT);
-            scenarios.add(impact(id, applySectorShock(snapshot, request.getCustom().getSector(), shockPct)));
+            String sector = request.getCustom().getSector().trim();
+            String id = "CUSTOM_" + sector.replaceAll("\\s+", "_").toUpperCase(Locale.ROOT);
+            double matchedWeight = 0;
+            int matchedHoldings = 0;
+            if (snapshot.getHoldings() != null) {
+                for (PortfolioIntelligenceSnapshot.Holding h : snapshot.getHoldings()) {
+                    if (SectorMatcher.matches(h.getSector(), sector)) {
+                        matchedWeight += h.getWeightPct();
+                        matchedHoldings++;
+                    }
+                }
+            }
+            matchedWeight = PortfolioIntelligenceSnapshotFactory.round2(matchedWeight);
+            double pct = applySectorShock(snapshot, sector, shockPct);
+            String note = matchedHoldings == 0
+                    ? "No holdings match this sector — impact 0%"
+                    : String.format(Locale.ROOT,
+                            "shock %+.0f%% on %d holdings (%.1f%% of book)",
+                            shockPct, matchedHoldings, matchedWeight);
+            scenarios.add(StressResponse.ScenarioImpactDto.builder()
+                    .id(id)
+                    .pctImpact(pct)
+                    .absImpact(0) // filled in finalizeAbs
+                    .matchedWeightPct(matchedWeight)
+                    .matchedHoldings(matchedHoldings)
+                    .appliedShockPct(shockPct)
+                    .note(note)
+                    .build());
         } else if (request != null && request.getPresets() != null && !request.getPresets().isEmpty()) {
             for (String raw : request.getPresets()) {
                 if (raw == null || raw.isBlank()) {
@@ -80,11 +106,40 @@ public class StressEngine {
             scenarios.add(impact(preset, applyPreset(snapshot, preset)));
         }
 
+        BetaMeta meta = resolveBetaMeta(snapshot);
         return StressResponse.builder()
                 .portfolioId(snapshot.getPortfolioId())
                 .estimateLabel(ESTIMATE_LABEL)
                 .scenarios(scenarios)
+                .method(meta.method)
+                .betaUsed(meta.betaUsed)
+                .benchmark(meta.benchmark)
+                .historyDays(meta.historyDays)
+                .betaAssumed(meta.betaAssumed)
                 .build();
+    }
+
+    private record BetaMeta(
+            String method,
+            Double betaUsed,
+            String benchmark,
+            Integer historyDays,
+            boolean betaAssumed) {
+    }
+
+    private static BetaMeta resolveBetaMeta(PortfolioIntelligenceSnapshot snapshot) {
+        int historyDays = snapshot.getHistoryPoints();
+        Double beta = snapshot.getBeta();
+        boolean measured = beta != null && Double.isFinite(beta) && historyDays >= 20;
+        if (measured) {
+            return new BetaMeta(
+                    "PORTFOLIO_BETA",
+                    PortfolioIntelligenceSnapshotFactory.round2(beta),
+                    "NIFTY50",
+                    historyDays,
+                    false);
+        }
+        return new BetaMeta("ASSUMED_ONE", 1.0, "NIFTY50", historyDays, true);
     }
 
     private static void requireKnownPreset(String preset) {
@@ -144,60 +199,44 @@ public class StressEngine {
             return 0;
         }
         for (PortfolioIntelligenceSnapshot.Holding h : snapshot.getHoldings()) {
-            if (sectorMatches(h.getSector(), sector)) {
+            if (SectorMatcher.matches(h.getSector(), sector)) {
                 pct += (h.getWeightPct() / 100.0) * shockPct * 1.0;
             }
         }
         return PortfolioIntelligenceSnapshotFactory.round2(pct);
     }
 
+    /** Same gate as {@link #resolveBetaMeta}: index shocks use 1.0 unless β is measured. */
     private static double betaProxy(PortfolioIntelligenceSnapshot snapshot) {
-        if (snapshot.getBeta() != null && snapshot.getBeta() > 0) {
-            return snapshot.getBeta();
-        }
-        return 1.0;
+        BetaMeta meta = resolveBetaMeta(snapshot);
+        return meta.betaUsed != null ? meta.betaUsed : 1.0;
     }
 
-    private static boolean sectorMatches(String holdingSector, String target) {
-        if (holdingSector == null || target == null) {
-            return false;
-        }
-        if (matchesBanking(target) && matchesBanking(holdingSector)) {
-            return true;
-        }
-        if (matchesIt(target) && matchesIt(holdingSector)) {
-            return true;
-        }
-        String h = holdingSector.toLowerCase(Locale.ROOT);
-        String t = target.toLowerCase(Locale.ROOT);
-        return h.equals(t) || h.contains(t) || t.contains(h);
+    /** @deprecated use {@link SectorMatcher#matches} */
+    static boolean sectorMatches(String holdingSector, String target) {
+        return SectorMatcher.matches(holdingSector, target);
     }
 
     /** Banking / Financial Services / Finance aliases aligned with X-Ray labels. */
     static boolean matchesBanking(String sector) {
-        if (sector == null) {
-            return false;
-        }
-        String s = sector.toLowerCase(Locale.ROOT);
-        return s.contains("bank")
-                || s.contains("financial")
-                || s.contains("finance")
-                || s.equals("bfsi");
+        return SectorMatcher.matchesBanking(sector);
     }
 
     /** IT / Information Technology / Software aliases. */
     static boolean matchesIt(String sector) {
-        if (sector == null) {
-            return false;
-        }
-        String s = sector.toLowerCase(Locale.ROOT);
-        return s.equals("it")
-                || s.contains("information technology")
-                || s.contains(" technol")
-                || s.startsWith("it ")
-                || s.endsWith(" it")
-                || s.contains("software")
-                || s.contains("computer");
+        return SectorMatcher.matchesIt(sector);
+    }
+
+    static boolean matchesAuto(String sector) {
+        return SectorMatcher.matchesAuto(sector);
+    }
+
+    static boolean matchesPharma(String sector) {
+        return SectorMatcher.matchesPharma(sector);
+    }
+
+    static boolean matchesEnergy(String sector) {
+        return SectorMatcher.matchesEnergy(sector);
     }
 
     private StressResponse.ScenarioImpactDto impact(String id, double pctImpact) {
@@ -214,6 +253,10 @@ public class StressEngine {
                 .id(dto.getId())
                 .pctImpact(dto.getPctImpact())
                 .absImpact(abs)
+                .matchedWeightPct(dto.getMatchedWeightPct())
+                .matchedHoldings(dto.getMatchedHoldings())
+                .appliedShockPct(dto.getAppliedShockPct())
+                .note(dto.getNote())
                 .build();
     }
 

@@ -106,6 +106,23 @@ public class PortfolioCalculationService {
 
             PortfolioUpdateEvent updateEvent = mapToUpdateEvent(holdings, summary, userId, holdingsPortfolioId);
 
+            // Demo fallback remaps many users onto one shared portfolio UUID. Publishing that
+            // to am-portfolio-update makes trade-management upsert-by-portfolioId keep only the
+            // first owner — every later user stays empty and the UI injects "Demo Portfolio".
+            boolean demoFanout = !holdingsUserId.equals(userId)
+                    || !java.util.Objects.equals(holdingsPortfolioId, portfolioId)
+                    || (newUserPortfolioFallbackService.getDemoPortfolioId() != null
+                        && newUserPortfolioFallbackService.getDemoPortfolioId().equals(holdingsPortfolioId));
+
+            if (demoFanout) {
+                updateEvent.setSource("DEMO");
+                log.info("Publishing DEMO calc to stream only (skip am-portfolio-update) user={} portfolioId={}",
+                        userId, holdingsPortfolioId);
+                kafkaProducerService.sendPortfolioStreamMessage(updateEvent, correlationId);
+                return;
+            }
+
+            updateEvent.setSource("PORTFOLIO_CALC");
             log.info("Publishing calculated portfolio update for UserID: {}, PortfolioID: {}", userId, holdingsPortfolioId);
             kafkaProducerService.sendMessage(updateEvent, correlationId);
             kafkaProducerService.sendPortfolioStreamMessage(updateEvent, correlationId);
@@ -129,11 +146,12 @@ public class PortfolioCalculationService {
             event.setTotalInvestment(summary.getInvestmentValue());
             event.setTotalGainLoss(summary.getTotalGainLoss());
             event.setTotalGainLossPercentage(summary.getTotalGainLossPercentage());
-            if (summary.getTodayGainLoss() != null && summary.getTodayGainLoss() != 0.0) {
+            // Suppress only unavailable (null). True flat day (0.0) must still broadcast.
+            if (summary.getTodayGainLoss() != null) {
                 event.setTodayGainLoss(summary.getTodayGainLoss());
                 event.setTodayGainLossPercentage(summary.getTodayGainLossPercentage());
             } else {
-                log.warn("[Kafka] Suppressing todayGainLoss broadcast (was null or 0.0) for portfolioId={}", portfolioId);
+                log.warn("[Kafka] Suppressing todayGainLoss broadcast (null / unavailable) for portfolioId={}", portfolioId);
             }
         }
 

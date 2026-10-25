@@ -69,6 +69,9 @@ spring:
       portfolio-intel:
         ttl: 90 # seconds — Overview intelligence warm cache (fail-open)
         key-prefix: "portfolio:intel:v1:"
+      portfolio-intel-hist:
+        ttl: 300 # seconds — regression β / history for stress (longer than Overview)
+        key-prefix: "portfolio:intel-hist:v1:"
       basket-etf:
         ttl: 86400 # 24 hours — enriched ETF constituents
         key-prefix: "basket:etf:enriched:v6:"
@@ -247,6 +250,11 @@ market-data:
     read-timeout: ${MARKET_DATA_API_READ_TIMEOUT_MS:45000}
     connection-timeout: 3000
     max-retry-attempts: 0
+    # Cash equity segment for hist keys (Vault/env override — avoid hardcoding in Java callers)
+    equity-instrument-prefix: ${MARKET_DATA_EQUITY_INSTRUMENT_PREFIX:NSE_EQ}
+    passthrough-instrument-prefixes: ${MARKET_DATA_PASSTHROUGH_INSTRUMENT_PREFIXES:NSE_FO,NSE_INDEX,BSE_EQ,BSE_FO,BSE_INDEX,MCX_FO}
+    # Caffeine miss-marker TTL (not Redis); successful priorClose stays ~18h
+    prior-close-miss-ttl-minutes: ${MARKET_DATA_PRIOR_CLOSE_MISS_TTL_MINUTES:15}
     batch:
       chunk-size: ${MARKET_DATA_BATCH_CHUNK_SIZE:50}
       parallel-batching-enabled: ${MARKET_DATA_PARALLEL_BATCHING:true}
@@ -331,6 +339,16 @@ management:
 # Enable the request-log filter and standard MDC fields:
 # traceId, spanId, correlationId, service, request.method, request.path, http.status
 am:
+  # When AM_SECURITY_ENABLED=true, am-security-lib owns the filter chain.
+  # Defaults only permit /health — kube probes use /actuator/health/* and get 401.
+  security:
+    public-paths:
+      - "/actuator/**"
+      - "/health"
+      - "/swagger-ui.html"
+      - "/swagger-ui/**"
+      - "/v3/api-docs/**"
+      - "/api-docs/**"
   observability:
     enabled: true
     request-log:
@@ -349,11 +367,18 @@ cache:
 portfolio:
   redis:
     enabled: ${PORTFOLIO_REDIS_ENABLED:false}
+  snapshot:
+    # 1D lookback must span weekends/holidays; callers still pick latest prior-session snap.
+    one-day-lookback-days: ${PORTFOLIO_SNAPSHOT_ONE_DAY_LOOKBACK_DAYS:10}
   intelligence:
     # Primary history benchmark (beta / relative return). Use "SENSEX" or "NIFTY 50".
     primary-benchmark-symbol: ${PORTFOLIO_INTEL_BENCHMARK:NIFTY 50}
-    history-lookback-days: ${PORTFOLIO_INTEL_HISTORY_LOOKBACK_DAYS:90}
-    history-timeout-ms: ${PORTFOLIO_INTEL_HISTORY_TIMEOUT_MS:2500}
+    history-lookback-days: ${PORTFOLIO_INTEL_HISTORY_LOOKBACK_DAYS:60}
+    history-timeout-ms: ${PORTFOLIO_INTEL_HISTORY_TIMEOUT_MS:800}
+    # Stress / intel β load — longer than soft timeout so MD hist can succeed once and fill cache
+    history-timeout-stress-ms: ${PORTFOLIO_INTEL_HISTORY_TIMEOUT_STRESS_MS:20000}
+    # A/B/C diversification + annualized vol; default false keeps legacy count formula
+    health-v2: ${PORTFOLIO_INTEL_HEALTH_V2:false}
     risk:
       top1-high-pct: 25.0
       sector-high-pct: 30.0

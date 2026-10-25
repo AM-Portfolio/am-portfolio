@@ -1,0 +1,30 @@
+name: Container Cleanup — AM Portfolio
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0' # Run weekly on Sundays
+
+jobs:
+  smart-cleanup:
+    name: Smart Cleanup (5 Main + 5 Feature)
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      actions: read
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install requests
+
+      - name: Run Smart Cleanup Script
+        env:
+          GITHUB_TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+        run: python .github/scripts/smart-cleanup.py

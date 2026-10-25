@@ -150,7 +150,10 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
                 return emptyResultSupplier.get();
             }
             log.info("Market data not in prefetch cache. Fetching individually for provider {}", this.getClass().getSimpleName());
-            marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, request != null ? request.getTimeFrameRequest() : null);
+            TimeFrameRequest fanOutTf = preferLiveMarketDataOnFanOut()
+                    ? null
+                    : (request != null ? request.getTimeFrameRequest() : null);
+            marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, fanOutTf);
         }
         
         if (marketData == null || marketData.isEmpty()) {
@@ -174,6 +177,14 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
      * Period providers may fan out after a failed hist prefetch (attempted=false).
      */
     protected boolean allowsPrefetchFanOut() {
+        return false;
+    }
+
+    /**
+     * When true, empty-prefetch fan-out uses live OHLC (day%) instead of chart timeframe hist.
+     * Movers must return true so period candles are never used as previousClose.
+     */
+    protected boolean preferLiveMarketDataOnFanOut() {
         return false;
     }
 

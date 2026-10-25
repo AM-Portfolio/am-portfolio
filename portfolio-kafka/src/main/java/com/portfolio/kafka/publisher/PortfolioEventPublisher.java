@@ -58,4 +58,41 @@ public class PortfolioEventPublisher {
         log.info("Published resolved portfolio to outbound topic for user: {}, broker: {}, source: {}",
                  savedPortfolio.getOwner(), savedPortfolio.getBrokerType(), source);
     }
+
+    public void publishPortfolioDelete(String owner, String portfolioId, String name, String source) {
+        if (kafkaProducerService == null) {
+            log.debug("Kafka disabled - skipping portfolio delete publish for user: {}", owner);
+            return;
+        }
+        if (owner == null || owner.isBlank()) {
+            log.warn("Skipping portfolio delete publish — owner blank portfolioId={}", portfolioId);
+            return;
+        }
+        // Never invent a random UUID: analysis deletes by portfolioEntityId(portfolioId, userId).
+        if (portfolioId == null || portfolioId.isBlank()) {
+            log.warn("Skipping portfolio delete publish — portfolioId blank owner={}", owner);
+            return;
+        }
+        final UUID resolvedId;
+        try {
+            resolvedId = UUID.fromString(portfolioId.trim());
+        } catch (IllegalArgumentException e) {
+            log.warn("Skipping portfolio delete publish — portfolioId is not a UUID: {}", portfolioId);
+            return;
+        }
+
+        PortfolioUpdateEvent outboundEvent = PortfolioUpdateEvent.builder()
+                .id(resolvedId)
+                .userId(owner)
+                .portfolioId(resolvedId.toString())
+                .name(name)
+                .source(source != null ? source : "PORTFOLIO_RESOLVED")
+                .action("DELETE")
+                .timestamp(LocalDateTime.now())
+                .build();
+
+        kafkaProducerService.sendMessage(outboundEvent, null);
+        log.info("Published DELETED portfolio to outbound topic for user: {}, portfolioId={}, name: {}",
+                owner, resolvedId, name);
+    }
 }

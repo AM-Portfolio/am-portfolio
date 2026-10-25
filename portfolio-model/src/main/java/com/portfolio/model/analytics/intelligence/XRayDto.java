@@ -17,6 +17,8 @@ public class XRayDto {
     private List<WeightSliceDto> sectorWeights;
     private List<WeightSliceDto> industryWeights;
     private List<WeightSliceDto> marketCapWeights;
+    /** EQUITY / FIXED_INCOME / COMMODITY / CASH / MUTUAL_FUND slices (sum ≈ 100%). */
+    private List<WeightSliceDto> assetClassWeights;
     /** Portfolio book NAV used as X-Ray denominator (INR). */
     private Double totalValue;
 

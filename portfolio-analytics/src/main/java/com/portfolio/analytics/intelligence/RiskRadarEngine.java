@@ -37,9 +37,23 @@ public class RiskRadarEngine {
     @Value("${portfolio.intelligence.risk.beta-medium:1.1}")
     private double betaMedium;
 
+    @Value("${portfolio.intelligence.health-v2:false}")
+    private boolean healthV2;
+
+    /** Test / programmatic override. */
+    public void setHealthV2(boolean healthV2) {
+        this.healthV2 = healthV2;
+    }
+
     public RiskDto compute(PortfolioIntelligenceSnapshot snapshot) {
+        if (snapshot.getHoldings() == null || snapshot.getHoldings().isEmpty()) {
+            return null;
+        }
+
         int concHealth = roundInt(HealthScoreEngine.concentration(snapshot));
-        int divHealth = roundInt(HealthScoreEngine.diversification(snapshot));
+        int divHealth = roundInt(healthV2
+                ? HealthScoreEngine.diversificationV2(snapshot)
+                : HealthScoreEngine.diversification(snapshot));
         int liqHealth = roundInt(clamp(snapshot.getLiquidSharePct(), 0, 100));
 
         List<RiskDto.RiskAxisDto> axes = new ArrayList<>();
@@ -48,22 +62,35 @@ public class RiskRadarEngine {
         axes.add(axis("DIVERSIFICATION", 100 - divHealth));
         axes.add(axis("LIQUIDITY", 100 - liqHealth));
 
-        if (snapshot.getHistoryPoints() >= MIN_HISTORY_POINTS) {
+        if (healthV2) {
+            if (snapshot.getHistoryPoints() >= MIN_HISTORY_POINTS && snapshot.getDailyVolPct() != null) {
+                double ann = HealthScoreEngine.annualizedVolPct(snapshot.getDailyVolPct());
+                int volHealth = roundInt(HealthScoreEngine.volatilityFromAnnPct(ann));
+                axes.add(axis("VOLATILITY", 100 - volHealth));
+            } else {
+                axes.add(axis("VOLATILITY", 100 - 55));
+            }
+        } else if (snapshot.getHistoryPoints() >= MIN_HISTORY_POINTS) {
             if (snapshot.getDailyVolPct() != null) {
                 int volHealth = roundInt(HealthScoreEngine.volatility(snapshot.getDailyVolPct()));
                 axes.add(axis("VOLATILITY", 100 - volHealth));
             }
-            if (snapshot.getBeta() != null) {
-                int betaHealth = roundInt(HealthScoreEngine.betaScore(snapshot.getBeta()));
-                axes.add(axis("BETA", 100 - betaHealth));
-            }
+        }
+
+        if (snapshot.getHistoryPoints() >= MIN_HISTORY_POINTS && snapshot.getBeta() != null) {
+            int betaHealth = roundInt(HealthScoreEngine.betaScore(snapshot.getBeta()));
+            axes.add(axis("BETA", 100 - betaHealth));
         }
 
         List<RiskDto.RiskFindingDto> findings = new ArrayList<>();
         if (snapshot.getTop1Pct() >= top1HighPct) {
+            String topLabel = snapshot.getTop1Symbol() != null && !snapshot.getTop1Symbol().isBlank()
+                    ? String.format(Locale.ROOT, "Top holding %s %.1f%%", snapshot.getTop1Symbol().trim(),
+                            snapshot.getTop1Pct())
+                    : String.format(Locale.ROOT, "Top holding %.1f%%", snapshot.getTop1Pct());
             findings.add(RiskDto.RiskFindingDto.builder()
                     .code("TOP1_HIGH")
-                    .label(String.format(Locale.ROOT, "Top holding %.1f%%", snapshot.getTop1Pct()))
+                    .label(topLabel)
                     .severity("HIGH")
                     .build());
         }

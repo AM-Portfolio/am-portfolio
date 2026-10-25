@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
+import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.FundType;
@@ -31,6 +32,15 @@ public class PortfolioModelV1 {
     private String tags;
     private String notes;
     private List<EquityModel> equityModels;
+    /** Option A multi-asset lists (default empty). */
+    @Builder.Default
+    private List<AssetModel> mutualFunds = List.of();
+    @Builder.Default
+    private List<AssetModel> bonds = List.of();
+    @Builder.Default
+    private List<AssetModel> commodities = List.of();
+    @Builder.Default
+    private List<AssetModel> cash = List.of();
     private Double totalValue;
     private Double investmentAmount;
     private BrokerType brokerType;

@@ -21,4 +21,11 @@ public interface PortfolioService {
     PortfolioModelV1 updateTradePortfolio(PortfolioModelV1 portfolioModel);
     void updateLastLoginDate(String userId, LocalDate loginDate);
     void markBasketLineUnderfunded(String basketId, String isin, double gapQuantity);
+
+    /**
+     * Replace one Option A class list (bonds | commodities | cash) on a BROKER portfolio.
+     * Other class lists and equities are left unchanged.
+     */
+    PortfolioModelV1 replaceAssetClassList(UUID portfolioId, String ownerUserId, String assetClass,
+            List<com.am.common.amcommondata.model.asset.AssetModel> items);
 }

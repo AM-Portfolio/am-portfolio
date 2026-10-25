@@ -51,6 +51,19 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return new ResponseEntity<>(responseBody, HttpStatus.BAD_REQUEST);
     }
 
+    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public ResponseEntity<Object> handleResponseStatus(
+            org.springframework.web.server.ResponseStatusException ex, WebRequest request) {
+        log.warn("Response status {}: {}", ex.getStatusCode().value(), ex.getReason());
+
+        Map<String, Object> responseBody = new LinkedHashMap<>();
+        responseBody.put("timestamp", LocalDateTime.now());
+        responseBody.put("message", ex.getReason() != null ? ex.getReason() : ex.getMessage());
+        responseBody.put("status", ex.getStatusCode().value());
+
+        return new ResponseEntity<>(responseBody, ex.getStatusCode());
+    }
+
     @ExceptionHandler(EtfNotFoundException.class)
     public ResponseEntity<Object> handleEtfNotFound(EtfNotFoundException ex, WebRequest request) {
         log.warn("ETF not found: {}", ex.getMessage());
