@@ -337,14 +337,14 @@ public class SnapshotCatchUpService {
                     symbolsParam);
             return false;
         }
-        for (Map.Entry<String, com.portfolio.marketdata.model.HistoricalData> entry
+        for (Map.Entry<String, com.portfolio.marketdata.model.HistoricalDataResponse> entry
                 : histResponse.getData().entrySet()) {
             String symbol = entry.getKey();
-            var series = entry.getValue();
-            if (series == null || series.getDataPoints() == null) {
+            var response = entry.getValue();
+            if (response == null) {
                 continue;
             }
-            for (var point : series.getDataPoints()) {
+            for (var point : response.effectiveDataPoints()) {
                 if (point == null || point.getClose() == null || point.getTime() == null) {
                     continue;
                 }

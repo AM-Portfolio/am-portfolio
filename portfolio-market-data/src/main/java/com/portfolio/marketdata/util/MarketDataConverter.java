@@ -137,17 +137,22 @@ public class MarketDataConverter {
             .dataPoints(dataPoints);
 
         if (!dataPoints.isEmpty()) {
-            MarketData.MarketDataPoint latestPoint = dataPoints.get(dataPoints.size() - 1);
-            MarketData.MarketDataPoint firstPoint = dataPoints.get(0);
+            // Derive first/last by candle time (payload order is not guaranteed).
+            List<MarketData.MarketDataPoint> ordered = new ArrayList<>(dataPoints);
+            ordered.sort(java.util.Comparator.comparing(
+                    MarketData.MarketDataPoint::getTimestamp,
+                    java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())));
+            MarketData.MarketDataPoint firstPoint = ordered.get(0);
+            MarketData.MarketDataPoint latestPoint = ordered.get(ordered.size() - 1);
 
             builder.ohlc(latestPoint.getOhlcData());
             if (latestPoint.getOhlcData() != null) {
                 builder.lastPrice(latestPoint.getOhlcData().getClose());
             }
-            if (dataPoints.size() >= 2
-                    && firstPoint.getOhlcData() != null
+            if (firstPoint.getOhlcData() != null
                     && latestPoint.getOhlcData() != null
                     && latestPoint.getOhlcData().getClose() > 0) {
+                // Prior close = chronologically first bar open (incl. single-bar series).
                 builder.previousClose(firstPoint.getOhlcData().getOpen());
             }
         }

@@ -33,9 +33,7 @@ public class HistoricalDataResponseWrapper {
     private LocalDate toDate;
     
     /**
-     * Map of symbols to per-symbol historical payloads.
-     * {@link HistoricalDataResponse} accepts am-market's flat candle shape
-     * ({@code tradingSymbol} / {@code dataPoints}) and legacy nested {@code data}.
+     * Map of symbols to their respective historical data responses
      */
     private Map<String, HistoricalDataResponse> data;
     
