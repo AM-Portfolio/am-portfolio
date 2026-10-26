@@ -32,4 +32,10 @@ class InstrumentKeysTest {
     void alreadyCash_preserved() {
         assertEquals("NSE_EQ:IDEA", InstrumentKeys.toInstrumentKey("NSE_EQ:IDEA", "NSE_EQ"));
     }
+
+    @Test
+    void dhanPipePrefix_rewrittenToColon() {
+        assertEquals("NSE_EQ:RELIANCE", InstrumentKeys.toInstrumentKey("NSE_EQ|RELIANCE", "NSE_EQ"));
+        assertEquals("NSE_FO:NIFTY25APRFUT", InstrumentKeys.toInstrumentKey("NSE_FO|NIFTY25APRFUT", "NSE_EQ"));
+    }
 }
