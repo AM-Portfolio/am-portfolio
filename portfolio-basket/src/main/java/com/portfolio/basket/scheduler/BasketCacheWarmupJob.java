@@ -32,7 +32,7 @@ public class BasketCacheWarmupJob {
                 return;
             }
             log.info("Cache warm-up: batch loading {} ETF tickers (discover monthly wave)", top.size());
-            enrichedEtfService.getEnrichedEtfsBatch(top, true);
+            enrichedEtfService.getEnrichedEtfsBatch(top, true, EnrichedEtfService.DISCOVER_WARM_WAIT_MS);
             log.info("Cache warm-up: done for {} ETFs", top.size());
         } catch (Exception e) {
             log.warn("BasketCacheWarmupJob failed — app still functional: {}", e.getMessage());

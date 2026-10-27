@@ -155,9 +155,9 @@ class EtfPerformanceEnricherTest {
         ArgumentCaptor<HistoricalDataRequest> cap = ArgumentCaptor.forClass(HistoricalDataRequest.class);
         verify(marketDataService, times(1)).getHistoricalData(cap.capture());
         HistoricalDataRequest req = cap.getValue();
-        assertEquals("1M", req.getInterval());
+        assertEquals("1W", req.getInterval());
         assertEquals("ALL", req.getFilterType());
-        assertEquals(Boolean.TRUE, req.getIsIndexSymbol());
+        assertEquals(Boolean.FALSE, req.getIsIndexSymbol());
         assertEquals(Boolean.FALSE, req.getForceRefresh());
     }
 

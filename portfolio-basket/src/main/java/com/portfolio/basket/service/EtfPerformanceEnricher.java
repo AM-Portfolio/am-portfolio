@@ -56,6 +56,11 @@ public class EtfPerformanceEnricher {
                 hasExcessPrecision(data.getReturn1Y())
                         || hasExcessPrecision(data.getReturn3Y())
                         || hasExcessPrecision(data.getReturn5Y());
+        if (!missingSpark && data.getReturnsAsOf() != null && !looksLikeUnnormalizedParser) {
+            // Hist already applied. Listings younger than 5Y honestly omit that chip — do not
+            // wait 2.5s on every Discover request trying to invent it.
+            return false;
+        }
         return needsReturnsFill(data) || missingSpark || looksLikeUnnormalizedParser;
     }
 
@@ -123,6 +128,10 @@ public class EtfPerformanceEnricher {
      * Times out at {@link #discoverWaveTimeoutMs} and fail-opens (does not cancel the fetch).
      */
     public int fillDiscoverWave(List<EtfData> etfs) {
+        return fillDiscoverWave(etfs, discoverWaveTimeoutMs);
+    }
+
+    public int fillDiscoverWave(List<EtfData> etfs, long timeoutMs) {
         if (etfs == null || etfs.isEmpty()) {
             return 0;
         }
@@ -141,14 +150,19 @@ public class EtfPerformanceEnricher {
                 .collect(Collectors.toList());
 
         long startMs = System.currentTimeMillis();
-        long timeoutMs = Math.max(50L, discoverWaveTimeoutMs);
+        long waitMs = timeoutMs <= 0 ? 60_000L : Math.max(50L, timeoutMs);
         Map<String, MarketData> hist = Map.of();
-        CompletableFuture<Map<String, MarketData>> fut =
-                CompletableFuture.supplyAsync(() -> fetchFiveYearMonthly(symbols));
         try {
-            hist = fut.get(timeoutMs, TimeUnit.MILLISECONDS);
+            if (waitMs >= 60_000L) {
+                // Already on a worker (warmup / singleflight). Avoid nested FJP deadlock.
+                hist = fetchFiveYearMonthly(symbols);
+            } else {
+                CompletableFuture<Map<String, MarketData>> fut =
+                        CompletableFuture.supplyAsync(() -> fetchFiveYearMonthly(symbols));
+                hist = fut.get(waitMs, TimeUnit.MILLISECONDS);
+            }
         } catch (TimeoutException e) {
-            log.warn("basket.perf.discover.wave timeoutMs={} symbols={}", timeoutMs, symbols.size());
+            log.warn("basket.perf.discover.wave timeoutMs={} symbols={}", waitMs, symbols.size());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.warn("basket.perf.discover.wave interrupted symbols={}", symbols.size());
@@ -280,10 +294,10 @@ public class EtfPerformanceEnricher {
                 .symbols(String.join(",", symbols))
                 .fromDate(from.toString())
                 .toDate(to.toString())
-                .interval(TimeFrame.MONTH.getValue())
+                .interval(TimeFrame.WEEK.getValue())
                 .filterType(FilterType.ALL.getValue())
                 .instrumentType(InstrumentType.EQ.getValue())
-                .isIndexSymbol(true)
+                .isIndexSymbol(false)
                 .forceRefresh(false)
                 .continuous(false)
                 .build();

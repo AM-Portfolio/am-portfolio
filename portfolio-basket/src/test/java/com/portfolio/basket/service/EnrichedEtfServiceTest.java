@@ -19,6 +19,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
@@ -47,6 +48,7 @@ class EnrichedEtfServiceTest {
         service.initL1();
         lenient().when(performanceEnricher.fillMissing(any())).thenReturn(0);
         lenient().when(performanceEnricher.fillDiscoverWave(any())).thenReturn(0);
+        lenient().when(performanceEnricher.fillDiscoverWave(any(), anyLong())).thenReturn(0);
     }
 
     @Test
@@ -141,7 +143,7 @@ class EnrichedEtfServiceTest {
         verify(etfApiClient, times(1)).fetchEtfHoldingsBatch(any());
         verify(etfApiClient, never()).enrichHoldings(any());
         verify(performanceEnricher, never()).fillMissing(any());
-        verify(performanceEnricher, times(1)).fillDiscoverWave(any());
+        verify(performanceEnricher, times(1)).fillDiscoverWave(any(), anyLong());
     }
 
     @Test
@@ -156,7 +158,7 @@ class EnrichedEtfServiceTest {
         assertEquals(1, result.size());
         verify(etfApiClient, times(1)).enrichHoldings(any());
         verify(performanceEnricher, never()).fillMissing(any());
-        verify(performanceEnricher, times(1)).fillDiscoverWave(any());
+        verify(performanceEnricher, times(1)).fillDiscoverWave(any(), anyLong());
     }
 
     @Test
@@ -170,7 +172,7 @@ class EnrichedEtfServiceTest {
         assertEquals(1, result.size());
         verify(etfApiClient, never()).fetchEtfHoldingsBatch(any());
         verify(performanceEnricher, never()).fillMissing(any());
-        verify(performanceEnricher, times(1)).fillDiscoverWave(any());
+        verify(performanceEnricher, times(1)).fillDiscoverWave(any(), anyLong());
     }
 
     @Test
@@ -189,6 +191,7 @@ class EnrichedEtfServiceTest {
         verify(etfApiClient, never()).fetchEtfHoldingsBatch(any());
         verify(performanceEnricher, never()).fillMissing(any());
         verify(performanceEnricher, never()).fillDiscoverWave(any());
+        verify(performanceEnricher, never()).fillDiscoverWave(any(), anyLong());
     }
 
     @Test
@@ -197,7 +200,7 @@ class EnrichedEtfServiceTest {
         EtfData cached = sampleEtfWithIsin("ITBEES");
         cached.setReturn1Y(null);
         ReflectionTestUtils.invokeMethod(service, "store", "ITBEES", cached);
-        when(performanceEnricher.fillDiscoverWave(any())).thenAnswer(inv -> {
+        when(performanceEnricher.fillDiscoverWave(any(), anyLong())).thenAnswer(inv -> {
             Thread.sleep(150);
             EtfData etf = ((List<EtfData>) inv.getArgument(0)).get(0);
             etf.setReturn1Y(9.0);
@@ -216,7 +219,7 @@ class EnrichedEtfServiceTest {
         } finally {
             pool.shutdownNow();
         }
-        verify(performanceEnricher, times(1)).fillDiscoverWave(any());
+        verify(performanceEnricher, times(1)).fillDiscoverWave(any(), anyLong());
     }
 
     @Test
