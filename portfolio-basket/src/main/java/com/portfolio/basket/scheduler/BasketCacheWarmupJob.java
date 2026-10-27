@@ -31,9 +31,8 @@ public class BasketCacheWarmupJob {
                 log.info("Cache warm-up: no featured ETF symbols");
                 return;
             }
-            log.info("Cache warm-up: batch loading {} ETF tickers", top.size());
-            // discoverFastPath=false → allow enrich + hist into L1/Redis off-path
-            enrichedEtfService.getEnrichedEtfsBatch(top, false);
+            log.info("Cache warm-up: batch loading {} ETF tickers (discover monthly wave)", top.size());
+            enrichedEtfService.getEnrichedEtfsBatch(top, true);
             log.info("Cache warm-up: done for {} ETFs", top.size());
         } catch (Exception e) {
             log.warn("BasketCacheWarmupJob failed — app still functional: {}", e.getMessage());
