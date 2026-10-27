@@ -22,28 +22,55 @@ public enum MarketCapType {
         return name;
     }
 
-    public static MarketCapType fromMarketCap(double marketCapInCrores) {
-        if (marketCapInCrores >= LARGE_CAP.minMarketCapInCrores) {
+    /**
+     * Classify from absolute market cap in INR (despite the historical field name).
+     * Thresholds: Large ≥ 1e12, Mid ≥ 2.5e11, Small ≥ 5e10, else Micro.
+     */
+    public static MarketCapType fromMarketCap(double marketCapInrAbsolute) {
+        if (marketCapInrAbsolute >= LARGE_CAP.minMarketCapInCrores) {
             return LARGE_CAP;
-        } else if (marketCapInCrores >= MID_CAP.minMarketCapInCrores) {
+        } else if (marketCapInrAbsolute >= MID_CAP.minMarketCapInCrores) {
             return MID_CAP;
-        } else if (marketCapInCrores >= SMALL_CAP.minMarketCapInCrores) {
+        } else if (marketCapInrAbsolute >= SMALL_CAP.minMarketCapInCrores) {
             return SMALL_CAP;
         } else {
             return MICRO_CAP;
         }
     }
 
+    /**
+     * Classify from market cap in crore INR (fundamentals peer field).
+     * Null/non-positive → null (do not invent MICRO_CAP).
+     */
+    public static MarketCapType fromMarketCapCrores(double crores) {
+        if (crores <= 0 || Double.isNaN(crores) || Double.isInfinite(crores)) {
+            return null;
+        }
+        return fromMarketCap(crores * 10_000_000D);
+    }
+
+    /**
+     * Parse a labeled cap type. Null/blank/unrecognized → null (do not invent MICRO_CAP).
+     * Numeric classification still uses {@link #fromMarketCap(double)}.
+     */
     public static MarketCapType fromMarketCap(String name) {
-        if (name.equals(LARGE_CAP.name)) {
+        if (name == null || name.trim().isEmpty()) {
+            return null;
+        }
+        String normalized = name.trim().toUpperCase().replace(' ', '_');
+        if (normalized.equals(LARGE_CAP.name) || normalized.contains("LARGE")) {
             return LARGE_CAP;
-        } else if (name.equals(MID_CAP.name)) {
+        }
+        if (normalized.equals(MID_CAP.name) || normalized.contains("MID")) {
             return MID_CAP;
-        } else if (name.equals(SMALL_CAP.name)) {
+        }
+        if (normalized.equals(SMALL_CAP.name) || normalized.contains("SMALL")) {
             return SMALL_CAP;
-        } else {
+        }
+        if (normalized.equals(MICRO_CAP.name) || normalized.contains("MICRO")) {
             return MICRO_CAP;
         }
+        return null;
     }
 }
 

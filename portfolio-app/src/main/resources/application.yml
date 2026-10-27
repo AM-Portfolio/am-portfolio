@@ -228,6 +228,8 @@ basket:
     write-token: ${BASKET_CATALOG_WRITE_TOKEN:}
   opportunities:
     discover-fast-path-enabled: ${BASKET_DISCOVER_FAST_PATH_ENABLED:true}
+    # Discover list: skip 5Y weekly hist (slow). Miss path uses one 5Y monthly ALL wave.
+    discover-skip-perf-hist: ${BASKET_DISCOVER_SKIP_PERF_HIST:true}
 
 market-data:
   client:
