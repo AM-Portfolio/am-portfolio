@@ -1,10 +1,18 @@
 package com.portfolio.analytics.intelligence;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class IndexEtfSleevesTest {
+
+    @AfterEach
+    void tearDown() {
+        IndexEtfSleeves.resetConfiguredForTesting();
+    }
 
     @Test
     void rawIndexAliases_excludeFromBetaQuantities() {
@@ -23,5 +31,26 @@ class IndexEtfSleevesTest {
         assertThat(IndexEtfSleeves.isBroadNiftyEtf("BANKBEES")).isFalse();
         assertThat(IndexEtfSleeves.isBroadNiftyEtf("ITBEES")).isFalse();
         assertThat(IndexEtfSleeves.isBroadNiftyEtf("GOLDBEES")).isFalse();
+    }
+
+    @Test
+    void registerRawIndex_dynamicallyExtendsRawIndexAliases() {
+        assertThat(IndexEtfSleeves.isRawIndexAlias("CUSTOM_IND")).isFalse();
+        IndexEtfSleeves.registerRawIndex(List.of("CUSTOM_IND"));
+        assertThat(IndexEtfSleeves.isRawIndexAlias("CUSTOM_IND")).isTrue();
+        assertThat(IndexEtfSleeves.isRawIndexAlias("custom-ind")).isTrue();
+    }
+
+    @Test
+    void registerBroadNiftyEtf_dynamicallyExtendsBroadEtfs() {
+        assertThat(IndexEtfSleeves.isBroadNiftyEtf("CUSTOM_ETF")).isFalse();
+        IndexEtfSleeves.registerBroadNiftyEtf(List.of("CUSTOM_ETF"));
+        assertThat(IndexEtfSleeves.isBroadNiftyEtf("CUSTOM_ETF")).isTrue();
+    }
+
+    @Test
+    void indexPatterns_recognizedAsRawIndexAlias() {
+        assertThat(IndexEtfSleeves.isRawIndexAlias("NIFTY_TRI")).isTrue();
+        assertThat(IndexEtfSleeves.isRawIndexAlias("NSE_INDEX")).isTrue();
     }
 }

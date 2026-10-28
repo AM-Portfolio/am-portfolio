@@ -337,6 +337,63 @@ class StressEngineTest {
         assertTrue(row.getNote().contains("No holdings match"));
     }
 
+    @Test
+    void customProperties_registersRawIndicesAndBroadEtfs() {
+        StressProperties props = new StressProperties();
+        props.setRawIndices(List.of("MY_CUSTOM_INDEX"));
+        props.setBroadNiftyEtfs(List.of("MY_CUSTOM_ETF"));
+        new StressEngine(props);
+
+        assertTrue(IndexEtfSleeves.isRawIndexAlias("MY_CUSTOM_INDEX"));
+        assertTrue(IndexEtfSleeves.isBroadNiftyEtf("MY_CUSTOM_ETF"));
+    }
+
+    @Test
+    void customSectorScenario_configuredViaProperties_isAppliedCorrectly() {
+        StressProperties props = new StressProperties();
+        props.setScenarios(java.util.Map.of(
+                "DEFENSE_DOWN_15",
+                StressProperties.ScenarioConfig.builder()
+                        .type(StressProperties.ScenarioType.SECTOR)
+                        .targetSector("Defense")
+                        .shockPct(-15.0)
+                        .description("Defense -15%")
+                        .build()));
+
+        StressEngine customEngine = new StressEngine(props);
+        PortfolioIntelligenceSnapshot snap = snapshot(
+                1.0,
+                holding("HAL", 100, 40, "Defense"),
+                holding("RELIANCE", 100, 60, "Energy"));
+
+        StressResponse res = customEngine.run(snap, StressRequest.builder().preset("DEFENSE_DOWN_15").build());
+        assertEquals(1, res.getScenarios().size());
+        assertEquals(-6.0, res.getScenarios().get(0).getPctImpact(), 0.01);
+        assertEquals(-15.0, res.getScenarios().get(0).getAppliedShockPct(), 0.01);
+    }
+
+    @Test
+    void customUniformScenario_configuredViaProperties_isAppliedCorrectly() {
+        StressProperties props = new StressProperties();
+        props.setScenarios(java.util.Map.of(
+                "GEOPOLITICAL_DOWN_25",
+                StressProperties.ScenarioConfig.builder()
+                        .type(StressProperties.ScenarioType.UNIFORM)
+                        .shockPct(-25.0)
+                        .description("Uniform -25% * betaProxy")
+                        .build()));
+
+        StressEngine customEngine = new StressEngine(props);
+        PortfolioIntelligenceSnapshot snap = snapshot(
+                0.5,
+                holding("A", 100, 100, "Energy"));
+
+        StressResponse res = customEngine.run(snap, StressRequest.builder().preset("GEOPOLITICAL_DOWN_25").build());
+        assertEquals(1, res.getScenarios().size());
+        assertEquals(-12.5, res.getScenarios().get(0).getPctImpact(), 0.01);
+        assertEquals(-25.0, res.getScenarios().get(0).getAppliedShockPct(), 0.01);
+    }
+
     private static PortfolioIntelligenceSnapshot snapshot(
             double beta, PortfolioIntelligenceSnapshot.Holding... holdings) {
         return PortfolioIntelligenceSnapshot.builder()

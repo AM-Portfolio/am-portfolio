@@ -387,6 +387,92 @@ portfolio:
       sector-medium-pct: 20.0
       beta-high: 1.3
       beta-medium: 1.1
+    stress:
+      raw-indices:
+        - NIFTY
+        - NIFTY50
+        - SENSEX
+        - BANKNIFTY
+        - FINNIFTY
+        - MIDCPNIFTY
+      broad-nifty-etfs:
+        - NIFTYBEES
+        - SETFNIF50
+        - NIFTYIETF
+        - JUNIORBEES
+        - NIF100BEES
+        - NEXT50
+        - NEXT50BEES
+        - MOM50BEES
+      scenarios:
+        NIFTY_DOWN_10:
+          type: UNIFORM
+          shock-pct: -10.0
+          description: "Uniform -10% * betaProxy"
+        NIFTY_DOWN_20:
+          type: UNIFORM
+          shock-pct: -20.0
+          description: "Uniform -20% * betaProxy"
+        SENSEX_DOWN_10:
+          type: UNIFORM
+          shock-pct: -10.0
+          description: "Uniform -10% * betaProxy (Sensex label)"
+        SENSEX_DOWN_20:
+          type: UNIFORM
+          shock-pct: -20.0
+          description: "Uniform -20% * betaProxy (Sensex label)"
+        BANKING_DOWN_20:
+          type: SECTOR
+          target-sector: Banking
+          shock-pct: -20.0
+          description: "Banking/Financial -20%"
+        IT_DOWN_15:
+          type: SECTOR
+          target-sector: IT
+          shock-pct: -15.0
+          description: "IT -15%"
+        AUTO_DOWN_20:
+          type: SECTOR
+          target-sector: Auto
+          shock-pct: -20.0
+          description: "Auto -20%"
+        PHARMA_DOWN_15:
+          type: SECTOR
+          target-sector: Pharma
+          shock-pct: -15.0
+          description: "Pharma -15%"
+        ENERGY_DOWN_20:
+          type: SECTOR
+          target-sector: Energy
+          shock-pct: -20.0
+          description: "Energy -20%"
+        CRASH_2008:
+          type: MULTI_SECTOR
+          description: "Banking -35%, IT -30%, residual -25%"
+          residual-shock: -25.0
+          sector-shocks:
+            Banking: -35.0
+            IT: -30.0
+        GFC_2008:
+          type: UNIFORM
+          shock-pct: -56.0
+          description: "Uniform -56% * betaProxy (GFC Oct 2008)"
+        COVID_2020:
+          type: UNIFORM
+          shock-pct: -38.0
+          description: "Uniform -38% * betaProxy (COVID Mar 2020)"
+        CHINA_2015:
+          type: UNIFORM
+          shock-pct: -28.0
+          description: "Uniform -28% * betaProxy (China Aug 2015)"
+        INFLATION_2022:
+          type: UNIFORM
+          shock-pct: -26.0
+          description: "Uniform -26% * betaProxy (Inflation Jan 2022)"
+        ELECTION_2024:
+          type: UNIFORM
+          shock-pct: -18.0
+          description: "Uniform -18% * betaProxy (Election Jun 2024)"
 
 growthbook:
   api-host: ${GROWTHBOOK_API_HOST:https://growthbook.asrax.in/gbapi}

@@ -2,21 +2,26 @@ package com.portfolio.analytics.intelligence;
 
 import com.portfolio.model.analytics.intelligence.StressRequest;
 import com.portfolio.model.analytics.intelligence.StressResponse;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Scenario stress estimates. Index/event rows: {@code equityWeight × shock × β}
  * vs NIFTY 50 (cash/MF/bonds excluded). Sector rows ignore β.
  * No Mongo writes. Label always "Scenario estimate".
+ *
+ * Configurable dynamically via {@link StressProperties} or YAML.
  */
 @Component
 public class StressEngine {
@@ -68,8 +73,128 @@ public class StressEngine {
     public static final double CRASH_IT_SHOCK = -30.0;
     public static final double CRASH_RESIDUAL_SHOCK = -25.0;
 
+    private static final Map<String, StressProperties.ScenarioConfig> DEFAULT_SCENARIOS = new LinkedHashMap<>();
+
+    static {
+        DEFAULT_SCENARIOS.put(PRESET_NIFTY_DOWN_10, StressProperties.ScenarioConfig.builder()
+                .type(StressProperties.ScenarioType.UNIFORM)
+                .shockPct(-10.0)
+                .description("Uniform -10% * betaProxy")
+                .build());
+        DEFAULT_SCENARIOS.put(PRESET_NIFTY_DOWN_20, StressProperties.ScenarioConfig.builder()
+                .type(StressProperties.ScenarioType.UNIFORM)
+                .shockPct(-20.0)
+                .description("Uniform -20% * betaProxy")
+                .build());
+        DEFAULT_SCENARIOS.put(PRESET_SENSEX_DOWN_10, StressProperties.ScenarioConfig.builder()
+                .type(StressProperties.ScenarioType.UNIFORM)
+                .shockPct(-10.0)
+                .description("Uniform -10% * betaProxy (Sensex label)")
+                .build());
+        DEFAULT_SCENARIOS.put(PRESET_SENSEX_DOWN_20, StressProperties.ScenarioConfig.builder()
+                .type(StressProperties.ScenarioType.UNIFORM)
+                .shockPct(-20.0)
+                .description("Uniform -20% * betaProxy (Sensex label)")
+                .build());
+        DEFAULT_SCENARIOS.put(PRESET_BANKING_DOWN_20, StressProperties.ScenarioConfig.builder()
+                .type(StressProperties.ScenarioType.SECTOR)
+                .targetSector("Banking")
+                .shockPct(-20.0)
+                .description("Banking/Financial -20%")
+                .build());
+        DEFAULT_SCENARIOS.put(PRESET_IT_DOWN_15, StressProperties.ScenarioConfig.builder()
+                .type(StressProperties.ScenarioType.SECTOR)
+                .targetSector("IT")
+                .shockPct(-15.0)
+                .description("IT -15%")
+                .build());
+        DEFAULT_SCENARIOS.put(PRESET_AUTO_DOWN_20, StressProperties.ScenarioConfig.builder()
+                .type(StressProperties.ScenarioType.SECTOR)
+                .targetSector("Auto")
+                .shockPct(-20.0)
+                .description("Auto -20%")
+                .build());
+        DEFAULT_SCENARIOS.put(PRESET_PHARMA_DOWN_15, StressProperties.ScenarioConfig.builder()
+                .type(StressProperties.ScenarioType.SECTOR)
+                .targetSector("Pharma")
+                .shockPct(-15.0)
+                .description("Pharma -15%")
+                .build());
+        DEFAULT_SCENARIOS.put(PRESET_ENERGY_DOWN_20, StressProperties.ScenarioConfig.builder()
+                .type(StressProperties.ScenarioType.SECTOR)
+                .targetSector("Energy")
+                .shockPct(-20.0)
+                .description("Energy -20%")
+                .build());
+        DEFAULT_SCENARIOS.put(PRESET_CRASH_2008, StressProperties.ScenarioConfig.builder()
+                .type(StressProperties.ScenarioType.MULTI_SECTOR)
+                .description("Banking -35%, IT -30%, residual -25%")
+                .residualShock(CRASH_RESIDUAL_SHOCK)
+                .sectorShocks(Map.of("Banking", CRASH_BANKING_SHOCK, "IT", CRASH_IT_SHOCK))
+                .build());
+        DEFAULT_SCENARIOS.put(PRESET_GFC_2008, StressProperties.ScenarioConfig.builder()
+                .type(StressProperties.ScenarioType.UNIFORM)
+                .shockPct(SHOCK_GFC_2008)
+                .description("Uniform -56% * betaProxy (GFC Oct 2008)")
+                .build());
+        DEFAULT_SCENARIOS.put(PRESET_COVID_2020, StressProperties.ScenarioConfig.builder()
+                .type(StressProperties.ScenarioType.UNIFORM)
+                .shockPct(SHOCK_COVID_2020)
+                .description("Uniform -38% * betaProxy (COVID Mar 2020)")
+                .build());
+        DEFAULT_SCENARIOS.put(PRESET_CHINA_2015, StressProperties.ScenarioConfig.builder()
+                .type(StressProperties.ScenarioType.UNIFORM)
+                .shockPct(SHOCK_CHINA_2015)
+                .description("Uniform -28% * betaProxy (China Aug 2015)")
+                .build());
+        DEFAULT_SCENARIOS.put(PRESET_INFLATION_2022, StressProperties.ScenarioConfig.builder()
+                .type(StressProperties.ScenarioType.UNIFORM)
+                .shockPct(SHOCK_INFLATION_2022)
+                .description("Uniform -26% * betaProxy (Inflation Jan 2022)")
+                .build());
+        DEFAULT_SCENARIOS.put(PRESET_ELECTION_2024, StressProperties.ScenarioConfig.builder()
+                .type(StressProperties.ScenarioType.UNIFORM)
+                .shockPct(SHOCK_ELECTION_2024)
+                .description("Uniform -18% * betaProxy (Election Jun 2024)")
+                .build());
+    }
+
+    private final Map<String, StressProperties.ScenarioConfig> scenarios = new ConcurrentHashMap<>();
+
+    public StressEngine() {
+        this(null);
+    }
+
+    @Autowired(required = false)
+    public StressEngine(StressProperties properties) {
+        initScenarios(properties);
+    }
+
+    private void initScenarios(StressProperties properties) {
+        this.scenarios.putAll(DEFAULT_SCENARIOS);
+        if (properties != null) {
+            if (properties.getScenarios() != null && !properties.getScenarios().isEmpty()) {
+                properties.getScenarios().forEach((k, v) -> {
+                    if (k != null && v != null) {
+                        this.scenarios.put(k.trim().toUpperCase(Locale.ROOT), v);
+                    }
+                });
+            }
+            if (properties.getRawIndices() != null && !properties.getRawIndices().isEmpty()) {
+                IndexEtfSleeves.registerRawIndex(properties.getRawIndices());
+            }
+            if (properties.getBroadNiftyEtfs() != null && !properties.getBroadNiftyEtfs().isEmpty()) {
+                IndexEtfSleeves.registerBroadNiftyEtf(properties.getBroadNiftyEtfs());
+            }
+        }
+    }
+
+    public Map<String, StressProperties.ScenarioConfig> getScenarios() {
+        return Collections.unmodifiableMap(scenarios);
+    }
+
     public StressResponse run(PortfolioIntelligenceSnapshot snapshot, StressRequest request) {
-        List<StressResponse.ScenarioImpactDto> scenarios = new ArrayList<>();
+        List<StressResponse.ScenarioImpactDto> scenarioImpacts = new ArrayList<>();
 
         if (request != null && request.getCustom() != null
                 && request.getCustom().getSector() != null
@@ -98,7 +223,7 @@ public class StressEngine {
                     : String.format(Locale.ROOT,
                             "shock %+.0f%% on %d holdings (%.1f%% of book)",
                             shockPct, matchedHoldings, matchedWeight);
-            scenarios.add(StressResponse.ScenarioImpactDto.builder()
+            scenarioImpacts.add(StressResponse.ScenarioImpactDto.builder()
                     .id(id)
                     .pctImpact(pct)
                     .absImpact(0) // filled in finalizeAbs
@@ -114,21 +239,21 @@ public class StressEngine {
                 }
                 String preset = raw.trim().toUpperCase(Locale.ROOT);
                 requireKnownPreset(preset);
-                scenarios.add(impact(preset, applyPreset(snapshot, preset), catalogShockPct(preset)));
+                scenarioImpacts.add(impact(preset, applyPreset(snapshot, preset), catalogShockPct(preset)));
             }
         } else {
             String preset = request != null && request.getPreset() != null && !request.getPreset().isBlank()
                     ? request.getPreset().trim().toUpperCase(Locale.ROOT)
                     : PRESET_NIFTY_DOWN_10;
             requireKnownPreset(preset);
-            scenarios.add(impact(preset, applyPreset(snapshot, preset), catalogShockPct(preset)));
+            scenarioImpacts.add(impact(preset, applyPreset(snapshot, preset), catalogShockPct(preset)));
         }
 
         BetaMeta meta = resolveBetaMeta(snapshot);
         return StressResponse.builder()
                 .portfolioId(snapshot.getPortfolioId())
                 .estimateLabel(ESTIMATE_LABEL)
-                .scenarios(scenarios)
+                .scenarios(scenarioImpacts)
                 .method(meta.method)
                 .betaUsed(meta.betaUsed)
                 .benchmark(meta.benchmark)
@@ -161,66 +286,77 @@ public class StressEngine {
         return new BetaMeta("ASSUMED_ONE", 1.0, "NIFTY50", historyDays, true);
     }
 
-    private static void requireKnownPreset(String preset) {
-        if (!KNOWN_PRESETS.contains(preset)) {
+    private void requireKnownPreset(String preset) {
+        if (!scenarios.containsKey(preset) && !KNOWN_PRESETS.contains(preset)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown stress preset: " + preset);
         }
     }
 
     private double applyPreset(PortfolioIntelligenceSnapshot snapshot, String preset) {
+        StressProperties.ScenarioConfig config = scenarios.get(preset);
+        if (config == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown stress preset: " + preset);
+        }
         double betaProxy = betaProxy(snapshot);
-        return switch (preset) {
-            case PRESET_NIFTY_DOWN_10, PRESET_SENSEX_DOWN_10 -> applyUniformShock(snapshot, -10.0, betaProxy);
-            case PRESET_NIFTY_DOWN_20, PRESET_SENSEX_DOWN_20 -> applyUniformShock(snapshot, -20.0, betaProxy);
-            case PRESET_BANKING_DOWN_20 -> applySectorShock(snapshot, "Banking", -20.0);
-            case PRESET_IT_DOWN_15 -> applySectorShock(snapshot, "IT", -15.0);
-            case PRESET_AUTO_DOWN_20 -> applySectorShock(snapshot, "Auto", -20.0);
-            case PRESET_PHARMA_DOWN_15 -> applySectorShock(snapshot, "Pharma", -15.0);
-            case PRESET_ENERGY_DOWN_20 -> applySectorShock(snapshot, "Energy", -20.0);
-            case PRESET_CRASH_2008 -> applyCrash2008(snapshot);
-            case PRESET_GFC_2008 -> applyUniformShock(snapshot, SHOCK_GFC_2008, betaProxy);
-            case PRESET_COVID_2020 -> applyUniformShock(snapshot, SHOCK_COVID_2020, betaProxy);
-            case PRESET_CHINA_2015 -> applyUniformShock(snapshot, SHOCK_CHINA_2015, betaProxy);
-            case PRESET_INFLATION_2022 -> applyUniformShock(snapshot, SHOCK_INFLATION_2022, betaProxy);
-            case PRESET_ELECTION_2024 -> applyUniformShock(snapshot, SHOCK_ELECTION_2024, betaProxy);
-            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown stress preset: " + preset);
+        StressProperties.ScenarioType type = config.getType() != null
+                ? config.getType()
+                : StressProperties.ScenarioType.UNIFORM;
+        return switch (type) {
+            case UNIFORM -> {
+                double shock = config.getShockPct() != null ? config.getShockPct() : 0.0;
+                yield applyUniformShock(snapshot, shock, betaProxy);
+            }
+            case SECTOR -> {
+                String sector = config.getTargetSector() != null ? config.getTargetSector() : "";
+                double shock = config.getShockPct() != null ? config.getShockPct() : 0.0;
+                yield applySectorShock(snapshot, sector, shock);
+            }
+            case MULTI_SECTOR -> applyMultiSectorShock(snapshot, config);
         };
     }
 
-    /** Uniform/sector catalog shock for {@code appliedShockPct}. Null for packed {@link #PRESET_CRASH_2008}. */
-    static Double catalogShockPct(String preset) {
-        return switch (preset) {
-            case PRESET_NIFTY_DOWN_10, PRESET_SENSEX_DOWN_10 -> -10.0;
-            case PRESET_NIFTY_DOWN_20, PRESET_SENSEX_DOWN_20 -> -20.0;
-            case PRESET_BANKING_DOWN_20, PRESET_AUTO_DOWN_20, PRESET_ENERGY_DOWN_20 -> -20.0;
-            case PRESET_IT_DOWN_15, PRESET_PHARMA_DOWN_15 -> -15.0;
-            case PRESET_GFC_2008 -> SHOCK_GFC_2008;
-            case PRESET_COVID_2020 -> SHOCK_COVID_2020;
-            case PRESET_CHINA_2015 -> SHOCK_CHINA_2015;
-            case PRESET_INFLATION_2022 -> SHOCK_INFLATION_2022;
-            case PRESET_ELECTION_2024 -> SHOCK_ELECTION_2024;
-            default -> null;
-        };
+    /** Uniform/sector catalog shock for {@code appliedShockPct}. Null for multi-sector packs like {@link #PRESET_CRASH_2008}. */
+    Double catalogShockPct(String preset) {
+        StressProperties.ScenarioConfig config = scenarios.get(preset);
+        if (config != null) {
+            return config.getShockPct();
+        }
+        return defaultCatalogShockPct(preset);
     }
 
-    private double applyCrash2008(PortfolioIntelligenceSnapshot snapshot) {
+    public static Double defaultCatalogShockPct(String preset) {
+        StressProperties.ScenarioConfig config = DEFAULT_SCENARIOS.get(preset);
+        return config != null ? config.getShockPct() : null;
+    }
+
+    private double applyMultiSectorShock(
+            PortfolioIntelligenceSnapshot snapshot,
+            StressProperties.ScenarioConfig config) {
         double pct = 0;
         if (snapshot.getHoldings() == null) {
             return 0;
         }
+        double residualShock = config.getResidualShock() != null ? config.getResidualShock() : CRASH_RESIDUAL_SHOCK;
+        Map<String, Double> sectorShocks = config.getSectorShocks();
         for (PortfolioIntelligenceSnapshot.Holding h : snapshot.getHoldings()) {
             if (!isEquitySleeve(h)) {
                 continue;
             }
-            double shock;
+            double shock = residualShock;
             if (IndexEtfSleeves.isBroadNiftyEtf(h.getSymbol())) {
-                shock = CRASH_RESIDUAL_SHOCK;
-            } else if (matchesBanking(h.getSector())) {
-                shock = CRASH_BANKING_SHOCK;
-            } else if (matchesIt(h.getSector())) {
-                shock = CRASH_IT_SHOCK;
-            } else {
-                shock = CRASH_RESIDUAL_SHOCK;
+                shock = residualShock;
+            } else if (sectorShocks != null && !sectorShocks.isEmpty()) {
+                boolean matched = false;
+                for (Map.Entry<String, Double> entry : sectorShocks.entrySet()) {
+                    if (SectorMatcher.matches(h.getSector(), entry.getKey())) {
+                        shock = entry.getValue();
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched) {
+                    shock = residualShock;
+                }
             }
             pct += (h.getWeightPct() / 100.0) * shock * 1.0;
         }
@@ -357,23 +493,19 @@ public class StressEngine {
         return response;
     }
 
+    public Map<String, String> getPresetCatalog() {
+        Map<String, String> m = new LinkedHashMap<>();
+        for (Map.Entry<String, StressProperties.ScenarioConfig> e : scenarios.entrySet()) {
+            m.put(e.getKey(), e.getValue().getDescription() != null ? e.getValue().getDescription() : "");
+        }
+        return m;
+    }
+
     public static Map<String, String> presetCatalog() {
         Map<String, String> m = new LinkedHashMap<>();
-        m.put(PRESET_NIFTY_DOWN_10, "Uniform -10% * betaProxy");
-        m.put(PRESET_NIFTY_DOWN_20, "Uniform -20% * betaProxy");
-        m.put(PRESET_SENSEX_DOWN_10, "Uniform -10% * betaProxy (Sensex label)");
-        m.put(PRESET_SENSEX_DOWN_20, "Uniform -20% * betaProxy (Sensex label)");
-        m.put(PRESET_BANKING_DOWN_20, "Banking/Financial -20%");
-        m.put(PRESET_IT_DOWN_15, "IT -15%");
-        m.put(PRESET_AUTO_DOWN_20, "Auto -20%");
-        m.put(PRESET_PHARMA_DOWN_15, "Pharma -15%");
-        m.put(PRESET_ENERGY_DOWN_20, "Energy -20%");
-        m.put(PRESET_CRASH_2008, "Banking -35%, IT -30%, residual -25%");
-        m.put(PRESET_GFC_2008, "Uniform -56% * betaProxy (GFC Oct 2008)");
-        m.put(PRESET_COVID_2020, "Uniform -38% * betaProxy (COVID Mar 2020)");
-        m.put(PRESET_CHINA_2015, "Uniform -28% * betaProxy (China Aug 2015)");
-        m.put(PRESET_INFLATION_2022, "Uniform -26% * betaProxy (Inflation Jan 2022)");
-        m.put(PRESET_ELECTION_2024, "Uniform -18% * betaProxy (Election Jun 2024)");
+        for (Map.Entry<String, StressProperties.ScenarioConfig> e : DEFAULT_SCENARIOS.entrySet()) {
+            m.put(e.getKey(), e.getValue().getDescription() != null ? e.getValue().getDescription() : "");
+        }
         return m;
     }
 }
