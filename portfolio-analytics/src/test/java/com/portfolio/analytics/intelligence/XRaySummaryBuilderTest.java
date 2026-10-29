@@ -55,7 +55,9 @@ class XRaySummaryBuilderTest {
         assertEquals(150_000.0, caps.get("SMALL_CAP").getValue());
 
         Map<String, XRayDto.WeightSliceDto> classes = byName(xray.getAssetClassWeights());
-        assertEquals(0, classes.size()); // All holdings are equity, so no non-equity asset classes
+        assertEquals(1, classes.size());
+        assertEquals(100.0, classes.get(HealthScoreEngine.ASSET_EQUITY).getWeightPct());
+        assertEquals(1_000_000.0, classes.get(HealthScoreEngine.ASSET_EQUITY).getValue());
 
         assertEquals("Banking", xray.getSectorWeights().get(0).getName());
         assertNotNull(xray.getSectorWeights().get(0).getValue());
@@ -75,13 +77,11 @@ class XRaySummaryBuilderTest {
 
         XRayDto xray = builder.build(snapshot);
         Map<String, XRayDto.WeightSliceDto> classes = byName(xray.getAssetClassWeights());
-        // Asset class weights only includes non-equity, and re-normalizes them (20+5 = 25 total)
-        // Fixed Income = 20/25 = 80%
-        // Commodity = 5/25 = 20%
-        assertEquals(2, classes.size());
-        assertEquals(80.0, classes.get(HealthScoreEngine.ASSET_FIXED_INCOME).getWeightPct());
-        assertEquals(20.0, classes.get(HealthScoreEngine.ASSET_COMMODITY).getWeightPct());
-        
+        assertEquals(3, classes.size());
+        assertEquals(75.0, classes.get(HealthScoreEngine.ASSET_EQUITY).getWeightPct());
+        assertEquals(20.0, classes.get(HealthScoreEngine.ASSET_FIXED_INCOME).getWeightPct());
+        assertEquals(5.0, classes.get(HealthScoreEngine.ASSET_COMMODITY).getWeightPct());
+
         // Sector weights only includes equity (75 total -> normalized to 100%)
         Map<String, XRayDto.WeightSliceDto> sectors = byName(xray.getSectorWeights());
         assertEquals(1, sectors.size());

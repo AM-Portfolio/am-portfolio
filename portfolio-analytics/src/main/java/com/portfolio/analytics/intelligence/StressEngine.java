@@ -2,6 +2,7 @@ package com.portfolio.analytics.intelligence;
 
 import com.portfolio.model.analytics.intelligence.StressRequest;
 import com.portfolio.model.analytics.intelligence.StressResponse;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -11,11 +12,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 /**
- * Scenario stress estimates: {@code Σ weightPct/100 * shockPct * betaProxy}.
- * No Mongo writes. Label always "Scenario estimate".
+ * Scenario stress estimates. Index/event rows: {@code equityWeight × shock × β}
+ * vs NIFTY 50 (cash/MF/bonds excluded). Sector rows ignore β.
+ * Scenario tables come from {@link StressConfigService} (Mongo / YAML seed).
  */
 @Component
 public class StressEngine {
@@ -32,26 +33,46 @@ public class StressEngine {
     public static final String PRESET_PHARMA_DOWN_15 = "PHARMA_DOWN_15";
     public static final String PRESET_ENERGY_DOWN_20 = "ENERGY_DOWN_20";
     public static final String PRESET_CRASH_2008 = "CRASH_2008";
+    public static final String PRESET_GFC_2008 = "GFC_2008";
+    public static final String PRESET_COVID_2020 = "COVID_2020";
+    public static final String PRESET_CHINA_2015 = "CHINA_2015";
+    public static final String PRESET_INFLATION_2022 = "INFLATION_2022";
+    public static final String PRESET_ELECTION_2024 = "ELECTION_2024";
 
-    public static final Set<String> KNOWN_PRESETS = Set.of(
-            PRESET_NIFTY_DOWN_10,
-            PRESET_NIFTY_DOWN_20,
-            PRESET_SENSEX_DOWN_10,
-            PRESET_SENSEX_DOWN_20,
-            PRESET_BANKING_DOWN_20,
-            PRESET_IT_DOWN_15,
-            PRESET_AUTO_DOWN_20,
-            PRESET_PHARMA_DOWN_15,
-            PRESET_ENERGY_DOWN_20,
-            PRESET_CRASH_2008);
+    private final StressConfigService configService;
 
-    /** CRASH_2008 pack (API-CONTRACTS). */
-    public static final double CRASH_BANKING_SHOCK = -35.0;
-    public static final double CRASH_IT_SHOCK = -30.0;
-    public static final double CRASH_RESIDUAL_SHOCK = -25.0;
+    public StressEngine() {
+        this(new StressConfigService(StressProperties.loadClasspathDefaults()));
+    }
+
+    /** Test helper: wrap properties into an initialized config service. */
+    public StressEngine(StressProperties properties) {
+        this(initFromProperties(properties));
+    }
+
+    @Autowired
+    public StressEngine(StressConfigService configService) {
+        this.configService = configService != null
+                ? configService
+                : new StressConfigService(StressProperties.loadClasspathDefaults());
+        // Ensure classpath seed is in cache when Mongo repos are absent (unit tests / early init).
+        if (this.configService.getScenarios().isEmpty()) {
+            this.configService.resetForTesting();
+        }
+    }
+
+    private static StressConfigService initFromProperties(StressProperties properties) {
+        StressConfigService svc = new StressConfigService(properties);
+        svc.initialize();
+        return svc;
+    }
+
+    public Map<String, StressProperties.ScenarioConfig> getScenarios() {
+        return configService.getScenarios();
+    }
 
     public StressResponse run(PortfolioIntelligenceSnapshot snapshot, StressRequest request) {
-        List<StressResponse.ScenarioImpactDto> scenarios = new ArrayList<>();
+        List<StressResponse.ScenarioImpactDto> scenarioImpacts = new ArrayList<>();
 
         if (request != null && request.getCustom() != null
                 && request.getCustom().getSector() != null
@@ -67,7 +88,7 @@ public class StressEngine {
             int matchedHoldings = 0;
             if (snapshot.getHoldings() != null) {
                 for (PortfolioIntelligenceSnapshot.Holding h : snapshot.getHoldings()) {
-                    if (SectorMatcher.matches(h.getSector(), sector)) {
+                    if (takesSectorShock(h, sector)) {
                         matchedWeight += h.getWeightPct();
                         matchedHoldings++;
                     }
@@ -80,10 +101,10 @@ public class StressEngine {
                     : String.format(Locale.ROOT,
                             "shock %+.0f%% on %d holdings (%.1f%% of book)",
                             shockPct, matchedHoldings, matchedWeight);
-            scenarios.add(StressResponse.ScenarioImpactDto.builder()
+            scenarioImpacts.add(StressResponse.ScenarioImpactDto.builder()
                     .id(id)
                     .pctImpact(pct)
-                    .absImpact(0) // filled in finalizeAbs
+                    .absImpact(0)
                     .matchedWeightPct(matchedWeight)
                     .matchedHoldings(matchedHoldings)
                     .appliedShockPct(shockPct)
@@ -96,26 +117,27 @@ public class StressEngine {
                 }
                 String preset = raw.trim().toUpperCase(Locale.ROOT);
                 requireKnownPreset(preset);
-                scenarios.add(impact(preset, applyPreset(snapshot, preset)));
+                scenarioImpacts.add(impact(preset, applyPreset(snapshot, preset), catalogShockPct(preset)));
             }
         } else {
             String preset = request != null && request.getPreset() != null && !request.getPreset().isBlank()
                     ? request.getPreset().trim().toUpperCase(Locale.ROOT)
                     : PRESET_NIFTY_DOWN_10;
             requireKnownPreset(preset);
-            scenarios.add(impact(preset, applyPreset(snapshot, preset)));
+            scenarioImpacts.add(impact(preset, applyPreset(snapshot, preset), catalogShockPct(preset)));
         }
 
         BetaMeta meta = resolveBetaMeta(snapshot);
         return StressResponse.builder()
                 .portfolioId(snapshot.getPortfolioId())
                 .estimateLabel(ESTIMATE_LABEL)
-                .scenarios(scenarios)
+                .scenarios(scenarioImpacts)
                 .method(meta.method)
                 .betaUsed(meta.betaUsed)
                 .benchmark(meta.benchmark)
                 .historyDays(meta.historyDays)
                 .betaAssumed(meta.betaAssumed)
+                .equityWeightPct(equityWeightPct(snapshot))
                 .build();
     }
 
@@ -142,40 +164,68 @@ public class StressEngine {
         return new BetaMeta("ASSUMED_ONE", 1.0, "NIFTY50", historyDays, true);
     }
 
-    private static void requireKnownPreset(String preset) {
-        if (!KNOWN_PRESETS.contains(preset)) {
+    private void requireKnownPreset(String preset) {
+        if (configService.getScenario(preset) == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown stress preset: " + preset);
         }
     }
 
     private double applyPreset(PortfolioIntelligenceSnapshot snapshot, String preset) {
+        StressProperties.ScenarioConfig config = configService.getScenario(preset);
+        if (config == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown stress preset: " + preset);
+        }
         double betaProxy = betaProxy(snapshot);
-        return switch (preset) {
-            case PRESET_NIFTY_DOWN_10, PRESET_SENSEX_DOWN_10 -> applyUniformShock(snapshot, -10.0, betaProxy);
-            case PRESET_NIFTY_DOWN_20, PRESET_SENSEX_DOWN_20 -> applyUniformShock(snapshot, -20.0, betaProxy);
-            case PRESET_BANKING_DOWN_20 -> applySectorShock(snapshot, "Banking", -20.0);
-            case PRESET_IT_DOWN_15 -> applySectorShock(snapshot, "IT", -15.0);
-            case PRESET_AUTO_DOWN_20 -> applySectorShock(snapshot, "Auto", -20.0);
-            case PRESET_PHARMA_DOWN_15 -> applySectorShock(snapshot, "Pharma", -15.0);
-            case PRESET_ENERGY_DOWN_20 -> applySectorShock(snapshot, "Energy", -20.0);
-            case PRESET_CRASH_2008 -> applyCrash2008(snapshot);
-            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown stress preset: " + preset);
+        StressProperties.ScenarioType type = config.getType() != null
+                ? config.getType()
+                : StressProperties.ScenarioType.UNIFORM;
+        return switch (type) {
+            case UNIFORM -> {
+                double shock = config.getShockPct() != null ? config.getShockPct() : 0.0;
+                yield applyUniformShock(snapshot, shock, betaProxy);
+            }
+            case SECTOR -> {
+                String sector = config.getTargetSector() != null ? config.getTargetSector() : "";
+                double shock = config.getShockPct() != null ? config.getShockPct() : 0.0;
+                yield applySectorShock(snapshot, sector, shock);
+            }
+            case MULTI_SECTOR -> applyMultiSectorShock(snapshot, config);
         };
     }
 
-    private double applyCrash2008(PortfolioIntelligenceSnapshot snapshot) {
+    Double catalogShockPct(String preset) {
+        StressProperties.ScenarioConfig config = configService.getScenario(preset);
+        return config != null ? config.getShockPct() : null;
+    }
+
+    private double applyMultiSectorShock(
+            PortfolioIntelligenceSnapshot snapshot,
+            StressProperties.ScenarioConfig config) {
         double pct = 0;
         if (snapshot.getHoldings() == null) {
             return 0;
         }
+        double residualShock = config.getResidualShock() != null ? config.getResidualShock() : 0.0;
+        Map<String, Double> sectorShocks = config.getSectorShocks();
         for (PortfolioIntelligenceSnapshot.Holding h : snapshot.getHoldings()) {
-            double shock;
-            if (matchesBanking(h.getSector())) {
-                shock = CRASH_BANKING_SHOCK;
-            } else if (matchesIt(h.getSector())) {
-                shock = CRASH_IT_SHOCK;
-            } else {
-                shock = CRASH_RESIDUAL_SHOCK;
+            if (!isEquitySleeve(h)) {
+                continue;
+            }
+            double shock = residualShock;
+            if (IndexEtfSleeves.isBroadNiftyEtf(h.getSymbol())) {
+                shock = residualShock;
+            } else if (sectorShocks != null && !sectorShocks.isEmpty()) {
+                boolean matched = false;
+                for (Map.Entry<String, Double> entry : sectorShocks.entrySet()) {
+                    if (SectorMatcher.matches(h.getSector(), entry.getKey())) {
+                        shock = entry.getValue();
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched) {
+                    shock = residualShock;
+                }
             }
             pct += (h.getWeightPct() / 100.0) * shock * 1.0;
         }
@@ -188,6 +238,9 @@ public class StressEngine {
             return 0;
         }
         for (PortfolioIntelligenceSnapshot.Holding h : snapshot.getHoldings()) {
+            if (!isEquitySleeve(h)) {
+                continue;
+            }
             pct += (h.getWeightPct() / 100.0) * shockPct * betaProxy;
         }
         return PortfolioIntelligenceSnapshotFactory.round2(pct);
@@ -199,14 +252,48 @@ public class StressEngine {
             return 0;
         }
         for (PortfolioIntelligenceSnapshot.Holding h : snapshot.getHoldings()) {
-            if (SectorMatcher.matches(h.getSector(), sector)) {
+            if (takesSectorShock(h, sector)) {
                 pct += (h.getWeightPct() / 100.0) * shockPct * 1.0;
             }
         }
         return PortfolioIntelligenceSnapshotFactory.round2(pct);
     }
 
-    /** Same gate as {@link #resolveBetaMeta}: index shocks use 1.0 unless β is measured. */
+    static boolean isEquitySleeve(PortfolioIntelligenceSnapshot.Holding h) {
+        if (h == null) {
+            return false;
+        }
+        return HealthScoreEngine.ASSET_EQUITY.equals(
+                HealthScoreEngine.normalizeAssetClass(h.getAssetClass()));
+    }
+
+    static double equityWeightPct(PortfolioIntelligenceSnapshot snapshot) {
+        if (snapshot == null || snapshot.getHoldings() == null) {
+            return 0.0;
+        }
+        double w = 0.0;
+        for (PortfolioIntelligenceSnapshot.Holding h : snapshot.getHoldings()) {
+            if (isEquitySleeve(h)) {
+                w += h.getWeightPct();
+            }
+        }
+        return PortfolioIntelligenceSnapshotFactory.round2(w);
+    }
+
+    static boolean takesSectorShock(PortfolioIntelligenceSnapshot.Holding h, String sector) {
+        if (h == null || !isEquitySleeve(h)) {
+            return false;
+        }
+        if (IndexEtfSleeves.isBroadNiftyEtf(h.getSymbol())) {
+            return false;
+        }
+        if (SectorMatcher.matches(h.getSector(), sector)) {
+            return true;
+        }
+        return SectorMatcher.isUnusable(h.getSector())
+                && SectorMatcher.matches(h.getIndustry(), sector);
+    }
+
     private static double betaProxy(PortfolioIntelligenceSnapshot snapshot) {
         BetaMeta meta = resolveBetaMeta(snapshot);
         return meta.betaUsed != null ? meta.betaUsed : 1.0;
@@ -217,12 +304,10 @@ public class StressEngine {
         return SectorMatcher.matches(holdingSector, target);
     }
 
-    /** Banking / Financial Services / Finance aliases aligned with X-Ray labels. */
     static boolean matchesBanking(String sector) {
         return SectorMatcher.matchesBanking(sector);
     }
 
-    /** IT / Information Technology / Software aliases. */
     static boolean matchesIt(String sector) {
         return SectorMatcher.matchesIt(sector);
     }
@@ -239,11 +324,12 @@ public class StressEngine {
         return SectorMatcher.matchesEnergy(sector);
     }
 
-    private StressResponse.ScenarioImpactDto impact(String id, double pctImpact) {
+    private StressResponse.ScenarioImpactDto impact(String id, double pctImpact, Double appliedShockPct) {
         return StressResponse.ScenarioImpactDto.builder()
                 .id(id)
                 .pctImpact(pctImpact)
                 .absImpact(0)
+                .appliedShockPct(appliedShockPct)
                 .build();
     }
 
@@ -272,18 +358,22 @@ public class StressEngine {
         return response;
     }
 
+    public Map<String, String> getPresetCatalog() {
+        Map<String, String> m = new LinkedHashMap<>();
+        for (Map.Entry<String, StressProperties.ScenarioConfig> e : configService.getScenarios().entrySet()) {
+            m.put(e.getKey(), e.getValue().getDescription() != null ? e.getValue().getDescription() : "");
+        }
+        return m;
+    }
+
+    /** Catalog from classpath seed (no Spring). */
     public static Map<String, String> presetCatalog() {
         Map<String, String> m = new LinkedHashMap<>();
-        m.put(PRESET_NIFTY_DOWN_10, "Uniform -10% * betaProxy");
-        m.put(PRESET_NIFTY_DOWN_20, "Uniform -20% * betaProxy");
-        m.put(PRESET_SENSEX_DOWN_10, "Uniform -10% * betaProxy (Sensex label)");
-        m.put(PRESET_SENSEX_DOWN_20, "Uniform -20% * betaProxy (Sensex label)");
-        m.put(PRESET_BANKING_DOWN_20, "Banking/Financial -20%");
-        m.put(PRESET_IT_DOWN_15, "IT -15%");
-        m.put(PRESET_AUTO_DOWN_20, "Auto -20%");
-        m.put(PRESET_PHARMA_DOWN_15, "Pharma -15%");
-        m.put(PRESET_ENERGY_DOWN_20, "Energy -20%");
-        m.put(PRESET_CRASH_2008, "Banking -35%, IT -30%, residual -25%");
+        StressProperties props = StressProperties.loadClasspathDefaults();
+        if (props.getScenarios() != null) {
+            props.getScenarios().forEach((k, v) ->
+                    m.put(k, v.getDescription() != null ? v.getDescription() : ""));
+        }
         return m;
     }
 }

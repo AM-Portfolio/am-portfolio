@@ -39,10 +39,10 @@ public final class InstrumentKeys {
                 ? DEFAULT_PASSTHROUGH_PREFIXES
                 : passthroughPrefixes;
 
-        int colon = s.indexOf(':');
-        if (colon > 0) {
-            String head = s.substring(0, colon).toUpperCase(Locale.ROOT);
-            String tail = s.substring(colon + 1).trim();
+        int cut = segmentSeparatorIndex(s);
+        if (cut > 0) {
+            String head = s.substring(0, cut).toUpperCase(Locale.ROOT);
+            String tail = s.substring(cut + 1).trim();
             if (tail.isEmpty()) {
                 return s;
             }
@@ -74,6 +74,16 @@ public final class InstrumentKeys {
             return t;
         }
         return normalizePrefix(equityPrefix) + ":" + t;
+    }
+
+    /** Colon or Dhan-style pipe: {@code NSE_EQ|RELIANCE} → same as {@code NSE_EQ:RELIANCE}. */
+    static int segmentSeparatorIndex(String s) {
+        int colon = s.indexOf(':');
+        int pipe = s.indexOf('|');
+        if (colon > 0 && (pipe < 0 || colon < pipe)) {
+            return colon;
+        }
+        return pipe > 0 ? pipe : -1;
     }
 
     public static String normalizePrefix(String equityPrefix) {

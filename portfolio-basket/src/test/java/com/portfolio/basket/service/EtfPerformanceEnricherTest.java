@@ -138,6 +138,107 @@ class EtfPerformanceEnricherTest {
     }
 
     @Test
+    void fillDiscoverWave_usesOneMonthlyAllNotWeeklyOrStartEnd() {
+        EtfData etf = new EtfData();
+        etf.setSymbol("ITBEES");
+
+        when(marketDataService.getHistoricalData(any())).thenReturn(Map.of(
+                "ITBEES", monthlySeries(100.0, 0.008, 60)));
+
+        int filled = enricher.fillDiscoverWave(List.of(etf));
+
+        assertEquals(1, filled);
+        assertNotNull(etf.getReturn1Y());
+        assertNotNull(etf.getReturn3Y());
+        assertNotNull(etf.getReturn5Y());
+        assertTrue(etf.getSparklineCloses().size() >= 2);
+        ArgumentCaptor<HistoricalDataRequest> cap = ArgumentCaptor.forClass(HistoricalDataRequest.class);
+        verify(marketDataService, times(1)).getHistoricalData(cap.capture());
+        HistoricalDataRequest req = cap.getValue();
+        assertEquals("1W", req.getInterval());
+        assertEquals("ALL", req.getFilterType());
+        assertEquals(Boolean.FALSE, req.getIsIndexSymbol());
+        assertEquals(Boolean.FALSE, req.getForceRefresh());
+    }
+
+    @Test
+    void fillDiscoverWave_matchesPrefixedHistKeys() {
+        EtfData etf = new EtfData();
+        etf.setSymbol("NIFTYBEES");
+        when(marketDataService.getHistoricalData(any())).thenReturn(Map.of(
+                "NSE_EQ:NIFTYBEES", monthlySeries(100.0, 0.008, 60)));
+
+        assertEquals(1, enricher.fillDiscoverWave(List.of(etf)));
+        assertNotNull(etf.getReturn1Y());
+        assertTrue(etf.getSparklineCloses().size() >= 2);
+    }
+
+    @Test
+    void fillDiscoverWave_doesNotCopy3YInto5Y() {
+        EtfData etf = new EtfData();
+        etf.setSymbol("METALIETF");
+        // ~3 years of monthly bars → 3Y ok at 70% of 3Y, 5Y stays null
+        when(marketDataService.getHistoricalData(any())).thenReturn(Map.of(
+                "METALIETF", monthlySeries(100.0, 0.008, 36)));
+
+        enricher.fillDiscoverWave(List.of(etf));
+
+        assertNotNull(etf.getReturn1Y());
+        assertNotNull(etf.getReturn3Y());
+        assertNull(etf.getReturn5Y());
+        assertNotEquals(etf.getReturn3Y(), etf.getReturn5Y());
+    }
+
+    @Test
+    void fillDiscoverWave_skipsWhenComplete() {
+        EtfData etf = new EtfData();
+        etf.setSymbol("NIFTYBEES");
+        etf.setReturn1Y(1.0);
+        etf.setReturn3Y(2.0);
+        etf.setReturn5Y(3.0);
+        etf.setSparklineCloses(List.of(100.0, 110.0));
+
+        assertEquals(0, enricher.fillDiscoverWave(List.of(etf)));
+        verify(marketDataService, never()).getHistoricalData(any());
+    }
+
+    @Test
+    void fillDiscoverWave_timeoutFailOpen() {
+        EtfData etf = new EtfData();
+        etf.setSymbol("ITBEES");
+        enricher.discoverWaveTimeoutMs = 50L;
+        when(marketDataService.getHistoricalData(any())).thenAnswer(inv -> {
+            Thread.sleep(400);
+            return Map.of("ITBEES", monthlySeries(100.0, 0.008, 60));
+        });
+
+        int filled = enricher.fillDiscoverWave(List.of(etf));
+
+        assertEquals(0, filled);
+        assertNull(etf.getReturn1Y());
+    }
+
+    @Test
+    void stripInstrumentPrefix_bareColonAndPipe() {
+        assertEquals("NIFTYBEES", EtfPerformanceEnricher.stripInstrumentPrefix("NIFTYBEES"));
+        assertEquals("NIFTYBEES", EtfPerformanceEnricher.stripInstrumentPrefix("NSE_EQ:NIFTYBEES"));
+        assertEquals("NIFTYBEES", EtfPerformanceEnricher.stripInstrumentPrefix("NSE_EQ|NIFTYBEES"));
+    }
+
+    @Test
+    void periodReturn_oneYearAllowsSubTwoYearCoverage() {
+        List<EtfPerformanceEnricher.ClosePoint> points = new ArrayList<>();
+        LocalDate end = LocalDate.of(2026, 9, 15);
+        points.add(new EtfPerformanceEnricher.ClosePoint(
+                end.minusMonths(10).atStartOfDay(ZONE).toInstant(), 100.0));
+        points.add(new EtfPerformanceEnricher.ClosePoint(
+                end.atStartOfDay(ZONE).toInstant(), 110.0));
+        Double r1 = EtfPerformanceEnricher.periodReturnPct(points, points.get(1), 1, false);
+        assertNotNull(r1);
+        assertEquals(10.0, r1, 0.2);
+    }
+
+    @Test
     void periodReturn_cagrVsTotal() {
         List<EtfPerformanceEnricher.ClosePoint> points = new ArrayList<>();
         LocalDate end = LocalDate.of(2026, 9, 15);
@@ -154,6 +255,22 @@ class EtfPerformanceEnricherTest {
         assertEquals(33.1, total, 0.2);
     }
 
+    private static MarketData monthlySeries(double startClose, double monthlyReturn, int months) {
+        List<MarketData.MarketDataPoint> pts = new ArrayList<>();
+        LocalDate day = LocalDate.now(ZONE).minusMonths(months);
+        double close = startClose;
+        for (int i = 0; i <= months; i++) {
+            pts.add(point(day, close));
+            close *= (1.0 + monthlyReturn);
+            day = day.plusMonths(1);
+        }
+        return MarketData.builder()
+                .symbol("X")
+                .historical(true)
+                .dataPoints(pts)
+                .build();
+    }
+
     private static MarketData weeklySeries(double startClose, double weeklyReturn, int weeks) {
         List<MarketData.MarketDataPoint> pts = new ArrayList<>();
         LocalDate day = LocalDate.now(ZONE).minusWeeks(weeks);
@@ -167,6 +284,18 @@ class EtfPerformanceEnricherTest {
                 .symbol("X")
                 .historical(true)
                 .dataPoints(pts)
+                .build();
+    }
+
+    private static MarketData startEndSeries(LocalDate from, LocalDate to, double startClose, double endClose) {
+        return MarketData.builder()
+                .symbol("X")
+                .historical(true)
+                .fromDate(from)
+                .toDate(to)
+                .previousClose(startClose)
+                .lastPrice(endClose)
+                .dataPoints(List.of(point(from, startClose), point(to, endClose)))
                 .build();
     }
 

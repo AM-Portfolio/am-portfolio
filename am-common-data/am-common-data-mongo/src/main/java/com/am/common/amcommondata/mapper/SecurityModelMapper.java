@@ -192,19 +192,17 @@ public class SecurityModelMapper {
     }
 
     public MarketCapType getMarketCapType(Double marketCapValue) {
-        if (marketCapValue != null && marketCapValue > 0) {
-            // Calculate market cap type based on market cap value
-            if (marketCapValue >= 1000000000000D) { // > 1 lakh crore
-                return MarketCapType.LARGE_CAP;
-            } else if (marketCapValue >= 250000000000D) { // > 25k crore
-                return MarketCapType.MID_CAP;
-            } else if (marketCapValue >= 50000000000D) { // > 5k crore
-                return MarketCapType.SMALL_CAP;
-            } else {
-                return MarketCapType.MICRO_CAP;
-            }
-        } else {
-            return MarketCapType.MICRO_CAP;
+        if (marketCapValue == null || marketCapValue <= 0) {
+            // Missing value → null (do not invent MICRO_CAP).
+            return null;
         }
+        if (marketCapValue >= 1000000000000D) { // > 1 lakh crore
+            return MarketCapType.LARGE_CAP;
+        } else if (marketCapValue >= 250000000000D) { // > 25k crore
+            return MarketCapType.MID_CAP;
+        } else if (marketCapValue >= 50000000000D) { // > 5k crore
+            return MarketCapType.SMALL_CAP;
+        }
+        return MarketCapType.MICRO_CAP;
     }
 }
