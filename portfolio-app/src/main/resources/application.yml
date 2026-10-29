@@ -379,6 +379,8 @@ portfolio:
     history-timeout-ms: ${PORTFOLIO_INTEL_HISTORY_TIMEOUT_MS:800}
     # Stress / intel β load — longer than soft timeout so MD hist can succeed once and fill cache
     history-timeout-stress-ms: ${PORTFOLIO_INTEL_HISTORY_TIMEOUT_STRESS_MS:20000}
+    # Soft fail-open for stress when intel-hist cold; background fetch still warms Redis
+    history-timeout-stress-soft-ms: ${PORTFOLIO_INTEL_HISTORY_TIMEOUT_STRESS_SOFT_MS:2500}
     # A/B/C diversification + annualized vol; default false keeps legacy count formula
     health-v2: ${PORTFOLIO_INTEL_HEALTH_V2:false}
     risk:

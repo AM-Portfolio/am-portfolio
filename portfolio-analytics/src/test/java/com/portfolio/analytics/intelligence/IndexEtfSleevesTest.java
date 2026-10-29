@@ -1,6 +1,7 @@
 package com.portfolio.analytics.intelligence;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -8,6 +9,13 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class IndexEtfSleevesTest {
+
+    @BeforeEach
+    void seedFromYaml() {
+        StressProperties props = StressProperties.loadClasspathDefaults();
+        IndexEtfSleeves.replaceRawIndex(props.getRawIndices());
+        IndexEtfSleeves.replaceBroadNiftyEtf(props.getBroadNiftyEtfs());
+    }
 
     @AfterEach
     void tearDown() {
@@ -22,6 +30,16 @@ class IndexEtfSleevesTest {
         assertThat(IndexEtfSleeves.isRawIndexAlias("BANKNIFTY")).isTrue();
         assertThat(IndexEtfSleeves.isRawIndexAlias("NIFTYBEES")).isFalse();
         assertThat(IndexEtfSleeves.isRawIndexAlias("RELIANCE")).isFalse();
+    }
+
+    @Test
+    void withoutRegistration_rawListsEmpty_heuristicsStillApply() {
+        IndexEtfSleeves.resetConfiguredForTesting();
+        // Exact list membership requires seed/Mongo; bare SENSEX is not a heuristic hit
+        assertThat(IndexEtfSleeves.isRawIndexAlias("SENSEX")).isFalse();
+        // Heuristics still work without seed
+        assertThat(IndexEtfSleeves.isRawIndexAlias("NIFTY_TRI")).isTrue();
+        assertThat(IndexEtfSleeves.isBroadNiftyEtf("NIFTYBEES")).isTrue();
     }
 
     @Test

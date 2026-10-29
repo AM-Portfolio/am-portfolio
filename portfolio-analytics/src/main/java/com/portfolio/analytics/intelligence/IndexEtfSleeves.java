@@ -9,34 +9,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * Ticker heuristics for Stress β sleeves. Listed ETFs stay in NAV vs NIFTY 50;
  * raw index names are excluded; broad Nifty ETFs skip Banking/IT sector shocks.
  *
- * Configurable dynamically via {@link StressProperties} or direct registration.
+ * Sleeve ticker lists come from {@link StressConfigService} (Mongo / YAML seed) —
+ * no hardcoded DEFAULT sets in Java.
  */
 public final class IndexEtfSleeves {
-
-    private static final Set<String> DEFAULT_RAW_INDEX = Set.of(
-            "NIFTY",
-            "NIFTY50",
-            "SENSEX",
-            "BANKNIFTY",
-            "FINNIFTY",
-            "MIDCPNIFTY",
-            "NIFTYMIDCAP50",
-            "NIFTYMIDCAP100",
-            "NIFTYMIDCAP150",
-            "NIFTY100",
-            "NIFTY200",
-            "NIFTY500",
-            "BSE500");
-
-    private static final Set<String> DEFAULT_BROAD_NIFTY_ETF = Set.of(
-            "NIFTYBEES",
-            "SETFNIF50",
-            "NIFTYIETF",
-            "JUNIORBEES",
-            "NIF100BEES",
-            "NEXT50",
-            "NEXT50BEES",
-            "MOM50BEES");
 
     private static final Set<String> CONFIGURED_RAW_INDEX = ConcurrentHashMap.newKeySet();
     private static final Set<String> CONFIGURED_BROAD_NIFTY_ETF = ConcurrentHashMap.newKeySet();
@@ -44,9 +20,7 @@ public final class IndexEtfSleeves {
     private IndexEtfSleeves() {
     }
 
-    /**
-     * Register additional raw index tickers at runtime (e.g. loaded from application.yml).
-     */
+    /** Append raw index tickers (additive). Prefer {@link #replaceRawIndex} on reload. */
     public static void registerRawIndex(Collection<String> symbols) {
         if (symbols == null) {
             return;
@@ -59,9 +33,7 @@ public final class IndexEtfSleeves {
         }
     }
 
-    /**
-     * Register additional broad Nifty ETF tickers at runtime (e.g. loaded from application.yml).
-     */
+    /** Append broad Nifty ETF tickers (additive). Prefer {@link #replaceBroadNiftyEtf} on reload. */
     public static void registerBroadNiftyEtf(Collection<String> symbols) {
         if (symbols == null) {
             return;
@@ -72,6 +44,18 @@ public final class IndexEtfSleeves {
                 CONFIGURED_BROAD_NIFTY_ETF.add(c);
             }
         }
+    }
+
+    /** Replace raw-index registry (Mongo reload / deactivated rows). */
+    public static void replaceRawIndex(Collection<String> symbols) {
+        CONFIGURED_RAW_INDEX.clear();
+        registerRawIndex(symbols);
+    }
+
+    /** Replace broad-ETF registry (Mongo reload / deactivated rows). */
+    public static void replaceBroadNiftyEtf(Collection<String> symbols) {
+        CONFIGURED_BROAD_NIFTY_ETF.clear();
+        registerBroadNiftyEtf(symbols);
     }
 
     /** Visible for testing. */
@@ -85,14 +69,12 @@ public final class IndexEtfSleeves {
         if (compact == null) {
             return false;
         }
-        if (DEFAULT_RAW_INDEX.contains(compact) || CONFIGURED_RAW_INDEX.contains(compact)) {
+        if (CONFIGURED_RAW_INDEX.contains(compact)) {
             return true;
         }
-        // ETFs are not raw index aliases
         if (compact.contains("BEES") || compact.contains("ETF") || compact.contains("IETF")) {
             return false;
         }
-        // Generic index suffix/prefix matching for NSE/BSE indices
         return compact.endsWith("INDEX") || compact.endsWith("TRI");
     }
 
@@ -102,7 +84,7 @@ public final class IndexEtfSleeves {
         if (compact == null || compact.isEmpty()) {
             return false;
         }
-        if (DEFAULT_BROAD_NIFTY_ETF.contains(compact) || CONFIGURED_BROAD_NIFTY_ETF.contains(compact)) {
+        if (CONFIGURED_BROAD_NIFTY_ETF.contains(compact)) {
             return true;
         }
         if (compact.contains("BANK")
