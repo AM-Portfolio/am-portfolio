@@ -187,4 +187,26 @@ class HeatmapUtilsTest {
     @Test void roundToTwoDecimals() {
         assertEquals(3.15, HeatmapUtils.roundToTwoDecimals(3.145));
     }
+
+    @Test void createCompleteSectorPerformance_returnsAllStocksBeyondFormerCap() {
+        int n = 20;
+        List<MarketData> stocks = new ArrayList<>();
+        List<Double> qtys = new ArrayList<>();
+        List<String> symbols = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            stocks.add(md(100 + i, 100, 100));
+            qtys.add(10.0);
+            symbols.add("SYM" + i);
+        }
+        var sector = HeatmapUtils.createCompleteSectorPerformance(
+                "Technology Services",
+                "TECH",
+                stocks,
+                qtys,
+                symbols,
+                1_000_000.0);
+        assertNotNull(sector.getStocks());
+        assertEquals(n, sector.getStocks().size());
+        assertEquals(n, sector.getStockCount());
+    }
 }
