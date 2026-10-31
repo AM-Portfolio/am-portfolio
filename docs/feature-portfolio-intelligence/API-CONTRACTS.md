@@ -77,13 +77,13 @@ Use these shapes for OpenAPI + Postman goldens. Field names may use camelCase in
 }
 ```
 
-Presets: `NIFTY_DOWN_10`, `NIFTY_DOWN_20`, `SENSEX_DOWN_10`, `SENSEX_DOWN_20`, `BANKING_DOWN_20`, `IT_DOWN_15`, `AUTO_DOWN_20`, `PHARMA_DOWN_15`, `ENERGY_DOWN_20`, `CRASH_2008`.
+Presets: `NIFTY_DOWN_10`, `NIFTY_DOWN_20`, `SENSEX_DOWN_10`, `SENSEX_DOWN_20`, `BANKING_DOWN_20`, `IT_DOWN_15`, `AUTO_DOWN_20`, `PHARMA_DOWN_15`, `ENERGY_DOWN_20`, `CRASH_2008` (sector pack; not in Overview table), plus uniform catalog events `GFC_2008` (−56% × β), `COVID_2020` (−38%), `CHINA_2015` (−28%), `INFLATION_2022` (−26%), `ELECTION_2024` (−18%). Preset rows include `appliedShockPct` (the catalog market-fall %). `CRASH_2008` omits a single `appliedShockPct` (mixed pack).
 
 **Batch (preferred for Overview):**
 
 ```json
 {
-  "presets": ["NIFTY_DOWN_10", "NIFTY_DOWN_20", "SENSEX_DOWN_10", "BANKING_DOWN_20", "IT_DOWN_15", "AUTO_DOWN_20", "PHARMA_DOWN_15", "ENERGY_DOWN_20", "CRASH_2008"]
+  "presets": ["NIFTY_DOWN_10", "SENSEX_DOWN_10", "GFC_2008", "COVID_2020", "CHINA_2015", "INFLATION_2022", "ELECTION_2024"]
 }
 ```
 
@@ -104,15 +104,24 @@ Custom (optional):
 {
   "portfolioId": "uuid",
   "estimateLabel": "Scenario estimate",
+  "method": "PORTFOLIO_BETA",
+  "betaUsed": 1.2,
+  "benchmark": "NIFTY50",
+  "historyDays": 39,
+  "betaAssumed": false,
+  "equityWeightPct": 70.0,
   "scenarios": [
     {
       "id": "NIFTY_DOWN_10",
       "pctImpact": -8.4,
-      "absImpact": -77800.0
+      "absImpact": -77800.0,
+      "appliedShockPct": -10.0
     }
   ]
 }
 ```
+
+**β:** stocks+ETFs vs **NIFTY 50 INDEX** only (`historyDays` = aligned daily returns, not calendar). Index/event `pctImpact` ≈ `equityWeightPct/100 × appliedShockPct × betaUsed`. Cash/MF/bonds are not in `equityWeightPct`. Assumed path: `method=ASSUMED_ONE`, `betaUsed=1.0`, `betaAssumed=true`, scenarios still filled (HTTP 200).
 
 **Asserts:** For `NIFTY_DOWN_10` on long equity book, `pctImpact` &lt; 0. No Mongo write.
 
