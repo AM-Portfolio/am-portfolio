@@ -23,8 +23,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Live cache for stress scenarios and ETF sleeves. Runtime source of truth is Mongo;
- * classpath YAML ({@link StressProperties#loadClasspathDefaults()}) seeds / fail-opens.
+ * Live cache for stress scenarios and ETF sleeves. Runtime source of truth is MongoDB.
  */
 @Slf4j
 @Service
@@ -54,25 +53,7 @@ public class StressConfigService {
     }
 
     private static StressProperties ensureSeedProperties(StressProperties properties) {
-        if (properties != null
-                && properties.getScenarios() != null
-                && !properties.getScenarios().isEmpty()) {
-            return properties;
-        }
-        StressProperties fromClasspath = StressProperties.loadClasspathDefaults();
-        if (properties == null) {
-            return fromClasspath;
-        }
-        if (properties.getScenarios() == null || properties.getScenarios().isEmpty()) {
-            properties.setScenarios(fromClasspath.getScenarios());
-        }
-        if (properties.getRawIndices() == null || properties.getRawIndices().isEmpty()) {
-            properties.setRawIndices(fromClasspath.getRawIndices());
-        }
-        if (properties.getBroadNiftyEtfs() == null || properties.getBroadNiftyEtfs().isEmpty()) {
-            properties.setBroadNiftyEtfs(fromClasspath.getBroadNiftyEtfs());
-        }
-        return properties;
+        return properties != null ? properties : new StressProperties();
     }
 
     @PostConstruct

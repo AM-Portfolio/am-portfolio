@@ -6,9 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
-import org.yaml.snakeyaml.Yaml;
 
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -66,64 +64,5 @@ public class StressProperties {
         private Map<String, Double> sectorShocks;
         /** Residual shock for holdings not matching any specific sector in MULTI_SECTOR. */
         private Double residualShock;
-    }
-
-    @SuppressWarnings("unchecked")
-    public static StressProperties loadClasspathDefaults() {
-        StressProperties props = new StressProperties();
-        try (InputStream is = StressProperties.class.getResourceAsStream("/stress-defaults.yml")) {
-            if (is != null) {
-                Yaml yaml = new Yaml();
-                Map<String, Object> root = yaml.load(is);
-                if (root != null && root.containsKey("portfolio")) {
-                    Map<String, Object> p = (Map<String, Object>) root.get("portfolio");
-                    Map<String, Object> intel = (Map<String, Object>) p.get("intelligence");
-                    if (intel != null) {
-                        Map<String, Object> stress = (Map<String, Object>) intel.get("stress");
-                        if (stress != null) {
-                            if (stress.containsKey("refresh-rate-ms")) {
-                                props.setRefreshRateMs(((Number) stress.get("refresh-rate-ms")).longValue());
-                            }
-                            if (stress.containsKey("raw-indices")) {
-                                props.setRawIndices(new ArrayList<>((List<String>) stress.get("raw-indices")));
-                            }
-                            if (stress.containsKey("broad-nifty-etfs")) {
-                                props.setBroadNiftyEtfs(new ArrayList<>((List<String>) stress.get("broad-nifty-etfs")));
-                            }
-                            if (stress.containsKey("scenarios")) {
-                                Map<String, Map<String, Object>> scMap = (Map<String, Map<String, Object>>) stress.get("scenarios");
-                                scMap.forEach((k, v) -> {
-                                    ScenarioConfig sc = new ScenarioConfig();
-                                    if (v.containsKey("type")) {
-                                        sc.setType(ScenarioType.valueOf((String) v.get("type")));
-                                    }
-                                    if (v.containsKey("shock-pct")) {
-                                        sc.setShockPct(((Number) v.get("shock-pct")).doubleValue());
-                                    }
-                                    if (v.containsKey("target-sector")) {
-                                        sc.setTargetSector((String) v.get("target-sector"));
-                                    }
-                                    if (v.containsKey("description")) {
-                                        sc.setDescription((String) v.get("description"));
-                                    }
-                                    if (v.containsKey("residual-shock")) {
-                                        sc.setResidualShock(((Number) v.get("residual-shock")).doubleValue());
-                                    }
-                                    if (v.containsKey("sector-shocks")) {
-                                        Map<String, Number> ss = (Map<String, Number>) v.get("sector-shocks");
-                                        Map<String, Double> shocks = new LinkedHashMap<>();
-                                        ss.forEach((sKey, sVal) -> shocks.put(sKey, sVal.doubleValue()));
-                                        sc.setSectorShocks(shocks);
-                                    }
-                                    props.getScenarios().put(k, sc);
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return props;
     }
 }

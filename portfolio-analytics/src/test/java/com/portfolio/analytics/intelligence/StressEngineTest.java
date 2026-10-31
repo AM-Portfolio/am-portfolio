@@ -5,7 +5,9 @@ import com.portfolio.model.analytics.intelligence.StressResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -13,7 +15,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StressEngineTest {
 
-    private final StressEngine engine = new StressEngine();
+    private static StressProperties buildTestProperties() {
+        StressProperties props = new StressProperties();
+        props.setRawIndices(List.of("^NSEI", "^BSESN", "NIFTY 50", "SENSEX"));
+        props.setBroadNiftyEtfs(List.of("NIFTYBEES", "SETFNIF50"));
+        Map<String, StressProperties.ScenarioConfig> map = new LinkedHashMap<>();
+        map.put("NIFTY_DOWN_10", StressProperties.ScenarioConfig.builder().type(StressProperties.ScenarioType.UNIFORM).shockPct(-10.0).description("Nifty Down 10%").build());
+        map.put("SENSEX_DOWN_10", StressProperties.ScenarioConfig.builder().type(StressProperties.ScenarioType.UNIFORM).shockPct(-10.0).description("Sensex Down 10%").build());
+        map.put("GFC_2008", StressProperties.ScenarioConfig.builder().type(StressProperties.ScenarioType.UNIFORM).shockPct(-56.0).description("2008 Global Financial Crisis").build());
+        map.put("COVID_2020", StressProperties.ScenarioConfig.builder().type(StressProperties.ScenarioType.UNIFORM).shockPct(-38.0).description("2020 COVID Crash").build());
+        map.put("CHINA_2015", StressProperties.ScenarioConfig.builder().type(StressProperties.ScenarioType.UNIFORM).shockPct(-28.0).description("2015 China Devaluation").build());
+        map.put("INFLATION_2022", StressProperties.ScenarioConfig.builder().type(StressProperties.ScenarioType.UNIFORM).shockPct(-15.0).description("2022 Global Inflation Spike").build());
+        map.put("ELECTION_2024", StressProperties.ScenarioConfig.builder().type(StressProperties.ScenarioType.UNIFORM).shockPct(-18.0).description("2024 Election Day Volatility").build());
+        map.put("BANKING_DOWN_20", StressProperties.ScenarioConfig.builder().type(StressProperties.ScenarioType.SECTOR).shockPct(-20.0).targetSector("Banking").description("Banking Shock -20%").build());
+        map.put("IT_DOWN_15", StressProperties.ScenarioConfig.builder().type(StressProperties.ScenarioType.SECTOR).shockPct(-15.0).targetSector("IT").description("IT Shock -15%").build());
+        map.put("AUTO_DOWN_20", StressProperties.ScenarioConfig.builder().type(StressProperties.ScenarioType.SECTOR).shockPct(-20.0).targetSector("Auto").description("Auto Shock -20%").build());
+        map.put("PHARMA_DOWN_15", StressProperties.ScenarioConfig.builder().type(StressProperties.ScenarioType.SECTOR).shockPct(-15.0).targetSector("Pharma").description("Pharma Shock -15%").build());
+        map.put("ENERGY_DOWN_20", StressProperties.ScenarioConfig.builder().type(StressProperties.ScenarioType.SECTOR).shockPct(-20.0).targetSector("Energy").description("Energy Shock -20%").build());
+        props.setScenarios(map);
+        return props;
+    }
+
+    private final StressEngine engine = new StressEngine(buildTestProperties());
 
     @Test
     void niftyDown10_withBetaHalf_impactIsMinusFive() {

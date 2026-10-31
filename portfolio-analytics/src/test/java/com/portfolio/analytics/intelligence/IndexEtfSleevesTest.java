@@ -12,7 +12,16 @@ class IndexEtfSleevesTest {
 
     @BeforeEach
     void seedFromYaml() {
-        StressProperties props = StressProperties.loadClasspathDefaults();
+        StressProperties props = new StressProperties();
+        props.setRawIndices(List.of(
+                "NIFTY", "NIFTY50", "SENSEX", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY",
+                "NIFTYMIDCAP50", "NIFTYMIDCAP100", "NIFTYMIDCAP150", "NIFTY100",
+                "NIFTY200", "NIFTY500", "BSE500"
+        ));
+        props.setBroadNiftyEtfs(List.of(
+                "NIFTYBEES", "SETFNIF50", "NIFTYIETF", "JUNIORBEES", "NIF100BEES",
+                "NEXT50", "NEXT50BEES", "MOM50BEES"
+        ));
         IndexEtfSleeves.replaceRawIndex(props.getRawIndices());
         IndexEtfSleeves.replaceBroadNiftyEtf(props.getBroadNiftyEtfs());
     }
