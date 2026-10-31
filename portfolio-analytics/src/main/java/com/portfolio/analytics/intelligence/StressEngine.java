@@ -42,7 +42,7 @@ public class StressEngine {
     private final StressConfigService configService;
 
     public StressEngine() {
-        this(new StressConfigService(new StressProperties()));
+        this(new StressConfigService(StressProperties.loadClasspathDefaults()));
     }
 
     /** Test helper: wrap properties into an initialized config service. */
@@ -54,7 +54,7 @@ public class StressEngine {
     public StressEngine(StressConfigService configService) {
         this.configService = configService != null
                 ? configService
-                : new StressConfigService(new StressProperties());
+                : new StressConfigService(StressProperties.loadClasspathDefaults());
         // Ensure classpath seed is in cache when Mongo repos are absent (unit tests / early init).
         if (this.configService.getScenarios().isEmpty()) {
             this.configService.resetForTesting();
@@ -121,8 +121,8 @@ public class StressEngine {
             }
         } else {
             String preset = request != null && request.getPreset() != null && !request.getPreset().isBlank()
-                    ? request.getPreset().trim().toUpperCase(Locale.ROOT)
-                    : PRESET_NIFTY_DOWN_10;
+                ? request.getPreset().trim().toUpperCase(Locale.ROOT)
+                : PRESET_NIFTY_DOWN_10;
             requireKnownPreset(preset);
             scenarioImpacts.add(impact(preset, applyPreset(snapshot, preset), catalogShockPct(preset)));
         }
@@ -369,7 +369,7 @@ public class StressEngine {
     /** Catalog from classpath seed (no Spring). */
     public static Map<String, String> presetCatalog() {
         Map<String, String> m = new LinkedHashMap<>();
-        StressProperties props = new StressProperties();
+        StressProperties props = StressProperties.loadClasspathDefaults();
         if (props.getScenarios() != null) {
             props.getScenarios().forEach((k, v) ->
                     m.put(k, v.getDescription() != null ? v.getDescription() : ""));

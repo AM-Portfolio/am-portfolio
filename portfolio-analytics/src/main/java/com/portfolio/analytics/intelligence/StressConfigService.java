@@ -24,6 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Live cache for stress scenarios and ETF sleeves. Runtime source of truth is MongoDB.
+ * Classpath defaults seed MongoDB idempotently if collections are empty.
  */
 @Slf4j
 @Service
@@ -53,7 +54,23 @@ public class StressConfigService {
     }
 
     private static StressProperties ensureSeedProperties(StressProperties properties) {
-        return properties != null ? properties : new StressProperties();
+        StressProperties seedProps = properties != null ? properties : new StressProperties();
+        if (seedProps.getScenarios() == null || seedProps.getScenarios().isEmpty()) {
+            StressProperties defaults = StressProperties.loadClasspathDefaults();
+            if (defaults != null && defaults.getScenarios() != null && !defaults.getScenarios().isEmpty()) {
+                if (seedProps.getScenarios() == null) {
+                    seedProps.setScenarios(new LinkedHashMap<>());
+                }
+                seedProps.getScenarios().putAll(defaults.getScenarios());
+            }
+            if (defaults != null && (seedProps.getRawIndices() == null || seedProps.getRawIndices().isEmpty())) {
+                seedProps.setRawIndices(new ArrayList<>(defaults.getRawIndices()));
+            }
+            if (defaults != null && (seedProps.getBroadNiftyEtfs() == null || seedProps.getBroadNiftyEtfs().isEmpty())) {
+                seedProps.setBroadNiftyEtfs(new ArrayList<>(defaults.getBroadNiftyEtfs()));
+            }
+        }
+        return seedProps;
     }
 
     @PostConstruct
@@ -69,6 +86,12 @@ public class StressConfigService {
         try {
             if (scenarioRepo.isPresent() && sleeveRepo.isPresent()) {
                 List<StressScenarioDocument> scenarios = scenarioRepo.get().findByActiveTrueOrderBySortOrderAsc();
+                if (scenarios.isEmpty()) {
+                    log.info("MongoDB stress_scenarios collection is empty. Seeding initial scenarios before live traffic...");
+                    seedMongoIdempotent();
+                    scenarios = scenarioRepo.get().findByActiveTrueOrderBySortOrderAsc();
+                }
+
                 if (!scenarios.isEmpty()) {
                     Map<String, StressProperties.ScenarioConfig> next = new LinkedHashMap<>();
                     for (StressScenarioDocument doc : scenarios) {
@@ -82,6 +105,12 @@ public class StressConfigService {
                 }
 
                 List<IndexSleeveDocument> sleeves = sleeveRepo.get().findByActiveTrue();
+                if (sleeves.isEmpty()) {
+                    log.info("MongoDB index_sleeves collection is empty. Seeding initial sleeves before live traffic...");
+                    seedMongoIdempotent();
+                    sleeves = sleeveRepo.get().findByActiveTrue();
+                }
+
                 if (!sleeves.isEmpty()) {
                     Set<String> raw = ConcurrentHashMap.newKeySet();
                     Set<String> broad = ConcurrentHashMap.newKeySet();
@@ -133,9 +162,11 @@ public class StressConfigService {
                 for (Map.Entry<String, StressProperties.ScenarioConfig> entry : properties.getScenarios().entrySet()) {
                     String code = entry.getKey().trim().toUpperCase(Locale.ROOT);
                     StressProperties.ScenarioConfig cfg = entry.getValue();
-                    StressScenarioDocument doc = scenarioRepo.get().findByScenarioCode(code)
-                            .orElseGet(StressScenarioDocument::new);
-                    boolean isNew = doc.getId() == null;
+                    var existing = scenarioRepo.get().findByScenarioCode(code);
+                    if (existing.isPresent()) {
+                        continue; // Preserve existing MongoDB record
+                    }
+                    StressScenarioDocument doc = new StressScenarioDocument();
                     doc.setScenarioCode(code);
                     doc.setScenarioName(entry.getKey());
                     doc.setScenarioType(cfg.getType() != null ? cfg.getType().name() : "UNIFORM");
@@ -147,14 +178,12 @@ public class StressConfigService {
                     doc.setActive(true);
                     doc.setSortOrder(order++);
                     doc.setUpdatedAt(now);
-                    if (isNew) {
-                        doc.setCreatedAt(now);
-                    }
+                    doc.setCreatedAt(now);
                     scenarioRepo.get().save(doc);
                     upserted++;
                 }
                 if (upserted > 0) {
-                    log.info("Upserted {} stress scenarios into MongoDB collection stress_scenarios", upserted);
+                    log.info("Seeded {} stress scenarios into MongoDB collection stress_scenarios", upserted);
                 }
             }
 
@@ -171,7 +200,7 @@ public class StressConfigService {
                     }
                 }
                 if (upserted > 0) {
-                    log.info("Upserted {} index sleeves into MongoDB collection index_sleeves", upserted);
+                    log.info("Seeded {} index sleeves into MongoDB collection index_sleeves", upserted);
                 }
             }
         } catch (Exception ex) {
@@ -184,15 +213,19 @@ public class StressConfigService {
             return 0;
         }
         String normalized = symbol.trim().toUpperCase(Locale.ROOT);
-        IndexSleeveDocument doc = sleeveRepo.get().findBySymbol(normalized).orElseGet(IndexSleeveDocument::new);
-        boolean isNew = doc.getId() == null;
+        var existing = sleeveRepo.get().findBySymbol(normalized);
+        if (existing.isPresent()) {
+            return 0; // Already exists in MongoDB
+        }
+        IndexSleeveDocument doc = new IndexSleeveDocument();
         doc.setSymbol(normalized);
         doc.setSleeveType(sleeveType);
+        doc.setDescription(sleeveType.equals("RAW_INDEX")
+                ? "Raw index excluded from NAV / shock mapping"
+                : "Broad market ETF excluded from single sector shock");
         doc.setActive(true);
         doc.setUpdatedAt(now);
-        if (isNew) {
-            doc.setCreatedAt(now);
-        }
+        doc.setCreatedAt(now);
         sleeveRepo.get().save(doc);
         return 1;
     }
@@ -303,10 +336,9 @@ public class StressConfigService {
         rawIndexCache.clear();
         broadNiftyEtfCache.clear();
         IndexEtfSleeves.resetConfiguredForTesting();
-        if (properties != null) {
-            loadFromProperties();
-            IndexEtfSleeves.replaceRawIndex(new ArrayList<>(rawIndexCache));
-            IndexEtfSleeves.replaceBroadNiftyEtf(new ArrayList<>(broadNiftyEtfCache));
-        }
+        this.properties = ensureSeedProperties(properties);
+        loadFromProperties();
+        IndexEtfSleeves.replaceRawIndex(new ArrayList<>(rawIndexCache));
+        IndexEtfSleeves.replaceBroadNiftyEtf(new ArrayList<>(broadNiftyEtfCache));
     }
 }
