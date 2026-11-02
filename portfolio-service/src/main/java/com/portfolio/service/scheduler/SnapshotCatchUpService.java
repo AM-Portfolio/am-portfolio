@@ -55,12 +55,20 @@ public class SnapshotCatchUpService {
     @Value("${app.history.job.pass-a-days:90}")
     private int passADays;
 
-    @Value("${app.history.fetch.chunk-size:10}")
+    /**
+     * One symbol per request: a single hanging ticker (e.g. TMCV on dig) blocks the whole
+     * multi-symbol market historical call past the WebClient timeout.
+     */
+    @Value("${app.history.fetch.chunk-size:1}")
     private int fetchChunkSize;
 
     /** Dig market CB opens under parallel hist — keep serial by default. */
     @Value("${app.history.fetch.max-parallel:1}")
     private int fetchMaxParallel;
+
+    /** Per-call mono timeout for history catch-up (ms). Below WebClient 45s so hangers fail fast. */
+    @Value("${app.history.fetch.per-call-timeout-ms:12000}")
+    private long fetchPerCallTimeoutMs;
 
     /** Refuse READY when fewer than this fraction of loadable tickers have any historical close. */
     @Value("${app.history.coverage.min-priced-fraction:0.8}")
@@ -442,54 +450,31 @@ public class SnapshotCatchUpService {
             log.warn("[HistoryJob] No trading tickers to price userId={} rawSymbols={}", userId, symbols.size());
             return priceLookup;
         }
-        int chunkSize = fetchChunkSize > 0 ? fetchChunkSize : 10;
-        int maxParallel = fetchMaxParallel > 0 ? fetchMaxParallel : 1;
+        int chunkSize = fetchChunkSize > 0 ? fetchChunkSize : 1;
         long t0 = System.currentTimeMillis();
+        int ok = 0;
+        int failed = 0;
 
-        List<List<String>> chunks = new ArrayList<>();
+        // Serial per-symbol (or tiny chunks): never amplify one hanger across a batch.
         for (int i = 0; i < symbolList.size(); i += chunkSize) {
-            chunks.add(new ArrayList<>(symbolList.subList(i, Math.min(i + chunkSize, symbolList.size()))));
-        }
-
-        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(
-                Math.min(maxParallel, Math.max(1, chunks.size())),
-                r -> {
-                    Thread t = new Thread(r, "history-fetch-" + userId);
-                    t.setDaemon(true);
-                    return t;
-                });
-        try {
-            List<java.util.concurrent.Future<Map<LocalDate, Map<String, Double>>>> futures = new ArrayList<>();
-            for (List<String> chunk : chunks) {
-                futures.add(pool.submit(() -> {
-                    Map<LocalDate, Map<String, Double>> partial = new HashMap<>();
-                    if (!fetchPriceChunk(userId, chunk, from, to, partial)) {
-                        for (String one : chunk) {
-                            fetchPriceChunk(userId, List.of(one), from, to, partial);
-                        }
+            List<String> chunk = new ArrayList<>(symbolList.subList(i, Math.min(i + chunkSize, symbolList.size())));
+            if (fetchPriceChunk(userId, chunk, from, to, priceLookup)) {
+                ok += chunk.size();
+            } else if (chunk.size() > 1) {
+                for (String one : chunk) {
+                    if (fetchPriceChunk(userId, List.of(one), from, to, priceLookup)) {
+                        ok++;
+                    } else {
+                        failed++;
                     }
-                    return partial;
-                }));
-            }
-            for (java.util.concurrent.Future<Map<LocalDate, Map<String, Double>>> f : futures) {
-                try {
-                    Map<LocalDate, Map<String, Double>> partial = f.get();
-                    if (partial == null) {
-                        continue;
-                    }
-                    for (Map.Entry<LocalDate, Map<String, Double>> e : partial.entrySet()) {
-                        priceLookup.computeIfAbsent(e.getKey(), k -> new HashMap<>()).putAll(e.getValue());
-                    }
-                } catch (Exception e) {
-                    log.error("[HistoryJob] Parallel price chunk failed userId={}: {}", userId, e.getMessage());
                 }
+            } else {
+                failed++;
             }
-        } finally {
-            pool.shutdown();
         }
 
-        log.info("[HistoryJob] Price map days={} userId={} tickers={} chunks={} parallel={} elapsedMs={}",
-                priceLookup.size(), userId, symbolList.size(), chunks.size(), maxParallel,
+        log.info("[HistoryJob] Price map days={} userId={} tickers={} ok={} failed={} chunkSize={} elapsedMs={}",
+                priceLookup.size(), userId, symbolList.size(), ok, failed, chunkSize,
                 System.currentTimeMillis() - t0);
         return priceLookup;
     }
@@ -512,18 +497,21 @@ public class SnapshotCatchUpService {
         log.info("[HistoryJob] Market historical fetch userId={} symbols={} from={} to={}",
                 userId, chunk.size(), from, to);
         HistoricalDataResponseWrapper histResponse = null;
-        final int maxAttempts = 4;
+        final int maxAttempts = 2;
+        long callTimeoutMs = fetchPerCallTimeoutMs > 0 ? fetchPerCallTimeoutMs : 12_000L;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                histResponse = marketDataApiClient.getHistoricalData(request).block();
+                histResponse = marketDataApiClient.getHistoricalData(request)
+                        .timeout(java.time.Duration.ofMillis(callTimeoutMs))
+                        .block();
                 break;
             } catch (Exception e) {
                 String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                 boolean cbBlocked = msg.contains("CallNotPermitted")
                         || msg.contains("CircuitBreaker")
                         || (e.getCause() != null && String.valueOf(e.getCause()).contains("CallNotPermitted"));
-                if (attempt < maxAttempts && (cbBlocked || msg.contains("Timeout"))) {
-                    long sleepMs = cbBlocked ? 5_000L * attempt : 1_500L * attempt;
+                if (attempt < maxAttempts && cbBlocked) {
+                    long sleepMs = 5_000L * attempt;
                     log.warn("[HistoryJob] Market fetch retry userId={} attempt={}/{} sleepMs={} reason={}",
                             userId, attempt, maxAttempts, sleepMs, msg);
                     try {
@@ -534,7 +522,9 @@ public class SnapshotCatchUpService {
                     }
                     continue;
                 }
-                log.error("[HistoryJob] Market fetch failed userId={} symbols={}", userId, symbolsParam, e);
+                // Timeouts / hangers: skip symbol, do not burn 45s×retries.
+                log.warn("[HistoryJob] Market fetch skip userId={} symbols={} reason={}",
+                        userId, symbolsParam, msg);
                 return false;
             }
         }
