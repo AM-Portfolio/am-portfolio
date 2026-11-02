@@ -149,8 +149,8 @@ app:
       pass-a-days: ${HISTORY_PASS_A_DAYS:90}
       debounce-seconds: ${HISTORY_JOB_DEBOUNCE_SECONDS:15}
     fetch:
-      chunk-size: ${HISTORY_FETCH_CHUNK_SIZE:20}
-      max-parallel: ${HISTORY_FETCH_MAX_PARALLEL:4}
+      chunk-size: ${HISTORY_FETCH_CHUNK_SIZE:10}
+      max-parallel: ${HISTORY_FETCH_MAX_PARALLEL:1}
     coverage:
       # Refuse HistoryJob READY when priced tickers / loadable tickers is below this (email MTM charts).
       min-priced-fraction: ${HISTORY_MIN_PRICED_FRACTION:0.8}

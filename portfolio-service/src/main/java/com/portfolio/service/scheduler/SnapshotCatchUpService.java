@@ -55,10 +55,11 @@ public class SnapshotCatchUpService {
     @Value("${app.history.job.pass-a-days:90}")
     private int passADays;
 
-    @Value("${app.history.fetch.chunk-size:20}")
+    @Value("${app.history.fetch.chunk-size:10}")
     private int fetchChunkSize;
 
-    @Value("${app.history.fetch.max-parallel:4}")
+    /** Dig market CB opens under parallel hist — keep serial by default. */
+    @Value("${app.history.fetch.max-parallel:1}")
     private int fetchMaxParallel;
 
     /** Refuse READY when fewer than this fraction of loadable tickers have any historical close. */
@@ -441,8 +442,8 @@ public class SnapshotCatchUpService {
             log.warn("[HistoryJob] No trading tickers to price userId={} rawSymbols={}", userId, symbols.size());
             return priceLookup;
         }
-        int chunkSize = fetchChunkSize > 0 ? fetchChunkSize : 20;
-        int maxParallel = fetchMaxParallel > 0 ? fetchMaxParallel : 4;
+        int chunkSize = fetchChunkSize > 0 ? fetchChunkSize : 10;
+        int maxParallel = fetchMaxParallel > 0 ? fetchMaxParallel : 1;
         long t0 = System.currentTimeMillis();
 
         List<List<String>> chunks = new ArrayList<>();
@@ -510,11 +511,34 @@ public class SnapshotCatchUpService {
                 .build();
         log.info("[HistoryJob] Market historical fetch userId={} symbols={} from={} to={}",
                 userId, chunk.size(), from, to);
-        HistoricalDataResponseWrapper histResponse;
-        try {
-            histResponse = marketDataApiClient.getHistoricalData(request).block();
-        } catch (Exception e) {
-            log.error("[HistoryJob] Market fetch failed userId={} symbols={}", userId, symbolsParam, e);
+        HistoricalDataResponseWrapper histResponse = null;
+        final int maxAttempts = 4;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                histResponse = marketDataApiClient.getHistoricalData(request).block();
+                break;
+            } catch (Exception e) {
+                String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                boolean cbBlocked = msg.contains("CallNotPermitted")
+                        || msg.contains("CircuitBreaker")
+                        || (e.getCause() != null && String.valueOf(e.getCause()).contains("CallNotPermitted"));
+                if (attempt < maxAttempts && (cbBlocked || msg.contains("Timeout"))) {
+                    long sleepMs = cbBlocked ? 5_000L * attempt : 1_500L * attempt;
+                    log.warn("[HistoryJob] Market fetch retry userId={} attempt={}/{} sleepMs={} reason={}",
+                            userId, attempt, maxAttempts, sleepMs, msg);
+                    try {
+                        Thread.sleep(sleepMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return false;
+                    }
+                    continue;
+                }
+                log.error("[HistoryJob] Market fetch failed userId={} symbols={}", userId, symbolsParam, e);
+                return false;
+            }
+        }
+        if (histResponse == null) {
             return false;
         }
         if (histResponse == null || histResponse.getData() == null || histResponse.getData().isEmpty()) {
