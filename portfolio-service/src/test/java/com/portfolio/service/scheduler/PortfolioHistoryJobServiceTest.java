@@ -94,6 +94,33 @@ class PortfolioHistoryJobServiceTest {
     }
 
     @Test
+    void runJobMarksFailedWhenCoverageTooLow() {
+        HistoryJobState queued = HistoryJobState.builder()
+                .userId("u1")
+                .generation(1)
+                .mode(HistoryJobMode.FULL)
+                .targetPortfolioId("p-dhan")
+                .phase(HistoryJobPhase.QUEUED)
+                .historyStatus(HistoryStatus.BUILDING)
+                .build();
+        when(jobRedis.tryLock("u1")).thenReturn(true);
+        when(jobRedis.get("u1")).thenReturn(Optional.of(queued));
+        when(snapshotCatchUpService.runHistoryBuild(eq("u1"), eq(HistoryJobMode.FULL), eq("p-dhan"), any()))
+                .thenThrow(new IllegalStateException(
+                        "History price coverage too low: priced=3 loadable=10 fraction=0.300 min=0.800"));
+
+        service.runJob("u1");
+
+        ArgumentCaptor<HistoryJobState> cap = ArgumentCaptor.forClass(HistoryJobState.class);
+        verify(jobRedis, org.mockito.Mockito.atLeastOnce()).save(cap.capture());
+        HistoryJobState last = cap.getValue();
+        assertEquals(HistoryJobPhase.FAILED, last.getPhase());
+        assertTrue(last.getFailureReason() != null && last.getFailureReason().contains("coverage too low"));
+        assertTrue(meters.counter("portfolio.history.jobs", "mode", "FULL", "outcome", "failed").count() >= 1);
+        verify(jobRedis).unlock("u1");
+    }
+
+    @Test
     void runJobRerunsWhenGenerationDirty() {
         AtomicReference<Long> gen = new AtomicReference<>(1L);
         when(jobRedis.tryLock("u1")).thenReturn(true);

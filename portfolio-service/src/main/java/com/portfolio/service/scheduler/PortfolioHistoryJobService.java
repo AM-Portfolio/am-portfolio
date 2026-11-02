@@ -166,8 +166,10 @@ public class PortfolioHistoryJobService {
                         after.getMode() != null ? after.getMode().name() : "GAP",
                         "outcome", "success").increment();
 
-                log.info("[HistoryJob] READY userId={} daysWritten={} from={} to={} elapsedMs={}",
+                log.info("[HistoryJob] READY userId={} daysWritten={} from={} to={} holdingsLoaded={} skippedIsin={} priced={} unpricedSkipped={} elapsedMs={}",
                         userId, result.daysWritten(), after.getHistoryFrom(), after.getHistoryTo(),
+                        result.holdingsLoaded(), result.symbolsSkippedIsin(),
+                        result.symbolsPriced(), result.symbolsUnpricedSkipped(),
                         after.getStartedAt() != null
                                 ? Instant.now().toEpochMilli() - after.getStartedAt().toEpochMilli()
                                 : -1);

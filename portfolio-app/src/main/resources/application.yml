@@ -151,6 +151,9 @@ app:
     fetch:
       chunk-size: ${HISTORY_FETCH_CHUNK_SIZE:20}
       max-parallel: ${HISTORY_FETCH_MAX_PARALLEL:4}
+    coverage:
+      # Refuse HistoryJob READY when priced tickers / loadable tickers is below this (email MTM charts).
+      min-priced-fraction: ${HISTORY_MIN_PRICED_FRACTION:0.8}
   jwt:
     internal-secret: ${INTERNAL_SECRET_KEY:internal-service-super-secret-key-32chars-minimum-change-in-prod}
     secret: ${JWT_SECRET:internal-service-super-secret-key-32chars-minimum-change-in-prod}

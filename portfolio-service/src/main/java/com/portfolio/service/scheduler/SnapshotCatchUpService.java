@@ -34,6 +34,7 @@ import com.portfolio.marketdata.model.HistoricalDataResponseWrapper;
 import com.portfolio.model.history.HistoryJobMode;
 import com.portfolio.model.history.HistoryJobPhase;
 import com.portfolio.model.resolver.TradingSymbolResolver;
+import com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +42,7 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Reconstructs historical portfolio snapshots from market daily closes.
  * Supports FULL / MERGE_BROKER / GAP modes with entry–exit window clipping (max 365d).
+ * Chart wealth is mark-to-market (qty × historical close); avgBuy may be 0 for email books.
  */
 @Slf4j
 @Service
@@ -59,14 +61,41 @@ public class SnapshotCatchUpService {
     @Value("${app.history.fetch.max-parallel:4}")
     private int fetchMaxParallel;
 
+    /** Refuse READY when fewer than this fraction of loadable tickers have any historical close. */
+    @Value("${app.history.coverage.min-priced-fraction:0.8}")
+    private double minPricedFraction;
+
     private final PortfolioSnapshotRepository portfolioSnapshotRepository;
     private final PortfolioService portfolioService;
     private final MarketDataApiClient marketDataApiClient;
+    private final PortfolioEquitySymbolNormalizer equitySymbolNormalizer;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private CacheManager cacheManager;
 
-    public record CatchUpResult(LocalDate historyFrom, LocalDate historyTo, int daysWritten) {}
+    public record CatchUpResult(
+            LocalDate historyFrom,
+            LocalDate historyTo,
+            int daysWritten,
+            int holdingsLoaded,
+            int symbolsSkippedIsin,
+            int symbolsPriced,
+            int symbolsUnpricedSkipped) {
+        public CatchUpResult(LocalDate historyFrom, LocalDate historyTo, int daysWritten) {
+            this(historyFrom, historyTo, daysWritten, 0, 0, 0, 0);
+        }
+    }
+
+    /** Mutable counters for one history build (instrumentation + READY gate). */
+    static final class CoverageStats {
+        int holdingsLoaded;
+        int symbolsSkippedIsin;
+        int loadableTickers;
+        int symbolsPriced;
+        int symbolsUnpricedSkipped;
+        double lastDayWealth;
+        int lastDayHoldingsPriced;
+    }
 
     /**
      * Login / legacy async entry — GAP fill only.
@@ -94,27 +123,36 @@ public class SnapshotCatchUpService {
         LocalDate hardCap = today.minusDays(maxBackfillDays);
         LocalDate yesterday = today.minusDays(1);
 
-        Map<String, List<HoldingInfo>> portfolioHoldings = loadCurrentHoldings(userId, targetPortfolioId, mode);
+        CoverageStats coverage = new CoverageStats();
+        Map<String, List<HoldingInfo>> portfolioHoldings =
+                loadCurrentHoldings(userId, targetPortfolioId, mode, coverage);
         if (portfolioHoldings.isEmpty()) {
-            log.warn("[HistoryJob] No holdings for userId={} mode={} target={} — abort", userId, mode, targetPortfolioId);
+            log.warn("[HistoryJob] No holdings for userId={} mode={} target={} holdingsLoaded={} skippedIsin={} — abort",
+                    userId, mode, targetPortfolioId, coverage.holdingsLoaded, coverage.symbolsSkippedIsin);
             throw new IllegalStateException("No valid equity holdings for history build");
         }
 
         Window window = resolveWindow(portfolioHoldings, mode, userId, hardCap, yesterday);
         if (window.from().isAfter(window.to())) {
             log.info("[HistoryJob] Empty window userId={} — nothing to build", userId);
-            return new CatchUpResult(null, null, 0);
+            return new CatchUpResult(null, null, 0,
+                    coverage.holdingsLoaded, coverage.symbolsSkippedIsin, 0, 0);
         }
 
-        log.info("[HistoryJob] Window resolved userId={} mode={} from={} to={} symbols={} portfolios={}",
+        log.info("[HistoryJob] Window resolved userId={} mode={} from={} to={} loadableTickers={} holdingsLoaded={} skippedIsin={} portfolios={}",
                 userId, mode, window.from(), window.to(),
-                portfolioHoldings.values().stream().mapToInt(List::size).sum(),
+                coverage.loadableTickers,
+                coverage.holdingsLoaded,
+                coverage.symbolsSkippedIsin,
                 portfolioHoldings.size());
 
         Set<String> allSymbols = new HashSet<>();
         portfolioHoldings.values().forEach(list -> list.forEach(h -> allSymbols.add(h.symbol)));
 
         Map<LocalDate, Map<String, Double>> priceLookup = fetchPrices(userId, allSymbols, window.from(), window.to());
+        retryUnpriced(userId, allSymbols, window.from(), window.to(), priceLookup);
+        applyPriceCoverage(allSymbols, priceLookup, coverage);
+        assertPriceCoverage(userId, coverage);
 
         LocalDate passAEnd = window.from().plusDays(Math.min(passADays, maxBackfillDays) - 1L);
         if (passAEnd.isAfter(window.to())) {
@@ -123,21 +161,31 @@ public class SnapshotCatchUpService {
 
         phaseCallback.accept(HistoryJobPhase.BUILDING_90D);
         int written = writeRange(userId, mode, targetPortfolioId, portfolioHoldings, priceLookup,
-                window.from(), passAEnd, mode == HistoryJobMode.GAP);
+                window.from(), passAEnd, mode == HistoryJobMode.GAP, coverage);
 
         if (passAEnd.isBefore(window.to())) {
             phaseCallback.accept(HistoryJobPhase.BUILDING_1Y);
             written += writeRange(userId, mode, targetPortfolioId, portfolioHoldings, priceLookup,
-                    passAEnd.plusDays(1), window.to(), mode == HistoryJobMode.GAP);
+                    passAEnd.plusDays(1), window.to(), mode == HistoryJobMode.GAP, coverage);
         }
 
-        log.info("[HistoryJob] Build complete userId={} daysWritten={} from={} to={}",
-                userId, written, window.from(), window.to());
-        return new CatchUpResult(window.from(), window.to(), written);
+        log.info("[HistoryJob] Build complete userId={} daysWritten={} from={} to={} holdingsLoaded={} skippedIsin={} priced={} unpricedSkipped={} lastDayWealth={} lastDayHoldingsPriced={}",
+                userId, written, window.from(), window.to(),
+                coverage.holdingsLoaded, coverage.symbolsSkippedIsin,
+                coverage.symbolsPriced, coverage.symbolsUnpricedSkipped,
+                coverage.lastDayWealth, coverage.lastDayHoldingsPriced);
+        return new CatchUpResult(
+                window.from(),
+                window.to(),
+                written,
+                coverage.holdingsLoaded,
+                coverage.symbolsSkippedIsin,
+                coverage.symbolsPriced,
+                coverage.symbolsUnpricedSkipped);
     }
 
     private Map<String, List<HoldingInfo>> loadCurrentHoldings(
-            String userId, String targetPortfolioId, HistoryJobMode mode) {
+            String userId, String targetPortfolioId, HistoryJobMode mode, CoverageStats coverage) {
         Map<String, List<HoldingInfo>> portfolioHoldings = new HashMap<>();
         List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
         if (portfolios == null || portfolios.isEmpty()) {
@@ -161,14 +209,22 @@ public class SnapshotCatchUpService {
                     && !targetPortfolioId.equals(portfolioId)) {
                 continue;
             }
+            // Same path as live summary: ISIN / broker alias → NSE ticker before history fetch.
+            if (equitySymbolNormalizer != null) {
+                equitySymbolNormalizer.normalizeEquities(portfolio.getEquityModels());
+            }
             String brokerStr = portfolio.getBrokerType() != null ? portfolio.getBrokerType().name() : null;
             List<HoldingInfo> holdingInfos = new ArrayList<>();
             for (EquityModel e : portfolio.getEquityModels()) {
                 if (e.getQuantity() == null || e.getQuantity() <= 0) {
                     continue;
                 }
+                coverage.holdingsLoaded++;
                 String marketSymbol = resolveMarketSymbol(e);
                 if (marketSymbol == null || marketSymbol.isBlank()) {
+                    coverage.symbolsSkippedIsin++;
+                    log.warn("[HistoryJob] Skip unresolved symbol portfolioId={} rawSymbol={} isin={} name={}",
+                            portfolioId, e.getSymbol(), e.getIsin(), e.getName());
                     continue;
                 }
                 LocalDate entry = resolveEntry(e);
@@ -186,6 +242,11 @@ public class SnapshotCatchUpService {
                 portfolioHoldings.put(portfolioId, holdingInfos);
             }
         }
+        coverage.loadableTickers = (int) portfolioHoldings.values().stream()
+                .flatMap(List::stream)
+                .map(h -> h.symbol)
+                .distinct()
+                .count();
         return portfolioHoldings;
     }
 
@@ -205,7 +266,8 @@ public class SnapshotCatchUpService {
     }
 
     /**
-     * Prefer compact tickers; otherwise use ISIN so market-data can map via upstock_instruments.
+     * Prefer compact tickers after {@link PortfolioEquitySymbolNormalizer} has run.
+     * Still-ISIN-shaped ids are skipped — historical-data batches fail on unresolved MF ISINs.
      */
     private String resolveMarketSymbol(EquityModel e) {
         String symbol = e.getSymbol();
@@ -218,13 +280,96 @@ public class SnapshotCatchUpService {
             return e.getIsin().trim().toUpperCase();
         }
         if (TradingSymbolResolver.looksLikeIsin(symbol)) {
-            // Unresolved ISIN — market day history NPEs on MF/unknown ISINs in a batch.
             return null;
         }
         if (e.getIsin() != null && TradingSymbolResolver.looksLikeIsin(e.getIsin())) {
             return null;
         }
         return symbol != null ? symbol.trim().toUpperCase() : null;
+    }
+
+    private void retryUnpriced(
+            String userId,
+            Set<String> allSymbols,
+            LocalDate from,
+            LocalDate to,
+            Map<LocalDate, Map<String, Double>> priceLookup) {
+        Set<String> priced = collectPricedSymbols(priceLookup);
+        Set<String> unpriced = new HashSet<>();
+        for (String s : allSymbols) {
+            if (s != null && !priced.contains(s.trim().toUpperCase())) {
+                unpriced.add(s.trim().toUpperCase());
+            }
+        }
+        if (unpriced.isEmpty()) {
+            return;
+        }
+        log.warn("[HistoryJob] Retrying unpriced tickers userId={} count={} sample={}",
+                userId, unpriced.size(), unpriced.stream().limit(8).collect(Collectors.toList()));
+        Map<LocalDate, Map<String, Double>> retry = fetchPrices(userId, unpriced, from, to);
+        for (Map.Entry<LocalDate, Map<String, Double>> e : retry.entrySet()) {
+            priceLookup.computeIfAbsent(e.getKey(), k -> new HashMap<>()).putAll(e.getValue());
+        }
+    }
+
+    static Set<String> collectPricedSymbols(Map<LocalDate, Map<String, Double>> priceLookup) {
+        Set<String> priced = new HashSet<>();
+        if (priceLookup == null) {
+            return priced;
+        }
+        for (Map<String, Double> day : priceLookup.values()) {
+            if (day == null) {
+                continue;
+            }
+            for (String sym : day.keySet()) {
+                String n = normalizePriceSymbol(sym);
+                if (n != null) {
+                    priced.add(n);
+                }
+            }
+        }
+        return priced;
+    }
+
+    private void applyPriceCoverage(
+            Set<String> allSymbols,
+            Map<LocalDate, Map<String, Double>> priceLookup,
+            CoverageStats coverage) {
+        Set<String> priced = collectPricedSymbols(priceLookup);
+        int pricedCount = 0;
+        for (String s : allSymbols) {
+            if (s != null && priced.contains(s.trim().toUpperCase())) {
+                pricedCount++;
+            }
+        }
+        coverage.symbolsPriced = pricedCount;
+        coverage.symbolsUnpricedSkipped = Math.max(0, allSymbols.size() - pricedCount);
+    }
+
+    void assertPriceCoverage(String userId, CoverageStats coverage) {
+        if (coverage.loadableTickers <= 0) {
+            return;
+        }
+        double fraction = (double) coverage.symbolsPriced / (double) coverage.loadableTickers;
+        double min = minPricedFraction > 0 && minPricedFraction <= 1.0 ? minPricedFraction : 0.8;
+        log.info("[HistoryJob] Price coverage userId={} holdingsLoaded={} skippedIsin={} loadable={} priced={} unpricedSkipped={} fraction={}",
+                userId,
+                coverage.holdingsLoaded,
+                coverage.symbolsSkippedIsin,
+                coverage.loadableTickers,
+                coverage.symbolsPriced,
+                coverage.symbolsUnpricedSkipped,
+                String.format("%.3f", fraction));
+        if (fraction < min) {
+            throw new IllegalStateException(String.format(
+                    "History price coverage too low: priced=%d loadable=%d fraction=%.3f min=%.3f holdingsLoaded=%d skippedIsin=%d",
+                    coverage.symbolsPriced,
+                    coverage.loadableTickers,
+                    fraction,
+                    min,
+                    coverage.holdingsLoaded,
+                    coverage.symbolsSkippedIsin));
+        }
     }
 
     private record Window(LocalDate from, LocalDate to) {}
@@ -405,7 +550,8 @@ public class SnapshotCatchUpService {
             Map<LocalDate, Map<String, Double>> priceLookup,
             LocalDate from,
             LocalDate to,
-            boolean skipExisting) {
+            boolean skipExisting,
+            CoverageStats coverage) {
 
         Set<LocalDate> existingDates = skipExisting
                 ? portfolioSnapshotRepository.findByUserIdAndSnapshotDateBetween(userId, from, to).stream()
@@ -429,7 +575,8 @@ public class SnapshotCatchUpService {
                 continue;
             }
 
-            List<PortfolioSnapshotEntry> newEntries = buildEntriesForDate(portfolioHoldings, lastKnownPrice, date);
+            DayBuildResult dayBuild = buildEntriesForDateWithStats(portfolioHoldings, lastKnownPrice, date);
+            List<PortfolioSnapshotEntry> newEntries = dayBuild.entries();
             if (newEntries.isEmpty()) {
                 continue;
             }
@@ -484,6 +631,15 @@ public class SnapshotCatchUpService {
                         .portfolios(toWrite)
                         .createdAt(LocalDateTime.now())
                         .build();
+            }
+            if (coverage != null) {
+                coverage.lastDayWealth = doc.getTotalUserWealth() != null ? doc.getTotalUserWealth() : 0;
+                coverage.lastDayHoldingsPriced = dayBuild.holdingsPriced();
+            }
+            if (written == 0 || date.equals(to)) {
+                log.info("[HistoryJob] Day snapshot userId={} date={} wealth={} holdingsPriced={} unpricedActive={} portfolios={}",
+                        userId, date, doc.getTotalUserWealth(), dayBuild.holdingsPriced(),
+                        dayBuild.holdingsUnpriced(), newEntries.size());
             }
             batch.add(doc);
             written++;
@@ -580,11 +736,22 @@ public class SnapshotCatchUpService {
         return Optional.empty();
     }
 
+    record DayBuildResult(List<PortfolioSnapshotEntry> entries, int holdingsPriced, int holdingsUnpriced) {}
+
     List<PortfolioSnapshotEntry> buildEntriesForDate(
             Map<String, List<HoldingInfo>> portfolioHoldings,
             Map<String, Double> lastKnownPrice,
             LocalDate date) {
+        return buildEntriesForDateWithStats(portfolioHoldings, lastKnownPrice, date).entries();
+    }
+
+    DayBuildResult buildEntriesForDateWithStats(
+            Map<String, List<HoldingInfo>> portfolioHoldings,
+            Map<String, Double> lastKnownPrice,
+            LocalDate date) {
         List<PortfolioSnapshotEntry> entries = new ArrayList<>();
+        int holdingsPriced = 0;
+        int holdingsUnpriced = 0;
         for (Map.Entry<String, List<HoldingInfo>> portEntry : portfolioHoldings.entrySet()) {
             String portfolioId = portEntry.getKey();
             List<HoldingInfo> holdings = portEntry.getValue();
@@ -599,9 +766,11 @@ public class SnapshotCatchUpService {
                 }
                 Optional<Double> priceOpt = resolveHoldingPrice(lastKnownPrice.get(h.symbol), h.avgBuyPrice);
                 if (priceOpt.isEmpty()) {
+                    holdingsUnpriced++;
                     continue;
                 }
                 double price = priceOpt.get();
+                holdingsPriced++;
                 portValue += h.quantity * price;
                 portInvestment += h.quantity * h.avgBuyPrice;
                 snapHoldings.add(HoldingSnapshotItem.builder()
@@ -631,7 +800,7 @@ public class SnapshotCatchUpService {
                     .holdings(snapHoldings)
                     .build());
         }
-        return entries;
+        return new DayBuildResult(entries, holdingsPriced, holdingsUnpriced);
     }
 
     static final class HoldingInfo {
