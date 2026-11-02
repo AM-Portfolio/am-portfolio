@@ -182,10 +182,15 @@ public class PortfolioIntradayService {
         }
 
         // ── STEP 4: Build time-series: candle time → {symbol → closePrice} ───
+        // Keys must match symbolQty (holdings symbols); API/Mongo may return NSE_EQ:X.
         TreeMap<LocalTime, Map<String, Double>> priceSeries = new TreeMap<>();
         if (chartResponse != null && chartResponse.getData() != null) {
             for (Map.Entry<String, com.portfolio.marketdata.model.HistoricalData> entry : chartResponse.getData().entrySet()) {
-                String sym = entry.getKey();
+                String chartSym = entry.getKey();
+                String qtySym = resolveQtySymbol(chartSym, symbolQty);
+                if (qtySym == null) {
+                    continue;
+                }
                 com.portfolio.marketdata.model.HistoricalData hd = entry.getValue();
                 if (hd == null || hd.getDataPoints() == null || hd.getDataPoints().isEmpty()) {
                     continue;
@@ -218,9 +223,17 @@ public class PortfolioIntradayService {
                     if (t.isBefore(MARKET_OPEN) || t.isAfter(MARKET_CLOSE)) {
                         continue;
                     }
-                    priceSeries.computeIfAbsent(t, k -> new HashMap<>()).put(sym, pt.getClose());
+                    priceSeries.computeIfAbsent(t, k -> new HashMap<>()).put(qtySym, pt.getClose());
                 }
             }
+        }
+
+        if (priceSeries.isEmpty()) {
+            log.warn("[Intraday] No 1D candles after charts fetch — using flat LTP fallback (last resort) user={} portfolioId={} symbols={}",
+                    userId, portfolioId, symbols.size());
+        } else {
+            log.info("[Intraday] Built price series slots={} uniqueTimes covering symbols with candles",
+                    priceSeries.size());
         }
 
         // Fetch current live prices of equities
@@ -250,6 +263,9 @@ public class PortfolioIntradayService {
 
         // ── STEP 5: Compute portfolio value per candle with carry-forward ──────
         Map<String, Double> lastKnown = new HashMap<>();
+        // Seed LTPs for holdings that lack session candles so they are not priced as 0
+        // once any other symbol's candle appears (avoids 09:15→09:20 wealth cliffs).
+        seedLastKnownFromLivePrices(lastKnown, livePrices, symbolQty);
         List<IntradayDataPoint> result = new ArrayList<>();
 
         // Anchor: 9:15 AM = session open baseline
@@ -311,12 +327,101 @@ public class PortfolioIntradayService {
             }
         }
 
-        // Cache the result before returning
-        if (intradayRedisService != null) {
+        // Cache only series with real movement — do not pin a flat "one drop" day for 30m.
+        if (intradayRedisService != null && !isDegenerateIntradaySeries(result)) {
             intradayRedisService.cacheIntradayData(userId, portfolioId, result, marketOpen);
+        } else if (intradayRedisService != null) {
+            log.warn("[Intraday] Skipping Redis cache for degenerate series (unique wealth values ≤ 1) user={} portfolioId={} points={}",
+                    userId, portfolioId, result.size());
         }
 
         return result;
+    }
+
+    /**
+     * Pre-fill {@code lastKnown} with live LTPs mapped onto holdings keys.
+     * Candle closes overwrite these later; symbols never present in candles keep LTP
+     * instead of contributing {@code 0} once the series is non-empty.
+     */
+    static void seedLastKnownFromLivePrices(
+            Map<String, Double> lastKnown,
+            Map<String, Double> livePrices,
+            Map<String, Double> symbolQty) {
+        if (lastKnown == null || livePrices == null || livePrices.isEmpty() || symbolQty == null || symbolQty.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, Double> e : livePrices.entrySet()) {
+            if (e.getKey() == null || e.getValue() == null || e.getValue() <= 0) {
+                continue;
+            }
+            String qtySym = resolveQtySymbol(e.getKey(), symbolQty);
+            if (qtySym != null && !lastKnown.containsKey(qtySym)) {
+                lastKnown.put(qtySym, e.getValue());
+            }
+        }
+        // Also seed by holdings key when live map uses the same bare ticker.
+        for (String qtySym : symbolQty.keySet()) {
+            if (qtySym == null || lastKnown.containsKey(qtySym)) {
+                continue;
+            }
+            Double p = livePrices.get(qtySym);
+            if (p == null) {
+                for (Map.Entry<String, Double> e : livePrices.entrySet()) {
+                    if (e.getKey() != null && e.getKey().equalsIgnoreCase(qtySym) && e.getValue() != null && e.getValue() > 0) {
+                        p = e.getValue();
+                        break;
+                    }
+                }
+            }
+            if (p != null && p > 0) {
+                lastKnown.put(qtySym, p);
+            }
+        }
+    }
+
+    /** Map chart/API symbol key onto a holdings symbolQty key (exact, strip NSE_EQ:/BSE_EQ:). */
+    static String resolveQtySymbol(String chartSym, Map<String, Double> symbolQty) {
+        if (chartSym == null || symbolQty == null || symbolQty.isEmpty()) {
+            return null;
+        }
+        if (symbolQty.containsKey(chartSym)) {
+            return chartSym;
+        }
+        String cleaned = chartSym;
+        int colon = chartSym.indexOf(':');
+        if (colon > 0 && colon < chartSym.length() - 1) {
+            cleaned = chartSym.substring(colon + 1);
+        }
+        if (symbolQty.containsKey(cleaned)) {
+            return cleaned;
+        }
+        for (String k : symbolQty.keySet()) {
+            if (k != null && k.equalsIgnoreCase(cleaned)) {
+                return k;
+            }
+            if (k != null && k.equalsIgnoreCase(chartSym)) {
+                return k;
+            }
+        }
+        return null;
+    }
+
+    /** True when wealth barely moves (flat LTP seed / empty candles). */
+    static boolean isDegenerateIntradaySeries(List<IntradayDataPoint> points) {
+        if (points == null || points.size() <= 1) {
+            return true;
+        }
+        java.util.HashSet<Long> uniqueCents = new java.util.HashSet<>();
+        for (IntradayDataPoint p : points) {
+            if (p == null) {
+                continue;
+            }
+            uniqueCents.add(Math.round(p.getTotalWealth() * 100.0));
+            if (uniqueCents.size() > 1) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

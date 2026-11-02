@@ -569,7 +569,10 @@ public class PortfolioServiceImpl implements PortfolioService {
             }
             clampAllocations(doc);
             if (doc.getAudit() != null) {
-                doc.getAudit().setUpdatedAt(LocalDateTime.now());
+                LocalDateTime asOf = portfolioModel.getUpdatedAt() != null
+                        ? portfolioModel.getUpdatedAt()
+                        : portfolioModel.getCreatedAt();
+                doc.getAudit().setUpdatedAt(asOf != null ? asOf : LocalDateTime.now());
             }
             return portfolioMapper.toModel(portfolioDocumentRepository.save(doc));
         } else {

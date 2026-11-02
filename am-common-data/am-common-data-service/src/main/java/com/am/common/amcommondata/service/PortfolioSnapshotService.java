@@ -138,7 +138,15 @@ public class PortfolioSnapshotService {
         existing.ifPresent(portfolioSnapshotRepository::delete);
     }
 
-    @org.springframework.cache.annotation.Cacheable(value = "portfolioHistory", key = "#userId + '_' + (#portfolioId != null ? #portfolioId : 'all') + '_' + #timeFrame + '_v3'")
+    /**
+     * Use {@code #p0/#p1/#p2} — named SpEL params need {@code -parameters}, which this module
+     * does not enable. Named keys collapsed every book onto {@code all} and cached empty
+     * results across catch-up.
+     */
+    @org.springframework.cache.annotation.Cacheable(
+            value = "portfolioHistory",
+            key = "#p0 + '_' + (#p1 != null ? #p1 : 'all') + '_' + #p2 + '_v4'",
+            unless = "#result == null || #result.isEmpty()")
     public List<PortfolioSnapshotModel> getHistory(String userId, String portfolioId, String timeFrame) {
         String frame = timeFrame != null ? timeFrame.toUpperCase() : "1M";
         LocalDate today = LocalDate.now(IST);

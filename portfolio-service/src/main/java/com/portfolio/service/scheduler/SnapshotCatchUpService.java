@@ -47,11 +47,17 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class SnapshotCatchUpService {
 
-    @Value("${app.scheduler.snapshot.max-backfill-days:365}")
+    @Value("${app.scheduler.snapshot.max-backfill-days:730}")
     private int maxBackfillDays;
 
     @Value("${app.history.job.pass-a-days:90}")
     private int passADays;
+
+    @Value("${app.history.fetch.chunk-size:20}")
+    private int fetchChunkSize;
+
+    @Value("${app.history.fetch.max-parallel:4}")
+    private int fetchMaxParallel;
 
     private final PortfolioSnapshotRepository portfolioSnapshotRepository;
     private final PortfolioService portfolioService;
@@ -290,19 +296,55 @@ public class SnapshotCatchUpService {
             log.warn("[HistoryJob] No trading tickers to price userId={} rawSymbols={}", userId, symbols.size());
             return priceLookup;
         }
-        int chunkSize = 20;
+        int chunkSize = fetchChunkSize > 0 ? fetchChunkSize : 20;
+        int maxParallel = fetchMaxParallel > 0 ? fetchMaxParallel : 4;
         long t0 = System.currentTimeMillis();
+
+        List<List<String>> chunks = new ArrayList<>();
         for (int i = 0; i < symbolList.size(); i += chunkSize) {
-            List<String> chunk = symbolList.subList(i, Math.min(i + chunkSize, symbolList.size()));
-            if (!fetchPriceChunk(userId, chunk, from, to, priceLookup)) {
-                // One bad symbol can fail the whole batch — retry singly so equities still price.
-                for (String one : chunk) {
-                    fetchPriceChunk(userId, List.of(one), from, to, priceLookup);
+            chunks.add(new ArrayList<>(symbolList.subList(i, Math.min(i + chunkSize, symbolList.size()))));
+        }
+
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(
+                Math.min(maxParallel, Math.max(1, chunks.size())),
+                r -> {
+                    Thread t = new Thread(r, "history-fetch-" + userId);
+                    t.setDaemon(true);
+                    return t;
+                });
+        try {
+            List<java.util.concurrent.Future<Map<LocalDate, Map<String, Double>>>> futures = new ArrayList<>();
+            for (List<String> chunk : chunks) {
+                futures.add(pool.submit(() -> {
+                    Map<LocalDate, Map<String, Double>> partial = new HashMap<>();
+                    if (!fetchPriceChunk(userId, chunk, from, to, partial)) {
+                        for (String one : chunk) {
+                            fetchPriceChunk(userId, List.of(one), from, to, partial);
+                        }
+                    }
+                    return partial;
+                }));
+            }
+            for (java.util.concurrent.Future<Map<LocalDate, Map<String, Double>>> f : futures) {
+                try {
+                    Map<LocalDate, Map<String, Double>> partial = f.get();
+                    if (partial == null) {
+                        continue;
+                    }
+                    for (Map.Entry<LocalDate, Map<String, Double>> e : partial.entrySet()) {
+                        priceLookup.computeIfAbsent(e.getKey(), k -> new HashMap<>()).putAll(e.getValue());
+                    }
+                } catch (Exception e) {
+                    log.error("[HistoryJob] Parallel price chunk failed userId={}: {}", userId, e.getMessage());
                 }
             }
+        } finally {
+            pool.shutdown();
         }
-        log.info("[HistoryJob] Price map days={} userId={} tickers={} elapsedMs={}",
-                priceLookup.size(), userId, symbolList.size(), System.currentTimeMillis() - t0);
+
+        log.info("[HistoryJob] Price map days={} userId={} tickers={} chunks={} parallel={} elapsedMs={}",
+                priceLookup.size(), userId, symbolList.size(), chunks.size(), maxParallel,
+                System.currentTimeMillis() - t0);
         return priceLookup;
     }
 
@@ -339,9 +381,9 @@ public class SnapshotCatchUpService {
         }
         for (Map.Entry<String, com.portfolio.marketdata.model.HistoricalDataResponse> entry
                 : histResponse.getData().entrySet()) {
-            String symbol = entry.getKey();
+            String symbol = normalizePriceSymbol(entry.getKey());
             var response = entry.getValue();
-            if (response == null) {
+            if (symbol == null || response == null) {
                 continue;
             }
             for (var point : response.effectiveDataPoints()) {
@@ -411,10 +453,20 @@ public class SnapshotCatchUpService {
             } else if (existingOpt.isPresent() && mode == HistoryJobMode.GAP) {
                 continue;
             } else {
+                List<PortfolioSnapshotEntry> toWrite = newEntries;
+                // MERGE on a brand-new day must not insert sibling brokers (only the target book).
+                if (mode == HistoryJobMode.MERGE_BROKER && targetPortfolioId != null) {
+                    toWrite = newEntries.stream()
+                            .filter(e -> targetPortfolioId.equals(e.getPortfolioId()))
+                            .collect(Collectors.toList());
+                    if (toWrite.isEmpty()) {
+                        continue;
+                    }
+                }
                 String snapshotId = UUID.randomUUID().toString();
                 double totalWealth = 0;
                 double totalInvestment = 0;
-                for (PortfolioSnapshotEntry e : newEntries) {
+                for (PortfolioSnapshotEntry e : toWrite) {
                     totalWealth += e.getClose() != null ? e.getClose() : 0;
                     totalInvestment += e.getTotalInvestment() != null ? e.getTotalInvestment() : 0;
                 }
@@ -429,7 +481,7 @@ public class SnapshotCatchUpService {
                         .totalUserInvestment(totalInvestment)
                         .totalUserGainLoss(gl)
                         .totalUserGainLossPercentage(glPct)
-                        .portfolios(newEntries)
+                        .portfolios(toWrite)
                         .createdAt(LocalDateTime.now())
                         .build();
             }
@@ -505,6 +557,19 @@ public class SnapshotCatchUpService {
      *
      * @return price to use, or empty if the holding should be skipped for this day
      */
+    /** Market responses often key as {@code NSE_EQ:TCS}; holdings use bare {@code TCS}. */
+    static String normalizePriceSymbol(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String s = raw.trim().toUpperCase();
+        int colon = s.lastIndexOf(':');
+        if (colon >= 0 && colon < s.length() - 1) {
+            s = s.substring(colon + 1);
+        }
+        return s.isBlank() ? null : s;
+    }
+
     static Optional<Double> resolveHoldingPrice(Double marketClose, double avgBuyPrice) {
         if (marketClose != null && marketClose > 0 && Double.isFinite(marketClose)) {
             return Optional.of(marketClose);

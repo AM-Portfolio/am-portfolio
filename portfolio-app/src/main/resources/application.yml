@@ -143,7 +143,14 @@ app:
   scheduler:
     snapshot:
       active-user-window-days: ${SNAPSHOT_ACTIVE_USER_WINDOW_DAYS:30}
-      max-backfill-days: ${SNAPSHOT_MAX_BACKFILL_DAYS:365}
+      max-backfill-days: ${SNAPSHOT_MAX_BACKFILL_DAYS:730}
+  history:
+    job:
+      pass-a-days: ${HISTORY_PASS_A_DAYS:90}
+      debounce-seconds: ${HISTORY_JOB_DEBOUNCE_SECONDS:15}
+    fetch:
+      chunk-size: ${HISTORY_FETCH_CHUNK_SIZE:20}
+      max-parallel: ${HISTORY_FETCH_MAX_PARALLEL:4}
   jwt:
     internal-secret: ${INTERNAL_SECRET_KEY:internal-service-super-secret-key-32chars-minimum-change-in-prod}
     secret: ${JWT_SECRET:internal-service-super-secret-key-32chars-minimum-change-in-prod}

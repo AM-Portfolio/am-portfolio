@@ -11,16 +11,22 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
 
 import com.portfolio.model.events.PortfolioUpdateEvent;
+import com.portfolio.model.history.HistoryJobMode;
 import com.portfolio.model.mapper.PortfolioMapperv1;
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.portfolio.kafka.publisher.PortfolioEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
+import com.portfolio.service.portfolio.PortfolioIntradayService;
 import com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer;
+import com.portfolio.service.scheduler.PortfolioHistoryJobService;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Consumes messages from the am-portfolio Kafka topic.
@@ -65,6 +71,8 @@ public class PortfolioUpdateConsumerService {
     private final com.portfolio.redis.service.PortfolioIntelligenceRedisService portfolioIntelligenceRedisService;
     private final PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer;
     private final StringRedisTemplate           stringRedisTemplate;
+    private final PortfolioHistoryJobService    portfolioHistoryJobService;
+    private final PortfolioIntradayService      portfolioIntradayService;
 
     @Value("${app.kafka.portfolio.consumer.id:am-portfolio-consumer-group}")
     private String consumerGroupId;
@@ -178,8 +186,40 @@ public class PortfolioUpdateConsumerService {
             }
             portfolioIntelligenceRedisService.evictAggregateForUser(saved.getOwner());
             activeMarketSymbolPublisher.publishFromPortfolio(saved);
+            enqueueDocumentHistoryAndWarmIntraday(saved, portfolioId);
         }
         publishUpdate(saved, event.getSource(), event.getPortfolioId());
+    }
+
+    /**
+     * After document/email upsert: kick daily history backfill and warm session intraday
+     * so chart TF 1D / 1Y can load without waiting for EOD.
+     */
+    private void enqueueDocumentHistoryAndWarmIntraday(PortfolioModelV1 saved, String portfolioId) {
+        String owner = saved.getOwner();
+        try {
+            List<PortfolioModelV1> existing = portfolioService.getPortfoliosByUserId(owner);
+            boolean otherBrokers = existing != null && existing.stream()
+                    .filter(p -> p.getPortfolioKind() == null || PortfolioKind.isBroker(p.getPortfolioKind()))
+                    .anyMatch(p -> saved.getBrokerType() == null
+                            || !java.util.Objects.equals(p.getBrokerType(), saved.getBrokerType()));
+            HistoryJobMode mode = otherBrokers ? HistoryJobMode.MERGE_BROKER : HistoryJobMode.FULL;
+            portfolioHistoryJobService.enqueue(owner, mode, portfolioId);
+            log.info("[DOC] Enqueued history job userId={} mode={} portfolioId={} asOfHint={}",
+                    owner, mode, portfolioId, saved.getCreatedAt());
+        } catch (Exception e) {
+            log.warn("[DOC] History enqueue failed userId={}: {}", owner, e.getMessage());
+        }
+        final String warmOwner = owner;
+        final String warmPid = portfolioId;
+        CompletableFuture.runAsync(() -> {
+            try {
+                portfolioIntradayService.getIntraday(warmOwner, warmPid);
+                log.info("[DOC] Intraday warm done userId={} portfolioId={}", warmOwner, warmPid);
+            } catch (Exception e) {
+                log.warn("[DOC] Intraday warm failed userId={}: {}", warmOwner, e.getMessage());
+            }
+        });
     }
 
     private void processTradeMessage(com.portfolio.model.events.trade.TradePortfolioSyncEvent event) {
