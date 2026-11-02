@@ -41,11 +41,12 @@ class PortfolioMapperAsOfTest {
     }
 
     @Test
-    void withoutAsOfLeavesCreatedAtNull() {
+    void withoutAsOfLeavesCreatedAtNullEvenWhenTimestampPresent() {
         PortfolioUpdateEvent event = PortfolioUpdateEvent.builder()
                 .userId("user-1")
                 .brokerType(BrokerType.ZERODHA)
                 .portfolioId("doc-1")
+                .timestamp(java.time.LocalDateTime.now())
                 .equities(List.of(EquityModel.builder()
                         .symbol("TCS")
                         .quantity(1.0)
@@ -54,6 +55,8 @@ class PortfolioMapperAsOfTest {
                 .build();
 
         PortfolioModelV1 model = mapper.toPortfolioModelV1(event);
+        // Ingest timestamp must not become lifeStart — catch-up uses ~90d when null.
         assertNull(model.getEquityModels().get(0).getCreatedAt());
+        assertNull(model.getCreatedAt());
     }
 }

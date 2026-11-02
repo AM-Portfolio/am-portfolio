@@ -20,13 +20,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.portfolio.kafka.publisher.PortfolioEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
+import com.portfolio.service.intraday.IntradayCandleWarmService;
 import com.portfolio.service.portfolio.PortfolioIntradayService;
 import com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer;
 import com.portfolio.service.scheduler.PortfolioHistoryJobService;
 
 import java.time.Duration;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
 /**
  * Consumes messages from the am-portfolio Kafka topic.
@@ -73,6 +77,7 @@ public class PortfolioUpdateConsumerService {
     private final StringRedisTemplate           stringRedisTemplate;
     private final PortfolioHistoryJobService    portfolioHistoryJobService;
     private final PortfolioIntradayService      portfolioIntradayService;
+    private final IntradayCandleWarmService     intradayCandleWarmService;
 
     @Value("${app.kafka.portfolio.consumer.id:am-portfolio-consumer-group}")
     private String consumerGroupId;
@@ -212,6 +217,7 @@ public class PortfolioUpdateConsumerService {
         }
         final String warmOwner = owner;
         final String warmPid = portfolioId;
+        final String candleSymbolsCsv = holdingsSymbolsCsv(saved);
         CompletableFuture.runAsync(() -> {
             try {
                 portfolioIntradayService.getIntraday(warmOwner, warmPid);
@@ -219,7 +225,43 @@ public class PortfolioUpdateConsumerService {
             } catch (Exception e) {
                 log.warn("[DOC] Intraday warm failed userId={}: {}", warmOwner, e.getMessage());
             }
+            if (candleSymbolsCsv == null || candleSymbolsCsv.isBlank()) {
+                return;
+            }
+            try {
+                var status = intradayCandleWarmService.startWarm(null, candleSymbolsCsv);
+                log.info("[DOC] Candle warm started userId={} portfolioId={} jobId={} symbols={}",
+                        warmOwner, warmPid,
+                        status != null ? status.getJobId() : null,
+                        candleSymbolsCsv.split(",").length);
+            } catch (Exception e) {
+                log.warn("[DOC] Candle warm failed userId={}: {}", warmOwner, e.getMessage());
+            }
         });
+    }
+
+    /** Comma-separated tickers from saved equities (cap 80) for automatic candle warm. */
+    private static String holdingsSymbolsCsv(PortfolioModelV1 saved) {
+        if (saved == null || saved.getEquityModels() == null || saved.getEquityModels().isEmpty()) {
+            return null;
+        }
+        Set<String> symbols = new LinkedHashSet<>();
+        for (var eq : saved.getEquityModels()) {
+            if (eq == null || eq.getSymbol() == null) {
+                continue;
+            }
+            String s = eq.getSymbol().trim().toUpperCase();
+            if (!s.isEmpty()) {
+                symbols.add(s);
+            }
+            if (symbols.size() >= 80) {
+                break;
+            }
+        }
+        if (symbols.isEmpty()) {
+            return null;
+        }
+        return symbols.stream().collect(Collectors.joining(","));
     }
 
     private void processTradeMessage(com.portfolio.model.events.trade.TradePortfolioSyncEvent event) {

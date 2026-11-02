@@ -427,8 +427,12 @@ public class SnapshotCatchUpService {
             return new Window(from, yesterday);
         }
 
-        // FULL / MERGE: lifespan ∩ hardCap..yesterday
-        LocalDate from = lifeStart != null ? lifeStart : hardCap;
+        // FULL / MERGE: lifespan ∩ hardCap..yesterday.
+        // Email books without equity createdAt/asOf must NOT fall back to full max-backfill
+        // (730d × N tickers opens market CB and leaves charts empty). Prefer ~90d.
+        LocalDate from = lifeStart != null
+                ? lifeStart
+                : yesterday.minusDays(Math.min(90, maxBackfillDays) - 1L);
         if (from.isBefore(hardCap)) {
             from = hardCap;
         }

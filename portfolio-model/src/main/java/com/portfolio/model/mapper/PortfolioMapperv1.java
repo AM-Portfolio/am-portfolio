@@ -2,6 +2,7 @@ package com.portfolio.model.mapper;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -70,19 +71,22 @@ public class PortfolioMapperv1 {
                 .build();
     }
 
+    /**
+     * Statement / Gmail calendar day for equity {@code createdAt} (history lifeStart).
+     * Never use {@link PortfolioUpdateEvent#getTimestamp()} — that is Kafka ingest time
+     * and collapses FULL catch-up to a 0–1 day window, leaving TF charts empty after sync.
+     * When {@code asOfDate} is absent, leave null so SnapshotCatchUp uses its ~90d fallback.
+     */
     private static LocalDateTime resolveAsOfDateTime(PortfolioUpdateEvent event) {
         LocalDate asOf = event.getAsOfDate();
-        if (asOf != null) {
-            LocalDate today = LocalDate.now();
-            if (asOf.isAfter(today)) {
-                asOf = today;
-            }
-            return asOf.atStartOfDay();
+        if (asOf == null) {
+            return null;
         }
-        if (event.getTimestamp() != null) {
-            return event.getTimestamp();
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+        if (asOf.isAfter(today)) {
+            asOf = today;
         }
-        return null;
+        return asOf.atStartOfDay();
     }
 
     /** GROW (legacy) and GROWW are one broker — document upsert must not create two Mongo books. */
