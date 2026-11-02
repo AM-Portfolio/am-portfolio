@@ -100,6 +100,15 @@ public class PortfolioEquitySymbolNormalizer {
             }
         }
 
+        // Broker display names (TATAAML-TATAGOLD / JIO PLATFORMS LIMITED) when MD still returns ISIN.
+        if ((resolved == null || resolved.isBlank() || TradingSymbolResolver.looksLikeIsin(resolved))
+                && equity.getName() != null && !equity.getName().isBlank()) {
+            String fromBrokerName = HoldingInstrumentClassifier.suggestDisplayTickerFromName(equity.getName());
+            if (fromBrokerName != null) {
+                resolved = fromBrokerName;
+            }
+        }
+
         if (resolved == null || resolved.isBlank() || TradingSymbolResolver.looksLikeIsin(resolved)) {
             return;
         }

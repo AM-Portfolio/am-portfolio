@@ -125,6 +125,47 @@ public final class HoldingInstrumentClassifier {
         return false;
     }
 
+    /**
+     * When market-data cannot map an ISIN, derive a display ticker from broker names.
+     * Groww ETF rows often look like {@code TATAAML-TATAGOLD}; unlisted names like
+     * {@code JIO PLATFORMS LIMITED} compress to {@code JIOPLATFORMS} (never JIOFIN).
+     */
+    public static String suggestDisplayTickerFromName(String holdingName) {
+        if (holdingName == null || holdingName.isBlank()) {
+            return null;
+        }
+        String raw = holdingName.trim();
+        int dash = raw.lastIndexOf('-');
+        if (dash >= 0 && dash < raw.length() - 1) {
+            String tail = raw.substring(dash + 1).trim().toUpperCase(Locale.ROOT);
+            if (isPlausibleDisplayTicker(tail) && !isUnsafeNameToTickerMap(holdingName, tail)) {
+                return tail;
+            }
+        }
+        String compact = raw.toUpperCase(Locale.ROOT)
+                .replaceAll("\\b(LIMITED|LTD\\.?|PVT\\.?|PRIVATE|LLC|INC\\.?)\\b", " ")
+                .replaceAll("[^A-Z0-9]+", "")
+                .trim();
+        if (isPlausibleDisplayTicker(compact) && !isUnsafeNameToTickerMap(holdingName, compact)) {
+            return compact;
+        }
+        return null;
+    }
+
+    public static boolean isPlausibleDisplayTicker(String ticker) {
+        if (ticker == null || ticker.isBlank()) {
+            return false;
+        }
+        String t = ticker.trim().toUpperCase(Locale.ROOT);
+        if (t.length() < 2 || t.length() > 20) {
+            return false;
+        }
+        if (TradingSymbolResolver.looksLikeIsin(t)) {
+            return false;
+        }
+        return t.matches("^[A-Z][A-Z0-9]*$");
+    }
+
     private static String firstNonBlank(String a, String b) {
         if (a != null && !a.isBlank()) {
             return a;

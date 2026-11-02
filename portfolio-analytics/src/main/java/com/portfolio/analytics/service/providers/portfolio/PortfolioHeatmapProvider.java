@@ -12,6 +12,7 @@ import com.portfolio.model.analytics.Heatmap;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
+import com.portfolio.model.resolver.TradingSymbolResolver;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -60,15 +61,21 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             request,
             this::createEmptyResult,
             (portfolio, portfolioSymbols, marketData) -> {
+                // ISIN-as-symbol (INF… ETF / unlisted) → broker display ticker for mosaic labels.
+                applyDisplayTickers(portfolio);
+                List<String> displaySymbols = getPortfolioSymbols(portfolio);
+                Map<String, MarketData> displayMarketData = remappedMarketData(marketData, portfolio);
+
                 // Create a map of symbol to holding quantity
                 Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
                 
                 // Retrieve market cap and sector data using the new helper
-                Map<String, com.am.common.amcommondata.model.security.SecurityModel> securityDetails = getSecurityDetails(portfolioSymbols, request);
+                Map<String, com.am.common.amcommondata.model.security.SecurityModel> securityDetails =
+                        getSecurityDetails(displaySymbols, request);
                 
                 // Align with sector allocation: group by security metadata sectors.
                 Map<String, List<String>> sectorToStocks = securityDetailsService
-                    .groupSymbolsBySector(portfolioSymbols, securityDetails);
+                    .groupSymbolsBySector(displaySymbols, securityDetails);
 
                 Map<String, EquityModel> equityBySymbol = indexEquities(portfolio);
                 // Equity holding sector + instrument classifier fills Unknown / blank meta.
@@ -80,7 +87,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                         }
                         String equitySector = usableEquitySector(model.getSector());
                         if (equitySector == null) {
-                            boolean hasMd = AnalyticsUtils.resolveMarketData(marketData, symbol) != null;
+                            boolean hasMd = AnalyticsUtils.resolveMarketData(displayMarketData, symbol) != null;
                             String priceSourceHint = hasMd
                                     ? HoldingInstrumentClassifier.PRICE_LIVE
                                     : HoldingInstrumentClassifier.PRICE_COST;
@@ -117,7 +124,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 Map<String, String> symbolPriceSource = new HashMap<>();
                 double[] totalPortfolioValue = {0.0};
                 groupMarketDataBySector(
-                        marketData,
+                        displayMarketData,
                         sectorToStocks,
                         symbolToQuantity,
                         equityBySymbol,
@@ -287,6 +294,68 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             }
         }
         return map;
+    }
+
+    /**
+     * Replace ISIN-shaped equity symbols with broker display tickers (request-scoped; not persisted).
+     */
+    static void applyDisplayTickers(PortfolioModelV1 portfolio) {
+        if (portfolio == null || portfolio.getEquityModels() == null) {
+            return;
+        }
+        for (EquityModel equity : portfolio.getEquityModels()) {
+            if (equity == null) {
+                continue;
+            }
+            String symbol = equity.getSymbol();
+            if (!TradingSymbolResolver.looksLikeIsin(symbol)) {
+                continue;
+            }
+            String suggested = HoldingInstrumentClassifier.suggestDisplayTickerFromName(equity.getName());
+            if (suggested == null || suggested.isBlank()) {
+                continue;
+            }
+            if (HoldingInstrumentClassifier.isUnsafeNameToTickerMap(equity.getName(), suggested)) {
+                continue;
+            }
+            if (equity.getIsin() == null || equity.getIsin().isBlank()) {
+                equity.setIsin(symbol.trim().toUpperCase(Locale.ROOT));
+            }
+            log.info("Heatmap display ticker {} → {} (isin={})", symbol, suggested, equity.getIsin());
+            equity.setSymbol(suggested);
+        }
+    }
+
+    /**
+     * Re-key market data from ISIN keys to display tickers after {@link #applyDisplayTickers}.
+     */
+    static Map<String, MarketData> remappedMarketData(
+            Map<String, MarketData> marketData, PortfolioModelV1 portfolio) {
+        if (marketData == null || marketData.isEmpty() || portfolio == null
+                || portfolio.getEquityModels() == null) {
+            return marketData != null ? marketData : Map.of();
+        }
+        Map<String, MarketData> out = new HashMap<>(marketData);
+        for (EquityModel equity : portfolio.getEquityModels()) {
+            if (equity == null || equity.getSymbol() == null) {
+                continue;
+            }
+            String display = equity.getSymbol();
+            if (out.containsKey(display)) {
+                continue;
+            }
+            String isin = equity.getIsin();
+            MarketData byIsin = isin != null ? AnalyticsUtils.resolveMarketData(marketData, isin) : null;
+            if (byIsin != null) {
+                out.put(display, MarketData.builder()
+                        .symbol(display)
+                        .lastPrice(byIsin.getLastPrice())
+                        .previousClose(byIsin.getPreviousClose())
+                        .ohlc(byIsin.getOhlc())
+                        .build());
+            }
+        }
+        return out;
     }
 
     private static String usableEquitySector(String sector) {

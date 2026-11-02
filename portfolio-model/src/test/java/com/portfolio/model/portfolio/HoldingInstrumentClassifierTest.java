@@ -43,4 +43,16 @@ class HoldingInstrumentClassifierTest {
         assertTrue(HoldingInstrumentClassifier.isMissingSector(null));
         assertFalse(HoldingInstrumentClassifier.isMissingSector("Information Technology"));
     }
+
+    @Test
+    void suggestDisplayTickerFromBrokerEtfName() {
+        assertEquals(
+                "TATAGOLD",
+                HoldingInstrumentClassifier.suggestDisplayTickerFromName("TATAAML-TATAGOLD"));
+        assertEquals(
+                "JIOPLATFORMS",
+                HoldingInstrumentClassifier.suggestDisplayTickerFromName("JIO PLATFORMS LIMITED"));
+        assertNull(HoldingInstrumentClassifier.suggestDisplayTickerFromName("INF277KA1976"));
+        assertNull(HoldingInstrumentClassifier.suggestDisplayTickerFromName(null));
+    }
 }
