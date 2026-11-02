@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.portfolio.EquityHoldings;
+import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.redis.session.CashSessionClock;
 import com.am.common.amcommondata.service.price.StockPriceMongoService;
@@ -210,20 +211,9 @@ public class PortfolioCalculator {
             }
         }
 
-        // Heuristic only on request path — never sync HTTP to funds search
-        if (holding.getSector() == null || holding.getSector().trim().isEmpty() || holding.getSector().equalsIgnoreCase("Unknown")) {
-            if (looksLikeEtf(symbol)) {
-                holding.setSector("Exchange Traded Funds (ETFs)");
-                if (holding.getIndustry() == null || holding.getIndustry().trim().isEmpty() || holding.getIndustry().equalsIgnoreCase("Unknown")) {
-                    holding.setIndustry("ETFs & Index Funds");
-                }
-            }
-        }
-
-
-
         Double currentPrice = null;
         Double previousClosePrice = null;
+        String priceSource = null;
 
         // Waterfall Price Assignment
         if (marketDataMap != null) {
@@ -238,8 +228,10 @@ public class PortfolioCalculator {
                 Double lastPrice = apiItem.getLastPrice();
                 if (lastPrice != null && lastPrice > 0) {
                     currentPrice = lastPrice;
+                    priceSource = HoldingInstrumentClassifier.PRICE_LIVE;
                 } else if (apiItem.getOhlc() != null && apiItem.getOhlc().getClose() > 0) {
                     currentPrice = apiItem.getOhlc().getClose();
+                    priceSource = HoldingInstrumentClassifier.PRICE_LIVE;
                 }
                 
                 Double prevClose = apiItem.getPreviousClose();
@@ -273,6 +265,7 @@ public class PortfolioCalculator {
                     if (priceDoc != null) {
                         if (currentPrice == null && priceDoc.getLastPrice() != null && priceDoc.getLastPrice() > 0) {
                             currentPrice = priceDoc.getLastPrice();
+                            priceSource = HoldingInstrumentClassifier.PRICE_LAST;
                         }
                         if (previousClosePrice == null && priceDoc.getPreviousClose() != null && priceDoc.getPreviousClose() > 0) {
                             Double mongoPrev = priceDoc.getPreviousClose();
@@ -294,10 +287,18 @@ public class PortfolioCalculator {
         if (currentPrice == null) {
             if (holding.getAverageBuyingPrice() != null && holding.getAverageBuyingPrice() > 0) {
                 currentPrice = holding.getAverageBuyingPrice();
+                priceSource = HoldingInstrumentClassifier.PRICE_COST;
             } else if (holding.getInvestmentCost() != null && holding.getQuantity() != null && holding.getQuantity() > 0) {
                 currentPrice = holding.getInvestmentCost() / holding.getQuantity();
+                priceSource = HoldingInstrumentClassifier.PRICE_COST;
             }
         }
+
+        holding.setPriceSource(priceSource);
+        String isin = holding.getIsin();
+        holding.setSector(HoldingInstrumentClassifier.resolveSector(holding.getSector(), symbol, isin, priceSource));
+        holding.setIndustry(HoldingInstrumentClassifier.resolveIndustry(holding.getIndustry(), symbol, isin, priceSource));
+        holding.setProductClass(HoldingInstrumentClassifier.productClass(symbol, isin, priceSource));
 
         if (currentPrice != null) {
             holding.setCurrentPrice(round(currentPrice));
@@ -315,7 +316,8 @@ public class PortfolioCalculator {
                 }
 
                 // Calculate Day's Gain/Loss (if previous close available)
-                if (previousClosePrice != null && previousClosePrice > 0) {
+                if (previousClosePrice != null && previousClosePrice > 0
+                        && !HoldingInstrumentClassifier.PRICE_COST.equals(priceSource)) {
                     double previousValue = previousClosePrice * holding.getQuantity();
                     double dayGainLoss = currentValue - previousValue;
                     double dayGainLossPct = previousValue > 0 ? (dayGainLoss / previousValue) * 100 : 0.0;
@@ -463,11 +465,8 @@ public class PortfolioCalculator {
 
     /** Request-path ETF hint only — never blocks on funds HTTP search. */
     static boolean looksLikeEtf(String symbol) {
-        if (symbol == null || symbol.isBlank()) {
-            return false;
-        }
-        String u = symbol.toUpperCase(java.util.Locale.ROOT);
-        return u.endsWith("BEES") || u.contains("ETF") || u.endsWith("IETF") || u.endsWith("GOLD") && u.length() <= 12;
+        return HoldingInstrumentClassifier.looksLikeEtfSymbol(symbol)
+                || HoldingInstrumentClassifier.looksLikeEtfOrScheme(symbol, null);
     }
 
     private String cleanSymbol(String symbol) {

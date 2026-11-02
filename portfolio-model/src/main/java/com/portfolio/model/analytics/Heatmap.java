@@ -263,6 +263,9 @@ public class Heatmap {
         private double weight = 0.0;     // Weight within sector (%)
         
         private String color;            // Color for UI representation
+
+        /** LIVE / LAST / COST_BASIS when known. */
+        private String priceSource;
         
         /**
          * Calculate the value based on price and quantity

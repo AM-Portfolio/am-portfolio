@@ -62,6 +62,15 @@ public class EquityHoldings {
    /** EQUITY / COMMODITY / FIXED_INCOME / CASH — null/omit treated as EQUITY. */
    private String assetClass;
 
+   /** LIVE / LAST / COST_BASIS — how {@link #currentPrice} was chosen. */
+   private String priceSource;
+
+   /** EQUITY / ETF / UNLISTED — product class for UI badges. */
+   private String productClass;
+
+   /** Exchange ticker when different from broker/ISIN {@link #symbol}. */
+   private String tradingSymbol;
+
    @Builder.Default
    private List<EquityBrokerHolding> brokerPortfolios = new ArrayList<>();
 }
