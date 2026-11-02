@@ -111,6 +111,48 @@ class PortfolioCalculatorTest {
         assertEquals(3000.0, results.get(0).getCurrentPrice());
         assertEquals(30000.0, results.get(0).getCurrentValue());
         assertEquals(0.0, results.get(0).getGainLoss());
+        assertEquals(com.portfolio.model.portfolio.HoldingInstrumentClassifier.PRICE_COST, results.get(0).getPriceSource());
+    }
+
+    @Test
+    void enrichHoldings_infSchemeGetsEtfSector() {
+        EquityHoldings gold = new EquityHoldings();
+        gold.setSymbol("INF277KA1976");
+        gold.setIsin("INF277KA1976");
+        gold.setQuantity(7.0);
+        gold.setAverageBuyingPrice(14.68);
+        gold.setInvestmentCost(102.76);
+        MarketData md = MarketData.builder().symbol("INF277KA1976").lastPrice(13.3).previousClose(13.5).build();
+        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("INF277KA1976", md));
+        when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+
+        EquityHoldings enriched = portfolioCalculator.enrichHoldings(List.of(gold)).get(0);
+        assertEquals("Exchange Traded Funds (ETFs)", enriched.getSector());
+        assertEquals("ETF", enriched.getProductClass());
+        assertEquals("LIVE", enriched.getPriceSource());
+        assertEquals(13.3, enriched.getCurrentPrice());
+    }
+
+    @Test
+    void enrichHoldings_platformsIsinStaysCostNotJiofin() {
+        EquityHoldings platforms = new EquityHoldings();
+        platforms.setSymbol("INE0BJO01010");
+        platforms.setIsin("INE0BJO01010");
+        platforms.setName("JIO PLATFORMS LIMITED");
+        platforms.setQuantity(1.0);
+        platforms.setAverageBuyingPrice(1119.0);
+        platforms.setInvestmentCost(1119.0);
+        when(marketDataService.getMarketData(anyList())).thenReturn(Collections.emptyMap());
+        when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+
+        EquityHoldings enriched = portfolioCalculator.enrichHoldings(List.of(platforms)).get(0);
+        assertEquals(1119.0, enriched.getCurrentPrice());
+        assertEquals("COST_BASIS", enriched.getPriceSource());
+        assertEquals("Private / Unlisted", enriched.getSector());
+        assertEquals("UNLISTED", enriched.getProductClass());
+        assertNotEquals(213.0, enriched.getCurrentPrice(), 1.0);
     }
 
     @Test

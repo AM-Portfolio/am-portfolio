@@ -290,8 +290,9 @@ public class PortfolioHoldingsService {
     }
 
     /**
-     * Narrow read-path heal: when ISIN is present and symbol is a short broker code (≤4)
-     * or still ISIN-shaped, re-run the equity normalizer and persist only on change.
+     * Read-path heal: blank / ISIN-as-symbol / scheme ISIN (INF…) / ISIN present with
+     * scheme-prefix symbol — re-run normalizer and persist only on change.
+     * Never length≤4 tickers alone (valid NSE: ITC, SBIN).
      */
     private void healShortOrIsinSymbols(List<PortfolioModelV1> portfolios) {
         if (portfolioEquitySymbolNormalizer == null || portfolios == null || portfolios.isEmpty()) {
@@ -308,11 +309,14 @@ public class PortfolioHoldingsService {
                 }
                 String isin = e.getIsin();
                 String sym = e.getSymbol();
-                if (isin == null || isin.isBlank()) {
-                    continue;
-                }
-                // Only heal blank symbols or ISIN-as-symbol — never length≤4 (valid NSE: ITC, SBIN).
-                if (sym == null || sym.isBlank() || TradingSymbolResolver.looksLikeIsin(sym)) {
+                boolean hasIsin = isin != null && !isin.isBlank();
+                boolean isinAsSymbol = TradingSymbolResolver.looksLikeIsin(sym);
+                boolean schemeIsin = hasIsin && isin.trim().toUpperCase().startsWith("INF");
+                boolean schemeSymbol = sym != null && sym.trim().toUpperCase().startsWith("INF");
+                if (sym == null || sym.isBlank() || isinAsSymbol || schemeIsin || schemeSymbol) {
+                    if (!hasIsin && !isinAsSymbol && !schemeSymbol) {
+                        continue;
+                    }
                     needsHeal = true;
                     break;
                 }

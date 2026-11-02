@@ -79,6 +79,7 @@ vault/backups/
 **/vault/*backup*.json
 credentials.json
 **/credentials.json
+docs/feature-portfolio-be-industry-grade/verify/
 *.pem
 *.p12
 *.key
