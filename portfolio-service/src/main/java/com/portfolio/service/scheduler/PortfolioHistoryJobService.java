@@ -94,15 +94,21 @@ public class PortfolioHistoryJobService {
 
     void runJob(String userId) {
         pending.remove(userId);
-        if (!jobRedis.tryLock(userId)) {
+        var lockToken = jobRedis.tryLock(userId);
+        if (lockToken.isEmpty()) {
             log.warn("[HistoryJob] Lock busy userId={} — will rely on dirty generation rerun", userId);
             return;
         }
+        String token = lockToken.get();
         MDC.put("userId", userId);
         try {
             boolean rerun;
             do {
                 rerun = false;
+                if (!jobRedis.renewLock(userId, token)) {
+                    log.warn("[HistoryJob] Lost lock ownership userId={} — abort worker", userId);
+                    return;
+                }
                 HistoryJobState state = jobRedis.get(userId).orElse(null);
                 if (state == null) {
                     return;
@@ -131,6 +137,7 @@ public class PortfolioHistoryJobService {
                             state.getMode(),
                             state.getTargetPortfolioId(),
                             phase -> {
+                                jobRedis.renewLock(userId, token);
                                 HistoryJobState s = jobRedis.get(userId).orElse(state);
                                 s.setPhase(phase);
                                 s.setUpdatedAt(Instant.now());
@@ -175,7 +182,7 @@ public class PortfolioHistoryJobService {
                                 : -1);
             } while (rerun);
         } finally {
-            jobRedis.unlock(userId);
+            jobRedis.unlock(userId, token);
             MDC.remove("userId");
             MDC.remove("generation");
             MDC.remove("mode");

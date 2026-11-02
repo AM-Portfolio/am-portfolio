@@ -3,11 +3,14 @@ package com.portfolio.redis.service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
@@ -27,6 +30,16 @@ public class PortfolioHistoryJobRedisService {
 
     private static final String JOB_PREFIX = "portfolio:history:job:";
     private static final String LOCK_PREFIX = "portfolio:history:lock:";
+
+    /** Delete lock key only when the caller still owns the token. */
+    private static final DefaultRedisScript<Long> UNLOCK_IF_OWNER = new DefaultRedisScript<>(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+            Long.class);
+
+    /** Renew TTL only when the caller still owns the token. */
+    private static final DefaultRedisScript<Long> RENEW_IF_OWNER = new DefaultRedisScript<>(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end",
+            Long.class);
 
     @Value("${cache.redis.enabled:true}")
     private boolean redisEnabled;
@@ -59,14 +72,30 @@ public class PortfolioHistoryJobRedisService {
         }
     }
 
+    /**
+     * Enqueue (or dirty-bump) a history job. Never downgrades a pending stronger mode
+     * (e.g. login GAP must not replace a queued FULL / MERGE_BROKER).
+     * Generation is incremented atomically via HINCRBY when Redis is available.
+     */
     public HistoryJobState enqueue(String userId, HistoryJobMode mode, String targetPortfolioId) {
         HistoryJobState existing = get(userId).orElse(null);
-        long generation = existing != null ? existing.getGeneration() + 1 : 1L;
+        HistoryJobMode resolvedMode = mode != null ? mode : HistoryJobMode.GAP;
+        String resolvedTarget = targetPortfolioId;
+        if (existing != null && isPending(existing) && isStronger(existing.getMode(), resolvedMode)) {
+            resolvedMode = existing.getMode();
+            if (existing.getTargetPortfolioId() != null && !existing.getTargetPortfolioId().isBlank()) {
+                resolvedTarget = existing.getTargetPortfolioId();
+            }
+            log.info("[HistoryJob] Preserving stronger pending mode userId={} kept={} requested={}",
+                    userId, resolvedMode, mode);
+        }
+
+        long generation = nextGeneration(userId, existing);
         HistoryJobState state = HistoryJobState.builder()
                 .userId(userId)
                 .generation(generation)
-                .mode(mode)
-                .targetPortfolioId(targetPortfolioId)
+                .mode(resolvedMode)
+                .targetPortfolioId(resolvedTarget)
                 .phase(HistoryJobPhase.QUEUED)
                 .historyStatus(HistoryStatus.BUILDING)
                 .updatedAt(Instant.now())
@@ -92,21 +121,59 @@ public class PortfolioHistoryJobRedisService {
         }
     }
 
-    /** @return true if lock acquired */
-    public boolean tryLock(String userId) {
+    /**
+     * @return lock owner token when acquired; empty when another worker holds the lock
+     */
+    public Optional<String> tryLock(String userId) {
         if (!usable() || userId == null) {
-            return true; // fail-open: allow build without Redis
+            return Optional.of("fail-open");
         }
         try {
+            String token = UUID.randomUUID().toString();
             Boolean ok = stringRedisTemplate.opsForValue()
-                    .setIfAbsent(LOCK_PREFIX + userId, "1", Duration.ofMinutes(Math.max(5, lockTtlMinutes)));
-            return Boolean.TRUE.equals(ok);
+                    .setIfAbsent(LOCK_PREFIX + userId, token, lockTtl());
+            return Boolean.TRUE.equals(ok) ? Optional.of(token) : Optional.empty();
         } catch (Exception e) {
             log.warn("[HistoryJob] Redis lock failed userId={} — fail-open: {}", userId, e.getMessage());
-            return true;
+            return Optional.of("fail-open");
         }
     }
 
+    /** Extend lock TTL while this worker still owns {@code token}. */
+    public boolean renewLock(String userId, String token) {
+        if (!usable() || userId == null || token == null || "fail-open".equals(token)) {
+            return true;
+        }
+        try {
+            Long ok = stringRedisTemplate.execute(
+                    RENEW_IF_OWNER,
+                    List.of(LOCK_PREFIX + userId),
+                    token,
+                    String.valueOf(lockTtl().toMillis()));
+            return ok != null && ok > 0;
+        } catch (Exception e) {
+            log.warn("[HistoryJob] Redis renew failed userId={}: {}", userId, e.getMessage());
+            return false;
+        }
+    }
+
+    /** Delete the lock only when {@code token} still owns it. */
+    public void unlock(String userId, String token) {
+        if (!usable() || userId == null) {
+            return;
+        }
+        if (token == null || "fail-open".equals(token)) {
+            return;
+        }
+        try {
+            stringRedisTemplate.execute(UNLOCK_IF_OWNER, List.of(LOCK_PREFIX + userId), token);
+        } catch (Exception e) {
+            log.warn("[HistoryJob] Redis unlock failed userId={}: {}", userId, e.getMessage());
+        }
+    }
+
+    /** @deprecated use {@link #unlock(String, String)} with the tryLock token */
+    @Deprecated
     public void unlock(String userId) {
         if (!usable() || userId == null) {
             return;
@@ -116,6 +183,53 @@ public class PortfolioHistoryJobRedisService {
         } catch (Exception e) {
             log.warn("[HistoryJob] Redis unlock failed userId={}: {}", userId, e.getMessage());
         }
+    }
+
+    static boolean isPending(HistoryJobState state) {
+        if (state == null) {
+            return false;
+        }
+        if (state.getHistoryStatus() == HistoryStatus.BUILDING) {
+            return true;
+        }
+        HistoryJobPhase phase = state.getPhase();
+        return phase == HistoryJobPhase.QUEUED
+                || phase == HistoryJobPhase.BUILDING_90D
+                || phase == HistoryJobPhase.BUILDING_1Y;
+    }
+
+    /** FULL &gt; MERGE_BROKER &gt; GAP */
+    static boolean isStronger(HistoryJobMode existing, HistoryJobMode incoming) {
+        return modeRank(existing) > modeRank(incoming);
+    }
+
+    private static int modeRank(HistoryJobMode mode) {
+        if (mode == null) {
+            return 0;
+        }
+        return switch (mode) {
+            case FULL -> 3;
+            case MERGE_BROKER -> 2;
+            case GAP -> 1;
+        };
+    }
+
+    private long nextGeneration(String userId, HistoryJobState existing) {
+        if (usable()) {
+            try {
+                Long gen = stringRedisTemplate.opsForHash().increment(JOB_PREFIX + userId, "generation", 1L);
+                if (gen != null && gen > 0) {
+                    return gen;
+                }
+            } catch (Exception e) {
+                log.warn("[HistoryJob] HINCRBY generation failed userId={} — fallback: {}", userId, e.getMessage());
+            }
+        }
+        return existing != null ? existing.getGeneration() + 1 : 1L;
+    }
+
+    private Duration lockTtl() {
+        return Duration.ofMinutes(Math.max(5, lockTtlMinutes));
     }
 
     private boolean usable() {

@@ -151,8 +151,10 @@ public class MarketDataConverter {
             }
             if (firstPoint.getOhlcData() != null
                     && latestPoint.getOhlcData() != null
-                    && latestPoint.getOhlcData().getClose() > 0) {
+                    && latestPoint.getOhlcData().getClose() > 0
+                    && firstPoint.getOhlcData().getOpen() > 0) {
                 // Prior close = chronologically first bar open (incl. single-bar series).
+                // Skip zero open — downstream % change treats previousClose as denominator.
                 builder.previousClose(firstPoint.getOhlcData().getOpen());
             }
         }

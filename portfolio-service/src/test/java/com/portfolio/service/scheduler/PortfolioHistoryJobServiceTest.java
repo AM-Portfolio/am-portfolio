@@ -73,7 +73,8 @@ class PortfolioHistoryJobServiceTest {
                 .phase(HistoryJobPhase.QUEUED)
                 .historyStatus(HistoryStatus.BUILDING)
                 .build();
-        when(jobRedis.tryLock("u1")).thenReturn(true);
+        when(jobRedis.tryLock("u1")).thenReturn(Optional.of("tok-1"));
+        when(jobRedis.renewLock("u1", "tok-1")).thenReturn(true);
         when(jobRedis.get("u1")).thenReturn(Optional.of(queued));
         when(snapshotCatchUpService.runHistoryBuild(eq("u1"), eq(HistoryJobMode.MERGE_BROKER), eq("p-b"), any()))
                 .thenReturn(new SnapshotCatchUpService.CatchUpResult(
@@ -90,7 +91,7 @@ class PortfolioHistoryJobServiceTest {
         assertEquals(HistoryStatus.READY, last.getHistoryStatus());
         assertEquals(40, last.getCoverageDays());
         assertTrue(meters.counter("portfolio.history.jobs", "mode", "MERGE_BROKER", "outcome", "success").count() >= 1);
-        verify(jobRedis).unlock("u1");
+        verify(jobRedis).unlock("u1", "tok-1");
     }
 
     @Test
@@ -103,7 +104,8 @@ class PortfolioHistoryJobServiceTest {
                 .phase(HistoryJobPhase.QUEUED)
                 .historyStatus(HistoryStatus.BUILDING)
                 .build();
-        when(jobRedis.tryLock("u1")).thenReturn(true);
+        when(jobRedis.tryLock("u1")).thenReturn(Optional.of("tok-2"));
+        when(jobRedis.renewLock("u1", "tok-2")).thenReturn(true);
         when(jobRedis.get("u1")).thenReturn(Optional.of(queued));
         when(snapshotCatchUpService.runHistoryBuild(eq("u1"), eq(HistoryJobMode.FULL), eq("p-dhan"), any()))
                 .thenThrow(new IllegalStateException(
@@ -117,13 +119,14 @@ class PortfolioHistoryJobServiceTest {
         assertEquals(HistoryJobPhase.FAILED, last.getPhase());
         assertTrue(last.getFailureReason() != null && last.getFailureReason().contains("coverage too low"));
         assertTrue(meters.counter("portfolio.history.jobs", "mode", "FULL", "outcome", "failed").count() >= 1);
-        verify(jobRedis).unlock("u1");
+        verify(jobRedis).unlock("u1", "tok-2");
     }
 
     @Test
     void runJobRerunsWhenGenerationDirty() {
         AtomicReference<Long> gen = new AtomicReference<>(1L);
-        when(jobRedis.tryLock("u1")).thenReturn(true);
+        when(jobRedis.tryLock("u1")).thenReturn(Optional.of("tok-3"));
+        when(jobRedis.renewLock("u1", "tok-3")).thenReturn(true);
         when(jobRedis.get("u1")).thenAnswer(inv -> Optional.of(HistoryJobState.builder()
                 .userId("u1")
                 .generation(gen.get())
@@ -143,6 +146,7 @@ class PortfolioHistoryJobServiceTest {
 
         verify(snapshotCatchUpService, org.mockito.Mockito.times(2))
                 .runHistoryBuild(eq("u1"), eq(HistoryJobMode.FULL), any(), any());
-        verify(jobRedis, never()).unlock(eq("other"));
+        verify(jobRedis).unlock("u1", "tok-3");
+        verify(jobRedis, never()).unlock(eq("other"), anyString());
     }
 }

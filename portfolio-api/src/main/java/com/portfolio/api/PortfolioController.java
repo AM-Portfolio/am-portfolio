@@ -284,7 +284,12 @@ public class PortfolioController {
                         ? HistoryJobMode.MERGE_BROKER
                         : HistoryJobMode.FULL;
                 if (!brokerExisted || "REPLACE_ALL".equals(portfolioModel.getLastTradeAction())) {
-                    portfolioHistoryJobService.enqueue(saved.getOwner(), mode, portfolioId);
+                    try {
+                        portfolioHistoryJobService.enqueue(saved.getOwner(), mode, portfolioId);
+                    } catch (Exception enqueueEx) {
+                        log.warn("PortfolioController - history enqueue failed after sync portfolioId={}: {}",
+                                portfolioId, enqueueEx.getMessage());
+                    }
                 }
             }
             log.info("PortfolioController - syncPortfolioFromTrade: saved portfolioId={}", saved != null ? saved.getId() : "null");
@@ -493,7 +498,17 @@ public class PortfolioController {
     }
 
     private PortfolioHistoryResponse toHistoryResponse(String userId, List<PortfolioSnapshotModel> points) {
-        PortfolioHistoryStatusResponse status = portfolioHistoryJobService.getStatus(userId);
+        PortfolioHistoryStatusResponse status;
+        try {
+            status = portfolioHistoryJobService.getStatus(userId);
+        } catch (Exception e) {
+            log.warn("PortfolioController - history status lookup failed userId={}: {}", userId, e.getMessage());
+            status = PortfolioHistoryStatusResponse.builder()
+                    .historyStatus(points.isEmpty() ? HistoryStatus.EMPTY : HistoryStatus.READY)
+                    .phase(com.portfolio.model.history.HistoryJobPhase.READY)
+                    .coverageDays(points.size())
+                    .build();
+        }
         HistoryStatus hs = status.getHistoryStatus();
         if (hs == null || hs == HistoryStatus.EMPTY) {
             hs = points.isEmpty() ? HistoryStatus.EMPTY : HistoryStatus.READY;

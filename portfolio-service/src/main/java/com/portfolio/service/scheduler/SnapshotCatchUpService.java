@@ -168,14 +168,18 @@ public class SnapshotCatchUpService {
             passAEnd = window.to();
         }
 
+        // Carry last-known closes across pass A → B so weekends/holidays after the
+        // boundary do not wipe the forward-fill map and leave a hole in the chart.
+        Map<String, Double> lastKnownPrice = new HashMap<>();
+
         phaseCallback.accept(HistoryJobPhase.BUILDING_90D);
         int written = writeRange(userId, mode, targetPortfolioId, portfolioHoldings, priceLookup,
-                window.from(), passAEnd, mode == HistoryJobMode.GAP, coverage);
+                window.from(), passAEnd, mode == HistoryJobMode.GAP, coverage, lastKnownPrice);
 
         if (passAEnd.isBefore(window.to())) {
             phaseCallback.accept(HistoryJobPhase.BUILDING_1Y);
             written += writeRange(userId, mode, targetPortfolioId, portfolioHoldings, priceLookup,
-                    passAEnd.plusDays(1), window.to(), mode == HistoryJobMode.GAP, coverage);
+                    passAEnd.plusDays(1), window.to(), mode == HistoryJobMode.GAP, coverage, lastKnownPrice);
         }
 
         log.info("[HistoryJob] Build complete userId={} daysWritten={} from={} to={} holdingsLoaded={} skippedIsin={} priced={} unpricedSkipped={} lastDayWealth={} lastDayHoldingsPriced={}",
@@ -251,9 +255,11 @@ public class SnapshotCatchUpService {
                 portfolioHoldings.put(portfolioId, holdingInfos);
             }
         }
+        // Coverage denominator must match fetchPrices (ticker-shaped only).
         coverage.loadableTickers = (int) portfolioHoldings.values().stream()
                 .flatMap(List::stream)
                 .map(h -> h.symbol)
+                .filter(TradingSymbolResolver::looksLikeTradingTicker)
                 .distinct()
                 .count();
         return portfolioHoldings;
@@ -276,7 +282,7 @@ public class SnapshotCatchUpService {
 
     /**
      * Prefer compact tickers after {@link PortfolioEquitySymbolNormalizer} has run.
-     * Still-ISIN-shaped ids are skipped — historical-data batches fail on unresolved MF ISINs.
+     * Company names / unresolved ISINs return null so they are skipped (not counted as loadable).
      */
     private String resolveMarketSymbol(EquityModel e) {
         String symbol = e.getSymbol();
@@ -288,13 +294,8 @@ public class SnapshotCatchUpService {
                 && TradingSymbolResolver.looksLikeTradingTicker(e.getIsin())) {
             return e.getIsin().trim().toUpperCase();
         }
-        if (TradingSymbolResolver.looksLikeIsin(symbol)) {
-            return null;
-        }
-        if (e.getIsin() != null && TradingSymbolResolver.looksLikeIsin(e.getIsin())) {
-            return null;
-        }
-        return symbol != null ? symbol.trim().toUpperCase() : null;
+        // Unresolved ISIN or demat company name — not fetchable for history pricing.
+        return null;
     }
 
     private void retryUnpriced(
@@ -569,7 +570,8 @@ public class SnapshotCatchUpService {
             LocalDate from,
             LocalDate to,
             boolean skipExisting,
-            CoverageStats coverage) {
+            CoverageStats coverage,
+            Map<String, Double> lastKnownPrice) {
 
         Set<LocalDate> existingDates = skipExisting
                 ? portfolioSnapshotRepository.findByUserIdAndSnapshotDateBetween(userId, from, to).stream()
@@ -577,7 +579,6 @@ public class SnapshotCatchUpService {
                         .collect(Collectors.toSet())
                 : Collections.emptySet();
 
-        Map<String, Double> lastKnownPrice = new HashMap<>();
         int written = 0;
         List<PortfolioSnapshotDocument> batch = new ArrayList<>();
 
@@ -595,12 +596,17 @@ public class SnapshotCatchUpService {
 
             DayBuildResult dayBuild = buildEntriesForDateWithStats(portfolioHoldings, lastKnownPrice, date);
             List<PortfolioSnapshotEntry> newEntries = dayBuild.entries();
-            if (newEntries.isEmpty()) {
-                continue;
-            }
-
             Optional<PortfolioSnapshotDocument> existingOpt =
                     portfolioSnapshotRepository.findByUserIdAndSnapshotDate(userId, date);
+
+            // FULL with no active priced holdings that day: drop stale leftover snapshot.
+            if (newEntries.isEmpty()) {
+                if (mode == HistoryJobMode.FULL && existingOpt.isPresent()) {
+                    portfolioSnapshotRepository.delete(existingOpt.get());
+                    written++;
+                }
+                continue;
+            }
 
             PortfolioSnapshotDocument doc;
             if (existingOpt.isPresent() && mode == HistoryJobMode.FULL) {
@@ -618,37 +624,18 @@ public class SnapshotCatchUpService {
             } else if (existingOpt.isPresent() && mode == HistoryJobMode.GAP) {
                 continue;
             } else {
-                List<PortfolioSnapshotEntry> toWrite = newEntries;
-                // MERGE on a brand-new day must not insert sibling brokers (only the target book).
-                if (mode == HistoryJobMode.MERGE_BROKER && targetPortfolioId != null) {
-                    toWrite = newEntries.stream()
-                            .filter(e -> targetPortfolioId.equals(e.getPortfolioId()))
-                            .collect(Collectors.toList());
-                    if (toWrite.isEmpty()) {
-                        continue;
-                    }
-                }
+                // New date: write every loaded broker so All / totals stay coherent
+                // (MERGE still only *refreshes* the target on existing dates above).
                 String snapshotId = UUID.randomUUID().toString();
-                double totalWealth = 0;
-                double totalInvestment = 0;
-                for (PortfolioSnapshotEntry e : toWrite) {
-                    totalWealth += e.getClose() != null ? e.getClose() : 0;
-                    totalInvestment += e.getTotalInvestment() != null ? e.getTotalInvestment() : 0;
-                }
-                double gl = totalWealth - totalInvestment;
-                double glPct = totalInvestment > 0 ? (gl / totalInvestment) * 100.0 : 0.0;
                 doc = PortfolioSnapshotDocument.builder()
                         .id(snapshotId)
                         .snapshotId(snapshotId)
                         .userId(userId)
                         .snapshotDate(date)
-                        .totalUserWealth(totalWealth)
-                        .totalUserInvestment(totalInvestment)
-                        .totalUserGainLoss(gl)
-                        .totalUserGainLossPercentage(glPct)
-                        .portfolios(toWrite)
+                        .portfolios(newEntries)
                         .createdAt(LocalDateTime.now())
                         .build();
+                recomputeTotals(doc);
             }
             if (coverage != null) {
                 coverage.lastDayWealth = doc.getTotalUserWealth() != null ? doc.getTotalUserWealth() : 0;
@@ -701,7 +688,15 @@ public class SnapshotCatchUpService {
                 }
             }
         }
+        // Drop the target's prior entry first so a rebuild with no holdings that day
+        // does not leave a stale nested broker in the snapshot.
+        if (targetPortfolioId != null && !targetPortfolioId.isBlank()) {
+            byId.remove(targetPortfolioId);
+        }
         for (PortfolioSnapshotEntry e : incoming) {
+            if (e.getPortfolioId() == null) {
+                continue;
+            }
             if (targetPortfolioId == null || targetPortfolioId.equals(e.getPortfolioId())) {
                 byId.put(e.getPortfolioId(), e);
             }
@@ -712,13 +707,21 @@ public class SnapshotCatchUpService {
     private void recomputeTotals(PortfolioSnapshotDocument doc) {
         double wealth = 0;
         double inv = 0;
+        double gl = 0;
         if (doc.getPortfolios() != null) {
             for (PortfolioSnapshotEntry e : doc.getPortfolios()) {
                 wealth += e.getClose() != null ? e.getClose() : 0;
                 inv += e.getTotalInvestment() != null ? e.getTotalInvestment() : 0;
+                // Prefer entry-level GL (excludes zero-cost MTM from the %) when present.
+                if (e.getTotalGainLoss() != null) {
+                    gl += e.getTotalGainLoss();
+                } else {
+                    double close = e.getClose() != null ? e.getClose() : 0;
+                    double entryInv = e.getTotalInvestment() != null ? e.getTotalInvestment() : 0;
+                    gl += close - entryInv;
+                }
             }
         }
-        double gl = wealth - inv;
         doc.setTotalUserWealth(wealth);
         doc.setTotalUserInvestment(inv);
         doc.setTotalUserGainLoss(gl);
@@ -776,6 +779,7 @@ public class SnapshotCatchUpService {
 
             double portValue = 0.0;
             double portInvestment = 0.0;
+            double costedValue = 0.0;
             List<HoldingSnapshotItem> snapHoldings = new ArrayList<>();
 
             for (HoldingInfo h : holdings) {
@@ -789,8 +793,14 @@ public class SnapshotCatchUpService {
                 }
                 double price = priceOpt.get();
                 holdingsPriced++;
-                portValue += h.quantity * price;
-                portInvestment += h.quantity * h.avgBuyPrice;
+                double mtm = h.quantity * price;
+                portValue += mtm;
+                // Zero-cost (typical email demat) still contributes to chart wealth, but must
+                // not enter the GL% numerator or it inflates Overall on mixed books.
+                if (h.avgBuyPrice > 0 && Double.isFinite(h.avgBuyPrice)) {
+                    portInvestment += h.quantity * h.avgBuyPrice;
+                    costedValue += mtm;
+                }
                 snapHoldings.add(HoldingSnapshotItem.builder()
                         .symbol(h.symbol)
                         .quantity(h.quantity)
@@ -800,7 +810,7 @@ public class SnapshotCatchUpService {
             if (snapHoldings.isEmpty()) {
                 continue;
             }
-            double portGainLoss = portValue - portInvestment;
+            double portGainLoss = costedValue - portInvestment;
             double portGainLossPct = portInvestment > 0 ? (portGainLoss / portInvestment) * 100.0 : 0.0;
             String brokerStr = holdings.isEmpty() ? null : holdings.get(0).brokerType;
             String portfolioName = holdings.isEmpty() ? null : holdings.get(0).portfolioName;

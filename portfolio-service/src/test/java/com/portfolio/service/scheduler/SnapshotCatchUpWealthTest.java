@@ -93,6 +93,29 @@ class SnapshotCatchUpWealthTest {
     }
 
     @Test
+    void buildEntriesZeroCostDoesNotInflateGainLossPct() {
+        SnapshotCatchUpService svc = newCatchUpStub();
+        Map<String, List<SnapshotCatchUpService.HoldingInfo>> holdings = Map.of(
+                "mixed-id", List.of(
+                        new SnapshotCatchUpService.HoldingInfo(
+                                "INFY", 2, 50.0, "ZERODHA", "Mixed", null, null),
+                        new SnapshotCatchUpService.HoldingInfo(
+                                "TCS", 1, 0.0, "ZERODHA", "Mixed", null, null)));
+
+        List<PortfolioSnapshotEntry> entries = svc.buildEntriesForDate(
+                holdings, Map.of("INFY", 200.0, "TCS", 3000.0), LocalDate.of(2026, 9, 1));
+
+        assertEquals(1, entries.size());
+        PortfolioSnapshotEntry e = entries.get(0);
+        // Chart wealth includes zero-cost MTM.
+        assertEquals(2 * 200.0 + 3000.0, e.getClose(), 1e-9);
+        assertEquals(2 * 50.0, e.getTotalInvestment(), 1e-9);
+        // GL% uses only costed holdings: (400 - 100) / 100 = 300%, not inflated by TCS.
+        assertEquals(300.0, e.getTotalGainLossPercentage(), 1e-9);
+        assertEquals(300.0, e.getTotalGainLoss(), 1e-9);
+    }
+
+    @Test
     void buildEntriesWithStatsCountsUnpricedZeroAvgBuy() {
         SnapshotCatchUpService svc = newCatchUpStub();
         Map<String, List<SnapshotCatchUpService.HoldingInfo>> holdings = Map.of(

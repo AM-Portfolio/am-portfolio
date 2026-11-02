@@ -100,9 +100,12 @@ public class PortfolioEquitySymbolNormalizer {
             }
         }
 
-        // Broker display names (TATAAML-TATAGOLD / JIO PLATFORMS LIMITED) when MD still returns ISIN.
+        // Broker display-name compact ticker only when there is no ISIN to preserve.
+        // Never overwrite an ISIN-shaped symbol with a compacted company name
+        // (transient MD miss would persist RELIANCEINDUSTRIES and skip heal).
         if ((resolved == null || resolved.isBlank() || TradingSymbolResolver.looksLikeIsin(resolved))
-                && equity.getName() != null && !equity.getName().isBlank()) {
+                && equity.getName() != null && !equity.getName().isBlank()
+                && isinKey == null) {
             String fromBrokerName = HoldingInstrumentClassifier.suggestDisplayTickerFromName(equity.getName());
             if (fromBrokerName != null) {
                 resolved = fromBrokerName;
