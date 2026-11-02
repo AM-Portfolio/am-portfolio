@@ -79,10 +79,10 @@ public class RedisConfig {
             log.warn("No Redis password provided, connecting without authentication");
         }
 
-        // Configure Lettuce client with a 5-second command timeout.
-        // This prevents health probes from hanging for 60s (Lettuce default)
-        // when Redis is in LOADING state during snapshot restore.
-        // Also enables Micrometer tracing for Redis commands.
+        // 5s command timeout + Micrometer tracing for Redis spans.
+        // Safe only if no Redis I/O runs during bean @PostConstruct: tracing finish() on the
+        // epoll thread can resolve Spring beans (Prometheus exemplars); that deadlocks if the
+        // factory lock is still held. ETF warm moved to ApplicationReadyEvent for that reason.
         LettuceClientConfiguration clientConfig = LettuceClientConfiguration.builder()
             .commandTimeout(Duration.ofSeconds(5))
             .clientResources(DefaultClientResources.builder()

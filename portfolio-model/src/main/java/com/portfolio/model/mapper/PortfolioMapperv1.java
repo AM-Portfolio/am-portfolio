@@ -1,5 +1,8 @@
 package com.portfolio.model.mapper;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -27,16 +30,18 @@ public class PortfolioMapperv1 {
     public PortfolioModelV1 toPortfolioModelV1(PortfolioUpdateEvent portfolioEvent) {
         BrokerType brokerType = canonicalizeBrokerType(portfolioEvent.getBrokerType());
 
+        LocalDateTime asOfTs = resolveAsOfDateTime(portfolioEvent);
+
         // null list = omit on soft-merge upsert; empty list = clear that class
         List<EquityModel> mappedEquities = portfolioEvent.getEquities() != null
-                ? mapToEquityModels(portfolioEvent, brokerType)
+                ? mapToEquityModels(portfolioEvent, brokerType, asOfTs)
                 : null;
 
         List<com.am.common.amcommondata.model.asset.AssetModel> mappedFunds = null;
         if (portfolioEvent.getMutualFunds() != null) {
             mappedFunds = portfolioEvent.getMutualFunds().stream()
                     .filter(f -> f != null)
-                    .map(f -> mapToAsset(f, brokerType))
+                    .map(f -> mapToAsset(f, brokerType, asOfTs))
                     .collect(Collectors.toList());
         }
 
@@ -45,9 +50,16 @@ public class PortfolioMapperv1 {
         int equityCount = mappedEquities != null ? calculateAssetCount(mappedEquities) : 0;
         int mfCount = mappedFunds != null ? mappedFunds.size() : 0;
 
+        // Broker books always use broker display name (Dhan/Zerodha…). Never persist
+        // email Mongo doc ObjectIds as the portfolio name — that surfaces in the UI selector.
+        String brokerName = brokerType != null ? brokerType.getCode() : null;
+        String eventName = portfolioEvent.getPortfolioId();
+        String name = looksLikeOpaqueId(eventName) ? brokerName
+                : (eventName != null && !eventName.isBlank() ? eventName : brokerName);
+
         return PortfolioModelV1.builder()
                 .id(portfolioEvent.getId())
-                .name(portfolioEvent.getPortfolioId())
+                .name(name)
                 .owner(portfolioEvent.getUserId())
                 .brokerType(brokerType)
                 .fundType(FundType.DEFAULT)
@@ -60,8 +72,40 @@ public class PortfolioMapperv1 {
                 .cash(null)
                 .assetCount(equityCount + mfCount)
                 .totalValue(equityValue + mfValue)
+                .createdAt(asOfTs)
+                .updatedAt(asOfTs)
                 .version(0L)
                 .build();
+    }
+
+    /** Mongo ObjectId (24 hex) or UUID — not a human portfolio label. */
+    static boolean looksLikeOpaqueId(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        String v = value.trim();
+        if (v.matches("(?i)[0-9a-f]{24}")) {
+            return true;
+        }
+        return v.matches("(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+    }
+
+    /**
+     * Statement / Gmail calendar day for equity {@code createdAt} (history lifeStart).
+     * Never use {@link PortfolioUpdateEvent#getTimestamp()} — that is Kafka ingest time
+     * and collapses FULL catch-up to a 0–1 day window, leaving TF charts empty after sync.
+     * When {@code asOfDate} is absent, leave null so SnapshotCatchUp uses its ~90d fallback.
+     */
+    private static LocalDateTime resolveAsOfDateTime(PortfolioUpdateEvent event) {
+        LocalDate asOf = event.getAsOfDate();
+        if (asOf == null) {
+            return null;
+        }
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+        if (asOf.isAfter(today)) {
+            asOf = today;
+        }
+        return asOf.atStartOfDay();
     }
 
     /** GROW (legacy) and GROWW are one broker — document upsert must not create two Mongo books. */
@@ -131,14 +175,15 @@ public class PortfolioMapperv1 {
         return portfolioModel;
     }
 
-    private List<EquityModel> mapToEquityModels(PortfolioUpdateEvent portfolio, BrokerType brokerType) {
+    private List<EquityModel> mapToEquityModels(
+            PortfolioUpdateEvent portfolio, BrokerType brokerType, LocalDateTime asOfTs) {
         List<EquityModel> equities = portfolio.getEquities();
         List<EquityModel> assets = new ArrayList<>();
 
         if (equities != null) {
             var assetModels = equities.stream()
                     .filter(e -> e != null)
-                    .map(e -> mapEquityModelToAsset(e, brokerType))
+                    .map(e -> mapEquityModelToAsset(e, brokerType, asOfTs))
                     .collect(Collectors.toList());
             assets.addAll(assetModels);
         }
@@ -168,7 +213,7 @@ public class PortfolioMapperv1 {
             em.setAvgBuyingPrice(e.getAvgBuyingPrice() != null ? e.getAvgBuyingPrice().doubleValue() : 0.0);
         }
 
-        return mapEquityModelToAsset(em, brokerType);
+        return mapEquityModelToAsset(em, brokerType, null);
     }
 
     private Double calculateTotalValue(List<EquityModel> equityModels) {
@@ -192,7 +237,8 @@ public class PortfolioMapperv1 {
         return equityModels.size();
     }
 
-    private EquityModel mapEquityModelToAsset(EquityModel equityModel, BrokerType brokerType) {
+    private EquityModel mapEquityModelToAsset(
+            EquityModel equityModel, BrokerType brokerType, LocalDateTime asOfTs) {
         String resolvedSymbol = resolveSymbolForStorage(equityModel.getSymbol(), equityModel.getIsin());
 
         if (resolvedSymbol == null || resolvedSymbol.isBlank()) {
@@ -243,6 +289,8 @@ public class PortfolioMapperv1 {
                 .todayProfitLossPercentage(equityModel.getTodayProfitLossPercentage())
                 .profitLoss(equityModel.getProfitLoss())
                 .profitLossPercentage(equityModel.getProfitLossPercentage())
+                .createdAt(asOfTs != null ? asOfTs : equityModel.getCreatedAt())
+                .updatedAt(asOfTs != null ? asOfTs : equityModel.getUpdatedAt())
                 .build();
     }
 
@@ -256,7 +304,8 @@ public class PortfolioMapperv1 {
                 .orElse(symbol);
     }
 
-    private MutualFundModel mapToAsset(MutualFundModel fundModel, BrokerType brokerType) {
+    private MutualFundModel mapToAsset(
+            MutualFundModel fundModel, BrokerType brokerType, LocalDateTime asOfTs) {
         Double qty = fundModel.getQuantity();
         Double avg = fundModel.getAvgBuyingPrice();
         Double currentValue = fundModel.getCurrentValue();
@@ -277,6 +326,8 @@ public class PortfolioMapperv1 {
                 .currentPrice(fundModel.getCurrentPrice() != null ? fundModel.getCurrentPrice() : avg)
                 .currentValue(currentValue)
                 .investmentValue(investmentValue)
+                .createdAt(asOfTs != null ? asOfTs : fundModel.getCreatedAt())
+                .updatedAt(asOfTs != null ? asOfTs : fundModel.getUpdatedAt())
                 .build();
     }
 
