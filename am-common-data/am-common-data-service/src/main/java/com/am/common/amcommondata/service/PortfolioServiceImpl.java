@@ -375,6 +375,18 @@ public class PortfolioServiceImpl implements PortfolioService {
         }
     }
 
+    /** Email Mongo ObjectId / UUID must never become the broker book display name. */
+    private static boolean looksLikeOpaquePortfolioName(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        String v = value.trim();
+        if (v.matches("(?i)[0-9a-f]{24}")) {
+            return true;
+        }
+        return v.matches("(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+    }
+
     private static boolean looksLikeIsin(String value) {
         if (value == null) {
             return false;
@@ -552,8 +564,12 @@ public class PortfolioServiceImpl implements PortfolioService {
             if (incoming.getCash() != null) {
                 doc.setCash(incoming.getCash());
             }
-            if (portfolioModel.getName() != null && !portfolioModel.getName().isBlank()) {
+            if (portfolioModel.getName() != null && !portfolioModel.getName().isBlank()
+                    && !looksLikeOpaquePortfolioName(portfolioModel.getName())) {
                 doc.setName(portfolioModel.getName());
+            } else if (doc.getName() == null || doc.getName().isBlank()
+                    || looksLikeOpaquePortfolioName(doc.getName())) {
+                doc.setName(brokerType.getCode());
             }
             // Always recompute total from whatever lists are on the doc after merge.
             doc.setTotalValue(sumEquityDocs(doc.getEquities())

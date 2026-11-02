@@ -53,6 +53,14 @@ public interface TradingSymbolResolver {
         if (looksLikeIsin(trimmed)) {
             return false;
         }
+        String u = trimmed.toUpperCase();
+        // F&O / option legs hang historical cash equity API and waste HistoryJob time.
+        if (u.endsWith("FUT") || u.endsWith("CE") || u.endsWith("PE")) {
+            return false;
+        }
+        if (u.matches(".*\\d{2}(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC).*")) {
+            return false;
+        }
         // Allow exchange prefixes and common ticker characters only.
         return trimmed.matches("(?i)[A-Z0-9][A-Z0-9._\\-&:]*");
     }

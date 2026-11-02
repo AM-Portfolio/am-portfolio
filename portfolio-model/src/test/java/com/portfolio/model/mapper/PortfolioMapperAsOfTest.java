@@ -41,6 +41,24 @@ class PortfolioMapperAsOfTest {
     }
 
     @Test
+    void opaqueMongoDocIdIsNotUsedAsPortfolioName() {
+        PortfolioUpdateEvent event = PortfolioUpdateEvent.builder()
+                .userId("user-1")
+                .brokerType(BrokerType.DHAN)
+                .portfolioId("6ae8f136a20959e873d75e08")
+                .asOfDate(LocalDate.of(2024, 5, 15))
+                .equities(List.of(EquityModel.builder()
+                        .symbol("RELIANCE")
+                        .quantity(1.0)
+                        .avgBuyingPrice(1.0)
+                        .build()))
+                .build();
+
+        PortfolioModelV1 model = mapper.toPortfolioModelV1(event);
+        assertEquals("Dhan", model.getName());
+    }
+
+    @Test
     void withoutAsOfLeavesCreatedAtNullEvenWhenTimestampPresent() {
         PortfolioUpdateEvent event = PortfolioUpdateEvent.builder()
                 .userId("user-1")

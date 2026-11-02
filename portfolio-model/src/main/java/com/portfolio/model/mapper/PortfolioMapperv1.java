@@ -50,9 +50,16 @@ public class PortfolioMapperv1 {
         int equityCount = mappedEquities != null ? calculateAssetCount(mappedEquities) : 0;
         int mfCount = mappedFunds != null ? mappedFunds.size() : 0;
 
+        // Broker books always use broker display name (Dhan/Zerodha…). Never persist
+        // email Mongo doc ObjectIds as the portfolio name — that surfaces in the UI selector.
+        String brokerName = brokerType != null ? brokerType.getCode() : null;
+        String eventName = portfolioEvent.getPortfolioId();
+        String name = looksLikeOpaqueId(eventName) ? brokerName
+                : (eventName != null && !eventName.isBlank() ? eventName : brokerName);
+
         return PortfolioModelV1.builder()
                 .id(portfolioEvent.getId())
-                .name(portfolioEvent.getPortfolioId())
+                .name(name)
                 .owner(portfolioEvent.getUserId())
                 .brokerType(brokerType)
                 .fundType(FundType.DEFAULT)
@@ -69,6 +76,18 @@ public class PortfolioMapperv1 {
                 .updatedAt(asOfTs)
                 .version(0L)
                 .build();
+    }
+
+    /** Mongo ObjectId (24 hex) or UUID — not a human portfolio label. */
+    static boolean looksLikeOpaqueId(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        String v = value.trim();
+        if (v.matches("(?i)[0-9a-f]{24}")) {
+            return true;
+        }
+        return v.matches("(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
     }
 
     /**
