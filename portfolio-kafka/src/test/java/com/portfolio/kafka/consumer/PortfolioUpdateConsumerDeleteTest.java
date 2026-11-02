@@ -9,6 +9,7 @@ import com.portfolio.redis.service.ActiveMarketSymbolPublisher;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
 import com.portfolio.redis.service.PortfolioIntelligenceRedisService;
 import com.portfolio.redis.service.PortfolioSummaryRedisService;
+import com.am.common.amcommondata.service.PortfolioSnapshotService;
 import com.portfolio.service.intraday.IntradayCandleWarmService;
 import com.portfolio.service.portfolio.PortfolioIntradayService;
 import com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer;
@@ -48,6 +49,7 @@ class PortfolioUpdateConsumerDeleteTest {
     @Mock private PortfolioHistoryJobService portfolioHistoryJobService;
     @Mock private PortfolioIntradayService portfolioIntradayService;
     @Mock private IntradayCandleWarmService intradayCandleWarmService;
+    @Mock private PortfolioSnapshotService portfolioSnapshotService;
     @Mock private Acknowledgment acknowledgment;
 
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
@@ -72,7 +74,8 @@ class PortfolioUpdateConsumerDeleteTest {
                 stringRedisTemplate,
                 portfolioHistoryJobService,
                 portfolioIntradayService,
-                intradayCandleWarmService);
+                intradayCandleWarmService,
+                portfolioSnapshotService);
         c.init();
         return c;
     }

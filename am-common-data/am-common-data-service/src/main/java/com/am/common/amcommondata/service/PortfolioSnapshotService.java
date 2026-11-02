@@ -90,6 +90,91 @@ public class PortfolioSnapshotService {
         log.info("Successfully upserted User-Centric snapshot for user {} on date {} totalWealth={}", userId, snapshotDate, totalUserWealth);
     }
 
+    /**
+     * After delete+email-resync the broker book gets a new UUID while old daily
+     * snapshots still point at the dead id — chart stays empty for minutes until
+     * HistoryJob rebuilds. Re-point orphaned same-broker series to the live id.
+     *
+     * @return number of snapshot days updated
+     */
+    @org.springframework.cache.annotation.CacheEvict(value = "portfolioHistory", allEntries = true)
+    public int rebindOrphanedBrokerSnapshots(
+            String userId,
+            String livePortfolioId,
+            String brokerTypeName,
+            String displayName) {
+        if (userId == null || userId.isBlank()
+                || livePortfolioId == null || livePortfolioId.isBlank()
+                || brokerTypeName == null || brokerTypeName.isBlank()) {
+            return 0;
+        }
+        String wantBroker = brokerTypeName.trim().toUpperCase();
+        String wantLabel = displayName != null ? displayName.trim() : null;
+        List<PortfolioSnapshotDocument> snaps =
+                portfolioSnapshotRepository.findByUserIdOrderBySnapshotDateAsc(userId);
+        if (snaps == null || snaps.isEmpty()) {
+            return 0;
+        }
+        int days = 0;
+        for (PortfolioSnapshotDocument snap : snaps) {
+            if (snap.getPortfolios() == null || snap.getPortfolios().isEmpty()) {
+                continue;
+            }
+            boolean changed = false;
+            for (PortfolioSnapshotEntry e : snap.getPortfolios()) {
+                if (e == null || !sameBrokerSeries(e, wantBroker, wantLabel)) {
+                    continue;
+                }
+                if (!livePortfolioId.equals(e.getPortfolioId())) {
+                    e.setPortfolioId(livePortfolioId);
+                    changed = true;
+                }
+                if (wantLabel != null && !wantLabel.isBlank()
+                        && (e.getPortfolioName() == null
+                        || looksLikeOpaqueName(e.getPortfolioName())
+                        || !wantLabel.equalsIgnoreCase(e.getPortfolioName()))) {
+                    e.setPortfolioName(wantLabel);
+                    changed = true;
+                }
+                if (e.getBrokerType() == null || e.getBrokerType().isBlank()) {
+                    e.setBrokerType(wantBroker);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                portfolioSnapshotRepository.save(snap);
+                days++;
+            }
+        }
+        if (days > 0) {
+            log.info("[History] Rebound {} snapshot day(s) userId={} broker={} -> portfolioId={}",
+                    days, userId, wantBroker, livePortfolioId);
+        }
+        return days;
+    }
+
+    private static boolean sameBrokerSeries(
+            PortfolioSnapshotEntry e, String wantBroker, String wantLabel) {
+        String bt = e.getBrokerType() != null ? e.getBrokerType().trim().toUpperCase() : "";
+        if (wantBroker.equals(bt)) {
+            return true;
+        }
+        String pname = e.getPortfolioName() != null ? e.getPortfolioName().trim() : "";
+        if (wantLabel != null && wantLabel.equalsIgnoreCase(pname)) {
+            return true;
+        }
+        return wantBroker.equalsIgnoreCase(pname);
+    }
+
+    private static boolean looksLikeOpaqueName(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        String v = value.trim();
+        return v.matches("(?i)[0-9a-f]{24}")
+                || v.matches("(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+    }
+
     /** [0]=sum gain, [1]=pct vs sum of opens; nulls when no entry freeze. */
     private static Double[] sumSessionDayGain(List<PortfolioSnapshotEntry> entries) {
         if (entries == null || entries.isEmpty()) {

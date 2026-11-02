@@ -16,6 +16,7 @@ import com.portfolio.model.mapper.PortfolioMapperv1;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.service.PortfolioService;
+import com.am.common.amcommondata.service.PortfolioSnapshotService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.portfolio.kafka.publisher.PortfolioEventPublisher;
 import org.springframework.context.annotation.Lazy;
@@ -78,6 +79,7 @@ public class PortfolioUpdateConsumerService {
     private final PortfolioHistoryJobService    portfolioHistoryJobService;
     private final PortfolioIntradayService      portfolioIntradayService;
     private final IntradayCandleWarmService     intradayCandleWarmService;
+    private final PortfolioSnapshotService      portfolioSnapshotService;
 
     @Value("${app.kafka.portfolio.consumer.id:am-portfolio-consumer-group}")
     private String consumerGroupId;
@@ -202,6 +204,22 @@ public class PortfolioUpdateConsumerService {
      */
     private void enqueueDocumentHistoryAndWarmIntraday(PortfolioModelV1 saved, String portfolioId) {
         String owner = saved.getOwner();
+        // Delete+resync mints a new UUID — attach prior chart days so UI is not empty for ~1m+.
+        if (portfolioId != null && saved.getBrokerType() != null) {
+            try {
+                int rebound = portfolioSnapshotService.rebindOrphanedBrokerSnapshots(
+                        owner,
+                        portfolioId,
+                        saved.getBrokerType().name(),
+                        saved.getName() != null ? saved.getName() : saved.getBrokerType().getCode());
+                if (rebound > 0) {
+                    log.info("[DOC] Rebound {} history day(s) onto portfolioId={} broker={}",
+                            rebound, portfolioId, saved.getBrokerType());
+                }
+            } catch (Exception e) {
+                log.warn("[DOC] Snapshot rebind failed userId={}: {}", owner, e.getMessage());
+            }
+        }
         try {
             List<PortfolioModelV1> existing = portfolioService.getPortfoliosByUserId(owner);
             boolean otherBrokers = existing != null && existing.stream()
