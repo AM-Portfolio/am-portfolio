@@ -431,18 +431,14 @@ public class HeatmapUtils {
         sectorPerformance.setStocks(stockDetails);
         sectorPerformance.setStockCount(stockDetails.size());
         
-        // Use domain methods to calculate values and sort stocks
+        // Use domain methods to calculate values and sort stocks.
+        // Full stock book is required for sector drill-down (TradingView-style
+        // mosaic); UI density rules hide microscopic labels, not API rows.
         sectorPerformance.calculateTotalValue()
                         .calculateTotalReturnAmount()
                         .calculateStockWeights()
                         .sortStocksByValue();
-                        
-        // LIMIT THE NUMBER OF STOCKS RETURNED TO PREVENT UI FREEZE
-        // A heatmap widget cannot physically display thousands of microscopic boxes
-        if (sectorPerformance.getStocks() != null && sectorPerformance.getStocks().size() > 15) {
-            sectorPerformance.setStocks(new java.util.ArrayList<>(sectorPerformance.getStocks().subList(0, 15)));
-        }
-        
+
         return sectorPerformance;
     }
 }

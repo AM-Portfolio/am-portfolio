@@ -11,4 +11,5 @@
 
 **Postman:** `am-portfolio/postman/AM_Basket_Current_PROD_Discover.postman_collection.json` (cloud: AM Basket — Current (PROD Discover)).
 
-**Next:** Deploy latency build → run Discover opportunities with `mode=DISCOVER` → improve-loop until ≤1s.
+**DEV (2026-10-17):** Warm Discover pass — p95 ~398ms, match ITBEES=9.09 / NIFTYBEES=1.96.  
+**Next:** PROD M-L4 when asked; keep Vault `MARKET_DATA_API_URL` in-cluster for Kind DEV.

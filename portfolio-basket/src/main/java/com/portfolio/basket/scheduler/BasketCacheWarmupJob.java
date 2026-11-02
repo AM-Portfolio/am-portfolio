@@ -8,6 +8,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
+/**
+ * Warms L1/L2 ETF enriched cache for featured catalog tickers (batch + perf fill).
+ * Runs off the Discover request path so opportunities stay ≤1s.
+ */
 @Component
 @Slf4j
 @RequiredArgsConstructor
@@ -20,21 +26,14 @@ public class BasketCacheWarmupJob {
     @Async("taskExecutor")
     public void warmUpTopEtfs() {
         try {
-            var catalog = catalogService.getCatalog();
-            log.info("Cache warm-up: catalog loaded ({} ETFs)", catalog.getThemes() != null ? catalog.getThemes().size() : 0);
-
-            if (catalog.getThemes() != null) {
-                catalog.getThemes().stream()
-                    .filter(theme -> theme.getQuery() != null && !theme.getQuery().isBlank())
-                    .forEach(theme -> {
-                        try {
-                            enrichedEtfService.getEnrichedEtf(theme.getQuery());
-                            log.info("Cache warm-up: loaded ETF {}", theme.getQuery());
-                        } catch (Exception e) {
-                            log.warn("Cache warm-up failed for ETF {}: {}", theme.getQuery(), e.getMessage());
-                        }
-                    });
+            List<String> top = catalogService.getTopEtfSymbols();
+            if (top == null || top.isEmpty()) {
+                log.info("Cache warm-up: no featured ETF symbols");
+                return;
             }
+            log.info("Cache warm-up: batch loading {} ETF tickers (discover monthly wave)", top.size());
+            enrichedEtfService.getEnrichedEtfsBatch(top, true, EnrichedEtfService.DISCOVER_WARM_WAIT_MS);
+            log.info("Cache warm-up: done for {} ETFs", top.size());
         } catch (Exception e) {
             log.warn("BasketCacheWarmupJob failed — app still functional: {}", e.getMessage());
         }

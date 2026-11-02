@@ -88,11 +88,17 @@ public final class SectorMatcher {
         }
         String s = sector.toLowerCase(Locale.ROOT).trim();
         return s.equals("it")
+                || s.equals("ites")
                 || s.equals("itech")
                 || s.contains("information technology")
                 || s.contains("technolog")
                 || s.contains("software")
-                || s.contains("computer");
+                || s.contains("computer")
+                || s.startsWith("it ")
+                || s.startsWith("it-")
+                || s.contains("it service")
+                || s.contains("it-software")
+                || s.contains("it software");
     }
 
     public static boolean matchesAuto(String sector) {

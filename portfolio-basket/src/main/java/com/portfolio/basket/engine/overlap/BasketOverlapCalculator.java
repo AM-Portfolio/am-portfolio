@@ -298,10 +298,17 @@ public class BasketOverlapCalculator {
         double physicalWeight = h.getWeightInPortfolio() != null ? h.getWeightInPortfolio() : 0.0;
         double physicalQty = h.getQuantity() != null ? h.getQuantity() : 0.0;
         double availableQty = h.getAvailableQuantity() != null ? h.getAvailableQuantity() : physicalQty;
-        if (physicalQty > 0) {
+        if (availableQty <= 0) {
+            return 0.0;
+        }
+        if (physicalQty > 0 && physicalWeight > 0) {
             return (availableQty / physicalQty) * physicalWeight;
         }
-        return 0.0;
+        // Zero-cost / unset weight: still expose a positive weight so Discover can mark HELD.
+        if (physicalWeight > 0) {
+            return physicalWeight;
+        }
+        return 0.01;
     }
 
     /**
@@ -349,12 +356,33 @@ public class BasketOverlapCalculator {
         log.debug("Checking Held Item: {} | Qty: {} | AvgPrice: {}",
                 userHolding.getSymbol(), userHolding.getQuantity(), userHolding.getAverageBuyingPrice());
 
-        double consumed = consumedWeightByIsin.getOrDefault(userHolding.getIsin(), 0.0);
+        double physicalQty = userHolding.getQuantity() != null ? userHolding.getQuantity() : 0.0;
+        double availableQty = userHolding.getAvailableQuantity() != null
+                ? userHolding.getAvailableQuantity()
+                : physicalQty;
+        if (availableQty <= 0) {
+            return false;
+        }
+
+        String consumeKey = userHolding.getIsin() != null && !userHolding.getIsin().isBlank()
+                ? userHolding.getIsin()
+                : userHolding.getSymbol();
+        if (consumeKey == null) {
+            return false;
+        }
+
+        double consumed = consumedWeightByIsin.getOrDefault(consumeKey, 0.0);
         double totalWeight = getAvailableWeight(userHolding);
         double available = totalWeight - consumed;
 
+        // Qty-owned but near-zero portfolio weight (missing avg cost): still count as HELD.
         if (available < 0.01) {
-            return false;
+            double etfW = req.getWeight();
+            if (etfW <= 0) {
+                return false;
+            }
+            available = etfW;
+            totalWeight = etfW;
         }
 
         item.setStatus(ItemStatus.HELD);
@@ -374,10 +402,11 @@ public class BasketOverlapCalculator {
             item.setLastPrice(price);
         }
 
-        double matchWeight = Math.min(req.getWeight(), available);
+        double reqWeight = req.getWeight();
+        double matchWeight = Math.min(reqWeight, available);
         item.setReplicaWeight(BasketUtils.round(matchWeight));
 
-        consumedWeightByIsin.merge(userHolding.getIsin(), matchWeight, Double::sum);
+        consumedWeightByIsin.merge(consumeKey, matchWeight, Double::sum);
 
         return true;
     }

@@ -22,6 +22,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /**
@@ -36,8 +39,11 @@ public class EtfPerformanceEnricher {
     private static final ZoneId MARKET_ZONE = ZoneId.of("Asia/Kolkata");
     private static final int SPARKLINE_MAX_POINTS = 24;
     private static final DateTimeFormatter AS_OF = DateTimeFormatter.ISO_LOCAL_DATE;
+    static final long DEFAULT_DISCOVER_WAVE_TIMEOUT_MS = 2_500L;
 
     private final MarketDataService marketDataService;
+    /** Fail-open budget for Discover hist; tests may override. */
+    long discoverWaveTimeoutMs = DEFAULT_DISCOVER_WAVE_TIMEOUT_MS;
 
     static boolean needsPerformanceFill(EtfData data) {
         if (data == null) {
@@ -45,15 +51,27 @@ public class EtfPerformanceEnricher {
         }
         // Always recompute from hist once per cache generation so Discover CAGR matches labels
         // and sparklines are present. Cached complete payloads skip via L1/L2 hit without fill.
-        boolean missingReturns = data.getReturn1Y() == null
-                || data.getReturn3Y() == null
-                || data.getReturn5Y() == null;
         boolean missingSpark = data.getSparklineCloses() == null || data.getSparklineCloses().size() < 2;
         boolean looksLikeUnnormalizedParser =
                 hasExcessPrecision(data.getReturn1Y())
                         || hasExcessPrecision(data.getReturn3Y())
                         || hasExcessPrecision(data.getReturn5Y());
-        return missingReturns || missingSpark || looksLikeUnnormalizedParser;
+        if (!missingSpark && data.getReturnsAsOf() != null && !looksLikeUnnormalizedParser) {
+            // Hist already applied. Listings younger than 5Y honestly omit that chip — do not
+            // wait 2.5s on every Discover request trying to invent it.
+            return false;
+        }
+        return needsReturnsFill(data) || missingSpark || looksLikeUnnormalizedParser;
+    }
+
+    /** 1Y/3Y/5Y chips — independent of sparkline so Discover can fill returns without weekly hist. */
+    static boolean needsReturnsFill(EtfData data) {
+        if (data == null) {
+            return false;
+        }
+        return data.getReturn1Y() == null
+                || data.getReturn3Y() == null
+                || data.getReturn5Y() == null;
     }
 
     /** Parser totals often arrive with >2 dp; Discover stores hist CAGR at 2 dp. */
@@ -106,28 +124,86 @@ public class EtfPerformanceEnricher {
     }
 
     /**
-     * START_END daily endpoints for 3Y/5Y when weekly series is too short (e.g. METALIETF).
+     * Discover miss path: one 5Y monthly ALL hist, derive 1Y/3Y/5Y + sparkline.
+     * Times out at {@link #discoverWaveTimeoutMs} and fail-opens (does not cancel the fetch).
+     */
+    public int fillDiscoverWave(List<EtfData> etfs) {
+        return fillDiscoverWave(etfs, discoverWaveTimeoutMs);
+    }
+
+    public int fillDiscoverWave(List<EtfData> etfs, long timeoutMs) {
+        if (etfs == null || etfs.isEmpty()) {
+            return 0;
+        }
+        List<EtfData> needing = etfs.stream()
+                .filter(EtfPerformanceEnricher::needsPerformanceFill)
+                .filter(e -> e.getSymbol() != null && !e.getSymbol().isBlank())
+                .collect(Collectors.toList());
+        if (needing.isEmpty()) {
+            return 0;
+        }
+
+        List<String> symbols = needing.stream()
+                .map(EtfData::getSymbol)
+                .map(s -> s.trim().toUpperCase(Locale.ROOT))
+                .distinct()
+                .collect(Collectors.toList());
+
+        long startMs = System.currentTimeMillis();
+        long waitMs = timeoutMs <= 0 ? 60_000L : Math.max(50L, timeoutMs);
+        Map<String, MarketData> hist = Map.of();
+        try {
+            if (waitMs >= 60_000L) {
+                // Already on a worker (warmup / singleflight). Avoid nested FJP deadlock.
+                hist = fetchFiveYearMonthly(symbols);
+            } else {
+                CompletableFuture<Map<String, MarketData>> fut =
+                        CompletableFuture.supplyAsync(() -> fetchFiveYearMonthly(symbols));
+                hist = fut.get(waitMs, TimeUnit.MILLISECONDS);
+            }
+        } catch (TimeoutException e) {
+            log.warn("basket.perf.discover.wave timeoutMs={} symbols={}", waitMs, symbols.size());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("basket.perf.discover.wave interrupted symbols={}", symbols.size());
+        } catch (Exception e) {
+            log.warn("basket.perf.discover.wave failed symbols={}: {}", symbols.size(), e.getMessage());
+        }
+        if (hist == null) {
+            hist = Map.of();
+        }
+
+        int filled = 0;
+        for (EtfData etf : needing) {
+            String key = etf.getSymbol().trim().toUpperCase(Locale.ROOT);
+            MarketData md = resolveHist(hist, key);
+            if (md != null && applyFromSeries(etf, md)) {
+                filled++;
+            }
+        }
+        log.info("basket.perf.discover.wave symbols={} histHits={} filled={} durationMs={}",
+                symbols.size(), hist.size(), filled, System.currentTimeMillis() - startMs);
+        return filled;
+    }
+
+    /**
+     * START_END daily endpoints for 1Y/3Y/5Y when weekly series is missing or too short (FULL path).
      */
     private int fillMissingLongHorizons(List<EtfData> etfs) {
         int filled = 0;
+        filled += applyStartEndReturns(etfs.stream()
+                .filter(e -> e.getReturn1Y() == null)
+                .collect(Collectors.toList()), 1, false);
         filled += applyStartEndReturns(etfs.stream()
                 .filter(e -> e.getReturn3Y() == null)
                 .collect(Collectors.toList()), 3, true);
         filled += applyStartEndReturns(etfs.stream()
                 .filter(e -> e.getReturn5Y() == null)
                 .collect(Collectors.toList()), 5, true);
-        // Young listings: if 3Y exists but 5Y still null, reuse 3Y START_END span as inception CAGR.
-        filled += applyStartEndReturns(etfs.stream()
-                .filter(e -> e.getReturn5Y() == null && e.getReturn3Y() != null)
-                .collect(Collectors.toList()), 3, true, true);
         return filled;
     }
 
     private int applyStartEndReturns(List<EtfData> etfs, int years, boolean cagr) {
-        return applyStartEndReturns(etfs, years, cagr, false);
-    }
-
-    private int applyStartEndReturns(List<EtfData> etfs, int years, boolean cagr, boolean asFiveYearProxy) {
         if (etfs == null || etfs.isEmpty()) {
             return 0;
         }
@@ -154,10 +230,15 @@ public class EtfPerformanceEnricher {
             if (r == null) {
                 continue;
             }
-            if (asFiveYearProxy || years == 5) {
+            if (years == 5) {
                 etf.setReturn5Y(r);
             } else if (years == 3) {
                 etf.setReturn3Y(r);
+            } else if (years == 1) {
+                etf.setReturn1Y(r);
+            }
+            if (etf.getReturnsAsOf() == null) {
+                etf.setReturnsAsOf(AS_OF.format(LocalDate.ofInstant(last.instant(), MARKET_ZONE)));
             }
             filled++;
         }
@@ -206,20 +287,66 @@ public class EtfPerformanceEnricher {
         }
     }
 
-    private static MarketData resolveHist(Map<String, MarketData> hist, String symbol) {
-        if (hist == null || hist.isEmpty()) {
+    private Map<String, MarketData> fetchFiveYearMonthly(List<String> symbols) {
+        LocalDate to = LocalDate.now(MARKET_ZONE);
+        LocalDate from = to.minusYears(5).minusMonths(1);
+        HistoricalDataRequest request = HistoricalDataRequest.builder()
+                .symbols(String.join(",", symbols))
+                .fromDate(from.toString())
+                .toDate(to.toString())
+                .interval(TimeFrame.WEEK.getValue())
+                .filterType(FilterType.ALL.getValue())
+                .instrumentType(InstrumentType.EQ.getValue())
+                .isIndexSymbol(false)
+                .forceRefresh(false)
+                .continuous(false)
+                .build();
+        try {
+            Map<String, MarketData> result = marketDataService.getHistoricalData(request);
+            return result != null ? result : Map.of();
+        } catch (Exception e) {
+            log.warn("basket.perf.discover.wave hist failed symbols={}: {}", symbols.size(), e.getMessage());
+            return Map.of();
+        }
+    }
+
+    static MarketData resolveHist(Map<String, MarketData> hist, String symbol) {
+        if (hist == null || hist.isEmpty() || symbol == null || symbol.isBlank()) {
             return null;
         }
+        String bare = stripInstrumentPrefix(symbol);
         MarketData direct = hist.get(symbol);
         if (direct != null) {
             return direct;
         }
+        direct = hist.get(bare);
+        if (direct != null) {
+            return direct;
+        }
         for (Map.Entry<String, MarketData> e : hist.entrySet()) {
-            if (e.getKey() != null && e.getKey().equalsIgnoreCase(symbol)) {
+            if (e.getKey() == null) {
+                continue;
+            }
+            String mapBare = stripInstrumentPrefix(e.getKey());
+            if (e.getKey().equalsIgnoreCase(symbol)
+                    || e.getKey().equalsIgnoreCase(bare)
+                    || mapBare.equalsIgnoreCase(bare)) {
                 return e.getValue();
             }
         }
         return null;
+    }
+
+    static String stripInstrumentPrefix(String key) {
+        if (key == null) {
+            return "";
+        }
+        String s = key.trim();
+        int colon = s.lastIndexOf(':');
+        int pipe = s.lastIndexOf('|');
+        int cut = Math.max(colon, pipe);
+        String tail = cut >= 0 ? s.substring(cut + 1) : s;
+        return tail.trim().toUpperCase(Locale.ROOT);
     }
 
     /**
@@ -274,7 +401,7 @@ public class EtfPerformanceEnricher {
             start = points.get(0);
             LocalDate startDay = LocalDate.ofInstant(start.instant(), MARKET_ZONE);
             double actualYears = ChronoUnit.DAYS.between(startDay, lastDay) / 365.25;
-            if (actualYears < 2.0) {
+            if (actualYears < years * 0.7) {
                 return null;
             }
             yearBasis = actualYears;
@@ -295,8 +422,9 @@ public class EtfPerformanceEnricher {
         if (Double.isInfinite(pct) || Double.isNaN(pct)) {
             return null;
         }
-        // Reject absurd hist glitches (bad ticks / corporate-action holes).
-        if (Math.abs(pct) > 150.0) {
+        // Reject absurd hist glitches. 1Y total can be larger than CAGR windows.
+        double cap = cagr ? 150.0 : 300.0;
+        if (Math.abs(pct) > cap) {
             return null;
         }
         return Math.round(pct * 100.0) / 100.0;

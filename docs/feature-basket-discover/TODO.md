@@ -165,7 +165,8 @@ Companion: [plan.md](./plan.md) · [architecture.drawio](./architecture.drawio)
 - [x] M-L2 Warm ETFs on startup + catalog PUT
 - [x] M-L3 Enrich skip when ≥95% ISINs
 - [x] Flutter explorer sends `mode=DISCOVER`
-- [ ] M-L4 PROD warm p95 ≤800ms / loop exit ≤1s
-- [ ] M-L5 Improve-loop until ≤1s (Postman collection)
+- [x] M-L4 **DEV** warm ≤1s (p95 ≤800ms) + match parity — 2026-10-17 via `kubeconfig.dev`
+- [ ] M-L4 **PROD** warm p95 ≤800ms / loop exit ≤1s
+- [x] M-L5 Improve-loop until ≤1s on DEV (Postman / curl) — exit green
 - [ ] M-L3b Parser perf batch if cold still >2s
 

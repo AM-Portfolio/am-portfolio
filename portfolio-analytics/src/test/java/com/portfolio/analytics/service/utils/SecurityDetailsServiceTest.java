@@ -1,13 +1,19 @@
 package com.portfolio.analytics.service.utils;
 
+import com.am.common.amcommondata.document.marketcap.MarketCapDocument;
 import com.am.common.amcommondata.model.MarketCapType;
 import com.am.common.amcommondata.model.security.SecurityKeyModel;
 import com.am.common.amcommondata.model.security.SecurityMetadataModel;
 import com.am.common.amcommondata.model.security.SecurityModel;
 import com.am.common.amcommondata.service.SecurityService;
 import com.am.common.amcommondata.service.marketcap.MarketCapMongoService;
+import com.portfolio.marketdata.model.BatchSearchResponse;
+import com.portfolio.marketdata.model.indices.IndexConstituent;
+import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.marketdata.service.NseIndicesService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -15,6 +21,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -23,6 +31,8 @@ class SecurityDetailsServiceTest {
     @Mock private SecurityService securityService;
     @Mock private MarketCapMongoService marketCapMongoService;
     @Mock private com.portfolio.basket.client.EtfApiClient etfApiClient;
+    @Mock private MarketDataService marketDataService;
+    @Mock private NseIndicesService nseIndicesService;
     @InjectMocks private SecurityDetailsService service;
 
     private SecurityModel buildSecurity(String symbol, String sector, String industry, MarketCapType cap) {
@@ -52,11 +62,14 @@ class SecurityDetailsServiceTest {
         var result = service.getSecurityDetails(List.of("AAPL"));
         assertEquals(1, result.size());
         assertNotNull(result.get("AAPL"));
+        verify(marketDataService, never()).getMarketCapData(anyList());
     }
 
     @Test void getSecurityDetails_partialResults_logsMissing() {
         var sec = buildSecurity("AAPL", "Tech", "Software", MarketCapType.LARGE_CAP);
         when(securityService.findBySymbols(List.of("AAPL", "MISS"))).thenReturn(List.of(sec));
+        when(marketCapMongoService.getBySymbols(List.of("MISS"))).thenReturn(Map.of());
+        when(marketDataService.getMarketCapData(List.of("MISS"))).thenReturn(Map.of());
         var result = service.getSecurityDetails(List.of("AAPL", "MISS"));
         assertEquals(1, result.size());
     }
@@ -73,6 +86,100 @@ class SecurityDetailsServiceTest {
         assertNotNull(result.get("A"));
     }
 
+    @Test void getSecurityDetails_apiFallback_fillsSectorAndWriteThrough() {
+        when(securityService.findBySymbols(List.of("TCS"))).thenReturn(List.of());
+        when(marketCapMongoService.getBySymbols(List.of("TCS"))).thenReturn(Map.of());
+        BatchSearchResponse.SecurityMatch match = BatchSearchResponse.SecurityMatch.builder()
+                .symbol("TCS")
+                .sector("Information Technology")
+                .industry("IT Services")
+                .marketCapType("LARGE_CAP")
+                .marketCapValue(10_000_000_000_000L)
+                .companyName("Tata Consultancy")
+                .build();
+        when(marketDataService.getMarketCapData(List.of("TCS"))).thenReturn(Map.of("TCS", match));
+
+        var result = service.getSecurityDetails(List.of("TCS"));
+        assertEquals(1, result.size());
+        assertEquals("Information Technology", result.get("TCS").getMetadata().getSector());
+        assertEquals(MarketCapType.LARGE_CAP, result.get("TCS").getMetadata().getMarketCapType());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<MarketCapDocument>> captor = ArgumentCaptor.forClass(List.class);
+        verify(marketCapMongoService).saveAll(captor.capture());
+        assertEquals(1, captor.getValue().size());
+        assertEquals("TCS", captor.getValue().get(0).getSymbol());
+    }
+
+    @Test void getSecurityDetails_nullApiCapType_doesNotInventMicroCap() {
+        when(securityService.findBySymbols(List.of("TCS"))).thenReturn(List.of());
+        when(marketCapMongoService.getBySymbols(List.of("TCS"))).thenReturn(Map.of());
+        BatchSearchResponse.SecurityMatch match = BatchSearchResponse.SecurityMatch.builder()
+                .symbol("TCS")
+                .sector("Information Technology")
+                .industry("IT Services")
+                .marketCapType(null)
+                .build();
+        when(marketDataService.getMarketCapData(List.of("TCS"))).thenReturn(Map.of("TCS", match));
+
+        var result = service.getSecurityDetails(List.of("TCS"));
+        assertNull(result.get("TCS").getMetadata().getMarketCapType());
+        assertEquals("Information Technology", result.get("TCS").getMetadata().getSector());
+    }
+
+    @Test void getSecurityDetails_mongoEmptyCapType_doesNotInventMicroCap() {
+        when(securityService.findBySymbols(List.of("TCS"))).thenReturn(List.of());
+        MarketCapDocument doc = MarketCapDocument.builder()
+                .symbol("TCS")
+                .sector(null)
+                .industry(null)
+                .marketCapType(null)
+                .build();
+        when(marketCapMongoService.getBySymbols(List.of("TCS"))).thenReturn(Map.of("TCS", doc));
+        when(marketDataService.getMarketCapData(List.of("TCS"))).thenReturn(Map.of());
+
+        var result = service.getSecurityDetails(List.of("TCS"));
+        assertNotNull(result.get("TCS"));
+        assertNull(result.get("TCS").getMetadata().getMarketCapType());
+    }
+
+    @Test void parseMarketCapType_nullAndGarbage_returnNull() {
+        assertNull(service.parseMarketCapType(null));
+        assertNull(service.parseMarketCapType(""));
+        assertNull(service.parseMarketCapType("garbage"));
+        assertEquals(MarketCapType.LARGE_CAP, service.parseMarketCapType("LARGE_CAP"));
+        assertEquals(MarketCapType.MICRO_CAP, service.parseMarketCapType("MICRO_CAP"));
+    }
+
+    @Test void getSecurityDetails_indexMembership_setsLargeCap() {
+        when(securityService.findBySymbols(List.of("TCS"))).thenReturn(List.of());
+        when(marketCapMongoService.getBySymbols(List.of("TCS"))).thenReturn(Map.of());
+        when(marketDataService.getMarketCapData(List.of("TCS"))).thenReturn(Map.of());
+        IndexConstituent c = new IndexConstituent();
+        c.setSymbol("TCS");
+        when(nseIndicesService.getIndexConstituents("NIFTY 50")).thenReturn(List.of(c));
+        when(nseIndicesService.getIndexConstituents("NIFTY NEXT 50")).thenReturn(List.of());
+        when(nseIndicesService.getIndexConstituents("NIFTY MIDCAP 150")).thenReturn(List.of());
+        when(nseIndicesService.getIndexConstituents("NIFTY SMLCAP 250")).thenReturn(List.of());
+        lenient().when(marketDataService.harvestPeerMarketCapCrores(anyList())).thenReturn(Map.of());
+
+        var result = service.getSecurityDetails(List.of("TCS"));
+        assertEquals(MarketCapType.LARGE_CAP, result.get("TCS").getMetadata().getMarketCapType());
+    }
+
+    @Test void getSecurityDetails_peerHarvest_setsLargeCapFromCrores() {
+        when(securityService.findBySymbols(List.of("TCS"))).thenReturn(List.of());
+        when(marketCapMongoService.getBySymbols(List.of("TCS"))).thenReturn(Map.of());
+        when(marketDataService.getMarketCapData(List.of("TCS"))).thenReturn(Map.of());
+        when(nseIndicesService.getIndexConstituents(anyString())).thenReturn(List.of());
+        when(marketDataService.harvestPeerMarketCapCrores(List.of("TCS")))
+                .thenReturn(Map.of("TCS", 750_000.0)); // crore INR → Large
+
+        var result = service.getSecurityDetails(List.of("TCS"));
+        assertEquals(MarketCapType.LARGE_CAP, result.get("TCS").getMetadata().getMarketCapType());
+        assertNotNull(result.get("TCS").getMetadata().getMarketCapValue());
+    }
+
     @Test void getSymbolMapSectors_success() {
         var sec = buildSecurity("AAPL", "Technology", "Software", null);
         when(securityService.findBySymbols(List.of("AAPL"))).thenReturn(List.of(sec));
@@ -83,6 +190,8 @@ class SecurityDetailsServiceTest {
     @Test void getSymbolMapSectors_nullSector_returnsUnknown() {
         var sec = buildSecurity("AAPL", null, null, null);
         when(securityService.findBySymbols(List.of("AAPL"))).thenReturn(List.of(sec));
+        when(marketCapMongoService.getBySymbols(List.of("AAPL"))).thenReturn(Map.of());
+        when(marketDataService.getMarketCapData(List.of("AAPL"))).thenReturn(Map.of());
         var result = service.getSymbolMapSectors(List.of("AAPL"));
         assertEquals("Unknown", result.get("AAPL"));
     }
@@ -132,6 +241,8 @@ class SecurityDetailsServiceTest {
         var s1 = buildSecurity("A", null, null, MarketCapType.LARGE_CAP);
         var s2 = buildSecurity("B", null, null, MarketCapType.SMALL_CAP);
         when(securityService.findBySymbols(List.of("A", "B"))).thenReturn(List.of(s1, s2));
+        when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+        when(marketDataService.getMarketCapData(anyList())).thenReturn(Map.of());
         var result = service.groupSymbolsByMarketType(List.of("A", "B"));
         assertEquals(2, result.size());
     }
@@ -139,6 +250,8 @@ class SecurityDetailsServiceTest {
     @Test void groupSymbolsByMarketType_nullCapType_usesUnknown() {
         var sec = buildSecurity("A", null, null, null);
         when(securityService.findBySymbols(List.of("A"))).thenReturn(List.of(sec));
+        when(marketCapMongoService.getBySymbols(List.of("A"))).thenReturn(Map.of());
+        when(marketDataService.getMarketCapData(List.of("A"))).thenReturn(Map.of());
         var result = service.groupSymbolsByMarketType(List.of("A"));
         assertTrue(result.containsKey("UNKNOWN"));
     }

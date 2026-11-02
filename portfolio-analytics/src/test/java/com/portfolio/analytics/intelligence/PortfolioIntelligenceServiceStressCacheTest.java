@@ -13,6 +13,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -50,12 +51,13 @@ class PortfolioIntelligenceServiceStressCacheTest {
                 intelligenceSuggestService,
                 intelligenceRedisService,
                 new SimpleMeterRegistry());
+        service.wireHistoryWarmedListener();
     }
 
     @Test
-    void stress_doesNotCacheAssumed_thenServesMeasuredOnSecondCall() {
-        when(snapshotFactory.getHistoryTimeoutStressMs()).thenReturn(20_000L);
-        when(snapshotFactory.build(eq("p1"), eq(true)))
+    void stress_cachesAssumedBriefly_thenServesMeasuredAfterWarmEvict() {
+        when(snapshotFactory.getHistoryTimeoutStressSoftMs()).thenReturn(2_500L);
+        when(snapshotFactory.build(eq("p1"), eq(true), anyLong(), eq(true)))
                 .thenReturn(snap(null, 0), snap(0.5, 30));
 
         StressRequest req = StressRequest.builder().preset("NIFTY_DOWN_10").build();
@@ -64,17 +66,20 @@ class PortfolioIntelligenceServiceStressCacheTest {
         assertThat(first.getMethod()).isEqualTo("ASSUMED_ONE");
         assertThat(first.getBetaUsed()).isEqualTo(1.0);
 
+        // ASSUMED stampede guard — second call hits L1 without rebuild
         StressResponse second = service.stress("p1", req);
-        assertThat(second.getBetaAssumed()).isFalse();
-        assertThat(second.getMethod()).isEqualTo("PORTFOLIO_BETA");
-        assertThat(second.getBetaUsed()).isEqualTo(0.5);
-        assertThat(second.getScenarios().get(0).getPctImpact()).isEqualTo(-5.0);
+        assertThat(second.getBetaAssumed()).isTrue();
+        verify(snapshotFactory, times(1)).build(eq("p1"), eq(true), anyLong(), eq(true));
 
+        // Hist warm evicts ASSUMED L1 → next call rebuilds measured
+        service.onHistoryWarmed("p1");
         StressResponse third = service.stress("p1", req);
         assertThat(third.getBetaAssumed()).isFalse();
+        assertThat(third.getMethod()).isEqualTo("PORTFOLIO_BETA");
         assertThat(third.getBetaUsed()).isEqualTo(0.5);
+        assertThat(third.getScenarios().get(0).getPctImpact()).isEqualTo(-5.0);
 
-        verify(snapshotFactory, times(2)).build(eq("p1"), eq(true));
+        verify(snapshotFactory, times(2)).build(eq("p1"), eq(true), anyLong(), eq(true));
     }
 
     @Test
@@ -105,6 +110,7 @@ class PortfolioIntelligenceServiceStressCacheTest {
                         .value(100)
                         .weightPct(100)
                         .sector("Energy")
+                        .assetClass("EQUITY")
                         .build()))
                 .totalValue(100)
                 .holdingsCount(1)

@@ -28,6 +28,8 @@ public class StressResponse {
     private Integer historyDays;
     /** True when β defaulted to 1.0 (history &lt; 20 or β missing/non-finite). */
     private Boolean betaAssumed;
+    /** Stock+ETF book weight (%) used in index shocks. Cash/MF/bonds excluded. */
+    private Double equityWeightPct;
 
     @Data
     @Builder

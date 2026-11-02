@@ -84,7 +84,7 @@ public final class IntelligenceHistoryMetrics {
             int totalCount = holdings.size();
             double countCoverage = totalCount > 0 ? (double) availableCount / totalCount : 0.0;
             double weightCoverage = totalWeight > 0 ? availableWeight / totalWeight : countCoverage;
-            if (countCoverage < MIN_COVERAGE || weightCoverage < MIN_COVERAGE) {
+            if (weightCoverage < MIN_COVERAGE) {
                 continue;
             }
             if (dayValue <= 0 || !Double.isFinite(dayValue)) {
@@ -142,6 +142,9 @@ public final class IntelligenceHistoryMetrics {
             if (symbol == null || symbol.isBlank() || Objects.equals(symbol, niftySymbol)) {
                 continue;
             }
+            if (IndexEtfSleeves.isRawIndexAlias(symbol)) {
+                continue;
+            }
             if (qty == null || !Double.isFinite(qty) || qty == 0.0) {
                 continue;
             }
@@ -177,6 +180,9 @@ public final class IntelligenceHistoryMetrics {
                 continue;
             }
             LocalDate day = toMarketDate(point.getTimestamp());
+            if (isIncompleteSessionBar(point.getTimestamp(), day)) {
+                continue;
+            }
             byDate.put(day, close);
         }
         return byDate;
@@ -184,6 +190,18 @@ public final class IntelligenceHistoryMetrics {
 
     private static LocalDate toMarketDate(Instant timestamp) {
         return timestamp.atZone(MARKET_ZONE).toLocalDate();
+    }
+
+    /** MD EOD bars are midnight IST; a live print (e.g. 12:35) must not enter daily β. */
+    static boolean isIncompleteSessionBar(Instant timestamp, LocalDate day) {
+        if (timestamp == null || day == null) {
+            return true;
+        }
+        var zoned = timestamp.atZone(MARKET_ZONE);
+        if (!zoned.toLocalDate().equals(day)) {
+            return true;
+        }
+        return zoned.toLocalTime().toSecondOfDay() != 0;
     }
 
     private static List<Double> dailyReturns(List<Double> values) {

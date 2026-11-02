@@ -54,8 +54,10 @@ public class PortfolioIntelligenceService {
 
     private final ConcurrentHashMap<String, CachedStress> stressL1 = new ConcurrentHashMap<>();
     private static final long STRESS_L1_TTL_MS = 30_000L;
+    /** Short guard so ASSUMED cold misses do not re-pay soft-wait on click spam. */
+    private static final long STRESS_ASSUMED_L1_TTL_MS = 10_000L;
 
-    private record CachedStress(StressResponse response, long expiresAtMs) {}
+    private record CachedStress(StressResponse response, long expiresAtMs, boolean assumed) {}
 
     @PostConstruct
     void wireHistoryWarmedListener() {
@@ -153,8 +155,19 @@ public class PortfolioIntelligenceService {
             boolean includeHistory,
             boolean fetchHistoryIfMiss,
             long historyTimeoutOverrideMs) {
+        return buildSnapshot(
+                portfolioId, ownedPortfolio, includeHistory, fetchHistoryIfMiss, historyTimeoutOverrideMs, false);
+    }
+
+    private PortfolioIntelligenceSnapshot buildSnapshot(
+            String portfolioId,
+            PortfolioModelV1 ownedPortfolio,
+            boolean includeHistory,
+            boolean fetchHistoryIfMiss,
+            long historyTimeoutOverrideMs,
+            boolean leanSecurity) {
         if (ownedPortfolio == null) {
-            return snapshotFactory.build(portfolioId, includeHistory);
+            return snapshotFactory.build(portfolioId, includeHistory, historyTimeoutOverrideMs, leanSecurity);
         }
         if (isAggregateCacheKey(portfolioId)) {
             return snapshotFactory.buildFromPortfolio(
@@ -163,10 +176,17 @@ public class PortfolioIntelligenceService {
                     AggregatePortfolioKeys.RESPONSE_PORTFOLIO_ID,
                     portfolioId,
                     fetchHistoryIfMiss,
-                    historyTimeoutOverrideMs);
+                    historyTimeoutOverrideMs,
+                    leanSecurity);
         }
         return snapshotFactory.buildFromPortfolio(
-                ownedPortfolio, includeHistory, null, null, fetchHistoryIfMiss, historyTimeoutOverrideMs);
+                ownedPortfolio,
+                includeHistory,
+                null,
+                null,
+                fetchHistoryIfMiss,
+                historyTimeoutOverrideMs,
+                leanSecurity);
     }
 
     private static boolean isAggregateCacheKey(String portfolioId) {
@@ -217,21 +237,23 @@ public class PortfolioIntelligenceService {
                 return hit.response();
             }
 
-            // Fetch hist with stress timeout (20s); joins in-flight intel warm when present.
+            // Soft fail-open on cold intel-hist (default 2.5s). Lean security skips peer/index enrich.
             PortfolioIntelligenceSnapshot snapshot = buildSnapshot(
                     portfolioId,
                     ownedPortfolio,
                     true,
                     true,
-                    snapshotFactory.getHistoryTimeoutStressMs());
+                    snapshotFactory.getHistoryTimeoutStressSoftMs(),
+                    true);
             StressResponse response = stressEngine.run(snapshot, effective);
             StressResponse finalized = stressEngine.finalizeAbs(response, snapshot.getTotalValue());
             if (isAggregateCacheKey(portfolioId) && finalized != null) {
                 finalized.setPortfolioId(AggregatePortfolioKeys.RESPONSE_PORTFOLIO_ID);
             }
-            // Only cache measured-β responses — never sticky ASSUMED_ONE.
-            if (finalized != null && !Boolean.TRUE.equals(finalized.getBetaAssumed())) {
-                stressL1.put(l1Key, new CachedStress(finalized, System.currentTimeMillis() + STRESS_L1_TTL_MS));
+            if (finalized != null) {
+                boolean assumed = Boolean.TRUE.equals(finalized.getBetaAssumed());
+                long ttl = assumed ? STRESS_ASSUMED_L1_TTL_MS : STRESS_L1_TTL_MS;
+                stressL1.put(l1Key, new CachedStress(finalized, System.currentTimeMillis() + ttl, assumed));
             }
             return finalized;
         } finally {

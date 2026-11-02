@@ -108,18 +108,22 @@ public class PortfolioHoldingsService {
 
     public PortfolioHoldings getPortfolioHoldings(String userId, String portfolioId, TimeInterval interval,
             boolean enrich) {
-        log.info("Starting getPortfolioHoldings for specific portfolio - User: {}, Portfolio: {}, Interval: {}",
-                userId, portfolioId, interval != null ? interval.getCode() : "null");
+        log.info("Starting getPortfolioHoldings for specific portfolio - User: {}, Portfolio: {}, Interval: {}, Enrich: {}",
+                userId, portfolioId, interval != null ? interval.getCode() : "null", enrich);
 
         if (portfolioId == null || portfolioId.trim().isEmpty()) {
             throw new IllegalArgumentException("portfolioId cannot be blank");
         }
 
-        if (enrich) {
-            Optional<PortfolioHoldings> cachedHoldings = getCachedHoldings(userId, interval, portfolioId);
-            if (cachedHoldings.isPresent()) {
+        // Always prefer cache. Discover/basket (enrich=false) needs structure + ISINs only —
+        // skip price overlay so the request path stays sub-second.
+        Optional<PortfolioHoldings> cachedHoldings = getCachedHoldings(userId, interval, portfolioId);
+        if (cachedHoldings.isPresent()) {
+            if (enrich) {
                 return overlayAndReturn(cachedHoldings.get());
             }
+            log.info("Serving cached holdings structure (no price overlay) for portfolio {}", portfolioId);
+            return cachedHoldings.get();
         }
 
         log.info("Cache miss for specific portfolio holdings - User: {}, Portfolio: {}", userId, portfolioId);
@@ -218,7 +222,10 @@ public class PortfolioHoldingsService {
         String context = portfolioId != null ? "portfolio: " + portfolioId : "all portfolios";
         log.debug("Building portfolio holdings for user: {} and {}", userId, context);
 
-        healShortOrIsinSymbols(portfolios);
+        // Symbol heal hits market-data; skip on lean Discover/basket reads (ISINs already on book).
+        if (enrich) {
+            healShortOrIsinSymbols(portfolios);
+        }
 
         var portfolioHoldings = portfolioHoldingsMapper.toPortfolioHoldingsV1(portfolios);
         // Allocation availableQuantity is set in PortfolioHoldingsMapper — do not re-query ledger here
@@ -283,8 +290,9 @@ public class PortfolioHoldingsService {
     }
 
     /**
-     * Narrow read-path heal: when ISIN is present and symbol is a short broker code (≤4)
-     * or still ISIN-shaped, re-run the equity normalizer and persist only on change.
+     * Read-path heal: blank / ISIN-as-symbol / scheme ISIN (INF…) / ISIN present with
+     * scheme-prefix symbol — re-run normalizer and persist only on change.
+     * Never length≤4 tickers alone (valid NSE: ITC, SBIN).
      */
     private void healShortOrIsinSymbols(List<PortfolioModelV1> portfolios) {
         if (portfolioEquitySymbolNormalizer == null || portfolios == null || portfolios.isEmpty()) {
@@ -301,11 +309,14 @@ public class PortfolioHoldingsService {
                 }
                 String isin = e.getIsin();
                 String sym = e.getSymbol();
-                if (isin == null || isin.isBlank()) {
-                    continue;
-                }
-                // Only heal blank symbols or ISIN-as-symbol — never length≤4 (valid NSE: ITC, SBIN).
-                if (sym == null || sym.isBlank() || TradingSymbolResolver.looksLikeIsin(sym)) {
+                boolean hasIsin = isin != null && !isin.isBlank();
+                boolean isinAsSymbol = TradingSymbolResolver.looksLikeIsin(sym);
+                boolean schemeIsin = hasIsin && isin.trim().toUpperCase().startsWith("INF");
+                boolean schemeSymbol = sym != null && sym.trim().toUpperCase().startsWith("INF");
+                if (sym == null || sym.isBlank() || isinAsSymbol || schemeIsin || schemeSymbol) {
+                    if (!hasIsin && !isinAsSymbol && !schemeSymbol) {
+                        continue;
+                    }
                     needsHeal = true;
                     break;
                 }

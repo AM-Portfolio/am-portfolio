@@ -20,6 +20,16 @@ class SectorMatcherTest {
     }
 
     @Test
+    void it_matchesNseItServicesLabels() {
+        assertThat(SectorMatcher.matches("IT Services", "IT")).isTrue();
+        assertThat(SectorMatcher.matches("IT-Software", "IT")).isTrue();
+        assertThat(SectorMatcher.matches("ITES", "IT")).isTrue();
+        assertThat(SectorMatcher.matches("IT Software", "IT")).isTrue();
+        assertThat(SectorMatcher.matches("Industrials", "IT")).isFalse();
+        assertThat(SectorMatcher.matches("Hospitality", "IT")).isFalse();
+    }
+
+    @Test
     void banking_matchesFinancialServices() {
         assertThat(SectorMatcher.matches("Financial Services", "Banking")).isTrue();
     }

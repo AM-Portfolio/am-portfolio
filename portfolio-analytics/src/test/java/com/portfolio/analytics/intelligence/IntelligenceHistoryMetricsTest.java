@@ -99,6 +99,52 @@ class IntelligenceHistoryMetricsTest {
     }
 
     @Test
+    void compute_skipsRawIndexHolding_keepsNiftyEtf() {
+        LocalDate d0 = LocalDate.of(2024, 1, 2);
+        LocalDate d1 = LocalDate.of(2024, 1, 3);
+        LocalDate d2 = LocalDate.of(2024, 1, 4);
+        Map<String, MarketData> historical = new HashMap<>();
+        historical.put("NIFTYBEES", series("NIFTYBEES", List.of(
+                point(d0, 100.0), point(d1, 101.0), point(d2, 102.01))));
+        historical.put("BANKNIFTY", series("BANKNIFTY", List.of(
+                point(d0, 100.0), point(d1, 200.0), point(d2, 400.0))));
+        historical.put(NIFTY, series(NIFTY, List.of(
+                point(d0, 1000.0), point(d1, 1010.0), point(d2, 1020.1))));
+
+        IntelligenceHistoryMetrics.Result beesOnly = IntelligenceHistoryMetrics.compute(
+                historical, Map.of("NIFTYBEES", 1.0), NIFTY);
+        IntelligenceHistoryMetrics.Result withIndex = IntelligenceHistoryMetrics.compute(
+                historical, Map.of("NIFTYBEES", 1.0, "BANKNIFTY", 1.0), NIFTY);
+        assertEquals(2, beesOnly.historyPoints());
+        assertNotNull(beesOnly.beta());
+        assertEquals(beesOnly.historyPoints(), withIndex.historyPoints());
+        assertEquals(beesOnly.beta(), withIndex.beta(), 1e-12);
+    }
+
+    @Test
+    void extract_skipsIntradayIncompleteBar() {
+        LocalDate d0 = LocalDate.of(2024, 1, 2);
+        LocalDate d1 = LocalDate.of(2024, 1, 3);
+        Instant live = d1.atTime(12, 35).atZone(IST).toInstant();
+        Map<String, MarketData> historical = new HashMap<>();
+        historical.put(AAA, series(AAA, List.of(
+                point(d0, 100.0),
+                MarketData.MarketDataPoint.builder()
+                        .timestamp(live)
+                        .ohlcData(OhlcData.builder().open(110).high(110).low(110).close(110).build())
+                        .build())));
+        historical.put(NIFTY, series(NIFTY, List.of(
+                point(d0, 1000.0),
+                MarketData.MarketDataPoint.builder()
+                        .timestamp(live)
+                        .ohlcData(OhlcData.builder().open(1100).high(1100).low(1100).close(1100).build())
+                        .build())));
+        IntelligenceHistoryMetrics.Result result =
+                IntelligenceHistoryMetrics.compute(historical, Map.of(AAA, 1.0), NIFTY);
+        assertEquals(0, result.historyPoints());
+    }
+
+    @Test
     void beta_nullWhenMarketVarianceZero() {
         // Constant market returns → varM = 0 → β undefined
         assertNull(IntelligenceHistoryMetrics.beta(

@@ -26,7 +26,8 @@ public class XRaySummaryBuilder {
                 .sectorWeights(groupWeights(snapshot, PortfolioIntelligenceSnapshot.Holding::getSector, h -> !isNonEquity(h)))
                 .industryWeights(groupWeights(snapshot, PortfolioIntelligenceSnapshot.Holding::getIndustry, h -> !isNonEquity(h)))
                 .marketCapWeights(groupWeights(snapshot, PortfolioIntelligenceSnapshot.Holding::getMarketCap, h -> !isNonEquity(h)))
-                .assetClassWeights(groupWeights(snapshot, h -> HealthScoreEngine.normalizeAssetClass(h.getAssetClass()), this::isNonEquity))
+                // Class tab: all holdings (EQUITY + bonds/commodity/cash). Empty only when book has no holdings.
+                .assetClassWeights(groupWeights(snapshot, h -> HealthScoreEngine.normalizeAssetClass(h.getAssetClass()), h -> true))
                 .totalValue(PortfolioIntelligenceSnapshotFactory.round2(snapshot.getTotalValue()))
                 .build();
     }

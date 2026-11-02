@@ -233,6 +233,18 @@ public class MarketDataApiClient extends AbstractApiClient {
         }
 
         /**
+         * Unified fundamentals (company + peers). Peers carry usable market-cap-in-crore values.
+         */
+        public Mono<com.fasterxml.jackson.databind.JsonNode> getFundamentals(String symbol) {
+                if (symbol == null || symbol.isBlank()) {
+                        return Mono.empty();
+                }
+                String path = "/v1/fundamentals/" + symbol.trim();
+                return get(path, com.fasterxml.jackson.databind.JsonNode.class)
+                                .doOnError(e -> log.debug("Fundamentals miss for {}: {}", symbol, e.getMessage()));
+        }
+
+        /**
          * Gets historical charts data from am-market.
          * 
          * @param symbols the symbols to fetch charts for

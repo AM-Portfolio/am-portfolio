@@ -179,9 +179,9 @@ Run section C probes; fill section F verdict. Do not approve if Blocker/Major re
 
 | Probe | Pass |
 |-------|------|
-| `mode=DISCOVER` skips `basket.opp.stage=prices` (durationMs=0 / skipped) | [ ] |
-| Flutter / Postman sends `"mode":"DISCOVER"` | [ ] |
-| Warm Discover defaultQuery wall ≤1s (loop exit) | [ ] |
-| Quality: N≫3, matchScore, returns/sparkline policy | [ ] |
+| `mode=DISCOVER` skips `basket.opp.stage=prices` (durationMs=0 / skipped) | [x] DEV 2026-10-17 |
+| Flutter / Postman sends `"mode":"DISCOVER"` | [x] |
+| Warm Discover defaultQuery wall ≤1s (loop exit) | [x] DEV: min 371 / p95 398 / max 406 ms (20 samples) |
+| Quality: N≫3, matchScore, returns/sparkline policy | [x] DEV match parity ITBEES=9.09 NIFTYBEES=1.96 |
 | Flag `discover-fast-path-enabled=false` forces FULL | [ ] |
-| Improve-loop iterated until green or report at 10 | [ ] |
+| Improve-loop iterated until green or report at 10 | [x] DEV green; PROD not in scope |

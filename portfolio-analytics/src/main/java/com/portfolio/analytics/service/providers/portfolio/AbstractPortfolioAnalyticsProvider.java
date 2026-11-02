@@ -195,8 +195,17 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
      * @return Map of symbol to SecurityModel
      */
     protected Map<String, com.am.common.amcommondata.model.security.SecurityModel> getSecurityDetails(List<String> symbols, AdvancedAnalyticsRequest request) {
-        if (request != null && request.getPrefetchedSecurityDetails() != null) {
+        if (request != null && request.getPrefetchedSecurityDetails() != null
+                && !request.getPrefetchedSecurityDetails().isEmpty()) {
             return request.getPrefetchedSecurityDetails();
+        }
+        // LIVE advanced: facade already spent its security-details budget. Do not start a
+        // per-symbol ETF/parser stampede (111× ~300ms) on the HTTP path — providers fall back
+        // to EquityModel.sector / Unknown for first paint.
+        if (request != null && request.isPrefetchAttempted()) {
+            log.warn("Skipping cold security-details fan-out for {} (prefetchAttempted, empty prefetch)",
+                    this.getClass().getSimpleName());
+            return Collections.emptyMap();
         }
         return securityDetailsService.getSecurityDetails(symbols);
     }

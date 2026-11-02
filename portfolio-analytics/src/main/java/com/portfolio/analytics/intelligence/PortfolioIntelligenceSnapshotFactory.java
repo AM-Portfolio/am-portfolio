@@ -56,6 +56,8 @@ public class PortfolioIntelligenceSnapshotFactory {
     public static final int HISTORY_LOOKBACK_DAYS = 60;
     public static final long HISTORY_TIMEOUT_MS = 800L;
     public static final long HISTORY_TIMEOUT_STRESS_MS = 20_000L;
+    /** Soft fail-open for stress when intel-hist is cold (background fetch continues). */
+    public static final long HISTORY_TIMEOUT_STRESS_SOFT_MS = 2_500L;
 
     @Value("${portfolio.intelligence.primary-benchmark-symbol:NIFTY 50}")
     private String primaryBenchmarkSymbol;
@@ -68,6 +70,9 @@ public class PortfolioIntelligenceSnapshotFactory {
 
     @Value("${portfolio.intelligence.history-timeout-stress-ms:20000}")
     private long historyTimeoutStressMs;
+
+    @Value("${portfolio.intelligence.history-timeout-stress-soft-ms:2500}")
+    private long historyTimeoutStressSoftMs;
 
     private final PortfolioService portfolioService;
     private final MarketDataService marketDataService;
@@ -89,6 +94,22 @@ public class PortfolioIntelligenceSnapshotFactory {
     }
 
     public PortfolioIntelligenceSnapshot build(String portfolioId, boolean includeHistory) {
+        return build(portfolioId, includeHistory, 0L);
+    }
+
+    public PortfolioIntelligenceSnapshot build(
+            String portfolioId, boolean includeHistory, long historyTimeoutOverrideMs) {
+        return build(portfolioId, includeHistory, historyTimeoutOverrideMs, false);
+    }
+
+    /**
+     * @param leanSecurity when true, skip SecurityDetailsService (stress path — sectors from equity docs)
+     */
+    public PortfolioIntelligenceSnapshot build(
+            String portfolioId,
+            boolean includeHistory,
+            long historyTimeoutOverrideMs,
+            boolean leanSecurity) {
         UUID id;
         try {
             id = UUID.fromString(portfolioId);
@@ -99,7 +120,8 @@ public class PortfolioIntelligenceSnapshotFactory {
         if (portfolio == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Portfolio not found: " + portfolioId);
         }
-        return buildFromPortfolio(portfolio, includeHistory);
+        return buildFromPortfolio(
+                portfolio, includeHistory, null, null, true, historyTimeoutOverrideMs, leanSecurity);
     }
 
     public PortfolioIntelligenceSnapshot buildFromPortfolio(PortfolioModelV1 portfolio) {
@@ -145,6 +167,24 @@ public class PortfolioIntelligenceSnapshotFactory {
             String historyCacheKey,
             boolean fetchHistoryIfMiss,
             long historyTimeoutOverrideMs) {
+        return buildFromPortfolio(
+                portfolio,
+                includeHistory,
+                responsePortfolioId,
+                historyCacheKey,
+                fetchHistoryIfMiss,
+                historyTimeoutOverrideMs,
+                false);
+    }
+
+    public PortfolioIntelligenceSnapshot buildFromPortfolio(
+            PortfolioModelV1 portfolio,
+            boolean includeHistory,
+            String responsePortfolioId,
+            String historyCacheKey,
+            boolean fetchHistoryIfMiss,
+            long historyTimeoutOverrideMs,
+            boolean leanSecurity) {
         String portfolioId = responsePortfolioId != null
                 ? responsePortfolioId
                 : (portfolio.getId() != null ? portfolio.getId().toString() : null);
@@ -190,32 +230,53 @@ public class PortfolioIntelligenceSnapshotFactory {
                 .collect(Collectors.toList());
 
         Map<String, MarketData> marketData = Map.of();
-        if (!symbols.isEmpty()) {
-            try {
-                Map<String, MarketData> raw = marketDataService.getMarketData(symbols);
-                Map<String, MarketData> normalized = new HashMap<>();
-                if (raw != null) {
-                    for (Map.Entry<String, MarketData> entry : raw.entrySet()) {
-                        if (entry.getValue() != null) {
-                            String key = entry.getKey().contains(":")
-                                    ? entry.getKey().substring(entry.getKey().indexOf(':') + 1)
-                                    : entry.getKey();
-                            normalized.put(SymbolResolver.normalize(key), entry.getValue());
-                        }
-                    }
-                }
-                marketData = normalized;
-            } catch (Exception e) {
-                log.warn("Failed to prefetch market data for intelligence snapshot: {}", e.getMessage());
-            }
-        }
-
         Map<String, SecurityModel> securityDetails = Map.of();
         if (!symbols.isEmpty()) {
-            try {
-                securityDetails = securityDetailsService.getSecurityDetails(symbols);
-            } catch (Exception e) {
-                log.warn("Failed to prefetch security details for intelligence snapshot: {}", e.getMessage());
+            CompletableFuture<Map<String, MarketData>> mdFut = CompletableFuture.supplyAsync(() -> {
+                try {
+                    Map<String, MarketData> raw = marketDataService.getMarketData(symbols);
+                    Map<String, MarketData> normalized = new HashMap<>();
+                    if (raw != null) {
+                        for (Map.Entry<String, MarketData> entry : raw.entrySet()) {
+                            if (entry.getValue() != null) {
+                                String key = entry.getKey().contains(":")
+                                        ? entry.getKey().substring(entry.getKey().indexOf(':') + 1)
+                                        : entry.getKey();
+                                normalized.put(SymbolResolver.normalize(key), entry.getValue());
+                            }
+                        }
+                    }
+                    return normalized;
+                } catch (Exception e) {
+                    log.warn("Failed to prefetch market data for intelligence snapshot: {}", e.getMessage());
+                    return Map.of();
+                }
+            });
+            CompletableFuture<Map<String, SecurityModel>> sdFut = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return securityDetailsService.getSecurityDetails(symbols);
+                } catch (Exception e) {
+                    log.warn("Failed to prefetch security details for intelligence snapshot: {}", e.getMessage());
+                    return Map.of();
+                }
+            });
+            marketData = mdFut.join();
+            if (marketData == null) {
+                marketData = Map.of();
+            }
+            if (leanSecurity) {
+                // Stress: soft-wait sectors so CRASH/sector presets stay accurate without 20s hangs.
+                try {
+                    securityDetails = sdFut.get(1_000L, TimeUnit.MILLISECONDS);
+                } catch (Exception e) {
+                    log.info("Intel security soft-timeout leanSecurity=true — sector shocks may use equity docs only");
+                    securityDetails = Map.of();
+                }
+            } else {
+                securityDetails = sdFut.join();
+            }
+            if (securityDetails == null) {
+                securityDetails = Map.of();
             }
         }
 
@@ -471,6 +532,11 @@ public class PortfolioIntelligenceSnapshotFactory {
         return historyTimeoutStressMs > 0 ? historyTimeoutStressMs : HISTORY_TIMEOUT_STRESS_MS;
     }
 
+    /** Soft wait for cold stress (ASSUMED fail-open); in-flight hist still warms Redis. */
+    public long getHistoryTimeoutStressSoftMs() {
+        return historyTimeoutStressSoftMs > 0 ? historyTimeoutStressSoftMs : HISTORY_TIMEOUT_STRESS_SOFT_MS;
+    }
+
     private HistoryFields fetchHistory(List<String> symbols, Map<String, Double> quantities) {
         LocalDate to = LocalDate.now();
         int lookback = historyLookbackDays > 0 ? historyLookbackDays : HISTORY_LOOKBACK_DAYS;
@@ -490,15 +556,24 @@ public class PortfolioIntelligenceSnapshotFactory {
                 .interval(TimeFrame.DAY.getValue())
                 .build();
 
-        Map<String, MarketData> raw = marketDataService.getHistoricalData(histReq);
-        Map<String, MarketData> normalized = normalizeHistorical(raw);
+        // EQ hist ∥ INDEX benchmark — save one serial MD RTT on the measured-β path.
+        CompletableFuture<Map<String, MarketData>> eqFut = CompletableFuture.supplyAsync(
+                () -> normalizeHistorical(marketDataService.getHistoricalData(histReq)));
+        CompletableFuture<Map<String, MarketData>> indexFut = CompletableFuture.supplyAsync(
+                () -> fetchBenchmarkAsIndex(benchmark, from, to));
+        Map<String, MarketData> normalized = eqFut.join();
+        if (normalized == null) {
+            normalized = new HashMap<>();
+        } else {
+            normalized = new HashMap<>(normalized);
+        }
 
         // Prefer INDEX bars for the benchmark — EQ "NIFTY 50" is often missing or flat,
         // which yields historyPoints>0 with beta=null → sticky ASSUMED_ONE.
         // Overlay writes the INDEX series under every alias so first-key-wins cannot
         // keep a flat EQ "NIFTY 50" when INDEX arrived as "NIFTY50".
         String benchmarkKey = resolveBenchmarkKey(normalized);
-        Map<String, MarketData> indexBars = fetchBenchmarkAsIndex(benchmark, from, to);
+        Map<String, MarketData> indexBars = indexFut.join();
         MarketData indexSeries = pickUsableBenchmarkSeries(indexBars);
         if (indexSeries != null) {
             applyBenchmarkSeriesToAliases(normalized, indexSeries);
