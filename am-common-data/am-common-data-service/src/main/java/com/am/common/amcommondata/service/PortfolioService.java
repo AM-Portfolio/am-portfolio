@@ -1,6 +1,7 @@
 package com.am.common.amcommondata.service;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -21,6 +22,12 @@ public interface PortfolioService {
     PortfolioModelV1 updateTradePortfolio(PortfolioModelV1 portfolioModel);
     void updateLastLoginDate(String userId, LocalDate loginDate);
     void markBasketLineUnderfunded(String basketId, String isin, double gapQuantity);
+
+    /** Active (non-DELETED) portfolios for owner with the given kind. */
+    List<PortfolioModelV1> findByOwnerAndPortfolioKind(String owner, PortfolioKind kind);
+
+    /** Soft-delete: set {@link PortfolioKind#DELETED}. No-op if missing or wrong owner. */
+    void softDeletePortfolio(String id, String owner);
 
     /**
      * Replace one Option A class list (bonds | commodities | cash) on a BROKER portfolio.

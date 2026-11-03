@@ -17,6 +17,9 @@ public interface PortfolioDocumentRepository extends BaseRepository<PortfolioDoc
     Optional<PortfolioDocument> findById(String id);
     List<PortfolioDocument> findByOwnerAndBrokerType(String owner, com.am.common.amcommondata.model.enums.BrokerType brokerType);
 
+    List<PortfolioDocument> findByOwnerAndPortfolioKind(
+            String owner, com.am.common.amcommondata.model.enums.PortfolioKind portfolioKind);
+
     @Aggregation(pipeline = { "{ '$group': { '_id': '$owner' } }" })
     List<String> findAllDistinctOwners();
 

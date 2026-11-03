@@ -13,7 +13,9 @@ import org.junit.jupiter.api.Test;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.enums.BrokerType;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.portfolio.model.events.PortfolioUpdateEvent;
+import com.portfolio.model.events.trade.TradePortfolioSyncEvent;
 
 class PortfolioMapperAsOfTest {
 
@@ -76,5 +78,31 @@ class PortfolioMapperAsOfTest {
         // Ingest timestamp must not become lifeStart — catch-up uses ~90d when null.
         assertNull(model.getEquityModels().get(0).getCreatedAt());
         assertNull(model.getCreatedAt());
+    }
+
+    @Test
+    void tradeSync_preservesPaperKind() {
+        TradePortfolioSyncEvent trade = new TradePortfolioSyncEvent();
+        trade.setId(java.util.UUID.randomUUID().toString());
+        trade.setPortfolioId("Paper");
+        trade.setUserId("user-1");
+        trade.setBrokerType("ZERODHA");
+        trade.setPortfolioKind("PAPER");
+        trade.setAction("UPSERT");
+
+        PortfolioModelV1 model = mapper.toPortfolioModelV1(trade);
+        assertEquals(PortfolioKind.PAPER, model.getPortfolioKind());
+    }
+
+    @Test
+    void tradeSync_paperNameHeuristic_whenKindBlank() {
+        TradePortfolioSyncEvent trade = new TradePortfolioSyncEvent();
+        trade.setId(java.util.UUID.randomUUID().toString());
+        trade.setPortfolioId("paper");
+        trade.setUserId("user-1");
+        trade.setBrokerType("ZERODHA");
+        trade.setAction("UPSERT");
+
+        assertEquals(PortfolioKind.PAPER, PortfolioMapperv1.resolveTradePortfolioKind(trade));
     }
 }

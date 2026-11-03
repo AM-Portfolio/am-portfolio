@@ -50,17 +50,11 @@ public class PortfolioCalculationService {
     }
 
     private void processAllPortfolios(String userId, String correlationId) {
+        // Provision / soft-hide personal DEMO before listing so Paper-only users still get Demo calc.
+        newUserPortfolioFallbackService.getDemoPortfolioForNewUser(userId, List.of());
         List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
         if (portfolios == null || portfolios.isEmpty()) {
-            // Fall back to demo portfolio so new/demo users get analysis entities populated
-            PortfolioModelV1 demo = newUserPortfolioFallbackService.getDemoPortfolioForNewUser(userId, List.of());
-            if (demo != null && demo.getId() != null) {
-                log.info("No real portfolios for user={}, falling back to demo portfolio id={} for calculation",
-                        userId, demo.getId());
-                calculateAndPublish(userId, demo.getId().toString(), correlationId);
-            } else {
-                log.warn("No portfolios found for user: {}", userId);
-            }
+            log.warn("No portfolios found for user: {}", userId);
             return;
         }
 
@@ -76,8 +70,7 @@ public class PortfolioCalculationService {
 
     private void calculateAndPublish(String userId, String portfolioId, String correlationId) {
         try {
-            // Remap empty-user demo reads to the shared demo document owner while keeping
-            // Kafka events attributed to the authenticating user (analysis ownerId key).
+            // Personal DEMO: resolve keeps userId as owner; may rewrite legacy template UUID -> clone UUID.
             NewUserPortfolioFallbackService.DemoResolution resolved =
                     newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
             String holdingsUserId = resolved.userId();
@@ -106,13 +99,8 @@ public class PortfolioCalculationService {
 
             PortfolioUpdateEvent updateEvent = mapToUpdateEvent(holdings, summary, userId, holdingsPortfolioId);
 
-            // Demo fallback remaps many users onto one shared portfolio UUID. Publishing that
-            // to am-portfolio-update makes trade-management upsert-by-portfolioId keep only the
-            // first owner — every later user stays empty and the UI injects "Demo Portfolio".
-            boolean demoFanout = !holdingsUserId.equals(userId)
-                    || !java.util.Objects.equals(holdingsPortfolioId, portfolioId)
-                    || (newUserPortfolioFallbackService.getDemoPortfolioId() != null
-                        && newUserPortfolioFallbackService.getDemoPortfolioId().equals(holdingsPortfolioId));
+            // Never fan DEMO / template calcs into am-portfolio-update (trade upsert path).
+            boolean demoFanout = isDemoCalcTarget(holdingsUserId, userId, holdingsPortfolioId, portfolioId);
 
             if (demoFanout) {
                 updateEvent.setSource("DEMO");
@@ -130,6 +118,24 @@ public class PortfolioCalculationService {
             log.error("Error executing calculation logic for user: {}, portfolioId: {} [TraceID: {}]",
                     userId, portfolioId, correlationId, e);
             throw e;
+        }
+    }
+
+    private boolean isDemoCalcTarget(
+            String holdingsUserId, String userId, String holdingsPortfolioId, String portfolioId) {
+        if (!holdingsUserId.equals(userId)) {
+            return true;
+        }
+        String templateId = newUserPortfolioFallbackService.getDemoPortfolioId();
+        if (templateId != null && !templateId.isBlank()
+                && (templateId.equals(holdingsPortfolioId) || templateId.equals(portfolioId))) {
+            return true;
+        }
+        try {
+            PortfolioModelV1 book = portfolioService.getPortfolioById(UUID.fromString(holdingsPortfolioId));
+            return book != null && com.am.common.amcommondata.model.enums.PortfolioKind.isDemo(book.getPortfolioKind());
+        } catch (IllegalArgumentException ignored) {
+            return false;
         }
     }
 

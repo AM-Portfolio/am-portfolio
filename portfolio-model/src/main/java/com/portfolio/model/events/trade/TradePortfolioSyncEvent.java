@@ -26,6 +26,8 @@ public class TradePortfolioSyncEvent {
     private String id;
     private String portfolioId;
     private String brokerType;
+    /** Optional: PAPER | BROKER from trade/OMS. Ignored when blank. */
+    private String portfolioKind;
     private String userId;
     private String action;
     private Boolean deleteAllTrades;
