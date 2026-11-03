@@ -214,6 +214,10 @@ public class PortfolioCalculator {
         Double currentPrice = null;
         Double previousClosePrice = null;
         String priceSource = null;
+        // Durable import mark (not live LTP) — survives enrich overwrite of currentPrice.
+        Double importMarkPrice = holding.getImportMarkPrice() != null && holding.getImportMarkPrice() > 0
+                ? holding.getImportMarkPrice()
+                : null;
 
         // Waterfall Price Assignment
         if (marketDataMap != null) {
@@ -313,6 +317,15 @@ public class PortfolioCalculator {
                     double gainLossPct = (gainLoss / holding.getInvestmentCost()) * 100;
                     holding.setGainLoss(round(gainLoss));
                     holding.setGainLossPercentage(round(gainLossPct));
+                } else if (importMarkPrice != null && holding.getQuantity() != null && holding.getQuantity() > 0) {
+                    // No avg cost (email demat): overall vs import/statement mark — never vs ₹0.
+                    double importValue = importMarkPrice * holding.getQuantity();
+                    if (importValue > 0) {
+                        double gainLoss = currentValue - importValue;
+                        double gainLossPct = (gainLoss / importValue) * 100;
+                        holding.setGainLoss(round(gainLoss));
+                        holding.setGainLossPercentage(round(gainLossPct));
+                    }
                 }
 
                 // Calculate Day's Gain/Loss (if previous close available)
@@ -360,8 +373,29 @@ public class PortfolioCalculator {
             currentValue = totalInvestmentValue;
         }
 
-        double totalGainLoss = currentValue - totalInvestmentValue;
-        double totalGainLossPct = totalInvestmentValue > 0 ? (totalGainLoss / totalInvestmentValue) * 100 : 0.0;
+        // When cost basis is unknown, prefer sum of per-holding gainLoss (import-mark / cost)
+        // instead of treating invested=0 as "entire market value is profit".
+        Double totalGainLoss;
+        Double totalGainLossPct;
+        if (totalInvestmentValue > 0) {
+            double gain = currentValue - totalInvestmentValue;
+            totalGainLoss = round(gain);
+            totalGainLossPct = round((gain / totalInvestmentValue) * 100);
+        } else {
+            boolean anyOverall = enrichedHoldings.stream().anyMatch(h -> h.getGainLoss() != null);
+            if (anyOverall) {
+                double gainSum = enrichedHoldings.stream()
+                        .filter(h -> h.getGainLoss() != null)
+                        .mapToDouble(EquityHoldings::getGainLoss)
+                        .sum();
+                double baseline = currentValue - gainSum;
+                totalGainLoss = round(gainSum);
+                totalGainLossPct = baseline > 0 ? round((gainSum / baseline) * 100) : null;
+            } else {
+                totalGainLoss = null;
+                totalGainLossPct = null;
+            }
+        }
 
         // Missing baselines must stay null — never collapse to 0.0 (looks like a flat session).
         boolean anyDayBaseline = enrichedHoldings.stream().anyMatch(h -> h.getTodayGainLoss() != null);
@@ -390,10 +424,10 @@ public class PortfolioCalculator {
         int todayLosers = count(enrichedHoldings, true, false);
 
         return PortfolioSummaryV1.builder()
-                .investmentValue(round(totalInvestmentValue))
+                .investmentValue(totalInvestmentValue > 0 ? round(totalInvestmentValue) : null)
                 .currentValue(round(currentValue))
-                .totalGainLoss(round(totalGainLoss))
-                .totalGainLossPercentage(round(totalGainLossPct))
+                .totalGainLoss(totalGainLoss)
+                .totalGainLossPercentage(totalGainLossPct)
                 .todayGainLoss(todayGainLoss)
                 .todayGainLossPercentage(todayGainLossPct)
                 .totalAssets((int) enrichedHoldings.stream().filter(h -> h.getQuantity() != null && h.getQuantity() > 0).count())

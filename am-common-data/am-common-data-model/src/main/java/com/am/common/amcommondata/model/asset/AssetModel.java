@@ -28,6 +28,11 @@ public class AssetModel {
     private Double currentPrice;
     private Double currentValue;
     private Double investmentValue;
+    /**
+     * Statement/import-day LTP when avg cost is unknown (email demat).
+     * Survives live currentPrice overwrites so overall P&L stays honest.
+     */
+    private Double importMarkPrice;
     private BrokerType brokerType;
     private Double profitLoss;
     private Double profitLossPercentage;

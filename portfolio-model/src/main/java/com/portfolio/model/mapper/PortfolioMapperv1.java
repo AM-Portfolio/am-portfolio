@@ -292,6 +292,14 @@ public class PortfolioMapperv1 {
             computedInvestmentValue = resolvedAvgPrice * equityModel.getQuantity();
         }
 
+        // Durable import mark: keep existing, else capture statement currentPrice when cost unknown.
+        Double importMark = equityModel.getImportMarkPrice();
+        boolean missingCost = resolvedAvgPrice == null || resolvedAvgPrice <= 0;
+        if ((importMark == null || importMark <= 0) && missingCost
+                && equityModel.getCurrentPrice() != null && equityModel.getCurrentPrice() > 0) {
+            importMark = equityModel.getCurrentPrice();
+        }
+
         return EquityModel.builder()
                 .assetType(AssetType.EQUITY)
                 .brokerType(brokerType)
@@ -300,11 +308,13 @@ public class PortfolioMapperv1 {
                 .companyName(
                         equityModel.getCompanyName() != null ? equityModel.getCompanyName() : equityModel.getName())
                 .isin(resolvedIsin)
-                .avgBuyingPrice(resolvedAvgPrice)
+                .avgBuyingPrice(resolvedAvgPrice != null && resolvedAvgPrice > 0 ? resolvedAvgPrice : null)
                 .currentPrice(equityModel.getCurrentPrice())
+                .importMarkPrice(importMark != null && importMark > 0 ? importMark : null)
                 .quantity(equityModel.getQuantity())
                 .currentValue(equityModel.getCurrentValue())
-                .investmentValue(computedInvestmentValue)
+                .investmentValue(computedInvestmentValue != null && computedInvestmentValue > 0
+                        ? computedInvestmentValue : null)
                 .sector(equityModel.getSector())
                 .industry(equityModel.getIndustry())
                 .marketCap(equityModel.getMarketCap())
