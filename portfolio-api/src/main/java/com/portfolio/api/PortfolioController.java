@@ -233,6 +233,84 @@ public class PortfolioController {
     }
 
     /**
+     * Internal live portfolio IDs — called by am-analysis orphan guard / reconcile.
+     * Declared before {@code /internal/{portfolioId}} so {@code ids} is never captured as a path var.
+     */
+    @Hidden
+    @Operation(summary = "List portfolio IDs for owner (internal)", operationId = "listPortfolioIdsInternal")
+    @GetMapping("/internal/ids")
+    public ResponseEntity<java.util.List<String>> listPortfolioIdsInternal(
+            @RequestParam String ownerId,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            log.warn("Unauthorized internal ids list attempt rejected ownerId={}", ownerId);
+            return ResponseEntity.status(403).build();
+        }
+        if (ownerId == null || ownerId.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(ownerId);
+        java.util.List<String> ids = portfolios == null
+                ? java.util.List.of()
+                : portfolios.stream()
+                        .filter(java.util.Objects::nonNull)
+                        .map(PortfolioModelV1::getId)
+                        .filter(java.util.Objects::nonNull)
+                        .map(UUID::toString)
+                        .toList();
+        log.info("PortfolioController - listPortfolioIdsInternal ownerId={} count={}", ownerId, ids.size());
+        return ResponseEntity.ok(ids);
+    }
+
+    /**
+     * Internal ownership check — called by am-trade-management before lazy local stub create.
+     */
+    @Hidden
+    @Operation(summary = "Verify broker portfolio ownership (internal)", operationId = "verifyPortfolioInternal")
+    @GetMapping("/internal/{portfolioId}")
+    public ResponseEntity<Void> verifyPortfolioInternal(
+            @PathVariable String portfolioId,
+            @RequestParam String ownerId,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            log.warn("Unauthorized internal verify attempt rejected portfolioId={}", portfolioId);
+            return ResponseEntity.status(403).build();
+        }
+        if (ownerId == null || ownerId.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        try {
+            brokerPortfolioDeleteService.assertOwnedBrokerPortfolio(portfolioId, ownerId);
+            return ResponseEntity.noContent().build();
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            return ResponseEntity.status(e.getStatusCode()).build();
+        }
+    }
+
+    /**
+     * Internal broker delete — called by am-trade-management so Trade→Portfolio
+     * delete is synchronous Mongo+cache+Kafka instead of fire-and-forget Kafka alone.
+     */
+    @Hidden
+    @Operation(summary = "Delete broker portfolio (internal)", operationId = "deletePortfolioInternal")
+    @DeleteMapping("/internal/{portfolioId}")
+    public ResponseEntity<Void> deletePortfolioInternal(
+            @PathVariable String portfolioId,
+            @RequestParam String ownerId,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            log.warn("Unauthorized internal delete attempt rejected portfolioId={}", portfolioId);
+            return ResponseEntity.status(403).build();
+        }
+        if (ownerId == null || ownerId.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        log.info("PortfolioController - deletePortfolioInternal portfolioId={} ownerId={}", portfolioId, ownerId);
+        brokerPortfolioDeleteService.deleteOwnedPortfolio(portfolioId, ownerId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
      * Internal sync endpoint — called by am-trade-management when a portfolio is created or updated in trade.
      * This upserts the portfolio into am-portfolio's database so the user can see it in the Portfolio portal.
      * Uses the internal JWT secret to authenticate (service-to-service call).
