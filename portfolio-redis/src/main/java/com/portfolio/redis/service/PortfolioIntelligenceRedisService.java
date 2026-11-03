@@ -24,7 +24,8 @@ public class PortfolioIntelligenceRedisService {
     @Value("${cache.redis.enabled:true}")
     private boolean isRedisEnabled;
 
-    @Value("${spring.data.redis.portfolio-intel.key-prefix:portfolio:intel:v1:}")
+    /** v2 busts Equity-only Class L2 after MF/NPS assetClass merge fix. */
+    @Value("${spring.data.redis.portfolio-intel.key-prefix:portfolio:intel:v2:}")
     private String keyPrefix;
 
     @Value("${spring.data.redis.portfolio-intel.ttl:90}")

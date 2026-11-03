@@ -10,6 +10,8 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
 
+import com.portfolio.model.events.CasDocumentEvent;
+import com.portfolio.model.events.NpsDocumentEvent;
 import com.portfolio.model.events.PortfolioUpdateEvent;
 import com.portfolio.model.history.HistoryJobMode;
 import com.portfolio.model.mapper.PortfolioMapperv1;
@@ -21,6 +23,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.portfolio.kafka.publisher.PortfolioEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
+import com.portfolio.service.cas.CasImportService;
+import com.portfolio.service.nps.NpsImportService;
 import com.portfolio.service.intraday.IntradayCandleWarmService;
 import com.portfolio.service.portfolio.PortfolioIntradayService;
 import com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer;
@@ -80,6 +84,8 @@ public class PortfolioUpdateConsumerService {
     private final PortfolioIntradayService      portfolioIntradayService;
     private final IntradayCandleWarmService     intradayCandleWarmService;
     private final PortfolioSnapshotService      portfolioSnapshotService;
+    private final CasImportService              casImportService;
+    private final NpsImportService              npsImportService;
 
     @Value("${app.kafka.portfolio.consumer.id:am-portfolio-consumer-group}")
     private String consumerGroupId;
@@ -137,6 +143,32 @@ public class PortfolioUpdateConsumerService {
                 }
 
                 processTradeMessage(event);
+                markProcessed(dedupKey);
+
+            } else if ("CAS_DOCUMENT".equals(eventType)) {
+                CasDocumentEvent event = objectMapper.treeToValue(rootNode, CasDocumentEvent.class);
+                String pid = event.getUserId() != null ? event.getUserId() : "cas-" + offset;
+                log.info("Parsed CasDocumentEvent for userId={} asOf={}", event.getUserId(), event.getAsOfDate());
+                String dedupKey = buildDedupKey("CAS", pid, offset, partition);
+                if (isDuplicate(dedupKey)) {
+                    log.warn("[DEDUP] Skipping already-processed CAS message: userId={} offset={}", pid, offset);
+                    acknowledgment.acknowledge();
+                    return;
+                }
+                casImportService.upsertFromEvent(event);
+                markProcessed(dedupKey);
+
+            } else if ("NPS_DOCUMENT".equals(eventType)) {
+                NpsDocumentEvent event = objectMapper.treeToValue(rootNode, NpsDocumentEvent.class);
+                String pid = event.getUserId() != null ? event.getUserId() : "nps-" + offset;
+                log.info("Parsed NpsDocumentEvent for userId={} asOf={}", event.getUserId(), event.getAsOfDate());
+                String dedupKey = buildDedupKey("NPS", pid, offset, partition);
+                if (isDuplicate(dedupKey)) {
+                    log.warn("[DEDUP] Skipping already-processed NPS message: userId={} offset={}", pid, offset);
+                    acknowledgment.acknowledge();
+                    return;
+                }
+                npsImportService.upsertFromEvent(event);
                 markProcessed(dedupKey);
 
             } else {

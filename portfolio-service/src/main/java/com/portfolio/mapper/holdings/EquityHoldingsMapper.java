@@ -9,6 +9,17 @@ import com.portfolio.model.portfolio.EquityHoldings;
 public class EquityHoldingsMapper {
     public EquityHoldings toEquityHoldings(EquityModel equityModel) {
         String normalizedSymbol = com.portfolio.model.util.SymbolResolver.normalize(equityModel.getSymbol());
+        boolean inventedCasCost = PortfolioHoldingsMapper.looksLikeInventedCasCost(equityModel);
+        Double cost = null;
+        if (equityModel.getInvestmentValue() != null && equityModel.getInvestmentValue() > 0) {
+            cost = equityModel.getInvestmentValue();
+        } else if (!inventedCasCost
+                && equityModel.getAvgBuyingPrice() != null
+                && equityModel.getQuantity() != null
+                && equityModel.getQuantity() > 0) {
+            cost = equityModel.getAvgBuyingPrice() * equityModel.getQuantity();
+        }
+        // null cost = unknown (e.g. CDSL CAS). Never stash 0.0 — that invents +100% returns.
         return EquityHoldings.builder()
             .isin(equityModel.getIsin())
             .symbol(normalizedSymbol)
@@ -17,8 +28,10 @@ public class EquityHoldingsMapper {
             .industry(equityModel.getIndustry())
             .marketCap(equityModel.getMarketCap())
             .quantity(equityModel.getQuantity())
-            .investmentCost(equityModel.getAvgBuyingPrice() != null && equityModel.getQuantity() != null ? equityModel.getAvgBuyingPrice() * equityModel.getQuantity() : 0.0)
-            .averageBuyingPrice(equityModel.getAvgBuyingPrice())
+            .investmentCost(cost)
+            .currentValue(equityModel.getCurrentValue())
+            .currentPrice(equityModel.getCurrentPrice())
+            .averageBuyingPrice(inventedCasCost ? null : equityModel.getAvgBuyingPrice())
             .build();
     }
 }

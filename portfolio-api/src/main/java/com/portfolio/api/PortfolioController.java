@@ -59,9 +59,84 @@ public class PortfolioController {
     private final com.portfolio.redis.service.PortfolioIntelligenceRedisService portfolioIntelligenceRedisService;
     private final com.portfolio.analytics.intelligence.AggregatePortfolioLoader aggregatePortfolioLoader;
     private final com.portfolio.service.portfolio.BrokerPortfolioDeleteService brokerPortfolioDeleteService;
+    private final com.portfolio.service.cas.CasImportService casImportService;
+    private final com.portfolio.service.nps.NpsImportService npsImportService;
+    private final com.portfolio.service.accounts.AccountsHubService accountsHubService;
 
     @org.springframework.beans.factory.annotation.Value("${app.jwt.internal-secret}")
     private String internalSecret;
+
+    @Operation(
+            summary = "Accounts hub",
+            description = "Identity + demat/MF directory + NPS meta + per-broker portfolio amounts for dashboard",
+            operationId = "getAccountsHub")
+    @GetMapping("/accounts-hub")
+    public ResponseEntity<com.am.common.amcommondata.model.accounts.AccountsHubModel> getAccountsHub() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        return ResponseEntity.ok(accountsHubService.hubForUser(userId));
+    }
+
+    @Operation(summary = "CAS account directory", description = "Demat + MF accounts from latest CDSL CAS import", operationId = "listCasAccounts")
+    @GetMapping("/accounts")
+    public ResponseEntity<List<com.am.common.amcommondata.model.demat.DematAccountModel>> listCasAccounts() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        return ResponseEntity.ok(casImportService.accounts(userId));
+    }
+
+    @Operation(summary = "CAS account by number", operationId = "getCasAccount")
+    @GetMapping("/accounts/{accountNo}")
+    public ResponseEntity<com.am.common.amcommondata.model.demat.DematAccountModel> getCasAccount(
+            @PathVariable String accountNo) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        return casImportService.account(userId, accountNo)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @Operation(summary = "Latest CAS import meta", operationId = "getLatestCas")
+    @GetMapping("/cas/latest")
+    public ResponseEntity<com.am.common.amcommondata.model.cas.CasDocumentMeta> getLatestCas() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        return casImportService.latestMeta(userId)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @Operation(summary = "Latest NPS import meta", operationId = "getLatestNps")
+    @GetMapping("/nps/latest")
+    public ResponseEntity<com.am.common.amcommondata.model.nps.NpsDocumentMeta> getLatestNps() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        return npsImportService.latestMeta(userId)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @Operation(summary = "NPS scheme lines for portfolio", operationId = "listPortfolioNpsSchemes")
+    @GetMapping("/{portfolioId}/nps/schemes")
+    public ResponseEntity<List<com.am.common.amcommondata.model.nps.NpsSchemeLine>> listPortfolioNpsSchemes(
+            @PathVariable String portfolioId) {
+        PortfolioModelV1 owned = portfolioOwnerAssert.requireOwner(portfolioId);
+        return ResponseEntity.ok(npsImportService.schemesForPortfolio(owned.getOwner(), portfolioId));
+    }
+
+    @Operation(summary = "MF folio groups for portfolio (CAS)", operationId = "listPortfolioFolios")
+    @GetMapping("/{portfolioId}/folios")
+    public ResponseEntity<List<com.am.common.amcommondata.model.cas.CasMfFolioGroup>> listPortfolioFolios(
+            @PathVariable String portfolioId) {
+        PortfolioModelV1 owned = portfolioOwnerAssert.requireOwner(portfolioId);
+        return ResponseEntity.ok(casImportService.foliosForPortfolio(owned.getOwner(), portfolioId));
+    }
+
+    @Operation(summary = "MF folio detail (CAS)", operationId = "getPortfolioFolio")
+    @GetMapping("/{portfolioId}/folios/{folio}")
+    public ResponseEntity<com.am.common.amcommondata.model.cas.CasMfFolioGroup> getPortfolioFolio(
+            @PathVariable String portfolioId,
+            @PathVariable String folio) {
+        PortfolioModelV1 owned = portfolioOwnerAssert.requireOwner(portfolioId);
+        return casImportService.folio(owned.getOwner(), folio)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
 
     @Operation(summary = "Get intraday data for all portfolios", operationId = "getAllPortfoliosIntraday")
     @GetMapping("/intraday")
@@ -195,7 +270,9 @@ public class PortfolioController {
                         row.portfolioName(),
                         row.kind(),
                         row.gapMissingCount(),
-                        row.dummy()))
+                        row.dummy(),
+                        row.brokerType(),
+                        row.assetCount()))
                 .collect(java.util.stream.Collectors.toList());
 
         log.info("PortfolioController - getPortfolioBasicDetails - Found {} portfolio basic details for user: {}",
@@ -410,15 +487,18 @@ public class PortfolioController {
             @Parameter(description = "Optional portfolio ID to filter results for specific portfolio") @RequestParam(required = false) String portfolioId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
-            @RequestParam(required = false) String interval) {
+            @RequestParam(required = false) String interval,
+            @Parameter(description = "Optional CAS asset class filter: equity|mutual_fund_demat|debt|mutual_fund_folio")
+            @RequestParam(required = false) String assetClass) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
 
         NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
 
 
         log.info(
-                "PortfolioController - getPortfolioHoldings called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}",
-                res.userId(), res.portfolioId() != null ? res.portfolioId() : "all", page, size, interval != null ? interval : "null");
+                "PortfolioController - getPortfolioHoldings called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}, assetClass: {}",
+                res.userId(), res.portfolioId() != null ? res.portfolioId() : "all", page, size, interval != null ? interval : "null",
+                assetClass);
 
         try {
             TimeInterval timeInterval = TimeInterval.fromCode(interval);
@@ -438,6 +518,16 @@ public class PortfolioController {
                         "PortfolioController - getPortfolioHoldings - No holdings found for user: {} and portfolio: {}. Returning empty state.",
                         res.userId(), res.portfolioId() != null ? res.portfolioId() : "all");
                 return ResponseEntity.ok(PortfolioHoldings.empty());
+            }
+
+            if (assetClass != null && !assetClass.isBlank()
+                    && portfolioHoldings.getEquityHoldings() != null) {
+                String want = assetClass.trim().toLowerCase();
+                portfolioHoldings.setEquityHoldings(
+                        portfolioHoldings.getEquityHoldings().stream()
+                                .filter(h -> h.getAssetClass() != null
+                                        && want.equalsIgnoreCase(h.getAssetClass()))
+                                .toList());
             }
 
             log.info(

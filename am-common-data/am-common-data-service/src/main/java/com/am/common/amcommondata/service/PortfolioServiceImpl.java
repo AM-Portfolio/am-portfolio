@@ -605,6 +605,9 @@ public class PortfolioServiceImpl implements PortfolioService {
             if (incoming.getCash() != null) {
                 doc.setCash(incoming.getCash());
             }
+            if (incoming.getNpsModels() != null) {
+                doc.setNpsModels(incoming.getNpsModels());
+            }
             if (portfolioModel.getName() != null && !portfolioModel.getName().isBlank()
                     && !looksLikeOpaquePortfolioName(portfolioModel.getName())) {
                 doc.setName(portfolioModel.getName());
@@ -617,7 +620,8 @@ public class PortfolioServiceImpl implements PortfolioService {
                     + sumAssetValues(doc.getMutualFunds())
                     + sumAssetValues(doc.getBonds())
                     + sumAssetValues(doc.getCommodities())
-                    + sumAssetValues(doc.getCash()));
+                    + sumAssetValues(doc.getCash())
+                    + sumAssetValues(doc.getNpsModels()));
             doc.setPortfolioKind(PortfolioKind.BROKER);
             // Keep stable broker name (no Zerodha-V*)
             if (doc.getName() == null || doc.getName().isBlank()

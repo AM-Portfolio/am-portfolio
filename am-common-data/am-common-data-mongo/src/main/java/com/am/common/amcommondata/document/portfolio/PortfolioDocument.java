@@ -79,6 +79,9 @@ public class PortfolioDocument extends BaseDocument {
 
     @Field("cash")
     private List<AssetDocument> cash;
+
+    @Field("npsModels")
+    private List<AssetDocument> npsModels;
     
     @Field("totalValue")
     private Double totalValue;

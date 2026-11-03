@@ -307,8 +307,14 @@ public class PortfolioCalculator {
                 double currentValue = currentPrice * holding.getQuantity();
                 holding.setCurrentValue(round(currentValue));
 
-                // Calculate Overall Gain/Loss
-                if (holding.getInvestmentCost() != null && holding.getInvestmentCost() > 0) {
+                // CDSL/CAS often has market value only — treat missing cost as mark (0 overall P&L).
+                boolean costKnown = (holding.getAverageBuyingPrice() != null && holding.getAverageBuyingPrice() > 0)
+                        || (holding.getInvestmentCost() != null && holding.getInvestmentCost() > 0);
+                if (!costKnown) {
+                    holding.setInvestmentCost(round(currentValue));
+                    holding.setGainLoss(0.0);
+                    holding.setGainLossPercentage(0.0);
+                } else if (holding.getInvestmentCost() != null && holding.getInvestmentCost() > 0) {
                     double gainLoss = currentValue - holding.getInvestmentCost();
                     double gainLossPct = (gainLoss / holding.getInvestmentCost()) * 100;
                     holding.setGainLoss(round(gainLoss));
@@ -340,6 +346,33 @@ public class PortfolioCalculator {
         return holding;
     }
 
+    /**
+     * Sum cost basis; when a row has no known cost, use its market value so overall
+     * return stays flat (CDSL CAS / document books without invested amount).
+     */
+    public static double sumInvestmentBasis(List<EquityHoldings> holdings) {
+        if (holdings == null || holdings.isEmpty()) {
+            return 0.0;
+        }
+        double sum = 0.0;
+        for (EquityHoldings h : holdings) {
+            double market = 0.0;
+            if (h.getCurrentValue() != null) {
+                market = h.getCurrentValue();
+            } else if (h.getCurrentPrice() != null && h.getQuantity() != null) {
+                market = h.getCurrentPrice() * h.getQuantity();
+            }
+            boolean costKnown = (h.getAverageBuyingPrice() != null && h.getAverageBuyingPrice() > 0)
+                    || (h.getInvestmentCost() != null && h.getInvestmentCost() > 0);
+            if (costKnown && h.getInvestmentCost() != null && h.getInvestmentCost() > 0) {
+                sum += h.getInvestmentCost();
+            } else {
+                sum += market;
+            }
+        }
+        return sum;
+    }
+
     public PortfolioSummaryV1 calculateSummary(List<EquityHoldings> enrichedHoldings, double totalInvestmentValue) {
         double currentValue = enrichedHoldings.stream()
                 .mapToDouble(h -> {
@@ -358,6 +391,14 @@ public class PortfolioCalculator {
 
         if (currentValue == 0.0 && totalInvestmentValue > 0) {
             currentValue = totalInvestmentValue;
+        }
+
+        // Prefer live holdings basis over a stale cached investment figure.
+        double investmentBasis = sumInvestmentBasis(enrichedHoldings);
+        if (investmentBasis > 0) {
+            totalInvestmentValue = investmentBasis;
+        } else if (totalInvestmentValue <= 0 && currentValue > 0) {
+            totalInvestmentValue = currentValue;
         }
 
         double totalGainLoss = currentValue - totalInvestmentValue;

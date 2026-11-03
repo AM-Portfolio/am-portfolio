@@ -5,6 +5,8 @@ import com.am.common.amcommondata.service.PortfolioService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -36,6 +38,15 @@ public class AggregatePortfolioLoader {
                 key, portfolioService.getPortfoliosByUserId(key));
         mergeCache.put(key, new CachedMerge(merged, now + MERGE_TTL_MS));
         return merged;
+    }
+
+    /** Per-broker book values for All-Portfolios X-Ray By Portfolio tab. */
+    public Map<String, Double> loadBrokerBookValues(String userId) {
+        if (userId == null || userId.isBlank()) {
+            throw new IllegalArgumentException("userId required");
+        }
+        List<PortfolioModelV1> books = portfolioService.getPortfoliosByUserId(userId.trim());
+        return AggregatePortfolioFactory.brokerBookValues(books);
     }
 
     /** Drop L1 merge after holdings writes so All-Portfolios reflects new books. */

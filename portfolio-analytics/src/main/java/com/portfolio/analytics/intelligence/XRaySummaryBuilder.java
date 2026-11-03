@@ -16,9 +16,10 @@ import java.util.Map;
 public class XRaySummaryBuilder {
 
     private static final java.util.Set<String> NON_EQUITY_CLASSES = java.util.Set.of(
-            HealthScoreEngine.ASSET_FIXED_INCOME, 
-            HealthScoreEngine.ASSET_COMMODITY, 
-            HealthScoreEngine.ASSET_CASH
+            HealthScoreEngine.ASSET_FIXED_INCOME,
+            HealthScoreEngine.ASSET_COMMODITY,
+            HealthScoreEngine.ASSET_CASH,
+            HealthScoreEngine.ASSET_NPS
     );
 
     public XRayDto build(PortfolioIntelligenceSnapshot snapshot) {
@@ -30,6 +31,40 @@ public class XRaySummaryBuilder {
                 .assetClassWeights(groupWeights(snapshot, h -> HealthScoreEngine.normalizeAssetClass(h.getAssetClass()), h -> true))
                 .totalValue(PortfolioIntelligenceSnapshotFactory.round2(snapshot.getTotalValue()))
                 .build();
+    }
+
+    /**
+     * Builds By-Portfolio slices from book display name → current value (INR).
+     * Used for All-Portfolios X-Ray; single-book callers pass one entry.
+     */
+    public List<XRayDto.WeightSliceDto> portfolioWeightsFromBookValues(Map<String, Double> bookValues) {
+        if (bookValues == null || bookValues.isEmpty()) {
+            return List.of();
+        }
+        double total = 0.0;
+        for (Double v : bookValues.values()) {
+            if (v != null && v > 0) {
+                total += v;
+            }
+        }
+        if (total <= 0) {
+            return List.of();
+        }
+        List<XRayDto.WeightSliceDto> slices = new ArrayList<>();
+        for (Map.Entry<String, Double> e : bookValues.entrySet()) {
+            double value = e.getValue() != null ? e.getValue() : 0.0;
+            if (value <= 0) {
+                continue;
+            }
+            String name = e.getKey() == null || e.getKey().isBlank() ? "Unknown" : e.getKey().trim();
+            slices.add(XRayDto.WeightSliceDto.builder()
+                    .name(name)
+                    .weightPct(PortfolioIntelligenceSnapshotFactory.round2((value / total) * 100.0))
+                    .value(PortfolioIntelligenceSnapshotFactory.round2(value))
+                    .build());
+        }
+        slices.sort(Comparator.comparingDouble(XRayDto.WeightSliceDto::getWeightPct).reversed());
+        return slices;
     }
 
     private boolean isNonEquity(PortfolioIntelligenceSnapshot.Holding h) {

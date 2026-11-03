@@ -201,12 +201,15 @@ public class PortfolioIntelligenceSnapshotFactory {
                 ? portfolio.getCommodities() : List.of();
         List<AssetModel> cash = portfolio.getCash() != null
                 ? portfolio.getCash() : List.of();
+        List<AssetModel> npsModels = portfolio.getNpsModels() != null
+                ? portfolio.getNpsModels() : List.of();
 
         boolean anyHoldings = !equities.isEmpty()
                 || !mutualFunds.isEmpty()
                 || !bonds.isEmpty()
                 || !commodities.isEmpty()
-                || !cash.isEmpty();
+                || !cash.isEmpty()
+                || !npsModels.isEmpty();
         if (!anyHoldings) {
             return PortfolioIntelligenceSnapshot.builder()
                     .portfolioId(portfolioId)
@@ -306,6 +309,8 @@ public class PortfolioIntelligenceSnapshotFactory {
             String industry = resolveIndustry(eq, sec);
             String marketCap = resolveMarketCap(eq, sec);
 
+            // Honor CAS assetClass on equity rows (mutual_fund_demat / debt / nps).
+            String equityClass = HealthScoreEngine.normalizeAssetClass(eq.getAssetClass());
             holdings.add(PortfolioIntelligenceSnapshot.Holding.builder()
                     .symbol(sym)
                     .value(value)
@@ -313,7 +318,7 @@ public class PortfolioIntelligenceSnapshotFactory {
                     .sector(sector)
                     .industry(industry)
                     .marketCap(marketCap)
-                    .assetClass(HealthScoreEngine.ASSET_EQUITY)
+                    .assetClass(equityClass)
                     .build());
             quantities.put(sym, eq.getQuantity());
         }
@@ -322,6 +327,7 @@ public class PortfolioIntelligenceSnapshotFactory {
         droppedNoPrice += appendAssetHoldings(holdings, bonds, HealthScoreEngine.ASSET_FIXED_INCOME);
         droppedNoPrice += appendAssetHoldings(holdings, commodities, HealthScoreEngine.ASSET_COMMODITY);
         droppedNoPrice += appendAssetHoldings(holdings, cash, HealthScoreEngine.ASSET_CASH);
+        droppedNoPrice += appendAssetHoldings(holdings, npsModels, HealthScoreEngine.ASSET_NPS);
 
         if (droppedNoPrice > 0) {
             log.warn("Intel snapshot portfolioId={} dropped {} holdings with no usable price",

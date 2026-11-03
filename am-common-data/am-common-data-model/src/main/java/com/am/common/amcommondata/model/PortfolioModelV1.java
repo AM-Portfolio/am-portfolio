@@ -41,6 +41,9 @@ public class PortfolioModelV1 {
     private List<AssetModel> commodities = List.of();
     @Builder.Default
     private List<AssetModel> cash = List.of();
+    /** NPS scheme lines (BrokerType.NPS book). */
+    @Builder.Default
+    private List<AssetModel> npsModels = List.of();
     private Double totalValue;
     private Double investmentAmount;
     private BrokerType brokerType;

@@ -55,6 +55,70 @@ class AggregatePortfolioFactoryTest {
         assertEquals("user-1", merged.getOwner());
     }
 
+    @Test
+    void preservesMutualFundAssetClassOnMerge() {
+        EquityModel mf = EquityModel.builder()
+                .symbol("INF090I01239")
+                .quantity(100.0)
+                .avgBuyingPrice(10.0)
+                .currentValue(50_000.0)
+                .assetClass("mutual_fund_demat")
+                .build();
+        PortfolioModelV1 cas = broker("cdsl", BrokerType.CDSL, mf);
+        PortfolioModelV1 merged = factory.mergeBrokerBooks("user-1", List.of(cas));
+        assertEquals(1, merged.getEquityModels().size());
+        assertEquals(
+                HealthScoreEngine.ASSET_MUTUAL_FUND,
+                HealthScoreEngine.normalizeAssetClass(merged.getEquityModels().get(0).getAssetClass()));
+    }
+
+    @Test
+    void liftsNpsBookEquitiesIntoNpsModels() {
+        EquityModel scheme = EquityModel.builder()
+                .symbol("SM001001")
+                .quantity(10.0)
+                .currentValue(20_000.0)
+                .build();
+        PortfolioModelV1 nps = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .name("NPS")
+                .owner("user-1")
+                .brokerType(BrokerType.NPS)
+                .portfolioKind(PortfolioKind.BROKER)
+                .equityModels(List.of(scheme))
+                .build();
+        PortfolioModelV1 merged = factory.mergeBrokerBooks("user-1", List.of(nps));
+        assertTrue(merged.getEquityModels() == null || merged.getEquityModels().isEmpty());
+        assertEquals(1, merged.getNpsModels().size());
+        assertEquals(HealthScoreEngine.ASSET_NPS, merged.getNpsModels().get(0).getAssetClass());
+        assertEquals(20_000.0, merged.getNpsModels().get(0).getCurrentValue(), 1e-9);
+    }
+
+    @Test
+    void brokerBookValuesSkipsZeroCurrent() {
+        PortfolioModelV1 zero = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .name("Zerodha")
+                .owner("user-1")
+                .brokerType(BrokerType.ZERODHA)
+                .portfolioKind(PortfolioKind.BROKER)
+                .totalValue(0.0)
+                .equityModels(List.of())
+                .build();
+        PortfolioModelV1 live = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .name("Dhan")
+                .owner("user-1")
+                .brokerType(BrokerType.DHAN)
+                .portfolioKind(PortfolioKind.BROKER)
+                .totalValue(100_000.0)
+                .build();
+        var values = AggregatePortfolioFactory.brokerBookValues(List.of(zero, live));
+        assertEquals(1, values.size());
+        assertEquals(100_000.0, values.get("Dhan"), 1e-9);
+        assertTrue(!values.containsKey("Zerodha"));
+    }
+
     private static PortfolioModelV1 broker(String name, BrokerType type, EquityModel... equities) {
         return PortfolioModelV1.builder()
                 .id(UUID.randomUUID())

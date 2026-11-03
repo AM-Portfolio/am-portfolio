@@ -1,6 +1,7 @@
 package com.portfolio.service;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.service.PortfolioService;
 import lombok.RequiredArgsConstructor;
@@ -52,7 +53,9 @@ public class NewUserPortfolioFallbackService {
             String portfolioName,
             String kind,
             Integer gapMissingCount,
-            boolean dummy) {}
+            boolean dummy,
+            String brokerType,
+            Integer assetCount) {}
 
     public DemoResolution resolveRequest(String userId, String portfolioId) {
         if (!isConfigured() || userId == null || userId.isBlank()) {
@@ -82,21 +85,64 @@ public class NewUserPortfolioFallbackService {
         }
 
         return portfolios.stream()
+                .filter(portfolio -> portfolio != null && !isCdslListRow(portfolio))
                 .map(portfolio -> {
                     boolean demo = PortfolioKind.isDemo(portfolio.getPortfolioKind());
                     String kind = portfolio.getPortfolioKind() != null
                             ? portfolio.getPortfolioKind().name()
                             : (portfolio.getSourcePortfolioId() != null && !portfolio.getSourcePortfolioId().isBlank()
                                     ? "BASKET" : "BROKER");
+                    String broker = portfolio.getBrokerType() != null ? portfolio.getBrokerType().name() : null;
+                    Integer assets = portfolio.getAssetCount();
+                    if (assets == null) {
+                        assets = countAssets(portfolio);
+                    }
+                    String displayName = demo
+                            ? DEMO_DISPLAY_NAME
+                            : (portfolio.getName() != null && !portfolio.getName().isBlank()
+                                    ? portfolio.getName()
+                                    : (broker != null ? broker : null));
                     return new BasicPortfolioRow(
                             portfolio.getId() != null ? portfolio.getId().toString() : null,
-                            demo ? DEMO_DISPLAY_NAME
-                                    : (portfolio.getName() != null ? portfolio.getName() : null),
+                            displayName,
                             kind,
                             portfolio.getGapMissingCount(),
-                            demo);
+                            demo,
+                            broker,
+                            assets);
                 })
                 .collect(Collectors.toList());
+    }
+
+    private static boolean isCdslListRow(PortfolioModelV1 portfolio) {
+        if (portfolio.getBrokerType() == BrokerType.CDSL) {
+            return true;
+        }
+        String name = portfolio.getName() == null ? "" : portfolio.getName().trim().toLowerCase();
+        return name.contains("cdsl") || name.equals("cas") || name.contains("cas aggregator");
+    }
+
+    private static int countAssets(PortfolioModelV1 p) {
+        int n = 0;
+        if (p.getEquityModels() != null) {
+            n += p.getEquityModels().size();
+        }
+        if (p.getMutualFunds() != null) {
+            n += p.getMutualFunds().size();
+        }
+        if (p.getBonds() != null) {
+            n += p.getBonds().size();
+        }
+        if (p.getCommodities() != null) {
+            n += p.getCommodities().size();
+        }
+        if (p.getCash() != null) {
+            n += p.getCash().size();
+        }
+        if (p.getNpsModels() != null) {
+            n += p.getNpsModels().size();
+        }
+        return n;
     }
 
     /**
@@ -152,7 +198,7 @@ public class NewUserPortfolioFallbackService {
      * Soft-hide personal DEMO when a real broker book exists; otherwise find-or-create.
      * @return active personal DEMO, or null when ineligible / unconfigured / template missing
      */
-    PortfolioModelV1 ensurePersonalDemoLifecycle(String userId) {
+    public PortfolioModelV1 ensurePersonalDemoLifecycle(String userId) {
         if (!isConfigured() || userId == null || userId.isBlank()) {
             return null;
         }

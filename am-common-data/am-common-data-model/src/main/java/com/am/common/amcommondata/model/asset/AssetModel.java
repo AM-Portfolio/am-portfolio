@@ -36,4 +36,14 @@ public class AssetModel {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private Boolean isActive;
+    /** CAS asset class: equity | mutual_fund_demat | debt | mutual_fund_folio | nps */
+    private String assetClass;
+    /** ISIN or NPS CRA schemeCode (SM00…) used as enrichment key */
+    private String isin;
+    private String schemeCode;
+    private String schemeClass;
+    private String schemeOption;
+    private Double statementNav;
+    private Double liveNav;
+    private String isinResolveStatus;
 }

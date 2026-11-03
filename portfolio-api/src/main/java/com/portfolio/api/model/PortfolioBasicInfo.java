@@ -31,6 +31,12 @@ public class PortfolioBasicInfo {
     @JsonProperty("isDummy")
     private boolean isDummy;
 
+    @Schema(description = "Broker type code when known", example = "ZERODHA")
+    private String brokerType;
+
+    @Schema(description = "Holding / asset line count; 0 means empty book")
+    private Integer assetCount;
+
     public PortfolioBasicInfo(String portfolioId, String portfolioName) {
         this.portfolioId = portfolioId;
         this.portfolioName = portfolioName;
