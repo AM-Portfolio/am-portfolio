@@ -30,6 +30,8 @@ public class AssetDocument extends BaseDocument {
     private Double currentPrice;
     private Double currentValue;
     private Double investmentValue;
+    /** Statement/import-day LTP when avg cost is unknown. */
+    private Double importMarkPrice;
     private BrokerType brokerType;
     private Double profitLoss;
     private Double profitLossPercentage;
