@@ -246,20 +246,11 @@ public class PortfolioController {
             log.warn("Unauthorized internal ids list attempt rejected ownerId={}", ownerId);
             return ResponseEntity.status(403).build();
         }
-        if (ownerId == null || ownerId.isBlank()) {
-            return ResponseEntity.badRequest().build();
+        try {
+            return ResponseEntity.ok(brokerPortfolioDeleteService.listPortfolioIdsForOwner(ownerId));
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            return ResponseEntity.status(e.getStatusCode()).build();
         }
-        List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(ownerId);
-        java.util.List<String> ids = portfolios == null
-                ? java.util.List.of()
-                : portfolios.stream()
-                        .filter(java.util.Objects::nonNull)
-                        .map(PortfolioModelV1::getId)
-                        .filter(java.util.Objects::nonNull)
-                        .map(UUID::toString)
-                        .toList();
-        log.info("PortfolioController - listPortfolioIdsInternal ownerId={} count={}", ownerId, ids.size());
-        return ResponseEntity.ok(ids);
     }
 
     /**
