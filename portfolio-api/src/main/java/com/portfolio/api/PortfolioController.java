@@ -242,15 +242,8 @@ public class PortfolioController {
     public ResponseEntity<java.util.List<String>> listPortfolioIdsInternal(
             @RequestParam String ownerId,
             @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
-        if (secret == null || !internalSecret.equals(secret)) {
-            log.warn("Unauthorized internal ids list attempt rejected ownerId={}", ownerId);
-            return ResponseEntity.status(403).build();
-        }
-        try {
-            return ResponseEntity.ok(brokerPortfolioDeleteService.listPortfolioIdsForOwner(ownerId));
-        } catch (org.springframework.web.server.ResponseStatusException e) {
-            return ResponseEntity.status(e.getStatusCode()).build();
-        }
+        requireInternalSecret(secret, "ids");
+        return ResponseEntity.ok(brokerPortfolioDeleteService.listPortfolioIdsForOwner(ownerId));
     }
 
     /**
@@ -263,19 +256,9 @@ public class PortfolioController {
             @PathVariable String portfolioId,
             @RequestParam String ownerId,
             @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
-        if (secret == null || !internalSecret.equals(secret)) {
-            log.warn("Unauthorized internal verify attempt rejected portfolioId={}", portfolioId);
-            return ResponseEntity.status(403).build();
-        }
-        if (ownerId == null || ownerId.isBlank()) {
-            return ResponseEntity.badRequest().build();
-        }
-        try {
-            brokerPortfolioDeleteService.assertOwnedBrokerPortfolio(portfolioId, ownerId);
-            return ResponseEntity.noContent().build();
-        } catch (org.springframework.web.server.ResponseStatusException e) {
-            return ResponseEntity.status(e.getStatusCode()).build();
-        }
+        requireInternalSecret(secret, "verify");
+        brokerPortfolioDeleteService.assertOwnedBrokerPortfolio(portfolioId, ownerId);
+        return ResponseEntity.noContent().build();
     }
 
     /**
@@ -289,16 +272,19 @@ public class PortfolioController {
             @PathVariable String portfolioId,
             @RequestParam String ownerId,
             @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
-        if (secret == null || !internalSecret.equals(secret)) {
-            log.warn("Unauthorized internal delete attempt rejected portfolioId={}", portfolioId);
-            return ResponseEntity.status(403).build();
-        }
-        if (ownerId == null || ownerId.isBlank()) {
-            return ResponseEntity.badRequest().build();
-        }
+        requireInternalSecret(secret, "delete");
         log.info("PortfolioController - deletePortfolioInternal portfolioId={} ownerId={}", portfolioId, ownerId);
         brokerPortfolioDeleteService.deleteOwnedPortfolio(portfolioId, ownerId);
         return ResponseEntity.noContent().build();
+    }
+
+    /** S2S gate only — domain validation/errors come from the service + GlobalExceptionHandler. */
+    private void requireInternalSecret(String secret, String operation) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            log.warn("Unauthorized internal {} attempt rejected", operation);
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "Forbidden");
+        }
     }
 
     /**
