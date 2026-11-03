@@ -15,6 +15,7 @@ import com.am.common.amcommondata.model.asset.mutualfund.MutualFundModel;
 import com.am.common.amcommondata.model.enums.AssetType;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.FundType;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.portfolio.model.events.PortfolioUpdateEvent;
 import com.portfolio.model.portfolio.v1.BrokerPortfolioSummary;
 import com.portfolio.model.resolver.TradingSymbolResolver;
@@ -138,6 +139,7 @@ public class PortfolioMapperv1 {
         }
 
         BrokerType brokerType = resolveBrokerType(tradeEvent.getBrokerType());
+        PortfolioKind kind = resolveTradePortfolioKind(tradeEvent);
 
         java.util.UUID portfolioUuid = null;
         if (tradeEvent.getId() != null) {
@@ -154,6 +156,7 @@ public class PortfolioMapperv1 {
                 .name(tradeEvent.getPortfolioId() != null ? tradeEvent.getPortfolioId() : tradeEvent.getId())
                 .owner(tradeEvent.getUserId())
                 .brokerType(brokerType)
+                .portfolioKind(kind)
                 .fundType(FundType.DEFAULT)
                 .status("Active")
                 .createdBy(tradeEvent.getUserId())
@@ -163,6 +166,26 @@ public class PortfolioMapperv1 {
                 .version(0L)
                 .lastTradeAction(action)
                 .build();
+    }
+
+    static PortfolioKind resolveTradePortfolioKind(
+            com.portfolio.model.events.trade.TradePortfolioSyncEvent tradeEvent) {
+        if (tradeEvent == null) {
+            return PortfolioKind.BROKER;
+        }
+        String raw = tradeEvent.getPortfolioKind();
+        if (raw != null && !raw.isBlank()) {
+            try {
+                return PortfolioKind.valueOf(raw.trim().toUpperCase(java.util.Locale.ROOT));
+            } catch (IllegalArgumentException ignored) {
+                // fall through
+            }
+        }
+        String name = tradeEvent.getPortfolioId() != null ? tradeEvent.getPortfolioId() : tradeEvent.getId();
+        if (name != null && "paper".equalsIgnoreCase(name.trim())) {
+            return PortfolioKind.PAPER;
+        }
+        return PortfolioKind.BROKER;
     }
 
     public BrokerPortfolioSummary toPortfolioModelV1(PortfolioModelV1 portfolio) {

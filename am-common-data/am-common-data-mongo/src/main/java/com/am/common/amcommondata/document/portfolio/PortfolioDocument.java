@@ -27,12 +27,18 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @EqualsAndHashCode(callSuper = true)
 @Document(collection = "portfolios")
-// Unique one BROKER portfolio per owner+brokerType. Baskets are excluded via partial filter.
+// Unique one BROKER portfolio per owner+brokerType. Baskets/DEMO/PAPER excluded via partial filter.
 @org.springframework.data.mongodb.core.index.CompoundIndex(
         name = "owner_broker_broker_only_idx",
         def = "{'owner': 1, 'brokerType': 1}",
         unique = true,
         partialFilter = "{'$or':[{'portfolioKind':'BROKER'},{'portfolioKind':{'$exists':false}},{'portfolioKind':null}]}")
+// At most one active DEMO sandbox per owner.
+@org.springframework.data.mongodb.core.index.CompoundIndex(
+        name = "owner_demo_unique_idx",
+        def = "{'owner': 1}",
+        unique = true,
+        partialFilter = "{'portfolioKind':'DEMO'}")
 public class PortfolioDocument extends BaseDocument {
     @Field("name")
     private String name;
@@ -80,7 +86,7 @@ public class PortfolioDocument extends BaseDocument {
     @Field("brokerType")
     private BrokerType brokerType;
 
-    /** BROKER (default/null) or BASKET carve-out. */
+    /** BROKER (default/null), BASKET, DEMO, PAPER, or DELETED. */
     @Field("portfolioKind")
     private PortfolioKind portfolioKind;
 

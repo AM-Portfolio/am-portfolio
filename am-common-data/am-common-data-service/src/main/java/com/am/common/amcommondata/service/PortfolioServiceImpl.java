@@ -16,7 +16,9 @@ import com.am.common.amcommondata.model.ledger.AllocationLedgerEventType;
 import lombok.RequiredArgsConstructor;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
@@ -45,6 +47,10 @@ public class PortfolioServiceImpl implements PortfolioService {
     /** Optional in unit tests; when present, kafka module fans out DELETE for cleaned twins. */
     @Autowired(required = false)
     private ApplicationEventPublisher applicationEventPublisher;
+
+    /** Shared demo template id — writes are refused (clone targets get new UUIDs). */
+    @Value("${app.demo.portfolio-id:}")
+    private String demoTemplatePortfolioId;
 
     /**
      * Lists the owner's portfolios. BROKER twins (GROW + GROWW, or same broker enum)
@@ -195,6 +201,10 @@ public class PortfolioServiceImpl implements PortfolioService {
 
         if (owner == null) return null;
 
+        if (portfolioModel.getId() != null) {
+            refuseDemoTemplateWrite(portfolioModel.getId().toString());
+        }
+
         PortfolioDocument doc = null;
         if (portfolioModel.getId() != null) {
             doc = portfolioDocumentRepository.findById(portfolioModel.getId().toString()).orElse(null);
@@ -202,14 +212,18 @@ public class PortfolioServiceImpl implements PortfolioService {
 
         // Removed fallback to findByOwnerAndBrokerType to support multiple portfolios of the same broker type.
 
+        PortfolioKind incomingKind = portfolioModel.getPortfolioKind();
         if (doc != null) {
-            if (PortfolioKind.isBasket(doc.getPortfolioKind())) {
-                log.warn("Refusing trade update on BASKET portfolio id={}", doc.getId());
+            if (PortfolioKind.isBasket(doc.getPortfolioKind()) || PortfolioKind.isDemo(doc.getPortfolioKind())) {
+                log.warn("Refusing trade update on {} portfolio id={}", doc.getPortfolioKind(), doc.getId());
                 return portfolioMapper.toModel(doc);
             }
             // Update name if the incoming model has a valid name that isn't just the ID
             if (portfolioModel.getName() != null && !portfolioModel.getName().equals(doc.getId())) {
                 doc.setName(portfolioModel.getName());
+            }
+            if (PortfolioKind.isPaper(incomingKind)) {
+                doc.setPortfolioKind(PortfolioKind.PAPER);
             }
         } else {
             // Create new portfolio
@@ -219,7 +233,7 @@ public class PortfolioServiceImpl implements PortfolioService {
             }
             doc.setOwner(owner);
             doc.setBrokerType(brokerType);
-            doc.setPortfolioKind(PortfolioKind.BROKER);
+            doc.setPortfolioKind(PortfolioKind.isPaper(incomingKind) ? PortfolioKind.PAPER : PortfolioKind.BROKER);
             doc.setName(portfolioModel.getName() != null && !portfolioModel.getName().equals(portfolioModel.getId() != null ? portfolioModel.getId().toString() : "") ? portfolioModel.getName() : (brokerType != null ? brokerType.getCode() : "Other"));
             doc.setStatus(com.am.common.amcommondata.model.enums.DocumentStatus.ACTIVE);
             com.am.common.amcommondata.document.common.AuditMetadata audit = new com.am.common.amcommondata.document.common.AuditMetadata();
@@ -434,6 +448,27 @@ public class PortfolioServiceImpl implements PortfolioService {
         if (PortfolioKind.isBasket(portfolioModel.getPortfolioKind())) {
             return createBasketPortfolio(portfolioModel);
         }
+        if (PortfolioKind.isDemo(portfolioModel.getPortfolioKind())
+                || PortfolioKind.isPaper(portfolioModel.getPortfolioKind())) {
+            if (portfolioModel.getId() != null) {
+                refuseDemoTemplateWrite(portfolioModel.getId().toString());
+            }
+            PortfolioDocument document = portfolioMapper.toDocument(portfolioModel);
+            document.setPortfolioKind(portfolioModel.getPortfolioKind());
+            try {
+                return portfolioMapper.toModel(portfolioDocumentRepository.save(document));
+            } catch (DuplicateKeyException dup) {
+                if (PortfolioKind.isDemo(portfolioModel.getPortfolioKind())
+                        && portfolioModel.getOwner() != null) {
+                    List<PortfolioModelV1> existing =
+                            findByOwnerAndPortfolioKind(portfolioModel.getOwner(), PortfolioKind.DEMO);
+                    if (!existing.isEmpty()) {
+                        return existing.get(0);
+                    }
+                }
+                throw dup;
+            }
+        }
         // One perfect BROKER portfolio per owner+broker — no V1/V2, no max-5 delete.
         if (portfolioModel.getBrokerType() != null && portfolioModel.getOwner() != null) {
             portfolioModel.setPortfolioKind(PortfolioKind.BROKER);
@@ -528,6 +563,12 @@ public class PortfolioServiceImpl implements PortfolioService {
             }
         }
         brokerDocs = new ArrayList<>(uniqueById.values());
+
+        for (PortfolioDocument d : brokerDocs) {
+            if (d != null && d.getId() != null) {
+                refuseDemoTemplateWrite(d.getId());
+            }
+        }
 
         if (!brokerDocs.isEmpty()) {
             // Survivor pick (stable for trade/analysis):
@@ -636,6 +677,9 @@ public class PortfolioServiceImpl implements PortfolioService {
     @Override
     @Transactional
     public PortfolioModelV1 savePortfolioDocument(PortfolioModelV1 portfolioModel) {
+        if (portfolioModel.getId() != null) {
+            refuseDemoTemplateWrite(portfolioModel.getId().toString());
+        }
         PortfolioDocument document = portfolioMapper.toDocument(portfolioModel);
         // Preserve id when updating
         if (portfolioModel.getId() != null) {
@@ -699,7 +743,8 @@ public class PortfolioServiceImpl implements PortfolioService {
         if (id == null || owner == null) {
             return;
         }
-        
+        refuseDemoTemplateWrite(id);
+
         List<PortfolioDocument> portfolios = portfolioDocumentRepository.findByOwner(owner);
         for (PortfolioDocument portfolio : portfolios) {
             if (id.equals(portfolio.getName()) || (portfolio.getId() != null && id.equals(portfolio.getId().toString()))) {
@@ -709,6 +754,47 @@ public class PortfolioServiceImpl implements PortfolioService {
             }
         }
         log.warn("Portfolio not found for deletion with name/id: {} and owner: {}", id, owner);
+    }
+
+    @Override
+    public List<PortfolioModelV1> findByOwnerAndPortfolioKind(String owner, PortfolioKind kind) {
+        if (owner == null || kind == null) {
+            return List.of();
+        }
+        return portfolioDocumentRepository.findByOwnerAndPortfolioKind(owner, kind).stream()
+                .filter(doc -> doc.getPortfolioKind() != PortfolioKind.DELETED)
+                .map(portfolioMapper::toModel)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional
+    public void softDeletePortfolio(String id, String owner) {
+        if (id == null || owner == null) {
+            return;
+        }
+        refuseDemoTemplateWrite(id);
+        portfolioDocumentRepository.findById(id).ifPresent(doc -> {
+            if (!owner.equals(doc.getOwner())) {
+                log.warn("softDelete refused: owner mismatch id={} expectedOwner={}", id, owner);
+                return;
+            }
+            if (doc.getPortfolioKind() == PortfolioKind.DELETED) {
+                return;
+            }
+            doc.setPortfolioKind(PortfolioKind.DELETED);
+            portfolioDocumentRepository.save(doc);
+            log.info("Soft-deleted portfolio id={} owner={} priorKind soft-set to DELETED", id, owner);
+        });
+    }
+
+    private void refuseDemoTemplateWrite(String portfolioId) {
+        if (demoTemplatePortfolioId == null || demoTemplatePortfolioId.isBlank() || portfolioId == null) {
+            return;
+        }
+        if (demoTemplatePortfolioId.equals(portfolioId)) {
+            throw new IllegalStateException("Demo template portfolio is read-only: " + portfolioId);
+        }
     }
 
     @Override
