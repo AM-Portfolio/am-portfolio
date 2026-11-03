@@ -1,10 +1,12 @@
 package com.portfolio.service;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.service.PortfolioService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -14,14 +16,15 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * Manages the shared "Demo Portfolio" shown to new users who have no portfolios yet.
+ * Per-user Demo Account provisioner.
  *
- * Strategy:
- *   1. Reads the shared demo portfolio from the DB using app.demo.portfolio-id.
- *   2. Returns a cloned, in-memory copy with name "Demo Portfolio" and owner = current user.
- *   3. Demo is shown only while the user has zero real portfolios. Uploading/linking a
- *      real portfolio automatically hides it. There is no separate "dismiss" path —
- *      legacy Redis dismiss keys are cleared and ignored so modules stay in sync.
+ * <p>The configured {@code app.demo.portfolio-id} is a read-only template. Eligible users
+ * get a personal {@link PortfolioKind#DEMO} clone they own, so intel/heatmap ownership
+ * checks succeed and edits stay isolated.
+ *
+ * <p>Eligibility = no real broker book ({@link PortfolioKind#isRealBrokerBook}).
+ * Paper and baskets never hide Demo. When a real broker appears, personal DEMO is
+ * soft-deleted; when the last real broker is removed, Demo is re-cloned from the template.
  */
 @Service
 @RequiredArgsConstructor
@@ -38,8 +41,8 @@ public class NewUserPortfolioFallbackService {
     private String demoPortfolioId;
 
     /**
-     * Resolved owner/portfolio IDs for dashboard reads when the caller may be viewing the demo.
-     * When eligible, remaps to the demo document's real owner so downstream queries hit Mongo data.
+     * Resolved owner/portfolio IDs for dashboard reads.
+     * Personal DEMO keeps {@code userId} as owner (no shared-template remap).
      */
     public record DemoResolution(String userId, String portfolioId) {}
 
@@ -51,103 +54,78 @@ public class NewUserPortfolioFallbackService {
             Integer gapMissingCount,
             boolean dummy) {}
 
-    // ---------------------------------------------------------------------------
-    // Public API
-    // ---------------------------------------------------------------------------
-
-    /**
-     * Remaps user/portfolio for summary, holdings, history, and intraday when the
-     * authenticated user has zero real portfolios and is addressing the demo ID (or all portfolios).
-     */
     public DemoResolution resolveRequest(String userId, String portfolioId) {
-        if (!isConfigured()) {
+        if (!isConfigured() || userId == null || userId.isBlank()) {
             return new DemoResolution(userId, portfolioId);
         }
 
-        List<PortfolioModelV1> real = portfolioService.getPortfoliosByUserId(userId);
-        if (real == null || real.isEmpty()) {
-            if (portfolioId == null || portfolioId.equals(demoPortfolioId)) {
-                String demoOwner = getDemoOwner();
-                if (demoOwner != null) {
-                    return new DemoResolution(demoOwner, demoPortfolioId);
-                }
-            }
+        PortfolioModelV1 personal = ensurePersonalDemoLifecycle(userId);
+        if (personal == null || personal.getId() == null) {
+            return new DemoResolution(userId, portfolioId);
+        }
+
+        String personalId = personal.getId().toString();
+        if (portfolioId == null
+                || portfolioId.isBlank()
+                || portfolioId.equals(personalId)
+                || portfolioId.equals(demoPortfolioId)) {
+            return new DemoResolution(userId, personalId);
         }
         return new DemoResolution(userId, portfolioId);
     }
 
-    /**
-     * Returns real portfolios as list rows, or a single demo row when the user has none.
-     */
     public List<BasicPortfolioRow> listBasicPortfolios(String userId) {
+        ensurePersonalDemoLifecycle(userId);
         List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
-
-        if (portfolios == null || portfolios.isEmpty()) {
-            PortfolioModelV1 demoModel = getDemoPortfolioForNewUser(userId, Collections.emptyList());
-            if (demoModel == null) {
-                return Collections.emptyList();
-            }
-            log.info("[DemoPortfolio] Injecting demo portfolio for new user: {}", userId);
-            return Collections.singletonList(new BasicPortfolioRow(
-                    demoModel.getId() != null ? demoModel.getId().toString() : null,
-                    demoModel.getName() != null ? demoModel.getName() : DEMO_DISPLAY_NAME,
-                    "BROKER",
-                    null,
-                    true));
+        if (portfolios == null) {
+            portfolios = Collections.emptyList();
         }
 
         return portfolios.stream()
-                .map(portfolio -> new BasicPortfolioRow(
-                        portfolio.getId() != null ? portfolio.getId().toString() : null,
-                        portfolio.getName(),
-                        portfolio.getPortfolioKind() != null ? portfolio.getPortfolioKind().name()
-                                : (portfolio.getSourcePortfolioId() != null && !portfolio.getSourcePortfolioId().isBlank()
-                                        ? "BASKET" : "BROKER"),
-                        portfolio.getGapMissingCount(),
-                        false))
+                .map(portfolio -> {
+                    boolean demo = PortfolioKind.isDemo(portfolio.getPortfolioKind());
+                    String kind = portfolio.getPortfolioKind() != null
+                            ? portfolio.getPortfolioKind().name()
+                            : (portfolio.getSourcePortfolioId() != null && !portfolio.getSourcePortfolioId().isBlank()
+                                    ? "BASKET" : "BROKER");
+                    return new BasicPortfolioRow(
+                            portfolio.getId() != null ? portfolio.getId().toString() : null,
+                            demo ? DEMO_DISPLAY_NAME
+                                    : (portfolio.getName() != null ? portfolio.getName() : null),
+                            kind,
+                            portfolio.getGapMissingCount(),
+                            demo);
+                })
                 .collect(Collectors.toList());
     }
 
     /**
-     * Returns the demo PortfolioModelV1 (in-memory clone) if:
-     *  - A DEMO_PORTFOLIO_ID is configured, AND
-     *  - The user's real portfolio list is empty.
-     * Returns null otherwise.
+     * Returns the user's personal DEMO when eligible (creates on first need).
+     * {@code realPortfolios} is ignored for eligibility; kept for call-site compatibility.
      */
     public PortfolioModelV1 getDemoPortfolioForNewUser(String userId, List<?> realPortfolios) {
-        if (!isConfigured() || !realPortfolios.isEmpty()) {
-            return null;
-        }
-        PortfolioModelV1 demo = fetchDemoPortfolio();
-        if (demo == null) {
-            return null;
-        }
-        return cloneAsDemo(demo, userId);
+        return ensurePersonalDemoLifecycle(userId);
     }
 
     /**
-     * Returns the demo PortfolioModelV1 (in-memory clone) if the
-     * given portfolioId matches the configured demo ID and the user still has 0 real portfolios.
-     * Returns null if not eligible or not the demo ID.
+     * Returns the personal DEMO model when {@code portfolioId} addresses it (or the legacy
+     * shared template id) and the user is still eligible.
      */
     public PortfolioModelV1 getDemoModelIfEligible(String userId, String portfolioId, List<?> realPortfolios) {
-        if (!isConfigured() || !realPortfolios.isEmpty()) {
+        PortfolioModelV1 personal = ensurePersonalDemoLifecycle(userId);
+        if (personal == null || personal.getId() == null || portfolioId == null) {
             return null;
         }
-        if (!demoPortfolioId.equals(portfolioId)) {
-            return null;
+        String personalId = personal.getId().toString();
+        if (portfolioId.equals(personalId) || portfolioId.equals(demoPortfolioId)) {
+            return personal;
         }
-        PortfolioModelV1 demo = fetchDemoPortfolio();
-        if (demo == null) {
-            return null;
-        }
-        return cloneAsDemo(demo, userId);
+        return null;
     }
 
     /**
-     * Legacy no-op restore: clears any old per-user dismiss flag so demo injection
-     * stays consistent across portfolio / trade / analysis. Demo is only hidden when
-     * the user has at least one real portfolio.
+     * Legacy no-op restore: clears any old per-user dismiss flag.
+     * Demo visibility is driven by real-broker eligibility only.
      */
     public void dismissForUser(String userId) {
         String key = DISMISSED_KEY_PREFIX + userId;
@@ -159,50 +137,188 @@ public class NewUserPortfolioFallbackService {
         }
     }
 
-    /** Returns the configured demo portfolio ID, or blank if not configured. */
+    /** Returns the configured demo template portfolio ID, or blank if not configured. */
     public String getDemoPortfolioId() {
         return demoPortfolioId;
     }
 
+    /** Owner of the shared template (ops / seed account), not the end user. */
     public String getDemoOwner() {
-        PortfolioModelV1 demo = fetchDemoPortfolio();
+        PortfolioModelV1 demo = fetchTemplate();
         return demo != null ? demo.getOwner() : null;
     }
 
-    // ---------------------------------------------------------------------------
-    // Private helpers
-    // ---------------------------------------------------------------------------
+    /**
+     * Soft-hide personal DEMO when a real broker book exists; otherwise find-or-create.
+     * @return active personal DEMO, or null when ineligible / unconfigured / template missing
+     */
+    PortfolioModelV1 ensurePersonalDemoLifecycle(String userId) {
+        if (!isConfigured() || userId == null || userId.isBlank()) {
+            return null;
+        }
+
+        List<PortfolioModelV1> owned = portfolioService.getPortfoliosByUserId(userId);
+        if (owned == null) {
+            owned = Collections.emptyList();
+        }
+
+        if (hasRealBrokerBook(owned)) {
+            softHidePersonalDemos(userId, owned);
+            return null;
+        }
+
+        List<PortfolioModelV1> existingDemos = owned.stream()
+                .filter(p -> PortfolioKind.isDemo(p.getPortfolioKind()))
+                .sorted(NewUserPortfolioFallbackService::compareDemoNewestFirst)
+                .collect(Collectors.toList());
+        if (!existingDemos.isEmpty()) {
+            // Unique index may lag on first deploys / races — keep newest DEMO, soft-hide extras.
+            PortfolioModelV1 survivor = existingDemos.get(0);
+            if (existingDemos.size() > 1) {
+                softHideExtraDemos(userId, existingDemos);
+            }
+            return decorateDemo(survivor);
+        }
+
+        return clonePersonalDemo(userId);
+    }
+
+    /** Newest updatedAt, then createdAt, then id — deterministic survivor. */
+    static int compareDemoNewestFirst(PortfolioModelV1 a, PortfolioModelV1 b) {
+        java.time.LocalDateTime aUp = a != null ? a.getUpdatedAt() : null;
+        java.time.LocalDateTime bUp = b != null ? b.getUpdatedAt() : null;
+        int byUpdated = java.util.Comparator.nullsLast(java.time.LocalDateTime::compareTo)
+                .compare(bUp, aUp);
+        if (byUpdated != 0) {
+            return byUpdated;
+        }
+        java.time.LocalDateTime aCr = a != null ? a.getCreatedAt() : null;
+        java.time.LocalDateTime bCr = b != null ? b.getCreatedAt() : null;
+        int byCreated = java.util.Comparator.nullsLast(java.time.LocalDateTime::compareTo)
+                .compare(bCr, aCr);
+        if (byCreated != 0) {
+            return byCreated;
+        }
+        String aId = a != null && a.getId() != null ? a.getId().toString() : "";
+        String bId = b != null && b.getId() != null ? b.getId().toString() : "";
+        return bId.compareTo(aId);
+    }
+
+    private void softHideExtraDemos(String userId, List<PortfolioModelV1> demosNewestFirst) {
+        for (int i = 1; i < demosNewestFirst.size(); i++) {
+            PortfolioModelV1 extra = demosNewestFirst.get(i);
+            if (extra == null || extra.getId() == null) {
+                continue;
+            }
+            try {
+                portfolioService.softDeletePortfolio(extra.getId().toString(), userId);
+                log.info("[DemoPortfolio] Soft-hid duplicate DEMO {} for user {} (kept newest)",
+                        extra.getId(), userId);
+            } catch (Exception e) {
+                log.warn("[DemoPortfolio] Failed to soft-hide duplicate DEMO {} for {}: {}",
+                        extra.getId(), userId, e.getMessage());
+            }
+        }
+    }
+
+    static boolean hasRealBrokerBook(List<PortfolioModelV1> portfolios) {
+        if (portfolios == null) {
+            return false;
+        }
+        for (PortfolioModelV1 p : portfolios) {
+            if (p == null) {
+                continue;
+            }
+            if (PortfolioKind.isRealBrokerBook(p.getPortfolioKind(), p.getBrokerType())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void softHidePersonalDemos(String userId, List<PortfolioModelV1> owned) {
+        for (PortfolioModelV1 p : owned) {
+            if (p == null || p.getId() == null || !PortfolioKind.isDemo(p.getPortfolioKind())) {
+                continue;
+            }
+            try {
+                portfolioService.softDeletePortfolio(p.getId().toString(), userId);
+                log.info("[DemoPortfolio] Soft-hid DEMO {} for user {} (real broker present)",
+                        p.getId(), userId);
+            } catch (Exception e) {
+                log.warn("[DemoPortfolio] Failed to soft-hide DEMO {} for {}: {}",
+                        p.getId(), userId, e.getMessage());
+            }
+        }
+    }
+
+    private PortfolioModelV1 clonePersonalDemo(String userId) {
+        PortfolioModelV1 template = fetchTemplate();
+        if (template == null) {
+            return null;
+        }
+
+        PortfolioModelV1 clone = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .name(DEMO_DISPLAY_NAME)
+                .description(template.getDescription())
+                .owner(userId)
+                .currency(template.getCurrency())
+                .fundType(template.getFundType())
+                .status(template.getStatus())
+                .equityModels(template.getEquityModels())
+                .mutualFunds(template.getMutualFunds())
+                .bonds(template.getBonds())
+                .commodities(template.getCommodities())
+                .cash(template.getCash())
+                .totalValue(template.getTotalValue())
+                .investmentAmount(template.getInvestmentAmount())
+                .brokerType(null)
+                .portfolioKind(PortfolioKind.DEMO)
+                .assetCount(template.getAssetCount())
+                .createdBy(userId)
+                .build();
+
+        try {
+            PortfolioModelV1 saved = portfolioService.createPortfolio(clone);
+            log.info("[DemoPortfolio] Cloned personal DEMO id={} for user={} from template={}",
+                    saved != null && saved.getId() != null ? saved.getId() : null,
+                    userId,
+                    demoPortfolioId);
+            return decorateDemo(saved);
+        } catch (DuplicateKeyException dup) {
+            List<PortfolioModelV1> raced =
+                    portfolioService.findByOwnerAndPortfolioKind(userId, PortfolioKind.DEMO);
+            if (!raced.isEmpty()) {
+                return decorateDemo(raced.get(0));
+            }
+            log.warn("[DemoPortfolio] DuplicateKey cloning DEMO for {} but none found on re-read", userId);
+            return null;
+        } catch (Exception e) {
+            log.warn("[DemoPortfolio] Failed to clone DEMO for {}: {}", userId, e.getMessage());
+            return null;
+        }
+    }
+
+    private PortfolioModelV1 decorateDemo(PortfolioModelV1 demo) {
+        if (demo == null) {
+            return null;
+        }
+        demo.setName(DEMO_DISPLAY_NAME);
+        demo.setPortfolioKind(PortfolioKind.DEMO);
+        return demo;
+    }
 
     private boolean isConfigured() {
         return demoPortfolioId != null && !demoPortfolioId.isBlank();
     }
 
-    private PortfolioModelV1 fetchDemoPortfolio() {
+    private PortfolioModelV1 fetchTemplate() {
         try {
             return portfolioService.getPortfolioById(UUID.fromString(demoPortfolioId));
         } catch (Exception e) {
-            log.warn("[DemoPortfolio] Could not fetch demo portfolio id={}: {}", demoPortfolioId, e.getMessage());
+            log.warn("[DemoPortfolio] Could not fetch demo template id={}: {}", demoPortfolioId, e.getMessage());
             return null;
         }
-    }
-
-    private PortfolioModelV1 cloneAsDemo(PortfolioModelV1 source, String userId) {
-        return PortfolioModelV1.builder()
-            .id(source.getId())
-            .name(DEMO_DISPLAY_NAME)
-            .description(source.getDescription())
-            .owner(userId)
-            .currency(source.getCurrency())
-            .fundType(source.getFundType())
-            .status(source.getStatus())
-            .equityModels(source.getEquityModels())
-            .totalValue(source.getTotalValue())
-            .investmentAmount(source.getInvestmentAmount())
-            .brokerType(source.getBrokerType())
-            .portfolioKind(com.am.common.amcommondata.model.enums.PortfolioKind.BROKER)
-            .assetCount(source.getAssetCount())
-            .createdAt(source.getCreatedAt())
-            .updatedAt(source.getUpdatedAt())
-            .build();
     }
 }

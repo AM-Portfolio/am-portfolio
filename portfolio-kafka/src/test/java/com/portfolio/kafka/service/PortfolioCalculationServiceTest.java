@@ -73,9 +73,31 @@ class PortfolioCalculationServiceTest {
         when(calculator.calculateSummary(any(), anyDouble())).thenReturn(new PortfolioSummaryV1());
         when(newUserPortfolioFallbackService.resolveRequest("new-user", "demo-shared"))
                 .thenReturn(new NewUserPortfolioFallbackService.DemoResolution("demo-owner", "demo-shared"));
-        when(newUserPortfolioFallbackService.getDemoPortfolioId()).thenReturn("demo-shared");
 
         service.processCalculation("new-user", "demo-shared", "corr");
+
+        verify(producerService, never()).sendMessage(any(), any());
+        verify(producerService).sendPortfolioStreamMessage(any(), eq("corr"));
+    }
+
+    @Test void processCalculation_personalDemoKind_skipsTradeFanoutTopic() {
+        UUID demoId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+        PortfolioHoldings ph = new PortfolioHoldings();
+        ph.setEquityHoldings(List.of(holding("AAPL", 1000.0)));
+        when(holdingsService.getPortfolioHoldings("u1", demoId.toString(), TimeInterval.ONE_DAY)).thenReturn(ph);
+        when(calculator.enrichHoldings(any())).thenReturn(ph.getEquityHoldings());
+        when(calculator.calculateSummary(any(), anyDouble())).thenReturn(new PortfolioSummaryV1());
+        when(newUserPortfolioFallbackService.resolveRequest("u1", demoId.toString()))
+                .thenReturn(new NewUserPortfolioFallbackService.DemoResolution("u1", demoId.toString()));
+        when(newUserPortfolioFallbackService.getDemoPortfolioId()).thenReturn("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        when(portfolioService.getPortfolioById(demoId)).thenReturn(
+                PortfolioModelV1.builder()
+                        .id(demoId)
+                        .owner("u1")
+                        .portfolioKind(com.am.common.amcommondata.model.enums.PortfolioKind.DEMO)
+                        .build());
+
+        service.processCalculation("u1", demoId.toString(), "corr");
 
         verify(producerService, never()).sendMessage(any(), any());
         verify(producerService).sendPortfolioStreamMessage(any(), eq("corr"));
