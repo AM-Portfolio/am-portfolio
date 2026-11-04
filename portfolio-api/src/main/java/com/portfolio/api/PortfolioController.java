@@ -334,7 +334,9 @@ public class PortfolioController {
                         row.gapMissingCount(),
                         row.dummy(),
                         row.brokerType(),
-                        row.assetCount()))
+                        row.assetCount(),
+                        row.familyMemberId(),
+                        row.familyMemberName()))
                 .collect(java.util.stream.Collectors.toList());
 
         log.info("PortfolioController - getPortfolioBasicDetails - Found {} portfolio basic details for user: {}",

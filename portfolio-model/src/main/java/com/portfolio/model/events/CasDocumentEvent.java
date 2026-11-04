@@ -43,4 +43,6 @@ public class CasDocumentEvent {
     private String identityMatch;
     private String holderName;
     private String holderEmail;
+    /** Indian PAN from CDSL cover when parsed. */
+    private String holderPan;
 }

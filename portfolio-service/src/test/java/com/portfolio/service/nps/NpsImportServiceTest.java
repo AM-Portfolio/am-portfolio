@@ -42,10 +42,12 @@ class NpsImportServiceTest {
 
     @Test
     void upsertFromEvent_persistsPranAndTiers() {
+        when(npsImportRepository.findFirstByOwnerAndFamilyMemberIdIsNullOrderByAsOfDateDescImportedAtDesc("u1"))
+                .thenReturn(Optional.empty());
         when(npsImportRepository.findFirstByOwnerOrderByAsOfDateDescImportedAtDesc("u1"))
                 .thenReturn(Optional.empty());
         when(npsImportRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(familyMemberService.resolveForImport(any(), any(), any(), any(), any()))
+        when(familyMemberService.resolveForImport(any(), any(), any(), any(), any(), any()))
                 .thenReturn(null);
 
         NpsDocumentEvent event = NpsDocumentEvent.builder()

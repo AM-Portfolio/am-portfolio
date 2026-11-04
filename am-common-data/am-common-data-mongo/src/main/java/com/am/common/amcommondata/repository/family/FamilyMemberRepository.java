@@ -23,6 +23,8 @@ public interface FamilyMemberRepository
 
     Optional<FamilyMemberDocument> findFirstByOwnerUserIdAndEmailNorm(String ownerUserId, String emailNorm);
 
+    Optional<FamilyMemberDocument> findFirstByOwnerUserIdAndPanNorm(String ownerUserId, String panNorm);
+
     Optional<FamilyMemberDocument> findFirstByOwnerUserIdAndNameNorm(String ownerUserId, String nameNorm);
 }
 

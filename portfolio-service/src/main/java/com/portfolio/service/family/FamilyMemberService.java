@@ -174,7 +174,7 @@ public class FamilyMemberService {
     }
 
     /**
-     * Find-or-create when identityMatch is FAMILY. Prefer email match, else name.
+     * Find-or-create when identityMatch is FAMILY. Match order: email → PAN → name.
      * Returns null for SELF / UNKNOWN / blank identity.
      */
     public FamilyMember resolveForImport(
@@ -182,6 +182,16 @@ public class FamilyMemberService {
             String identityMatch,
             String holderName,
             String holderEmail,
+            String source) {
+        return resolveForImport(ownerUserId, identityMatch, holderName, holderEmail, null, source);
+    }
+
+    public FamilyMember resolveForImport(
+            String ownerUserId,
+            String identityMatch,
+            String holderName,
+            String holderEmail,
+            String holderPan,
             String source) {
         if (ownerUserId == null || ownerUserId.isBlank()) {
             return null;
@@ -191,8 +201,9 @@ public class FamilyMemberService {
         }
         familyMemberRepository.consolidateObjectIdStringTwins(ownerUserId);
         String emailNorm = normEmail(holderEmail);
+        String panNorm = normPan(holderPan);
         String nameNorm = normName(holderName);
-        if (emailNorm == null && nameNorm == null) {
+        if (emailNorm == null && panNorm == null && nameNorm == null) {
             return null;
         }
 
@@ -200,6 +211,11 @@ public class FamilyMemberService {
         if (emailNorm != null) {
             existing = familyMemberRepository
                     .findFirstByOwnerUserIdAndEmailNorm(ownerUserId, emailNorm)
+                    .orElse(null);
+        }
+        if (existing == null && panNorm != null) {
+            existing = familyMemberRepository
+                    .findFirstByOwnerUserIdAndPanNorm(ownerUserId, panNorm)
                     .orElse(null);
         }
         if (existing == null && nameNorm != null) {
@@ -222,12 +238,14 @@ public class FamilyMemberService {
                 existing.setEmailNorm(emailNorm);
                 dirty = true;
             }
-            if (dirty) {
-                existing = familyMemberRepository.savePreservingBsonId(existing);
-            } else {
-                // Still normalize ObjectId → String if needed.
-                existing = familyMemberRepository.savePreservingBsonId(existing);
+            if (panNorm != null
+                    && (existing.getPanNorm() == null || existing.getPanNorm().isBlank())) {
+                existing.setPan(panNorm);
+                existing.setPanNorm(panNorm);
+                dirty = true;
             }
+            // Always savePreservingBsonId to normalize ObjectId → String if needed.
+            existing = familyMemberRepository.savePreservingBsonId(existing);
             return toModel(existing, null);
         }
 
@@ -239,6 +257,8 @@ public class FamilyMemberService {
                 .email(holderEmail != null && !holderEmail.isBlank() ? holderEmail.trim() : null)
                 .emailNorm(emailNorm)
                 .nameNorm(nameNorm)
+                .pan(panNorm)
+                .panNorm(panNorm)
                 .source(source != null ? source : "CAS")
                 .createdAt(LocalDateTime.now())
                 .build();
@@ -270,6 +290,7 @@ public class FamilyMemberService {
                 .ownerUserId(doc.getOwnerUserId())
                 .displayName(doc.getDisplayName())
                 .email(doc.getEmail())
+                .pan(doc.getPan())
                 .source(doc.getSource())
                 .createdAt(doc.getCreatedAt())
                 .portfolioCount(portfolioCount)
@@ -281,6 +302,18 @@ public class FamilyMemberService {
             return null;
         }
         return email.trim().toLowerCase(Locale.ROOT);
+    }
+
+    /** Uppercase 10-char Indian PAN or null. */
+    public static String normPan(String pan) {
+        if (pan == null || pan.isBlank()) {
+            return null;
+        }
+        String p = pan.trim().toUpperCase(Locale.ROOT);
+        if (p.length() != 10) {
+            return null;
+        }
+        return p;
     }
 
     private static String normName(String name) {

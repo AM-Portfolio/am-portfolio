@@ -37,6 +37,12 @@ public class PortfolioBasicInfo {
     @Schema(description = "Holding / asset line count; 0 means empty book")
     private Integer assetCount;
 
+    @Schema(description = "Soft family member id when this book is not the primary owner")
+    private String familyMemberId;
+
+    @Schema(description = "Soft family member display name for dropdown labels")
+    private String familyMemberName;
+
     public PortfolioBasicInfo(String portfolioId, String portfolioName) {
         this.portfolioId = portfolioId;
         this.portfolioName = portfolioName;

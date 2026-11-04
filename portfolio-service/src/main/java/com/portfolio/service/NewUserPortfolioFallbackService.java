@@ -55,7 +55,9 @@ public class NewUserPortfolioFallbackService {
             Integer gapMissingCount,
             boolean dummy,
             String brokerType,
-            Integer assetCount) {}
+            Integer assetCount,
+            String familyMemberId,
+            String familyMemberName) {}
 
     public DemoResolution resolveRequest(String userId, String portfolioId) {
         if (!isConfigured() || userId == null || userId.isBlank()) {
@@ -109,7 +111,9 @@ public class NewUserPortfolioFallbackService {
                             portfolio.getGapMissingCount(),
                             demo,
                             broker,
-                            assets);
+                            assets,
+                            portfolio.getFamilyMemberId(),
+                            portfolio.getFamilyMemberName());
                 })
                 .collect(Collectors.toList());
     }

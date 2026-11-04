@@ -39,4 +39,5 @@ public class NpsDocumentEvent {
     private String identityMatch;
     private String holderName;
     private String holderEmail;
+    private String holderPan;
 }

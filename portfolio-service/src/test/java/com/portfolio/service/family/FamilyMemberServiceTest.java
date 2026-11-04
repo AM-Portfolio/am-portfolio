@@ -87,6 +87,47 @@ class FamilyMemberServiceTest {
     }
 
     @Test
+    void familyMatchesByPanWhenEmailMissing() {
+        when(familyMemberRepository.consolidateObjectIdStringTwins("u1")).thenReturn(0);
+        when(familyMemberRepository.findFirstByOwnerUserIdAndPanNorm("u1", "JYQPK9320A"))
+                .thenReturn(Optional.of(FamilyMemberDocument.builder()
+                        .id("fm-pan")
+                        .ownerUserId("u1")
+                        .displayName("Priyanshu Kumar")
+                        .pan("JYQPK9320A")
+                        .panNorm("JYQPK9320A")
+                        .build()));
+        when(familyMemberRepository.savePreservingBsonId(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        FamilyMember m = familyMemberService.resolveForImport(
+                "u1", "FAMILY", "PRIYANSHU KUMAR", null, "JYQPK9320A", "CAS");
+        assertEquals("fm-pan", m.getId());
+        assertEquals("JYQPK9320A", m.getPan());
+    }
+
+    @Test
+    void familyCreatesMemberWithPan() {
+        when(familyMemberRepository.consolidateObjectIdStringTwins("u1")).thenReturn(0);
+        when(familyMemberRepository.findFirstByOwnerUserIdAndEmailNorm("u1", "priyanshukpd@gmail.com"))
+                .thenReturn(Optional.empty());
+        when(familyMemberRepository.findFirstByOwnerUserIdAndPanNorm("u1", "JYQPK9320A"))
+                .thenReturn(Optional.empty());
+        when(familyMemberRepository.countByOwnerUserId("u1")).thenReturn(0L);
+        when(familyMemberRepository.savePreservingBsonId(any())).thenAnswer(inv -> {
+            FamilyMemberDocument d = inv.getArgument(0);
+            d.setId("fm-new-pan");
+            return d;
+        });
+
+        FamilyMember m = familyMemberService.resolveForImport(
+                "u1", "FAMILY", "PRIYANSHU KUMAR", "priyanshukpd@gmail.com", "JYQPK9320A", "CAS");
+        assertEquals("fm-new-pan", m.getId());
+        ArgumentCaptor<FamilyMemberDocument> cap = ArgumentCaptor.forClass(FamilyMemberDocument.class);
+        verify(familyMemberRepository).savePreservingBsonId(cap.capture());
+        assertEquals("JYQPK9320A", cap.getValue().getPanNorm());
+    }
+
+    @Test
     void familyReplacesGenericDisplayNameWhenHolderNameArrives() {
         when(familyMemberRepository.consolidateObjectIdStringTwins("u1")).thenReturn(0);
         when(familyMemberRepository.findFirstByOwnerUserIdAndEmailNorm("u1", "priyanshukpd@gmail.com"))

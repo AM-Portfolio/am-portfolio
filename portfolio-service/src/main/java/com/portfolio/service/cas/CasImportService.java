@@ -5,7 +5,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -39,6 +41,7 @@ public class CasImportService {
 
         String holderName = event.getHolderName();
         String holderEmail = event.getHolderEmail();
+        String holderPan = event.getHolderPan();
         if ((holderName == null || holderName.isBlank()) && event.getAccountDirectory() != null) {
             holderName = event.getAccountDirectory().stream()
                     .filter(a -> a != null && a.getHolderName() != null && !a.getHolderName().isBlank())
@@ -57,7 +60,7 @@ public class CasImportService {
         }
 
         FamilyMember member = familyMemberService.resolveForImport(
-                owner, event.getIdentityMatch(), holderName, holderEmail, "CAS");
+                owner, event.getIdentityMatch(), holderName, holderEmail, holderPan, "CAS");
 
         // One CAS envelope per owner persona (primary vs familyMemberId).
         CasImportDocument existing;
@@ -66,6 +69,8 @@ public class CasImportService {
                     .findFirstByOwnerAndFamilyMemberIdOrderByAsOfDateDescImportedAtDesc(
                             owner, member.getId())
                     .orElse(null);
+            // Retag mis-scoped primary CAS that matches this family holder.
+            existing = retagMatchingPrimary(owner, member, holderName, holderEmail, holderPan, existing);
         } else {
             existing = casImportRepository
                     .findFirstByOwnerAndFamilyMemberIdIsNullOrderByAsOfDateDescImportedAtDesc(owner)
@@ -90,6 +95,7 @@ public class CasImportService {
         doc.setIdentityMatch(event.getIdentityMatch());
         doc.setHolderName(holderName);
         doc.setHolderEmail(holderEmail);
+        doc.setHolderPan(FamilyMemberService.normPan(holderPan));
         if (member != null) {
             doc.setFamilyMemberId(member.getId());
             doc.setFamilyMemberName(member.getDisplayName());
@@ -103,6 +109,104 @@ public class CasImportService {
                 owner, saved.getAsOfDate(), saved.getFamilyMemberId(),
                 saved.getAccountDirectory() != null ? saved.getAccountDirectory().size() : 0);
         return saved;
+    }
+
+    /**
+     * If a primary (null familyMemberId) CAS document matches this family holder,
+     * reuse it as the family doc (or delete the twin when a family doc already exists).
+     */
+    CasImportDocument retagMatchingPrimary(
+            String owner,
+            FamilyMember member,
+            String holderName,
+            String holderEmail,
+            String holderPan,
+            CasImportDocument existingFamily) {
+        if (member == null || member.getId() == null) {
+            return existingFamily;
+        }
+        CasImportDocument primary = casImportRepository
+                .findFirstByOwnerAndFamilyMemberIdIsNullOrderByAsOfDateDescImportedAtDesc(owner)
+                .orElse(null);
+        if (primary == null || !matchesFamilyHolder(primary, holderName, holderEmail, holderPan, member)) {
+            return existingFamily;
+        }
+        if (existingFamily == null) {
+            log.info("Retagging primary CAS {} → familyMemberId={}", primary.getId(), member.getId());
+            primary.setFamilyMemberId(member.getId());
+            primary.setFamilyMemberName(member.getDisplayName());
+            return casImportRepository.save(primary);
+        }
+        if (!Objects.equals(existingFamily.getId(), primary.getId())) {
+            log.info("Deleting mis-scoped primary CAS twin {} (family doc {})",
+                    primary.getId(), existingFamily.getId());
+            casImportRepository.delete(primary);
+        }
+        return existingFamily;
+    }
+
+    static boolean matchesFamilyHolder(
+            CasImportDocument primary,
+            String holderName,
+            String holderEmail,
+            String holderPan,
+            FamilyMember member) {
+        if (primary == null) {
+            return false;
+        }
+        String panNorm = FamilyMemberService.normPan(holderPan);
+        String primaryPan = FamilyMemberService.normPan(primary.getHolderPan());
+        if (panNorm != null && panNorm.equals(primaryPan)) {
+            return true;
+        }
+        if (panNorm != null && panNorm.equalsIgnoreCase(nullToEmpty(member.getPan()))) {
+            // Member already known by PAN; primary holder name/email also align if present.
+            String pe = normEmail(primary.getHolderEmail());
+            String he = normEmail(holderEmail);
+            if (pe != null && pe.equals(he)) {
+                return true;
+            }
+            String pn = normName(primary.getHolderName());
+            String hn = normName(holderName);
+            if (pn != null && pn.equals(hn)) {
+                return true;
+            }
+            if (pn != null && pn.equals(normName(member.getDisplayName()))) {
+                return true;
+            }
+        }
+        String pe = normEmail(primary.getHolderEmail());
+        String he = normEmail(holderEmail);
+        if (pe != null && pe.equals(he) && !FamilyMemberService.looksTruncatedEmail(pe)) {
+            return true;
+        }
+        String me = normEmail(member.getEmail());
+        if (pe != null && pe.equals(me) && !FamilyMemberService.looksTruncatedEmail(pe)) {
+            return true;
+        }
+        String pn = normName(primary.getHolderName());
+        String hn = normName(holderName);
+        if (pn != null && (pn.equals(hn) || pn.equals(normName(member.getDisplayName())))) {
+            return true;
+        }
+        // Directory row email/name fallback
+        if (primary.getAccountDirectory() != null) {
+            for (DematAccountModel a : primary.getAccountDirectory()) {
+                if (a == null) {
+                    continue;
+                }
+                String ae = normEmail(a.getEmail());
+                if (ae != null && (ae.equals(he) || ae.equals(me))
+                        && !FamilyMemberService.looksTruncatedEmail(ae)) {
+                    return true;
+                }
+                String an = normName(a.getHolderName());
+                if (an != null && (an.equals(hn) || an.equals(normName(member.getDisplayName())))) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public Optional<CasImportDocument> latest(String userId) {
@@ -261,5 +365,19 @@ public class CasImportService {
 
     private static String nullToEmpty(String s) {
         return s == null ? "" : s;
+    }
+
+    private static String normEmail(String email) {
+        if (email == null || email.isBlank()) {
+            return null;
+        }
+        return email.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static String normName(String name) {
+        if (name == null || name.isBlank()) {
+            return null;
+        }
+        return name.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
     }
 }

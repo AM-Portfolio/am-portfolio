@@ -38,12 +38,10 @@ public class NpsImportService {
             throw new IllegalArgumentException("NPS_DOCUMENT requires userId");
         }
         String owner = event.getUserId();
-        NpsImportDocument existing = npsImportRepository
-                .findFirstByOwnerOrderByAsOfDateDescImportedAtDesc(owner)
-                .orElse(null);
 
         String holderName = event.getHolderName();
         String holderEmail = event.getHolderEmail();
+        String holderPan = event.getHolderPan();
         if (event.getSubscriber() != null) {
             if ((holderName == null || holderName.isBlank()) && event.getSubscriber().get("name") != null) {
                 holderName = String.valueOf(event.getSubscriber().get("name"));
@@ -51,10 +49,28 @@ public class NpsImportService {
             if ((holderEmail == null || holderEmail.isBlank()) && event.getSubscriber().get("email") != null) {
                 holderEmail = String.valueOf(event.getSubscriber().get("email"));
             }
+            if ((holderPan == null || holderPan.isBlank()) && event.getSubscriber().get("pan") != null) {
+                holderPan = String.valueOf(event.getSubscriber().get("pan"));
+            }
         }
 
         FamilyMember member = familyMemberService.resolveForImport(
-                owner, event.getIdentityMatch(), holderName, holderEmail, "NPS");
+                owner, event.getIdentityMatch(), holderName, holderEmail, holderPan, "NPS");
+
+        NpsImportDocument existing;
+        if (member != null && member.getId() != null) {
+            existing = npsImportRepository
+                    .findFirstByOwnerAndFamilyMemberIdOrderByAsOfDateDescImportedAtDesc(
+                            owner, member.getId())
+                    .orElse(null);
+        } else {
+            existing = npsImportRepository
+                    .findFirstByOwnerAndFamilyMemberIdIsNullOrderByAsOfDateDescImportedAtDesc(owner)
+                    .orElseGet(() -> npsImportRepository
+                            .findFirstByOwnerOrderByAsOfDateDescImportedAtDesc(owner)
+                            .filter(d -> d.getFamilyMemberId() == null || d.getFamilyMemberId().isBlank())
+                            .orElse(null));
+        }
 
         NpsImportDocument doc = existing != null ? existing : NpsImportDocument.builder().build();
         doc.setOwner(owner);

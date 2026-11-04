@@ -64,6 +64,7 @@ public class PortfolioUpdateEvent {
     private String identityMatch;
     private String holderName;
     private String holderEmail;
+    private String holderPan;
     private String familyMemberId;
     private String familyMemberName;
 }

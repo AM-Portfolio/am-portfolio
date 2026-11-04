@@ -169,4 +169,52 @@ class AccountsHubServiceTest {
         assertEquals(1, hub.getFamilyMembers().size());
         assertEquals(3, hub.getFamilyMembers().get(0).getPortfolioCount());
     }
+
+    @Test
+    void hubForUser_computesHouseholdFamilyShare() {
+        when(casImportService.accountsForOwnerAllPersonas("u1")).thenReturn(List.of(
+                DematAccountModel.builder()
+                        .accountNo("P1")
+                        .accountType("demat")
+                        .holdingValue(100.0)
+                        .build(),
+                DematAccountModel.builder()
+                        .accountNo("F1")
+                        .accountType("demat")
+                        .familyMemberId("fm1")
+                        .holdingValue(300.0)
+                        .build()));
+        when(casImportService.latestMeta("u1")).thenReturn(Optional.empty());
+        when(npsImportService.listMetasForOwner("u1")).thenReturn(List.of(
+                NpsDocumentMeta.builder().pran("1").totalValue(100.0).build(),
+                NpsDocumentMeta.builder()
+                        .pran("2")
+                        .familyMemberId("fm1")
+                        .totalValue(100.0)
+                        .build()));
+        when(portfolioService.getPortfoliosByUserId("u1")).thenReturn(List.of(
+                PortfolioModelV1.builder()
+                        .id(UUID.randomUUID())
+                        .name("Zerodha")
+                        .brokerType(BrokerType.ZERODHA)
+                        .totalValue(200.0)
+                        .build(),
+                PortfolioModelV1.builder()
+                        .id(UUID.randomUUID())
+                        .name("Zerodha")
+                        .brokerType(BrokerType.ZERODHA)
+                        .familyMemberId("fm1")
+                        .totalValue(200.0)
+                        .build()));
+        when(familyMemberService.listForOwner("u1")).thenReturn(List.of(
+                FamilyMember.builder().id("fm1").displayName("Priyanshu").build()));
+
+        AccountsHubModel hub = accountsHubService.hubForUser("u1");
+        // primary: demat 100 + nps 100 + broker 200 = 400
+        // family: demat 300 + nps 100 + broker 200 = 600
+        assertEquals(400.0, hub.getStats().getPrimaryTotalValue(), 0.01);
+        assertEquals(600.0, hub.getStats().getFamilyTotalValue(), 0.01);
+        assertEquals(1000.0, hub.getStats().getHouseholdTotalValue(), 0.01);
+        assertEquals(60.0, hub.getStats().getFamilySharePct(), 0.01);
+    }
 }

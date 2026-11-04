@@ -172,6 +172,42 @@ class NewUserPortfolioFallbackServiceTest {
     }
 
     @Test
+    void listBasicPortfolios_includesFamilyMemberFields() {
+        PortfolioModelV1 primary = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .owner(USER)
+                .name("Dhan")
+                .portfolioKind(PortfolioKind.BROKER)
+                .brokerType(BrokerType.DHAN)
+                .build();
+        PortfolioModelV1 family = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .owner(USER)
+                .name("Dhan")
+                .portfolioKind(PortfolioKind.BROKER)
+                .brokerType(BrokerType.DHAN)
+                .familyMemberId("fm-priyanshu")
+                .familyMemberName("Priyanshu Kumar")
+                .build();
+        when(portfolioService.getPortfoliosByUserId(USER)).thenReturn(List.of(primary, family));
+
+        List<NewUserPortfolioFallbackService.BasicPortfolioRow> rows = service.listBasicPortfolios(USER);
+
+        assertThat(rows).hasSize(2);
+        NewUserPortfolioFallbackService.BasicPortfolioRow primaryRow = rows.stream()
+                .filter(r -> r.familyMemberId() == null)
+                .findFirst()
+                .orElseThrow();
+        NewUserPortfolioFallbackService.BasicPortfolioRow familyRow = rows.stream()
+                .filter(r -> "fm-priyanshu".equals(r.familyMemberId()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(primaryRow.familyMemberName()).isNull();
+        assertThat(familyRow.familyMemberName()).isEqualTo("Priyanshu Kumar");
+        assertThat(familyRow.brokerType()).isEqualTo("DHAN");
+    }
+
+    @Test
     void hasRealBrokerBook_ignoresPaperBasketDemo() {
         assertThat(NewUserPortfolioFallbackService.hasRealBrokerBook(List.of(
                 PortfolioModelV1.builder().portfolioKind(PortfolioKind.PAPER).brokerType(BrokerType.ZERODHA).build(),

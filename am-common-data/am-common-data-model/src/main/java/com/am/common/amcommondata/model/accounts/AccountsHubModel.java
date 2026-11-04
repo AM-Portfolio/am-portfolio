@@ -55,6 +55,14 @@ public class AccountsHubModel {
         private Integer brokerPortfolioCount;
         /** Annualized overall XIRR % across non-paper broker books; null when insufficient cashflows. */
         private Double overallXirrPct;
+        /** Sum of primary-persona demat/MF/NPS/broker values. */
+        private Double primaryTotalValue;
+        /** Sum of all family-persona demat/MF/NPS/broker values. */
+        private Double familyTotalValue;
+        /** primaryTotalValue + familyTotalValue. */
+        private Double householdTotalValue;
+        /** familyTotalValue / householdTotalValue * 100; null when household is 0. */
+        private Double familySharePct;
     }
 
     @Data

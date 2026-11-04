@@ -103,6 +103,11 @@ public class AccountsHubService {
                         .build())
                 .toList();
 
+        double primaryTotal = sumPersonaValue(demat, rows, npsAccounts, true);
+        double familyTotal = sumPersonaValue(demat, rows, npsAccounts, false);
+        double household = primaryTotal + familyTotal;
+        Double familySharePct = household > 0 ? round2((familyTotal / household) * 100.0) : null;
+
         return AccountsHubModel.builder()
                 .identity(buildIdentity(userId, nps, primaryDemat))
                 .stats(AccountsStats.builder()
@@ -112,6 +117,10 @@ public class AccountsHubService {
                         .npsLinked(nps != null && nps.getPran() != null && !nps.getPran().isBlank())
                         .brokerPortfolioCount(brokerCount)
                         .overallXirrPct(computeOverallXirr(xirrBooks))
+                        .primaryTotalValue(round2(primaryTotal))
+                        .familyTotalValue(round2(familyTotal))
+                        .householdTotalValue(round2(household))
+                        .familySharePct(familySharePct)
                         .build())
                 .portfolios(rows)
                 .dematAccounts(demat)
@@ -120,6 +129,60 @@ public class AccountsHubService {
                 .cas(cas)
                 .familyMembers(familySummaries)
                 .build();
+    }
+
+    /**
+     * @param primaryOnly true = null familyMemberId only; false = any stamped family id
+     */
+    static double sumPersonaValue(
+            List<DematAccountModel> demat,
+            List<AccountsPortfolioRow> rows,
+            List<NpsDocumentMeta> npsAccounts,
+            boolean primaryOnly) {
+        double sum = 0.0;
+        if (demat != null) {
+            for (DematAccountModel a : demat) {
+                if (a == null || !personaMatches(a.getFamilyMemberId(), primaryOnly)) {
+                    continue;
+                }
+                if (a.getHoldingValue() != null && a.getHoldingValue() > 0) {
+                    sum += a.getHoldingValue();
+                }
+            }
+        }
+        if (rows != null) {
+            for (AccountsPortfolioRow r : rows) {
+                if (r == null || isPaperLike(r) || isNpsRow(r)) {
+                    continue;
+                }
+                if (!personaMatches(r.getFamilyMemberId(), primaryOnly)) {
+                    continue;
+                }
+                if (r.getCurrent() != null && r.getCurrent() > 0) {
+                    sum += r.getCurrent();
+                }
+            }
+        }
+        if (npsAccounts != null) {
+            for (NpsDocumentMeta m : npsAccounts) {
+                if (m == null || !personaMatches(m.getFamilyMemberId(), primaryOnly)) {
+                    continue;
+                }
+                if (m.getTotalValue() != null && m.getTotalValue() > 0) {
+                    sum += m.getTotalValue();
+                }
+            }
+        }
+        return sum;
+    }
+
+    private static boolean personaMatches(String familyMemberId, boolean primaryOnly) {
+        boolean isPrimary = familyMemberId == null || familyMemberId.isBlank();
+        return primaryOnly ? isPrimary : !isPrimary;
+    }
+
+    private static Double round2(double v) {
+        return Math.round(v * 100.0) / 100.0;
     }
 
     static int countDematForMember(List<DematAccountModel> demat, String familyMemberId) {

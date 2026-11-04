@@ -75,4 +75,7 @@ public class CasImportDocument extends BaseDocument {
 
     @Field("holderEmail")
     private String holderEmail;
+
+    @Field("holderPan")
+    private String holderPan;
 }

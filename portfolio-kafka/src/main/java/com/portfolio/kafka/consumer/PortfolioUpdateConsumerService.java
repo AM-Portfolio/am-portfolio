@@ -225,6 +225,7 @@ public class PortfolioUpdateConsumerService {
                 event.getIdentityMatch(),
                 event.getHolderName(),
                 event.getHolderEmail(),
+                event.getHolderPan(),
                 source);
         if (member != null) {
             event.setFamilyMemberId(member.getId());

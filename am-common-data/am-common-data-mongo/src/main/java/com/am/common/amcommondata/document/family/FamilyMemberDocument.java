@@ -23,6 +23,9 @@ import lombok.experimental.SuperBuilder;
 @org.springframework.data.mongodb.core.index.CompoundIndex(
         name = "family_owner_name_idx",
         def = "{'ownerUserId': 1, 'nameNorm': 1}")
+@org.springframework.data.mongodb.core.index.CompoundIndex(
+        name = "family_owner_pan_idx",
+        def = "{'ownerUserId': 1, 'panNorm': 1}")
 public class FamilyMemberDocument extends BaseDocument {
     @Field("ownerUserId")
     private String ownerUserId;
@@ -38,6 +41,13 @@ public class FamilyMemberDocument extends BaseDocument {
 
     @Field("nameNorm")
     private String nameNorm;
+
+    /** Indian PAN as shown on CAS cover (e.g. JYQPK9320A). */
+    @Field("pan")
+    private String pan;
+
+    @Field("panNorm")
+    private String panNorm;
 
     @Field("source")
     private String source;
