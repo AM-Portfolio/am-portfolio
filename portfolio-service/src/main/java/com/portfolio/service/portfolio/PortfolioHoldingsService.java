@@ -84,7 +84,8 @@ public class PortfolioHoldingsService {
 
         if (enrich) {
             Optional<PortfolioHoldings> cachedHoldings = getCachedHoldings(userId, interval, null);
-            if (cachedHoldings.isPresent()) {
+            // ISIN-shaped symbols mean heal never ran (or MD was empty); skip cache so heal can fix.
+            if (cachedHoldings.isPresent() && !hasIsinShapedSymbols(cachedHoldings.get())) {
                 return overlayAndReturn(cachedHoldings.get());
             }
         }
@@ -121,10 +122,14 @@ public class PortfolioHoldingsService {
         Optional<PortfolioHoldings> cachedHoldings = getCachedHoldings(userId, interval, portfolioId);
         if (cachedHoldings.isPresent()) {
             if (enrich) {
-                return overlayAndReturn(cachedHoldings.get());
+                if (!hasIsinShapedSymbols(cachedHoldings.get())) {
+                    return overlayAndReturn(cachedHoldings.get());
+                }
+                log.info("Bypassing holdings cache for portfolio {} — ISIN-shaped symbols need heal", portfolioId);
+            } else {
+                log.info("Serving cached holdings structure (no price overlay) for portfolio {}", portfolioId);
+                return cachedHoldings.get();
             }
-            log.info("Serving cached holdings structure (no price overlay) for portfolio {}", portfolioId);
-            return cachedHoldings.get();
         }
 
         log.info("Cache miss for specific portfolio holdings - User: {}, Portfolio: {}", userId, portfolioId);
@@ -150,6 +155,15 @@ public class PortfolioHoldingsService {
         }
 
         return buildPortfolioHoldings(List.of(portfolio), userId, portfolioId, interval, enrich);
+    }
+
+    /** True when any equity holding still uses an ISIN as its trading symbol. */
+    private static boolean hasIsinShapedSymbols(PortfolioHoldings holdings) {
+        if (holdings == null || holdings.getEquityHoldings() == null) {
+            return false;
+        }
+        return holdings.getEquityHoldings().stream()
+                .anyMatch(h -> h != null && TradingSymbolResolver.looksLikeIsin(h.getSymbol()));
     }
 
     private PortfolioHoldings overlayAndReturn(PortfolioHoldings cached) {
