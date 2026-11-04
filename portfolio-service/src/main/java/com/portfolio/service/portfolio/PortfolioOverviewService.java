@@ -312,11 +312,15 @@ public class PortfolioOverviewService {
             equityHoldings = portfolioHoldingsService.getHoldings(portfolios);
         }
 
-        var investmentValue = PortfolioCalculator.sumInvestmentBasis(equityHoldings);
+        var investmentValue = equityHoldings.stream()
+                .mapToDouble(h -> h.getInvestmentCost() != null && h.getInvestmentCost() > 0
+                        ? h.getInvestmentCost() : 0.0)
+                .sum();
 
         // Use calculator to generate the summary
         PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(equityHoldings, investmentValue);
-        summary.setInvestmentValue(summary.getInvestmentValue() != null ? summary.getInvestmentValue() : investmentValue);
+        // Unknown cost → leave investment null (do not publish 0.0 as invested).
+        summary.setInvestmentValue(investmentValue > 0 ? investmentValue : null);
         if (pricedHoldings != null) {
             summary.setAsOf(pricedHoldings.getAsOf());
             summary.setPriceFreshness(pricedHoldings.getPriceFreshness());
@@ -917,14 +921,19 @@ public class PortfolioOverviewService {
         if (summary == null) {
             return;
         }
+        // Already computed honestly (cost or import-mark path) — keep it.
+        if (summary.getTotalGainLoss() != null) {
+            return;
+        }
         Double current = summary.getCurrentValue();
         Double invested = summary.getInvestmentValue();
-        if (current == null || invested == null) {
+        // Never invent overall P&L from invested=0/null (that made market value look like profit).
+        if (current == null || invested == null || invested <= 0) {
             return;
         }
         double overall = current - invested;
         summary.setTotalGainLoss(overall);
-        summary.setTotalGainLossPercentage(invested > 0 ? (overall / invested) * 100.0 : 0.0);
+        summary.setTotalGainLossPercentage((overall / invested) * 100.0);
     }
 
     private List<PortfolioSnapshotModel> loadSnapshotHistory(String userId, String portfolioId) {

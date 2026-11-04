@@ -13,10 +13,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -46,6 +49,39 @@ class BrokerPortfolioDeleteServiceTest {
                 summaryRedisService,
                 intelligenceRedisService,
                 deleteNotifier);
+    }
+
+    @Test
+    void listPortfolioIdsForOwner_mapsOwnedUuids() {
+        String ownerId = "owner-" + UUID.randomUUID();
+        UUID id1 = UUID.randomUUID();
+        UUID id2 = UUID.randomUUID();
+        PortfolioModelV1 a = new PortfolioModelV1();
+        a.setId(id1);
+        a.setOwner(ownerId);
+        PortfolioModelV1 b = new PortfolioModelV1();
+        b.setId(id2);
+        b.setOwner(ownerId);
+        when(portfolioService.getPortfoliosByUserId(ownerId)).thenReturn(List.of(a, b));
+
+        List<String> ids = service.listPortfolioIdsForOwner(ownerId);
+
+        assertEquals(List.of(id1.toString(), id2.toString()), ids);
+    }
+
+    @Test
+    void listPortfolioIdsForOwner_emptyWhenNone() {
+        when(portfolioService.getPortfoliosByUserId("owner-1")).thenReturn(Collections.emptyList());
+        assertTrue(service.listPortfolioIdsForOwner("owner-1").isEmpty());
+    }
+
+    @Test
+    void listPortfolioIdsForOwner_blankOwner_badRequest() {
+        ResponseStatusException ex = assertThrows(
+                ResponseStatusException.class,
+                () -> service.listPortfolioIdsForOwner(" "));
+        assertEquals(400, ex.getStatusCode().value());
+        verify(portfolioService, never()).getPortfoliosByUserId(org.mockito.ArgumentMatchers.any());
     }
 
     @Test

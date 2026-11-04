@@ -46,6 +46,7 @@ public abstract class AssetMapper<M extends AssetModel, D extends AssetDocument>
         model.setCurrentPrice(document.getCurrentPrice());
         model.setCurrentValue(document.getCurrentValue());
         model.setInvestmentValue(document.getInvestmentValue());
+        model.setImportMarkPrice(document.getImportMarkPrice());
         model.setBrokerType(document.getBrokerType());
         model.setProfitLoss(document.getProfitLoss());
         model.setProfitLossPercentage(document.getProfitLossPercentage());
@@ -78,6 +79,7 @@ public abstract class AssetMapper<M extends AssetModel, D extends AssetDocument>
         document.setCurrentPrice(model.getCurrentPrice());
         document.setCurrentValue(model.getCurrentValue());
         document.setInvestmentValue(model.getInvestmentValue());
+        document.setImportMarkPrice(model.getImportMarkPrice());
         document.setBrokerType(model.getBrokerType());
         document.setProfitLoss(model.getProfitLoss());
         document.setProfitLossPercentage(model.getProfitLossPercentage());

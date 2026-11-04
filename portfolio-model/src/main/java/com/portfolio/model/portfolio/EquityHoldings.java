@@ -45,6 +45,8 @@ public class EquityHoldings {
 
    // Stock price metrics
    private Double averageBuyingPrice;
+    /** Durable statement/import LTP when avg cost unknown — not overwritten by live enrich. */
+    private Double importMarkPrice;
     private Double currentPrice;
     private Double percentageChange; // Stock price percentage change
     /** Newest tick/OHLC timestamp used for this holding's current price. */

@@ -14,11 +14,15 @@ import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
- * Synchronous broker-portfolio delete: Mongo + caches + outbound DELETE fan-out.
- * IDs come only from the caller (path / JWT); no hardcoded portfolio or user ids.
+ * Synchronous broker-portfolio ops for HTTP + internal Trade callers:
+ * ownership checks, delete (Mongo + caches + Kafka), and owner ID listing.
+ * IDs come only from the caller (path / JWT / query); no hardcoded portfolio or user ids.
  */
 @Service
 @Slf4j
@@ -47,10 +51,30 @@ public class BrokerPortfolioDeleteService {
     }
 
     /**
-     * @param portfolioId path UUID
-     * @param ownerId     authenticated user id
+     * Portfolio UUIDs owned by {@code ownerId} — used by internal reconcile / orphan guards.
      */
-    public void deleteOwnedPortfolio(String portfolioId, String ownerId) {
+    public List<String> listPortfolioIdsForOwner(String ownerId) {
+        if (ownerId == null || ownerId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "ownerId required");
+        }
+        List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(ownerId);
+        if (portfolios == null || portfolios.isEmpty()) {
+            return List.of();
+        }
+        List<String> ids = portfolios.stream()
+                .filter(Objects::nonNull)
+                .map(PortfolioModelV1::getId)
+                .filter(Objects::nonNull)
+                .map(UUID::toString)
+                .collect(Collectors.toList());
+        log.info("Listed portfolio ids for ownerId={} count={}", ownerId, ids.size());
+        return ids;
+    }
+
+    /**
+     * Ownership + broker-kind check used by internal verify and before delete.
+     */
+    public void assertOwnedBrokerPortfolio(String portfolioId, String ownerId) {
         if (ownerId == null || ownerId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing user");
         }
@@ -72,6 +96,19 @@ public class BrokerPortfolioDeleteService {
         if (PortfolioKind.isBasket(portfolio.getPortfolioKind())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Basket portfolios cannot be deleted via broker delete");
+        }
+    }
+
+    /**
+     * @param portfolioId path UUID
+     * @param ownerId     authenticated user id
+     */
+    public void deleteOwnedPortfolio(String portfolioId, String ownerId) {
+        assertOwnedBrokerPortfolio(portfolioId, ownerId);
+        final UUID id = UUID.fromString(portfolioId);
+        PortfolioModelV1 portfolio = portfolioService.getPortfolioById(id);
+        if (portfolio == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Portfolio not found");
         }
 
         String name = portfolio.getName();

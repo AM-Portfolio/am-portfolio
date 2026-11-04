@@ -10,16 +10,28 @@ public class EquityHoldingsMapper {
     public EquityHoldings toEquityHoldings(EquityModel equityModel) {
         String normalizedSymbol = com.portfolio.model.util.SymbolResolver.normalize(equityModel.getSymbol());
         boolean inventedCasCost = PortfolioHoldingsMapper.looksLikeInventedCasCost(equityModel);
-        Double cost = null;
-        if (equityModel.getInvestmentValue() != null && equityModel.getInvestmentValue() > 0) {
-            cost = equityModel.getInvestmentValue();
-        } else if (!inventedCasCost
-                && equityModel.getAvgBuyingPrice() != null
-                && equityModel.getQuantity() != null
-                && equityModel.getQuantity() > 0) {
-            cost = equityModel.getAvgBuyingPrice() * equityModel.getQuantity();
+        Double avg = inventedCasCost ? null : equityModel.getAvgBuyingPrice();
+        Double qty = equityModel.getQuantity();
+        Double investmentCost = null;
+        if (!inventedCasCost) {
+            if (avg != null && avg > 0 && qty != null) {
+                investmentCost = avg * qty;
+            } else if (equityModel.getInvestmentValue() != null && equityModel.getInvestmentValue() > 0) {
+                investmentCost = equityModel.getInvestmentValue();
+                if ((avg == null || avg <= 0) && qty != null && qty > 0) {
+                    avg = investmentCost / qty;
+                }
+            }
         }
-        // null cost = unknown (e.g. CDSL CAS). Never stash 0.0 — that invents +100% returns.
+        Double importMark = equityModel.getImportMarkPrice();
+        if ((importMark == null || importMark <= 0)
+                && (avg == null || avg <= 0)
+                && equityModel.getCurrentPrice() != null
+                && equityModel.getCurrentPrice() > 0) {
+            // One-time capture from persisted statement mark before live enrich overwrites currentPrice.
+            importMark = equityModel.getCurrentPrice();
+        }
+        // Never emit 0 cost — null means "unknown".
         return EquityHoldings.builder()
             .isin(equityModel.getIsin())
             .symbol(normalizedSymbol)
@@ -27,11 +39,14 @@ public class EquityHoldingsMapper {
             .sector(equityModel.getSector())
             .industry(equityModel.getIndustry())
             .marketCap(equityModel.getMarketCap())
-            .quantity(equityModel.getQuantity())
-            .investmentCost(cost)
-            .currentValue(equityModel.getCurrentValue())
-            .currentPrice(equityModel.getCurrentPrice())
-            .averageBuyingPrice(inventedCasCost ? null : equityModel.getAvgBuyingPrice())
+            .quantity(qty)
+            .investmentCost(investmentCost)
+            .averageBuyingPrice(avg != null && avg > 0 ? avg : null)
+            .importMarkPrice(importMark != null && importMark > 0 ? importMark : null)
+            .currentPrice(equityModel.getCurrentPrice() != null && equityModel.getCurrentPrice() > 0
+                    ? equityModel.getCurrentPrice() : null)
+            .currentValue(equityModel.getCurrentValue() != null && equityModel.getCurrentValue() > 0
+                    ? equityModel.getCurrentValue() : null)
             .build();
     }
 }
