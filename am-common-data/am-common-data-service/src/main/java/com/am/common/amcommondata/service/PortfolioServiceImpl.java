@@ -390,6 +390,27 @@ public class PortfolioServiceImpl implements PortfolioService {
     }
 
     /** Email Mongo ObjectId / UUID must never become the broker book display name. */
+    /** Same CAS dump within 2% (or both null/zero) — used to retag untagged primary books. */
+    private static boolean totalsNearlyEqual(Double existing, Double incoming) {
+        double a = existing != null ? existing : 0.0;
+        double b = incoming != null ? incoming : 0.0;
+        if (a <= 0 && b <= 0) {
+            return true;
+        }
+        double denom = Math.max(Math.abs(b), Math.abs(a));
+        if (denom <= 0) {
+            return true;
+        }
+        return Math.abs(a - b) / denom <= 0.02;
+    }
+
+    private static String blankToNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
+    }
+
     private static boolean looksLikeOpaquePortfolioName(String value) {
         if (value == null || value.isBlank()) {
             return true;
@@ -555,6 +576,25 @@ public class PortfolioServiceImpl implements PortfolioService {
         List<PortfolioDocument> brokerDocs = existingDocs == null ? List.of() : existingDocs.stream()
                 .filter(d -> PortfolioKind.isBroker(d.getPortfolioKind()))
                 .collect(Collectors.toList());
+        // Soft family: match primary (null) vs familyMemberId books separately.
+        final String targetFamilyId = blankToNull(portfolioModel.getFamilyMemberId());
+        List<PortfolioDocument> primaryBrokerDocs = brokerDocs.stream()
+                .filter(d -> blankToNull(d.getFamilyMemberId()) == null)
+                .collect(Collectors.toList());
+        brokerDocs = brokerDocs.stream()
+                .filter(d -> java.util.Objects.equals(blankToNull(d.getFamilyMemberId()), targetFamilyId))
+                .collect(Collectors.toList());
+        // Repair: prior FAMILY CAS imports landed on primary (null familyMemberId) before tagging
+        // existed. If this upsert targets a family persona and no family book exists yet, retag the
+        // single primary book when its total matches the incoming document total (~same CAS dump).
+        if (brokerDocs.isEmpty() && targetFamilyId != null && primaryBrokerDocs.size() == 1) {
+            PortfolioDocument orphan = primaryBrokerDocs.get(0);
+            if (totalsNearlyEqual(orphan.getTotalValue(), portfolioModel.getTotalValue())) {
+                log.info("Retagging primary broker book id={} owner={} broker={} → familyMemberId={}",
+                        orphan.getId(), owner, brokerType, targetFamilyId);
+                brokerDocs = new ArrayList<>(List.of(orphan));
+            }
+        }
         // Dedupe by Mongo id (GROW + GROWW query can return the same doc once each path).
         Map<String, PortfolioDocument> uniqueById = new HashMap<>();
         for (PortfolioDocument d : brokerDocs) {
@@ -623,6 +663,10 @@ public class PortfolioServiceImpl implements PortfolioService {
                     + sumAssetValues(doc.getCash())
                     + sumAssetValues(doc.getNpsModels()));
             doc.setPortfolioKind(PortfolioKind.BROKER);
+            doc.setFamilyMemberId(targetFamilyId);
+            if (portfolioModel.getFamilyMemberName() != null) {
+                doc.setFamilyMemberName(portfolioModel.getFamilyMemberName());
+            }
             // Keep stable broker name (no Zerodha-V*)
             if (doc.getName() == null || doc.getName().isBlank()
                     || doc.getName().matches("(?i)" + java.util.regex.Pattern.quote(brokerType.getCode()) + "-V\\d+")) {

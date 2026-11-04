@@ -27,10 +27,11 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @EqualsAndHashCode(callSuper = true)
 @Document(collection = "portfolios")
-// Unique one BROKER portfolio per owner+brokerType. Baskets/DEMO/PAPER excluded via partial filter.
+// Unique one BROKER portfolio per owner+brokerType+familyMemberId (null = primary user).
+// Baskets/DEMO/PAPER excluded via partial filter.
 @org.springframework.data.mongodb.core.index.CompoundIndex(
-        name = "owner_broker_broker_only_idx",
-        def = "{'owner': 1, 'brokerType': 1}",
+        name = "owner_broker_family_broker_only_idx",
+        def = "{'owner': 1, 'brokerType': 1, 'familyMemberId': 1}",
         unique = true,
         partialFilter = "{'$or':[{'portfolioKind':'BROKER'},{'portfolioKind':{'$exists':false}},{'portfolioKind':null}]}")
 // At most one active DEMO sandbox per owner.
@@ -127,6 +128,13 @@ public class PortfolioDocument extends BaseDocument {
 
     @Field("lastLoginDate")
     private LocalDate lastLoginDate; // Updated on each user login — used for active-user filtering
+
+    /** Soft family persona under owner; null = primary. */
+    @Field("familyMemberId")
+    private String familyMemberId;
+
+    @Field("familyMemberName")
+    private String familyMemberName;
     
     // Helper methods for enum conversions
     public void setCurrency(Currency currency) {

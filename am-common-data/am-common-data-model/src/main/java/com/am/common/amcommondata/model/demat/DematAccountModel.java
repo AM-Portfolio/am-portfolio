@@ -36,4 +36,6 @@ public class DematAccountModel {
     private String folio;
     private Boolean active;
     private String portfolioId;
+    /** Soft family persona; null = primary owner CAS directory. */
+    private String familyMemberId;
 }

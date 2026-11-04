@@ -62,6 +62,8 @@ public class PortfolioController {
     private final com.portfolio.service.cas.CasImportService casImportService;
     private final com.portfolio.service.nps.NpsImportService npsImportService;
     private final com.portfolio.service.accounts.AccountsHubService accountsHubService;
+    private final com.portfolio.service.family.FamilyMemberService familyMemberService;
+    private final com.portfolio.service.family.FamilyMemberDeleteService familyMemberDeleteService;
 
     @org.springframework.beans.factory.annotation.Value("${app.jwt.internal-secret}")
     private String internalSecret;
@@ -74,6 +76,66 @@ public class PortfolioController {
     public ResponseEntity<com.am.common.amcommondata.model.accounts.AccountsHubModel> getAccountsHub() {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
         return ResponseEntity.ok(accountsHubService.hubForUser(userId));
+    }
+
+    @Operation(summary = "List soft family members", operationId = "listFamilyMembers")
+    @GetMapping("/family-members")
+    public ResponseEntity<List<com.am.common.amcommondata.model.family.FamilyMember>> listFamilyMembers() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        return ResponseEntity.ok(familyMemberService.listForOwner(userId));
+    }
+
+    @Operation(summary = "Get soft family member", operationId = "getFamilyMember")
+    @GetMapping("/family-members/{familyMemberId}")
+    public ResponseEntity<com.am.common.amcommondata.model.family.FamilyMember> getFamilyMember(
+            @PathVariable String familyMemberId) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        return ResponseEntity.ok(familyMemberService.getOwned(familyMemberId, userId));
+    }
+
+    @Operation(summary = "Create soft family member", operationId = "createFamilyMember")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "201", description = "Created"),
+            @ApiResponse(responseCode = "400", description = "Invalid body"),
+            @ApiResponse(responseCode = "409", description = "Duplicate name or email")
+    })
+    @PostMapping("/family-members")
+    public ResponseEntity<com.am.common.amcommondata.model.family.FamilyMember> createFamilyMember(
+            @RequestBody com.portfolio.api.model.FamilyMemberWriteRequest body) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        com.am.common.amcommondata.model.family.FamilyMember created = familyMemberService.createManual(
+                userId,
+                body != null ? body.getDisplayName() : null,
+                body != null ? body.getEmail() : null);
+        return ResponseEntity.status(201).body(created);
+    }
+
+    @Operation(summary = "Update soft family member", operationId = "updateFamilyMember")
+    @PutMapping("/family-members/{familyMemberId}")
+    public ResponseEntity<com.am.common.amcommondata.model.family.FamilyMember> updateFamilyMember(
+            @PathVariable String familyMemberId,
+            @RequestBody com.portfolio.api.model.FamilyMemberWriteRequest body) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        return ResponseEntity.ok(familyMemberService.updateOwned(
+                familyMemberId,
+                userId,
+                body != null ? body.getDisplayName() : null,
+                body != null ? body.getEmail() : null));
+    }
+
+    @Operation(
+            summary = "Delete soft family member",
+            description = "Cascade-deletes tagged broker portfolios, CAS/NPS imports for that persona, then the member. Primary books untouched.",
+            operationId = "deleteFamilyMember")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "204", description = "Deleted"),
+            @ApiResponse(responseCode = "404", description = "Not found or not owned")
+    })
+    @DeleteMapping("/family-members/{familyMemberId}")
+    public ResponseEntity<Void> deleteFamilyMember(@PathVariable String familyMemberId) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        familyMemberDeleteService.deleteOwnedMember(familyMemberId, userId);
+        return ResponseEntity.noContent().build();
     }
 
     @Operation(summary = "CAS account directory", description = "Demat + MF accounts from latest CDSL CAS import", operationId = "listCasAccounts")

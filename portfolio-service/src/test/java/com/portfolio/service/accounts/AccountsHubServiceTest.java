@@ -19,9 +19,11 @@ import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.accounts.AccountsHubModel;
 import com.am.common.amcommondata.model.demat.DematAccountModel;
 import com.am.common.amcommondata.model.enums.BrokerType;
+import com.am.common.amcommondata.model.family.FamilyMember;
 import com.am.common.amcommondata.model.nps.NpsDocumentMeta;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.service.cas.CasImportService;
+import com.portfolio.service.family.FamilyMemberService;
 import com.portfolio.service.nps.NpsImportService;
 
 @ExtendWith(MockitoExtension.class)
@@ -33,13 +35,15 @@ class AccountsHubServiceTest {
     private NpsImportService npsImportService;
     @Mock
     private PortfolioService portfolioService;
+    @Mock
+    private FamilyMemberService familyMemberService;
 
     @InjectMocks
     private AccountsHubService accountsHubService;
 
     @Test
     void hubForUser_composesIdentityStatsAndPortfolios() {
-        when(casImportService.accounts("u1")).thenReturn(List.of(
+        when(casImportService.accountsForOwnerAllPersonas("u1")).thenReturn(List.of(
                 DematAccountModel.builder()
                         .accountNo("1208")
                         .accountType("demat")
@@ -55,7 +59,7 @@ class AccountsHubServiceTest {
                         .active(true)
                         .build()));
         when(casImportService.latestMeta("u1")).thenReturn(Optional.empty());
-        when(npsImportService.latestMeta("u1")).thenReturn(Optional.of(
+        when(npsImportService.listMetasForOwner("u1")).thenReturn(List.of(
                 NpsDocumentMeta.builder()
                         .pran("1101")
                         .subscriberName("Munish")
@@ -72,6 +76,7 @@ class AccountsHubServiceTest {
                         .investmentAmount(150.0)
                         .assetCount(2)
                         .build()));
+        when(familyMemberService.listForOwner("u1")).thenReturn(List.of());
 
         AccountsHubModel hub = accountsHubService.hubForUser("u1");
         assertNotNull(hub.getIdentity());
@@ -88,15 +93,14 @@ class AccountsHubServiceTest {
         assertEquals(2, hub.getDematAccounts().size());
         assertEquals("Spouse", hub.getDematAccounts().get(0).getNominee());
         assertTrue(Boolean.TRUE.equals(hub.getDematAccounts().get(0).getNomineeRegistered()));
-        // Insufficient dated cashflows → overall XIRR stays null
         assertTrue(hub.getStats().getOverallXirrPct() == null);
     }
 
     @Test
     void hubForUser_filtersCdslAggregatorBooks() {
-        when(casImportService.accounts("u1")).thenReturn(List.of());
+        when(casImportService.accountsForOwnerAllPersonas("u1")).thenReturn(List.of());
         when(casImportService.latestMeta("u1")).thenReturn(Optional.empty());
-        when(npsImportService.latestMeta("u1")).thenReturn(Optional.empty());
+        when(npsImportService.listMetasForOwner("u1")).thenReturn(List.of());
         when(portfolioService.getPortfoliosByUserId("u1")).thenReturn(List.of(
                 PortfolioModelV1.builder()
                         .id(UUID.randomUUID())
@@ -112,9 +116,57 @@ class AccountsHubServiceTest {
                         .investmentAmount(80.0)
                         .assetCount(1)
                         .build()));
+        when(familyMemberService.listForOwner("u1")).thenReturn(List.of());
 
         AccountsHubModel hub = accountsHubService.hubForUser("u1");
         assertEquals(1, hub.getPortfolios().size());
         assertEquals("Zerodha", hub.getPortfolios().get(0).getDisplayName());
+    }
+
+    @Test
+    void hubForUser_portfolioCountUsesDematNotBrokerBooks() {
+        when(casImportService.accountsForOwnerAllPersonas("u1")).thenReturn(List.of(
+                DematAccountModel.builder()
+                        .accountNo("D1")
+                        .accountType("demat")
+                        .familyMemberId("fm1")
+                        .build(),
+                DematAccountModel.builder()
+                        .accountNo("D2")
+                        .accountType("demat")
+                        .familyMemberId("fm1")
+                        .build(),
+                DematAccountModel.builder()
+                        .accountNo("D3")
+                        .accountType("demat")
+                        .familyMemberId("fm1")
+                        .build(),
+                DematAccountModel.builder()
+                        .accountNo("F1")
+                        .accountType("mf")
+                        .familyMemberId("fm1")
+                        .build()));
+        when(casImportService.latestMeta("u1")).thenReturn(Optional.empty());
+        when(npsImportService.listMetasForOwner("u1")).thenReturn(List.of());
+        when(portfolioService.getPortfoliosByUserId("u1")).thenReturn(List.of(
+                PortfolioModelV1.builder()
+                        .id(UUID.randomUUID())
+                        .name("Zerodha")
+                        .brokerType(BrokerType.ZERODHA)
+                        .familyMemberId("fm1")
+                        .totalValue(900000.0)
+                        .build()));
+        when(familyMemberService.listForOwner("u1")).thenReturn(List.of(
+                FamilyMember.builder()
+                        .id("fm1")
+                        .displayName("Priyanshu Kumar")
+                        .email("priyanshukpd@gmail.com")
+                        .source("CAS")
+                        .build()));
+
+        AccountsHubModel hub = accountsHubService.hubForUser("u1");
+        assertEquals(1, hub.getPortfolios().size());
+        assertEquals(1, hub.getFamilyMembers().size());
+        assertEquals(3, hub.getFamilyMembers().get(0).getPortfolioCount());
     }
 }

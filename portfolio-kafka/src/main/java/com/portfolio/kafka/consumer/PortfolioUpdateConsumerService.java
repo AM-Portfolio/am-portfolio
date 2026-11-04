@@ -24,8 +24,10 @@ import com.portfolio.kafka.publisher.PortfolioEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
 import com.portfolio.service.cas.CasImportService;
+import com.portfolio.service.family.FamilyMemberService;
 import com.portfolio.service.nps.NpsImportService;
 import com.portfolio.service.intraday.IntradayCandleWarmService;
+import com.am.common.amcommondata.model.family.FamilyMember;
 import com.portfolio.service.portfolio.PortfolioIntradayService;
 import com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer;
 import com.portfolio.service.scheduler.PortfolioHistoryJobService;
@@ -86,6 +88,7 @@ public class PortfolioUpdateConsumerService {
     private final PortfolioSnapshotService      portfolioSnapshotService;
     private final CasImportService              casImportService;
     private final NpsImportService              npsImportService;
+    private final FamilyMemberService           familyMemberService;
 
     @Value("${app.kafka.portfolio.consumer.id:am-portfolio-consumer-group}")
     private String consumerGroupId;
@@ -205,7 +208,40 @@ public class PortfolioUpdateConsumerService {
 
     // ── Message processing ───────────────────────────────────────────────────
 
+    private void attachFamilyMember(PortfolioUpdateEvent event) {
+        if (event == null || event.getUserId() == null) {
+            return;
+        }
+        if (event.getFamilyMemberId() != null && !event.getFamilyMemberId().isBlank()) {
+            log.info("PortfolioUpdate already tagged familyMemberId={} portfolioId={} broker={}",
+                    event.getFamilyMemberId(), event.getPortfolioId(), event.getBrokerType());
+            return;
+        }
+        String source = event.getDocumentSource() != null && event.getDocumentSource().contains("NPS")
+                ? "NPS"
+                : "CAS";
+        FamilyMember member = familyMemberService.resolveForImport(
+                event.getUserId(),
+                event.getIdentityMatch(),
+                event.getHolderName(),
+                event.getHolderEmail(),
+                source);
+        if (member != null) {
+            event.setFamilyMemberId(member.getId());
+            event.setFamilyMemberName(member.getDisplayName());
+            log.info("Stamped familyMemberId={} name={} on PortfolioUpdate identityMatch={} holderEmail={} portfolioId={} broker={}",
+                    member.getId(), member.getDisplayName(), event.getIdentityMatch(),
+                    event.getHolderEmail(), event.getPortfolioId(), event.getBrokerType());
+        } else if (event.getIdentityMatch() != null
+                && "FAMILY".equalsIgnoreCase(event.getIdentityMatch().trim())) {
+            log.warn("FAMILY identityMatch but no FamilyMember resolved userId={} holderEmail={} holderName={} portfolioId={} broker={}",
+                    event.getUserId(), event.getHolderEmail(), event.getHolderName(),
+                    event.getPortfolioId(), event.getBrokerType());
+        }
+    }
+
     private void processDocumentMessage(PortfolioUpdateEvent event) {
+        attachFamilyMember(event);
         PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
         // Batch ISIN→ticker normalize (same as HTTP /sync) before persist.
         // Must not block Mongo upsert + trade fan-out if Market Data is slow/down.

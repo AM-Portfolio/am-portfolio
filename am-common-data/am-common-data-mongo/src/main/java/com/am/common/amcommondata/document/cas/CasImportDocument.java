@@ -60,4 +60,19 @@ public class CasImportDocument extends BaseDocument {
 
     @Field("unmappedDematHoldings")
     private List<CasUnmappedDemat> unmappedDematHoldings;
+
+    @Field("familyMemberId")
+    private String familyMemberId;
+
+    @Field("familyMemberName")
+    private String familyMemberName;
+
+    @Field("identityMatch")
+    private String identityMatch;
+
+    @Field("holderName")
+    private String holderName;
+
+    @Field("holderEmail")
+    private String holderEmail;
 }

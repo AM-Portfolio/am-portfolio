@@ -39,4 +39,8 @@ public class CasDocumentEvent {
     private List<DematAccountModel> accountDirectory;
     private List<CasMfFolioGroup> mfFolios;
     private List<CasUnmappedDemat> unmappedDematHoldings;
+    /** SELF | FAMILY | UNKNOWN from email-extractor. */
+    private String identityMatch;
+    private String holderName;
+    private String holderEmail;
 }

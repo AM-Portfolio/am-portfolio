@@ -54,6 +54,7 @@ class PortfolioUpdateConsumerDeleteTest {
     @Mock private PortfolioSnapshotService portfolioSnapshotService;
     @Mock private CasImportService casImportService;
     @Mock private NpsImportService npsImportService;
+    @Mock private com.portfolio.service.family.FamilyMemberService familyMemberService;
     @Mock private Acknowledgment acknowledgment;
 
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
@@ -81,7 +82,8 @@ class PortfolioUpdateConsumerDeleteTest {
                 intradayCandleWarmService,
                 portfolioSnapshotService,
                 casImportService,
-                npsImportService);
+                npsImportService,
+                familyMemberService);
         c.init();
         return c;
     }

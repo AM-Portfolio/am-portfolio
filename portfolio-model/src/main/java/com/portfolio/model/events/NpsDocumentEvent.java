@@ -35,4 +35,8 @@ public class NpsDocumentEvent {
     private Map<String, Object> subscriber;
     private List<Map<String, Object>> tiers;
     private NpsDocumentMeta.Validation validation;
+    /** SELF | FAMILY | UNKNOWN from email-extractor. */
+    private String identityMatch;
+    private String holderName;
+    private String holderEmail;
 }

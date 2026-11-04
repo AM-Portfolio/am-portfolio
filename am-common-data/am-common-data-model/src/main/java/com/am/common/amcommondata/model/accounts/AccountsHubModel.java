@@ -24,7 +24,10 @@ public class AccountsHubModel {
     private List<AccountsPortfolioRow> portfolios;
     private List<DematAccountModel> dematAccounts;
     private NpsDocumentMeta nps;
+    /** All NPS statements for owner personas (null familyMemberId = primary). */
+    private List<NpsDocumentMeta> npsAccounts;
     private CasDocumentMeta cas;
+    private List<FamilyMemberSummary> familyMembers;
 
     @Data
     @Builder
@@ -70,5 +73,20 @@ public class AccountsHubModel {
         private Double returnPct;
         private Integer assetCount;
         private Boolean dummy;
+        private String familyMemberId;
+        private String familyMemberName;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonInclude(Include.NON_NULL)
+    public static class FamilyMemberSummary {
+        private String id;
+        private String name;
+        private String email;
+        private Integer portfolioCount;
+        private String source;
     }
 }

@@ -66,4 +66,7 @@ public class PortfolioModelV1 {
     private String lastTradeAction;
     /** True when this portfolio is the shared demo portfolio injected for new users. Never stored. */
     private Boolean isDummy;
+    /** Soft family persona id under {@link #owner}; null = primary user. */
+    private String familyMemberId;
+    private String familyMemberName;
 }

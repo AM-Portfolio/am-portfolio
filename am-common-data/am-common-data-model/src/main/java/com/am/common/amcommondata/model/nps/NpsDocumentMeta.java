@@ -35,6 +35,8 @@ public class NpsDocumentMeta {
     private Double tier2Value;
     private Double totalValue;
     private Validation validation;
+    private String familyMemberId;
+    private String familyMemberName;
 
     @Data
     @Builder

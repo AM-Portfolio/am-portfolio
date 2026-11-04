@@ -59,4 +59,11 @@ public class PortfolioUpdateEvent {
 
     /** Demat BOID / DP refs for CAS-mapped broker books. */
     private DematRef dematRef;
+
+    /** SELF | FAMILY | UNKNOWN from email-extractor. */
+    private String identityMatch;
+    private String holderName;
+    private String holderEmail;
+    private String familyMemberId;
+    private String familyMemberName;
 }

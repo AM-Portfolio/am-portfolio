@@ -14,16 +14,18 @@ import com.am.common.amcommondata.model.accounts.AccountsHubModel;
 import com.am.common.amcommondata.model.accounts.AccountsHubModel.AccountsIdentity;
 import com.am.common.amcommondata.model.accounts.AccountsHubModel.AccountsPortfolioRow;
 import com.am.common.amcommondata.model.accounts.AccountsHubModel.AccountsStats;
+import com.am.common.amcommondata.model.accounts.AccountsHubModel.FamilyMemberSummary;
 import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.cas.CasDocumentMeta;
-import com.am.common.amcommondata.model.cas.CasMfFolioGroup;
 import com.am.common.amcommondata.model.demat.DematAccountModel;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
+import com.am.common.amcommondata.model.family.FamilyMember;
 import com.am.common.amcommondata.model.nps.NpsDocumentMeta;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.service.accounts.OverallXirrCalculator.Cashflow;
 import com.portfolio.service.cas.CasImportService;
+import com.portfolio.service.family.FamilyMemberService;
 import com.portfolio.service.nps.NpsImportService;
 
 import lombok.RequiredArgsConstructor;
@@ -35,13 +37,17 @@ public class AccountsHubService {
     private final CasImportService casImportService;
     private final NpsImportService npsImportService;
     private final PortfolioService portfolioService;
+    private final FamilyMemberService familyMemberService;
 
     public AccountsHubModel hubForUser(String userId) {
-        List<DematAccountModel> directory = casImportService.accounts(userId);
-        List<DematAccountModel> demat = new ArrayList<>(directory != null ? directory : List.of());
-        // Folio groups missing from accountDirectory still count as MF rows.
-        mergeMissingMfFolios(demat, casImportService.folios(userId));
-        NpsDocumentMeta nps = npsImportService.latestMeta(userId).orElse(null);
+        // All personas stamped with familyMemberId (null = primary).
+        List<DematAccountModel> demat = new ArrayList<>(
+                casImportService.accountsForOwnerAllPersonas(userId));
+        List<NpsDocumentMeta> npsAccounts = npsImportService.listMetasForOwner(userId);
+        NpsDocumentMeta nps = npsAccounts.stream()
+                .filter(m -> m != null && (m.getFamilyMemberId() == null || m.getFamilyMemberId().isBlank()))
+                .findFirst()
+                .orElse(npsImportService.latestMeta(userId).orElse(null));
         CasDocumentMeta cas = casImportService.latestMeta(userId).orElse(null);
 
         List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
@@ -63,26 +69,42 @@ public class AccountsHubService {
             }
         }
 
-        int activeDemat = (int) demat.stream()
-                .filter(a -> a != null && "demat".equalsIgnoreCase(nullToEmpty(a.getAccountType())))
+        // Hub-level stats default to primary persona (null familyMemberId).
+        List<DematAccountModel> primaryDemat = demat.stream()
+                .filter(a -> a != null && (a.getFamilyMemberId() == null || a.getFamilyMemberId().isBlank()))
+                .toList();
+        int activeDemat = (int) primaryDemat.stream()
+                .filter(a -> "demat".equalsIgnoreCase(nullToEmpty(a.getAccountType())))
                 .filter(a -> Boolean.TRUE.equals(a.getActive())
                         || (a.getStatus() != null && a.getStatus().toLowerCase(Locale.ROOT).contains("active")))
                 .count();
-        int dematCount = (int) demat.stream()
-                .filter(a -> a != null && "demat".equalsIgnoreCase(nullToEmpty(a.getAccountType())))
+        int dematCount = (int) primaryDemat.stream()
+                .filter(a -> "demat".equalsIgnoreCase(nullToEmpty(a.getAccountType())))
                 .count();
-        int mfCount = (int) demat.stream()
-                .filter(a -> a != null && "mf".equalsIgnoreCase(nullToEmpty(a.getAccountType())))
+        int mfCount = (int) primaryDemat.stream()
+                .filter(a -> "mf".equalsIgnoreCase(nullToEmpty(a.getAccountType())))
                 .count();
-        // Brokers = running books only (current > 0), not paper/dummy/NPS.
         int brokerCount = (int) rows.stream()
+                .filter(r -> r.getFamilyMemberId() == null || r.getFamilyMemberId().isBlank())
                 .filter(r -> !isPaperLike(r))
                 .filter(r -> !isNpsRow(r))
                 .filter(r -> r.getCurrent() != null && r.getCurrent() > 0)
                 .count();
 
+        List<FamilyMember> members = familyMemberService.listForOwner(userId);
+        List<FamilyMemberSummary> familySummaries = members.stream()
+                .map(m -> FamilyMemberSummary.builder()
+                        .id(m.getId())
+                        .name(m.getDisplayName())
+                        .email(m.getEmail())
+                        .source(m.getSource())
+                        // portfolioCount = non-MF demat accounts for that persona's CAS.
+                        .portfolioCount(countDematForMember(demat, m.getId()))
+                        .build())
+                .toList();
+
         return AccountsHubModel.builder()
-                .identity(buildIdentity(userId, nps, demat))
+                .identity(buildIdentity(userId, nps, primaryDemat))
                 .stats(AccountsStats.builder()
                         .activeDematCount(activeDemat)
                         .dematAccountCount(dematCount)
@@ -94,8 +116,20 @@ public class AccountsHubService {
                 .portfolios(rows)
                 .dematAccounts(demat)
                 .nps(nps)
+                .npsAccounts(npsAccounts)
                 .cas(cas)
+                .familyMembers(familySummaries)
                 .build();
+    }
+
+    static int countDematForMember(List<DematAccountModel> demat, String familyMemberId) {
+        if (familyMemberId == null || familyMemberId.isBlank() || demat == null) {
+            return 0;
+        }
+        return (int) demat.stream()
+                .filter(a -> a != null && familyMemberId.equals(a.getFamilyMemberId()))
+                .filter(a -> !"mf".equalsIgnoreCase(nullToEmpty(a.getAccountType())))
+                .count();
     }
 
     private static Double computeOverallXirr(List<PortfolioModelV1> books) {
@@ -123,47 +157,22 @@ public class AccountsHubService {
         return OverallXirrCalculator.annualizedPct(flows);
     }
 
-    static void mergeMissingMfFolios(List<DematAccountModel> demat, List<CasMfFolioGroup> folios) {
-        if (folios == null || folios.isEmpty()) {
-            return;
-        }
-        for (CasMfFolioGroup g : folios) {
-            if (g == null || g.getFolio() == null || g.getFolio().isBlank()) {
-                continue;
-            }
-            String folio = g.getFolio().trim();
-            boolean exists = demat.stream().anyMatch(a ->
-                    a != null
-                            && "mf".equalsIgnoreCase(nullToEmpty(a.getAccountType()))
-                            && folio.equalsIgnoreCase(nullToEmpty(a.getFolio())));
-            if (exists) {
-                continue;
-            }
-            demat.add(DematAccountModel.builder()
-                    .accountNo(folio)
-                    .accountType("mf")
-                    .folio(folio)
-                    .amcName(g.getAmcName())
-                    .active(true)
-                    .status("ACTIVE")
-                    .build());
-        }
-    }
-
     static boolean isCdslAggregator(PortfolioModelV1 p) {
         if (p == null) {
             return false;
         }
+        // Soft-family CDSL books hold MF folios + unmapped DPs for that persona — count them.
+        boolean familyTagged = p.getFamilyMemberId() != null && !p.getFamilyMemberId().isBlank();
         if (p.getBrokerType() == BrokerType.CDSL) {
-            return true;
+            return !familyTagged;
         }
         String name = nullToEmpty(p.getName()).toLowerCase(Locale.ROOT);
         if (name.contains("cdsl") || name.equals("cas") || name.contains("cas aggregator")
                 || name.contains("cas mutual")) {
-            return true;
+            return !familyTagged;
         }
         String kind = p.getPortfolioKind() != null ? p.getPortfolioKind().name() : "";
-        return kind.toUpperCase(Locale.ROOT).contains("CAS");
+        return kind.toUpperCase(Locale.ROOT).contains("CAS") && !familyTagged;
     }
 
     private static boolean isPaperPortfolio(PortfolioModelV1 p) {
@@ -249,6 +258,8 @@ public class AccountsHubService {
                 .returnPct(returnPct)
                 .assetCount(p.getAssetCount())
                 .dummy(p.getIsDummy())
+                .familyMemberId(p.getFamilyMemberId())
+                .familyMemberName(p.getFamilyMemberName())
                 .build();
     }
 

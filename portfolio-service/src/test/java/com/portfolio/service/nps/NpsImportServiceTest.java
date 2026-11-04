@@ -23,6 +23,7 @@ import com.am.common.amcommondata.model.nps.NpsDocumentMeta;
 import com.am.common.amcommondata.repository.nps.NpsImportRepository;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.model.events.NpsDocumentEvent;
+import com.portfolio.service.family.FamilyMemberService;
 
 @ExtendWith(MockitoExtension.class)
 class NpsImportServiceTest {
@@ -33,6 +34,9 @@ class NpsImportServiceTest {
     @Mock
     private PortfolioService portfolioService;
 
+    @Mock
+    private FamilyMemberService familyMemberService;
+
     @InjectMocks
     private NpsImportService npsImportService;
 
@@ -41,6 +45,8 @@ class NpsImportServiceTest {
         when(npsImportRepository.findFirstByOwnerOrderByAsOfDateDescImportedAtDesc("u1"))
                 .thenReturn(Optional.empty());
         when(npsImportRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(familyMemberService.resolveForImport(any(), any(), any(), any(), any()))
+                .thenReturn(null);
 
         NpsDocumentEvent event = NpsDocumentEvent.builder()
                 .eventType("NPS_DOCUMENT")

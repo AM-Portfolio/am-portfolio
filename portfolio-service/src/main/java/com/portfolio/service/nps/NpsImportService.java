@@ -15,9 +15,11 @@ import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.nps.NpsDocumentMeta;
 import com.am.common.amcommondata.model.nps.NpsSchemeLine;
+import com.am.common.amcommondata.model.family.FamilyMember;
 import com.am.common.amcommondata.repository.nps.NpsImportRepository;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.model.events.NpsDocumentEvent;
+import com.portfolio.service.family.FamilyMemberService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +31,7 @@ public class NpsImportService {
 
     private final NpsImportRepository npsImportRepository;
     private final PortfolioService portfolioService;
+    private final FamilyMemberService familyMemberService;
 
     public NpsImportDocument upsertFromEvent(NpsDocumentEvent event) {
         if (event == null || event.getUserId() == null || event.getUserId().isBlank()) {
@@ -38,6 +41,20 @@ public class NpsImportService {
         NpsImportDocument existing = npsImportRepository
                 .findFirstByOwnerOrderByAsOfDateDescImportedAtDesc(owner)
                 .orElse(null);
+
+        String holderName = event.getHolderName();
+        String holderEmail = event.getHolderEmail();
+        if (event.getSubscriber() != null) {
+            if ((holderName == null || holderName.isBlank()) && event.getSubscriber().get("name") != null) {
+                holderName = String.valueOf(event.getSubscriber().get("name"));
+            }
+            if ((holderEmail == null || holderEmail.isBlank()) && event.getSubscriber().get("email") != null) {
+                holderEmail = String.valueOf(event.getSubscriber().get("email"));
+            }
+        }
+
+        FamilyMember member = familyMemberService.resolveForImport(
+                owner, event.getIdentityMatch(), holderName, holderEmail, "NPS");
 
         NpsImportDocument doc = existing != null ? existing : NpsImportDocument.builder().build();
         doc.setOwner(owner);
@@ -49,13 +66,23 @@ public class NpsImportService {
         doc.setSubscriber(event.getSubscriber());
         doc.setTiers(event.getTiers());
         doc.setValidation(event.getValidation());
+        doc.setIdentityMatch(event.getIdentityMatch());
+        doc.setHolderName(holderName);
+        doc.setHolderEmail(holderEmail);
+        if (member != null) {
+            doc.setFamilyMemberId(member.getId());
+            doc.setFamilyMemberName(member.getDisplayName());
+        } else {
+            doc.setFamilyMemberId(null);
+            doc.setFamilyMemberName(null);
+        }
         if (event.getSubscriber() != null && event.getSubscriber().get("pran") != null) {
             doc.setPran(String.valueOf(event.getSubscriber().get("pran")));
         }
 
         NpsImportDocument saved = npsImportRepository.save(doc);
-        log.info("Upserted NPS import for owner={} pran={} asOf={}",
-                owner, saved.getPran(), saved.getAsOfDate());
+        log.info("Upserted NPS import for owner={} pran={} asOf={} familyMemberId={}",
+                owner, saved.getPran(), saved.getAsOfDate(), saved.getFamilyMemberId());
         return saved;
     }
 
@@ -63,77 +90,115 @@ public class NpsImportService {
         return npsImportRepository.findFirstByOwnerOrderByAsOfDateDescImportedAtDesc(userId);
     }
 
+    /** One latest NPS meta per persona (null familyMemberId = primary). */
+    public List<NpsDocumentMeta> listMetasForOwner(String userId) {
+        if (userId == null || userId.isBlank()) {
+            return Collections.emptyList();
+        }
+        List<NpsImportDocument> all =
+                npsImportRepository.findByOwnerOrderByAsOfDateDescImportedAtDesc(userId);
+        if (all == null || all.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<String, NpsImportDocument> latestByPersona = new java.util.LinkedHashMap<>();
+        for (NpsImportDocument doc : all) {
+            if (doc == null) {
+                continue;
+            }
+            String key = doc.getFamilyMemberId() == null || doc.getFamilyMemberId().isBlank()
+                    ? ""
+                    : doc.getFamilyMemberId().trim();
+            latestByPersona.putIfAbsent(key, doc);
+        }
+        List<NpsDocumentMeta> out = new ArrayList<>();
+        for (NpsImportDocument doc : latestByPersona.values()) {
+            toMeta(doc).ifPresent(out::add);
+        }
+        return out;
+    }
+
     public Optional<NpsDocumentMeta> latestMeta(String userId) {
-        return latest(userId).map(doc -> {
-            Double t1 = null;
-            Double t2 = null;
-            if (doc.getTiers() != null) {
-                for (Map<String, Object> tier : doc.getTiers()) {
-                    if (tier == null) {
-                        continue;
-                    }
-                    Object tierId = tier.get("tier");
-                    Object value = null;
-                    Object summary = tier.get("investmentSummary");
-                    if (summary instanceof Map<?, ?> sm) {
-                        value = sm.get("holdingsValue");
-                    }
-                    if (value == null) {
-                        value = tier.get("closingValue");
-                    }
-                    Double v = toDouble(value);
-                    if ("I".equals(String.valueOf(tierId)) || "1".equals(String.valueOf(tierId))) {
-                        t1 = v;
-                    } else if ("II".equals(String.valueOf(tierId)) || "2".equals(String.valueOf(tierId))) {
-                        t2 = v;
-                    }
+        return latest(userId).flatMap(this::toMeta);
+    }
+
+    private Optional<NpsDocumentMeta> toMeta(NpsImportDocument doc) {
+        if (doc == null) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(mapDocToMeta(doc));
+    }
+
+    private NpsDocumentMeta mapDocToMeta(NpsImportDocument doc) {
+        Double t1 = null;
+        Double t2 = null;
+        if (doc.getTiers() != null) {
+            for (Map<String, Object> tier : doc.getTiers()) {
+                if (tier == null) {
+                    continue;
+                }
+                Object tierId = tier.get("tier");
+                Object value = null;
+                Object summary = tier.get("investmentSummary");
+                if (summary instanceof Map<?, ?> sm) {
+                    value = sm.get("holdingsValue");
+                }
+                if (value == null) {
+                    value = tier.get("closingValue");
+                }
+                Double v = toDouble(value);
+                if ("I".equals(String.valueOf(tierId)) || "1".equals(String.valueOf(tierId))) {
+                    t1 = v;
+                } else if ("II".equals(String.valueOf(tierId)) || "2".equals(String.valueOf(tierId))) {
+                    t2 = v;
                 }
             }
-            Double total = null;
-            if (t1 != null || t2 != null) {
-                total = (t1 != null ? t1 : 0.0) + (t2 != null ? t2 : 0.0);
+        }
+        Double total = null;
+        if (t1 != null || t2 != null) {
+            total = (t1 != null ? t1 : 0.0) + (t2 != null ? t2 : 0.0);
+        }
+        String name = null;
+        String email = null;
+        String mobile = null;
+        String nomineeDetails = null;
+        String registrationDate = null;
+        if (doc.getSubscriber() != null) {
+            if (doc.getSubscriber().get("name") != null) {
+                name = String.valueOf(doc.getSubscriber().get("name"));
             }
-            String name = null;
-            String email = null;
-            String mobile = null;
-            String nomineeDetails = null;
-            String registrationDate = null;
-            if (doc.getSubscriber() != null) {
-                if (doc.getSubscriber().get("name") != null) {
-                    name = String.valueOf(doc.getSubscriber().get("name"));
-                }
-                if (doc.getSubscriber().get("email") != null) {
-                    email = String.valueOf(doc.getSubscriber().get("email"));
-                }
-                if (doc.getSubscriber().get("mobile") != null) {
-                    mobile = String.valueOf(doc.getSubscriber().get("mobile"));
-                }
-                if (doc.getSubscriber().get("registrationDate") != null) {
-                    registrationDate = String.valueOf(doc.getSubscriber().get("registrationDate")).trim();
-                    if (registrationDate.isEmpty()) {
-                        registrationDate = null;
-                    }
-                }
-                nomineeDetails = formatNominee(doc.getSubscriber().get("nominee"));
+            if (doc.getSubscriber().get("email") != null) {
+                email = String.valueOf(doc.getSubscriber().get("email"));
             }
-            return NpsDocumentMeta.builder()
-                    .documentSource(doc.getDocumentSource())
-                    .asOfDate(doc.getAsOfDate())
-                    .statementFrom(doc.getStatementFrom())
-                    .statementTo(doc.getStatementTo())
-                    .importedAt(doc.getImportedAt())
-                    .pran(doc.getPran())
-                    .subscriberName(name)
-                    .subscriberEmail(email)
-                    .subscriberMobile(mobile)
-                    .nomineeDetails(nomineeDetails)
-                    .registrationDate(registrationDate)
-                    .tier1Value(t1)
-                    .tier2Value(t2)
-                    .totalValue(total)
-                    .validation(doc.getValidation())
-                    .build();
-        });
+            if (doc.getSubscriber().get("mobile") != null) {
+                mobile = String.valueOf(doc.getSubscriber().get("mobile"));
+            }
+            if (doc.getSubscriber().get("registrationDate") != null) {
+                registrationDate = String.valueOf(doc.getSubscriber().get("registrationDate")).trim();
+                if (registrationDate.isEmpty()) {
+                    registrationDate = null;
+                }
+            }
+            nomineeDetails = formatNominee(doc.getSubscriber().get("nominee"));
+        }
+        return NpsDocumentMeta.builder()
+                .documentSource(doc.getDocumentSource())
+                .asOfDate(doc.getAsOfDate())
+                .statementFrom(doc.getStatementFrom())
+                .statementTo(doc.getStatementTo())
+                .importedAt(doc.getImportedAt())
+                .pran(doc.getPran())
+                .subscriberName(name)
+                .subscriberEmail(email)
+                .subscriberMobile(mobile)
+                .nomineeDetails(nomineeDetails)
+                .registrationDate(registrationDate)
+                .tier1Value(t1)
+                .tier2Value(t2)
+                .totalValue(total)
+                .validation(doc.getValidation())
+                .familyMemberId(doc.getFamilyMemberId())
+                .familyMemberName(doc.getFamilyMemberName())
+                .build();
     }
 
     static String formatNominee(Object nominee) {

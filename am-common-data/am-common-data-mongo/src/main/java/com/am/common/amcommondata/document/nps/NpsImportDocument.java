@@ -55,4 +55,19 @@ public class NpsImportDocument extends BaseDocument {
 
     @Field("validation")
     private NpsDocumentMeta.Validation validation;
+
+    @Field("familyMemberId")
+    private String familyMemberId;
+
+    @Field("familyMemberName")
+    private String familyMemberName;
+
+    @Field("identityMatch")
+    private String identityMatch;
+
+    @Field("holderName")
+    private String holderName;
+
+    @Field("holderEmail")
+    private String holderEmail;
 }

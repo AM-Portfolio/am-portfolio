@@ -74,6 +74,8 @@ public class PortfolioMapperv1 {
                 .id(portfolioEvent.getId())
                 .name(name)
                 .owner(portfolioEvent.getUserId())
+                .familyMemberId(portfolioEvent.getFamilyMemberId())
+                .familyMemberName(portfolioEvent.getFamilyMemberName())
                 .brokerType(brokerType)
                 .fundType(FundType.DEFAULT)
                 .status("Active")
