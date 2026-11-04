@@ -310,13 +310,13 @@ public class MarketDataApiClient extends AbstractApiClient {
                                                         }
                                                         com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch match = qr
                                                                         .getMatches().get(0);
-                                                        String ticker = match.getSymbol();
-                                                        if (ticker == null || ticker.isBlank()) {
+                                                        String ticker = firstNonBlankTicker(match);
+                                                        if (ticker == null) {
                                                                 continue;
                                                         }
                                                         // Key by the query ISIN the caller sent (stable for batch map lookup)
                                                         String isinKey = qr.getQuery().trim().toUpperCase();
-                                                        resultMap.put(isinKey, ticker.trim().toUpperCase());
+                                                        resultMap.put(isinKey, ticker);
                                                 }
                                         }
                                         return (Map) resultMap;
@@ -358,17 +358,30 @@ public class MarketDataApiClient extends AbstractApiClient {
                                                         }
                                                         com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch match = qr
                                                                         .getMatches().get(0);
-                                                        String ticker = match.getSymbol();
-                                                        if (ticker == null || ticker.isBlank()) {
+                                                        String ticker = firstNonBlankTicker(match);
+                                                        if (ticker == null) {
                                                                 continue;
                                                         }
-                                                        resultMap.put(qr.getQuery().trim().toUpperCase(),
-                                                                        ticker.trim().toUpperCase());
+                                                        resultMap.put(qr.getQuery().trim().toUpperCase(), ticker);
                                                 }
                                         }
                                         return (Map) resultMap;
                                 })
                                 .doOnError(e -> log.error("Failed to resolve batch queries: {}", e.getMessage()));
+        }
+
+        /** Prefer {@code symbol}, then {@code ticker}, then {@code nseSymbol} (Trade parity). */
+        private static String firstNonBlankTicker(
+                        com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch match) {
+                if (match == null) {
+                        return null;
+                }
+                for (String candidate : new String[] { match.getSymbol(), match.getTicker(), match.getNseSymbol() }) {
+                        if (candidate != null && !candidate.isBlank()) {
+                                return candidate.trim().toUpperCase();
+                        }
+                }
+                return null;
         }
 }
 
