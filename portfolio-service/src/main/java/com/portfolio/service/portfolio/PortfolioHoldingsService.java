@@ -21,6 +21,7 @@ import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.mapper.holdings.PortfolioHoldingsMapper;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.EquityHoldings;
+import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.resolver.TradingSymbolResolver;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
@@ -291,7 +292,8 @@ public class PortfolioHoldingsService {
 
     /**
      * Read-path heal: blank / ISIN-as-symbol / scheme ISIN (INF…) / ISIN present with
-     * scheme-prefix symbol — re-run normalizer and persist only on change.
+     * scheme-prefix symbol / broker-name display ticker still awaiting MD upgrade —
+     * re-run normalizer and persist only on change.
      * Never length≤4 tickers alone (valid NSE: ITC, SBIN).
      */
     private void healShortOrIsinSymbols(List<PortfolioModelV1> portfolios) {
@@ -309,12 +311,20 @@ public class PortfolioHoldingsService {
                 }
                 String isin = e.getIsin();
                 String sym = e.getSymbol();
+                String name = e.getName();
                 boolean hasIsin = isin != null && !isin.isBlank();
                 boolean isinAsSymbol = TradingSymbolResolver.looksLikeIsin(sym);
                 boolean schemeIsin = hasIsin && isin.trim().toUpperCase().startsWith("INF");
                 boolean schemeSymbol = sym != null && sym.trim().toUpperCase().startsWith("INF");
-                if (sym == null || sym.isBlank() || isinAsSymbol || schemeIsin || schemeSymbol) {
-                    if (!hasIsin && !isinAsSymbol && !schemeSymbol) {
+                // Broker-name display tickers (PR #95) must keep healing so MD can upgrade later (PR #72).
+                boolean brokerDerivedDisplay = false;
+                if (hasIsin && name != null && !name.isBlank() && sym != null && !sym.isBlank()) {
+                    String suggested = HoldingInstrumentClassifier.suggestDisplayTickerFromName(name);
+                    brokerDerivedDisplay = suggested != null && suggested.equalsIgnoreCase(sym.trim());
+                }
+                if (sym == null || sym.isBlank() || isinAsSymbol || schemeIsin || schemeSymbol
+                        || brokerDerivedDisplay) {
+                    if (!hasIsin && !isinAsSymbol && !schemeSymbol && !brokerDerivedDisplay) {
                         continue;
                     }
                     needsHeal = true;

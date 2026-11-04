@@ -129,12 +129,18 @@ public final class HoldingInstrumentClassifier {
      * When market-data cannot map an ISIN, derive a display ticker from broker names.
      * Groww ETF rows often look like {@code TATAAML-TATAGOLD}; unlisted names like
      * {@code JIO PLATFORMS LIMITED} compress to {@code JIOPLATFORMS} (never JIOFIN).
+     *
+     * <p>Broker series suffixes ({@code -EQ}, {@code EQ}, {@code -BE}) are stripped first so
+     * {@code PHYSICSWALLAH-EQ} becomes {@code PHYSICSWALLAH}, not {@code EQ}.
      */
     public static String suggestDisplayTickerFromName(String holdingName) {
         if (holdingName == null || holdingName.isBlank()) {
             return null;
         }
-        String raw = holdingName.trim();
+        String raw = stripBrokerSeriesSuffix(holdingName.trim());
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
         int dash = raw.lastIndexOf('-');
         if (dash >= 0 && dash < raw.length() - 1) {
             String tail = raw.substring(dash + 1).trim().toUpperCase(Locale.ROOT);
@@ -150,6 +156,17 @@ public final class HoldingInstrumentClassifier {
             return compact;
         }
         return null;
+    }
+
+    /** Strip trailing broker equity series markers before ticker derivation / NAME search. */
+    public static String stripBrokerSeriesSuffix(String value) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        return value
+                .replaceAll("(?i)\\s*-\\s*(EQ|BE)\\s*$", "")
+                .replaceAll("(?i)\\s+(EQ|BE)\\s*$", "")
+                .trim();
     }
 
     public static boolean isPlausibleDisplayTicker(String ticker) {

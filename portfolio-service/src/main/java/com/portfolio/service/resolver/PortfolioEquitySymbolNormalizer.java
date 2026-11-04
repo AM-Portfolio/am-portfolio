@@ -100,12 +100,11 @@ public class PortfolioEquitySymbolNormalizer {
             }
         }
 
-        // Broker display-name compact ticker only when there is no ISIN to preserve.
-        // Never overwrite an ISIN-shaped symbol with a compacted company name
-        // (transient MD miss would persist RELIANCEINDUSTRIES and skip heal).
+        // Broker display ticker when MD ISIN + COMPANY_NAME both miss (PR #95).
+        // Runs even when isinKey is set — dig often has INF/INE rows with no instrument match.
+        // Heal keeps retrying broker-derived symbols so a later MD hit can still upgrade (PR #72).
         if ((resolved == null || resolved.isBlank() || TradingSymbolResolver.looksLikeIsin(resolved))
-                && equity.getName() != null && !equity.getName().isBlank()
-                && isinKey == null) {
+                && equity.getName() != null && !equity.getName().isBlank()) {
             String fromBrokerName = HoldingInstrumentClassifier.suggestDisplayTickerFromName(equity.getName());
             if (fromBrokerName != null) {
                 resolved = fromBrokerName;
@@ -133,7 +132,10 @@ public class PortfolioEquitySymbolNormalizer {
             return null;
         }
         try {
-            String query = name.trim();
+            String query = HoldingInstrumentClassifier.stripBrokerSeriesSuffix(name.trim());
+            if (query == null || query.isBlank()) {
+                return null;
+            }
             Map response = marketDataApiClient
                     .resolveTickersByQueries(List.of(query), List.of("COMPANY_NAME"))
                     .block();
