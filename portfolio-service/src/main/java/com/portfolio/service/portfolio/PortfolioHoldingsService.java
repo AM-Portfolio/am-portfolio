@@ -292,9 +292,9 @@ public class PortfolioHoldingsService {
 
     /**
      * Read-path heal: blank / ISIN-as-symbol / scheme ISIN (INF…) / ISIN present with
-     * scheme-prefix symbol / broker-name display ticker still awaiting MD upgrade —
-     * re-run normalizer and persist only on change.
-     * Never length≤4 tickers alone (valid NSE: ITC, SBIN).
+     * scheme-prefix symbol / previously invented broker-name display tickers —
+     * re-run normalizer (ISIN → real NSE ticker from market-data only) and persist
+     * only on change. Never length≤4 tickers alone (valid NSE: ITC, SBIN).
      */
     private void healShortOrIsinSymbols(List<PortfolioModelV1> portfolios) {
         if (portfolioEquitySymbolNormalizer == null || portfolios == null || portfolios.isEmpty()) {
