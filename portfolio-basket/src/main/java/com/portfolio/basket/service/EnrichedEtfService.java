@@ -11,9 +11,11 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.lang.Nullable;
-import org.springframework.stereotype.Service;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -67,8 +69,13 @@ public class EnrichedEtfService {
                 .build();
     }
 
+    /**
+     * After the context is fully up — never during {@code @PostConstruct}.
+     * {@code @Async} on {@code @PostConstruct} still ran on main and could
+     * deadlock Lettuce tracing against the Spring bean factory lock.
+     */
     @Async
-    @PostConstruct
+    @EventListener(ApplicationReadyEvent.class)
     public void warmCache() {
         try {
             List<String> topEtfs = basketCatalogService.getTopEtfSymbols();

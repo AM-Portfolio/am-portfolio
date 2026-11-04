@@ -31,8 +31,9 @@ resilience4j:
         sliding-window-size: 20
         minimum-number-of-calls: 10
         failure-rate-threshold: 50
-        wait-duration-in-open-state: 30s
-        permitted-number-of-calls-in-half-open-state: 5
+        wait-duration-in-open-state: 60s
+        permitted-number-of-calls-in-half-open-state: 2
+        automatic-transition-from-open-to-half-open-enabled: true
       ohlcDataApi:
         sliding-window-size: 20
         minimum-number-of-calls: 10

@@ -71,4 +71,9 @@ public class HistoricalDataResponseWrapper {
      * Processing time in milliseconds for the entire request
      */
     private long processingTimeMs;
+
+    /** Present when am-market rejects the request (e.g. missing {@code from}). */
+    private String error;
+
+    private String message;
 }

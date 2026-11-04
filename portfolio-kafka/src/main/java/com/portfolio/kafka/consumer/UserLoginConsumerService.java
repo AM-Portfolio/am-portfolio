@@ -3,7 +3,8 @@ package com.portfolio.kafka.consumer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.portfolio.model.events.UserLoginEvent;
 import com.am.common.amcommondata.service.PortfolioService;
-import com.portfolio.service.scheduler.SnapshotCatchUpService;
+import com.portfolio.service.scheduler.PortfolioHistoryJobService;
+import com.portfolio.model.history.HistoryJobMode;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,7 +23,7 @@ public class UserLoginConsumerService {
 
     private final ObjectMapper objectMapper;
     private final PortfolioService portfolioService;
-    private final SnapshotCatchUpService snapshotCatchUpService;
+    private final PortfolioHistoryJobService portfolioHistoryJobService;
 
     @KafkaListener(topics = "${app.kafka.login.topic:active-user}", groupId = "${app.kafka.login.consumer.id:am-portfolio-login-group}")
     public void consumeUserLoginEvent(String message, Acknowledgment ack) {
@@ -33,8 +34,8 @@ public class UserLoginConsumerService {
                 // Update lastLoginDate
                 portfolioService.updateLastLoginDate(event.getUserId(), LocalDate.now());
                 
-                // Trigger async catchup
-                snapshotCatchUpService.triggerCatchUp(event.getUserId());
+                // GAP fill via debounced history job (single-flight)
+                portfolioHistoryJobService.enqueue(event.getUserId(), HistoryJobMode.GAP, null);
             }
             ack.acknowledge();
         } catch (Exception e) {

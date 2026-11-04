@@ -1375,22 +1375,39 @@ public class MarketDataService {
             return callExternalApiForRange(symbols, "1D", partial, cleanToRaw);
         }
 
+        // Query both clean and NSE_EQ: forms — ticks may be stored under either key.
+        List<String> mongoQuerySymbols = new ArrayList<>();
+        for (String cleanSymbol : symbols) {
+            if (cleanSymbol == null || cleanSymbol.isBlank()) {
+                continue;
+            }
+            mongoQuerySymbols.add(cleanSymbol);
+            if (!cleanSymbol.regionMatches(true, 0, "NSE_EQ:", 0, 7)
+                    && !cleanSymbol.regionMatches(true, 0, "BSE_EQ:", 0, 7)) {
+                mongoQuerySymbols.add("NSE_EQ:" + cleanSymbol);
+            }
+        }
+
         Map<String, List<StockPriceHistoryDocument>> historyBySymbol = new HashMap<>();
         try {
-            historyBySymbol = stockPriceHistoryMongoService.getIntradayHistory(symbols, startEpoch);
+            historyBySymbol = stockPriceHistoryMongoService.getIntradayHistory(mongoQuerySymbols, startEpoch);
         } catch (Exception e) {
             log.error("[Intraday-Mongo] DB query failed, falling back to API for all symbols", e);
             return callExternalApiForRange(symbols, "1D", partial, cleanToRaw);
         }
 
         List<String> fallbackSymbols = new ArrayList<>();
-        Map<String, Double> liveSnapshots = new HashMap<>();
 
         for (String cleanSymbol : symbols) {
             List<StockPriceHistoryDocument> ticks = historyBySymbol.getOrDefault(cleanSymbol, List.of());
+            if (ticks.isEmpty()) {
+                ticks = historyBySymbol.getOrDefault("NSE_EQ:" + cleanSymbol, List.of());
+            }
+            if (ticks.isEmpty()) {
+                ticks = historyBySymbol.getOrDefault("BSE_EQ:" + cleanSymbol, List.of());
+            }
 
             if (ticks.isEmpty()) {
-                // No history in DB for this symbol — schedule it for fallback
                 fallbackSymbols.add(cleanSymbol);
                 continue;
             }
@@ -1421,33 +1438,51 @@ public class MarketDataService {
             chartCache.put(cleanSymbol + ":1D", hd); // Populate L1 cache for next call
         }
 
-        // ── FALLBACK: Symbols missing from MongoDB ──
+        // ── FALLBACK: Symbols missing from MongoDB → real 1D candles from market API ──
+        // Flat LTP seed was skipping historical-charts and produced a dead Overall chart
+        // when tick history was empty (common on dig). Always prefer API candles.
         if (!fallbackSymbols.isEmpty()) {
-            log.warn("[Intraday-Mongo] {} symbols missing from DB, falling back to API individually: {}",
-                fallbackSymbols.size(), fallbackSymbols);
-            
+            log.warn("[Intraday-Mongo] {} symbols missing from DB, fetching 1D candles via historical-charts API: {}",
+                fallbackSymbols.size(), fallbackSymbols.size() <= 20 ? fallbackSymbols : fallbackSymbols.size() + " symbols");
             try {
-                Map<String, StockPriceDocument> liveDocs = 
-                    stockPriceMongoService != null ? 
-                    stockPriceMongoService.getPrices(fallbackSymbols) : Map.of();
-
-                for (String cleanSymbol : fallbackSymbols) {
-                    String rawSymbol = cleanToRaw.getOrDefault(cleanSymbol, cleanSymbol);
-                    
-                    // Directly create a flat-line chart using live price to avoid slow API timeouts
-                    StockPriceDocument liveDoc = liveDocs.get(cleanSymbol);
-                    if (liveDoc != null && liveDoc.getLastPrice() != null && liveDoc.getLastPrice() > 0) {
-                        log.warn("[Intraday-Mongo] Symbol {} has no OHLC data in DB, skipping slow API and using flat live price: {}", 
-                            cleanSymbol, liveDoc.getLastPrice());
-                        com.portfolio.marketdata.model.HistoricalData flatLine = buildFlatLineChart(cleanSymbol, liveDoc.getLastPrice());
-                        partial.getData().put(rawSymbol, flatLine);
-                        chartCache.put(cleanSymbol + ":1D", flatLine);
-                    } else {
-                        log.warn("[Intraday-Mongo] Symbol {} has no data at all, omitting from chart.", cleanSymbol);
-                    }
-                }
+                callExternalApiForRange(fallbackSymbols, "1D", partial, cleanToRaw);
             } catch (Exception e) {
-                log.error("[Intraday-Mongo] Fallback API call failed: {}", e.getMessage());
+                log.error("[Intraday-Mongo] historical-charts API fallback failed: {}", e.getMessage());
+            }
+
+            // Last resort: only symbols still missing after API — flat live price so qty×price still plots.
+            List<String> stillMissing = new ArrayList<>();
+            for (String cleanSymbol : fallbackSymbols) {
+                String rawSymbol = cleanToRaw.getOrDefault(cleanSymbol, cleanSymbol);
+                if (!partial.getData().containsKey(rawSymbol)
+                        && !partial.getData().containsKey(cleanSymbol)) {
+                    stillMissing.add(cleanSymbol);
+                }
+            }
+            if (!stillMissing.isEmpty() && stockPriceMongoService != null) {
+                try {
+                    Map<String, StockPriceDocument> liveDocs = stockPriceMongoService.getPrices(stillMissing);
+                    for (String cleanSymbol : stillMissing) {
+                        String rawSymbol = cleanToRaw.getOrDefault(cleanSymbol, cleanSymbol);
+                        StockPriceDocument liveDoc = liveDocs.get(cleanSymbol);
+                        if (liveDoc == null) {
+                            liveDoc = liveDocs.get("NSE_EQ:" + cleanSymbol);
+                        }
+                        if (liveDoc != null && liveDoc.getLastPrice() != null && liveDoc.getLastPrice() > 0) {
+                            log.warn("[Intraday-Mongo] Symbol {} API empty — flat live price last resort: {}",
+                                    cleanSymbol, liveDoc.getLastPrice());
+                            com.portfolio.marketdata.model.HistoricalData flatLine =
+                                    buildFlatLineChart(cleanSymbol, liveDoc.getLastPrice());
+                            partial.getData().put(rawSymbol, flatLine);
+                            chartCache.put(cleanSymbol + ":1D", flatLine);
+                        } else {
+                            log.warn("[Intraday-Mongo] Symbol {} has no Mongo ticks, API candles, or live price — omitting",
+                                    cleanSymbol);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("[Intraday-Mongo] Live-price last resort failed: {}", e.getMessage());
+                }
             }
         }
 

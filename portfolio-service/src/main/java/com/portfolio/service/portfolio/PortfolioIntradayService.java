@@ -159,12 +159,14 @@ public class PortfolioIntradayService {
                     portfolioEntries(qtyByPortfolio, nameByPortfolio, liveValueByPortfolio, todayGlByPortfolio, Map.of())));
         }
 
-        // ── STEP 3: Fetch 1D OHLC candles for all symbols in batch ─────────────
+        // ── STEP 3: Fetch 1D OHLC candles (always — market rolls holiday/weekend) ──
         List<String> symbols = new ArrayList<>(symbolQty.keySet());
         com.portfolio.marketdata.model.HistoricalChartsResponse chartResponse = null;
+        LocalDate sessionDate = resolveSessionDate(today, nowIST, marketOpen);
+        log.info("[Intraday] Session date={} marketOpen={} (today={})", sessionDate, marketOpen, today);
 
-        // Always fetch 1D candles — market-data resolves last trading day when cash is closed
-        // (same idea as NIFTY overlay). Flat LTP is only a last-resort fallback below.
+        // Always fetch 1D candles — market-data resolves last trading day when cash is closed.
+        // Dense grid / flat LTP seed is applied in STEP 4.5 when the series is empty.
         try {
             chartResponse = marketDataService.getHistoricalCharts(symbols, "1D");
             if (chartResponse != null && chartResponse.getData() != null) {
@@ -180,10 +182,15 @@ public class PortfolioIntradayService {
         }
 
         // ── STEP 4: Build time-series: candle time → {symbol → closePrice} ───
+        // Keys must match symbolQty (holdings symbols); API/Mongo may return NSE_EQ:X.
         TreeMap<LocalTime, Map<String, Double>> priceSeries = new TreeMap<>();
         if (chartResponse != null && chartResponse.getData() != null) {
             for (Map.Entry<String, com.portfolio.marketdata.model.HistoricalData> entry : chartResponse.getData().entrySet()) {
-                String sym = entry.getKey();
+                String chartSym = entry.getKey();
+                String qtySym = resolveQtySymbol(chartSym, symbolQty);
+                if (qtySym == null) {
+                    continue;
+                }
                 com.portfolio.marketdata.model.HistoricalData hd = entry.getValue();
                 if (hd == null || hd.getDataPoints() == null || hd.getDataPoints().isEmpty()) {
                     continue;
@@ -216,9 +223,17 @@ public class PortfolioIntradayService {
                     if (t.isBefore(MARKET_OPEN) || t.isAfter(MARKET_CLOSE)) {
                         continue;
                     }
-                    priceSeries.computeIfAbsent(t, k -> new HashMap<>()).put(sym, pt.getClose());
+                    priceSeries.computeIfAbsent(t, k -> new HashMap<>()).put(qtySym, pt.getClose());
                 }
             }
+        }
+
+        if (priceSeries.isEmpty()) {
+            log.warn("[Intraday] No 1D candles after charts fetch — using flat LTP fallback (last resort) user={} portfolioId={} symbols={}",
+                    userId, portfolioId, symbols.size());
+        } else {
+            log.info("[Intraday] Built price series slots={} uniqueTimes covering symbols with candles",
+                    priceSeries.size());
         }
 
         // Fetch current live prices of equities
@@ -238,42 +253,22 @@ public class PortfolioIntradayService {
             log.error("[Intraday] Failed to fetch live prices or compute live equity wealth", e);
         }
 
-        // ── STEP 4.5: Weekend/Non-Trading Day Real Lookback ───
-        // (The 1W fallback hack was removed to eliminate 30s timeouts.
-        // It seamlessly falls through to the native flat chart generator below.)
-
-        // Fallback: If STILL empty, generate a flat chart using the last known prices
-        if (priceSeries.isEmpty()) {
-            if (livePrices != null && !livePrices.isEmpty()) {
-                log.warn("[Intraday] No 1D candles — using flat LTP fallback (last resort)");
-                LocalTime t = MARKET_OPEN;
-                java.time.DayOfWeek dayOfWeek = today.getDayOfWeek();
-                boolean isWeekend = dayOfWeek == java.time.DayOfWeek.SATURDAY
-                        || dayOfWeek == java.time.DayOfWeek.SUNDAY;
-
-                LocalTime limit;
-                if (isWeekend || nowIST.isAfter(MARKET_CLOSE)) {
-                    limit = MARKET_CLOSE;
-                } else if (nowIST.isBefore(MARKET_OPEN)) {
-                    limit = MARKET_OPEN;
-                } else {
-                    limit = nowIST;
-                }
-
-                while (!t.isAfter(limit)) {
-                    priceSeries.put(t, livePrices);
-                    t = t.plusMinutes(5);
-                }
-            }
-        }
-
-
+        // ── STEP 4.5: Dense 09:15→end grid (fixes afternoon-only / holiday gaps) ──
+        LocalTime sessionEnd = resolveSessionEnd(nowIST, marketOpen, sessionDate, today);
+        // Only seed flatline when there are NO candles (closed day / empty feed).
+        Map<String, Double> flatSeed = priceSeries.isEmpty() && livePrices != null
+                ? new HashMap<>(livePrices)
+                : Map.of();
+        priceSeries = fillSessionGrid(priceSeries, flatSeed, sessionEnd);
 
         // ── STEP 5: Compute portfolio value per candle with carry-forward ──────
         Map<String, Double> lastKnown = new HashMap<>();
+        // Seed LTPs for holdings that lack session candles so they are not priced as 0
+        // once any other symbol's candle appears (avoids 09:15→09:20 wealth cliffs).
+        seedLastKnownFromLivePrices(lastKnown, livePrices, symbolQty);
         List<IntradayDataPoint> result = new ArrayList<>();
 
-        // Anchor: 9:15 AM = yesterday's close
+        // Anchor: 9:15 AM = session open baseline
         result.add(makeGlobalPoint(
                 "09:15",
                 baselineWealth,
@@ -282,30 +277,40 @@ public class PortfolioIntradayService {
                 portfolioEntries(qtyByPortfolio, nameByPortfolio, liveValueByPortfolio, todayGlByPortfolio, Map.of())));
 
         LocalTime latestCandle = priceSeries.isEmpty() ? null : priceSeries.lastKey();
+        LocalTime t = MARKET_OPEN.plusMinutes(5);
+        while (!t.isAfter(sessionEnd)) {
+            Map<String, Double> at = priceSeries.get(t);
+            if (at != null && !at.isEmpty()) {
+                lastKnown.putAll(at);
+            }
 
-        for (Map.Entry<LocalTime, Map<String, Double>> entry : priceSeries.entrySet()) {
-            LocalTime t = entry.getKey();
-            lastKnown.putAll(entry.getValue()); // carry-forward update
-
-            double equityValue = symbolQty.entrySet().stream()
-                    .mapToDouble(sq -> {
-                        Double price = lastKnown.get(sq.getKey());
-                        return (price != null ? price : 0.0) * sq.getValue();
-                    })
-                    .sum();
-
+            double equityValue = 0.0;
+            if (!lastKnown.isEmpty()) {
+                equityValue = symbolQty.entrySet().stream()
+                        .mapToDouble(sq -> {
+                            Double price = lastKnown.get(sq.getKey());
+                            return (price != null ? price : 0.0) * sq.getValue();
+                        })
+                        .sum();
+            }
             if (equityValue <= 0) {
+                // Before first candle: hold open baseline so X spans full session.
+                equityValue = baselineWealth - missingAssetValue;
+            }
+            if (equityValue <= 0) {
+                t = t.plusMinutes(5);
                 continue;
             }
 
             double totalWealth = equityValue + missingAssetValue;
-            boolean isLive = t.equals(latestCandle) && marketOpen;
+            boolean isLive = latestCandle != null && t.equals(latestCandle) && marketOpen;
             result.add(makeGlobalPoint(
                     t.toString(),
                     totalWealth,
                     baselineWealth,
                     isLive,
                     portfolioEntries(qtyByPortfolio, nameByPortfolio, liveValueByPortfolio, todayGlByPortfolio, lastKnown)));
+            t = t.plusMinutes(5);
         }
 
         // ── STEP 6: LTP Stitching (Industry Standard real-time update) ───
@@ -322,20 +327,206 @@ public class PortfolioIntradayService {
             }
         }
 
-        // Cache the result before returning
-        if (intradayRedisService != null) {
+        // Cache only series with real movement — do not pin a flat "one drop" day for 30m.
+        if (intradayRedisService != null && !isDegenerateIntradaySeries(result)) {
             intradayRedisService.cacheIntradayData(userId, portfolioId, result, marketOpen);
+        } else if (intradayRedisService != null) {
+            log.warn("[Intraday] Skipping Redis cache for degenerate series (unique wealth values ≤ 1) user={} portfolioId={} points={}",
+                    userId, portfolioId, result.size());
         }
 
         return result;
     }
 
-    private IntradayDataPoint makeGlobalPoint(
-            String ts,
-            double value,
-            double baseline,
-            boolean isLive) {
-        return makeGlobalPoint(ts, value, baseline, isLive, List.of());
+    /**
+     * Pre-fill {@code lastKnown} with live LTPs mapped onto holdings keys.
+     * Candle closes overwrite these later; symbols never present in candles keep LTP
+     * instead of contributing {@code 0} once the series is non-empty.
+     */
+    static void seedLastKnownFromLivePrices(
+            Map<String, Double> lastKnown,
+            Map<String, Double> livePrices,
+            Map<String, Double> symbolQty) {
+        if (lastKnown == null || livePrices == null || livePrices.isEmpty() || symbolQty == null || symbolQty.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, Double> e : livePrices.entrySet()) {
+            if (e.getKey() == null || e.getValue() == null || e.getValue() <= 0) {
+                continue;
+            }
+            String qtySym = resolveQtySymbol(e.getKey(), symbolQty);
+            if (qtySym != null && !lastKnown.containsKey(qtySym)) {
+                lastKnown.put(qtySym, e.getValue());
+            }
+        }
+        // Also seed by holdings key when live map uses the same bare ticker.
+        for (String qtySym : symbolQty.keySet()) {
+            if (qtySym == null || lastKnown.containsKey(qtySym)) {
+                continue;
+            }
+            Double p = livePrices.get(qtySym);
+            if (p == null) {
+                for (Map.Entry<String, Double> e : livePrices.entrySet()) {
+                    if (e.getKey() != null && e.getKey().equalsIgnoreCase(qtySym) && e.getValue() != null && e.getValue() > 0) {
+                        p = e.getValue();
+                        break;
+                    }
+                }
+            }
+            if (p != null && p > 0) {
+                lastKnown.put(qtySym, p);
+            }
+        }
+    }
+
+    /** Map chart/API symbol key onto a holdings symbolQty key (exact, strip NSE_EQ:/BSE_EQ:). */
+    static String resolveQtySymbol(String chartSym, Map<String, Double> symbolQty) {
+        if (chartSym == null || symbolQty == null || symbolQty.isEmpty()) {
+            return null;
+        }
+        if (symbolQty.containsKey(chartSym)) {
+            return chartSym;
+        }
+        String cleaned = chartSym;
+        int colon = chartSym.indexOf(':');
+        if (colon > 0 && colon < chartSym.length() - 1) {
+            cleaned = chartSym.substring(colon + 1);
+        }
+        if (symbolQty.containsKey(cleaned)) {
+            return cleaned;
+        }
+        for (String k : symbolQty.keySet()) {
+            if (k != null && k.equalsIgnoreCase(cleaned)) {
+                return k;
+            }
+            if (k != null && k.equalsIgnoreCase(chartSym)) {
+                return k;
+            }
+        }
+        return null;
+    }
+
+    /** True when wealth barely moves (flat LTP seed / empty candles). */
+    static boolean isDegenerateIntradaySeries(List<IntradayDataPoint> points) {
+        if (points == null || points.size() <= 1) {
+            return true;
+        }
+        java.util.HashSet<Long> uniqueCents = new java.util.HashSet<>();
+        for (IntradayDataPoint p : points) {
+            if (p == null) {
+                continue;
+            }
+            uniqueCents.add(Math.round(p.getTotalWealth() * 100.0));
+            if (uniqueCents.size() > 1) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Cash session date for the 1D chart: today while the market is open/post-open on a
+     * weekday; otherwise last weekday (weekend / pre-open / holiday walk-back).
+     */
+    static LocalDate resolveSessionDate(LocalDate today, LocalTime nowIst, boolean marketOpen) {
+        LocalDate target = today;
+        java.time.DayOfWeek day = today.getDayOfWeek();
+        boolean preMarket = nowIst.isBefore(MARKET_OPEN);
+        if (day == java.time.DayOfWeek.SATURDAY) {
+            target = today.minusDays(1);
+        } else if (day == java.time.DayOfWeek.SUNDAY) {
+            target = today.minusDays(2);
+        } else if (preMarket && !marketOpen) {
+            target = today.minusDays(1);
+            if (target.getDayOfWeek() == java.time.DayOfWeek.SUNDAY) {
+                target = target.minusDays(2);
+            } else if (target.getDayOfWeek() == java.time.DayOfWeek.SATURDAY) {
+                target = target.minusDays(1);
+            }
+        } else if (!marketOpen && nowIst.isAfter(MARKET_CLOSE)) {
+            // After close on a weekday — still today's session.
+            target = today;
+        } else if (!marketOpen) {
+            // Midweek holiday / cash closed during day: walk back to prior weekday.
+            target = today.minusDays(1);
+            while (target.getDayOfWeek() == java.time.DayOfWeek.SATURDAY
+                    || target.getDayOfWeek() == java.time.DayOfWeek.SUNDAY) {
+                target = target.minusDays(1);
+            }
+        }
+        return target;
+    }
+
+    static LocalTime resolveSessionEnd(
+            LocalTime nowIst, boolean marketOpen, LocalDate sessionDate, LocalDate today) {
+        if (!sessionDate.equals(today)) {
+            return MARKET_CLOSE;
+        }
+        if (marketOpen && !nowIst.isBefore(MARKET_OPEN) && !nowIst.isAfter(MARKET_CLOSE)) {
+            return nowIst.withSecond(0).withNano(0);
+        }
+        if (nowIst.isAfter(MARKET_CLOSE)) {
+            return MARKET_CLOSE;
+        }
+        if (nowIst.isBefore(MARKET_OPEN)) {
+            return MARKET_OPEN;
+        }
+        return MARKET_CLOSE;
+    }
+
+    /**
+     * Ensures a 5-minute grid from market open through {@code sessionEnd}.
+     * Carry-forward only applies after the first real candle (does not back-date
+     * afternoon prices into the morning). When {@code flatSeed} is non-empty and
+     * candles are empty, fills a flat session (holiday / no feed).
+     */
+    static TreeMap<LocalTime, Map<String, Double>> fillSessionGrid(
+            TreeMap<LocalTime, Map<String, Double>> candles,
+            Map<String, Double> flatSeed,
+            LocalTime sessionEnd) {
+        TreeMap<LocalTime, Map<String, Double>> filled = new TreeMap<>();
+        LocalTime end = sessionEnd == null || sessionEnd.isBefore(MARKET_OPEN) ? MARKET_OPEN : sessionEnd;
+        if (end.isAfter(MARKET_CLOSE)) {
+            end = MARKET_CLOSE;
+        }
+        boolean hasCandles = candles != null && !candles.isEmpty();
+        Map<String, Double> carry = new HashMap<>();
+        LocalTime t = MARKET_OPEN;
+        while (!t.isAfter(end)) {
+            Map<String, Double> at = hasCandles ? candles.get(t) : null;
+            if (at != null && !at.isEmpty()) {
+                carry.putAll(at);
+            }
+            if (!carry.isEmpty()) {
+                filled.put(t, new HashMap<>(carry));
+            } else if (!hasCandles && flatSeed != null && !flatSeed.isEmpty()) {
+                filled.put(t, new HashMap<>(flatSeed));
+            }
+            t = t.plusMinutes(5);
+        }
+        if (hasCandles) {
+            for (Map.Entry<LocalTime, Map<String, Double>> e : candles.entrySet()) {
+                if (!e.getKey().isAfter(end)) {
+                    filled.put(e.getKey(), new HashMap<>(e.getValue()));
+                }
+            }
+            // Re-apply forward carry so gaps between sparse candles are filled.
+            carry.clear();
+            TreeMap<LocalTime, Map<String, Double>> dense = new TreeMap<>();
+            t = MARKET_OPEN;
+            while (!t.isAfter(end)) {
+                Map<String, Double> at = filled.get(t);
+                if (at != null && !at.isEmpty()) {
+                    carry.putAll(at);
+                }
+                if (!carry.isEmpty()) {
+                    dense.put(t, new HashMap<>(carry));
+                }
+                t = t.plusMinutes(5);
+            }
+            return dense;
+        }
+        return filled;
     }
 
     private IntradayDataPoint makeGlobalPoint(

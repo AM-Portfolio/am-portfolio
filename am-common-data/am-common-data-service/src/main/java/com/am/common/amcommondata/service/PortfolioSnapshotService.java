@@ -35,13 +35,14 @@ public class PortfolioSnapshotService {
     private int oneDayLookbackDays;
 
     private static final java.util.Map<String, java.time.Period> TIMEFRAME_PERIODS = java.util.Map.of(
-        "1W",  java.time.Period.ofWeeks(1),
-        "1M",  java.time.Period.ofMonths(1),
-        "3M",  java.time.Period.ofMonths(3),
-        "6M",  java.time.Period.ofMonths(6),
-        "1Y",  java.time.Period.ofYears(1),
-        "3Y",  java.time.Period.ofYears(3),
-        "5Y",  java.time.Period.ofYears(5)
+        "1D",  java.time.Period.ofDays(1),
+        "1W",  java.time.Period.ofDays(7),
+        "1M",  java.time.Period.ofDays(30),
+        "3M",  java.time.Period.ofDays(90),
+        "6M",  java.time.Period.ofDays(180),
+        "1Y",  java.time.Period.ofDays(365),
+        "3Y",  java.time.Period.ofDays(365 * 3),
+        "5Y",  java.time.Period.ofDays(365 * 5)
     );
 
     @org.springframework.cache.annotation.CacheEvict(value = "portfolioHistory", allEntries = true)
@@ -87,6 +88,91 @@ public class PortfolioSnapshotService {
 
         portfolioSnapshotRepository.save(snapshot);
         log.info("Successfully upserted User-Centric snapshot for user {} on date {} totalWealth={}", userId, snapshotDate, totalUserWealth);
+    }
+
+    /**
+     * After delete+email-resync the broker book gets a new UUID while old daily
+     * snapshots still point at the dead id — chart stays empty for minutes until
+     * HistoryJob rebuilds. Re-point orphaned same-broker series to the live id.
+     *
+     * @return number of snapshot days updated
+     */
+    @org.springframework.cache.annotation.CacheEvict(value = "portfolioHistory", allEntries = true)
+    public int rebindOrphanedBrokerSnapshots(
+            String userId,
+            String livePortfolioId,
+            String brokerTypeName,
+            String displayName) {
+        if (userId == null || userId.isBlank()
+                || livePortfolioId == null || livePortfolioId.isBlank()
+                || brokerTypeName == null || brokerTypeName.isBlank()) {
+            return 0;
+        }
+        String wantBroker = brokerTypeName.trim().toUpperCase();
+        String wantLabel = displayName != null ? displayName.trim() : null;
+        List<PortfolioSnapshotDocument> snaps =
+                portfolioSnapshotRepository.findByUserIdOrderBySnapshotDateAsc(userId);
+        if (snaps == null || snaps.isEmpty()) {
+            return 0;
+        }
+        int days = 0;
+        for (PortfolioSnapshotDocument snap : snaps) {
+            if (snap.getPortfolios() == null || snap.getPortfolios().isEmpty()) {
+                continue;
+            }
+            boolean changed = false;
+            for (PortfolioSnapshotEntry e : snap.getPortfolios()) {
+                if (e == null || !sameBrokerSeries(e, wantBroker, wantLabel)) {
+                    continue;
+                }
+                if (!livePortfolioId.equals(e.getPortfolioId())) {
+                    e.setPortfolioId(livePortfolioId);
+                    changed = true;
+                }
+                if (wantLabel != null && !wantLabel.isBlank()
+                        && (e.getPortfolioName() == null
+                        || looksLikeOpaqueName(e.getPortfolioName())
+                        || !wantLabel.equalsIgnoreCase(e.getPortfolioName()))) {
+                    e.setPortfolioName(wantLabel);
+                    changed = true;
+                }
+                if (e.getBrokerType() == null || e.getBrokerType().isBlank()) {
+                    e.setBrokerType(wantBroker);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                portfolioSnapshotRepository.save(snap);
+                days++;
+            }
+        }
+        if (days > 0) {
+            log.info("[History] Rebound {} snapshot day(s) userId={} broker={} -> portfolioId={}",
+                    days, userId, wantBroker, livePortfolioId);
+        }
+        return days;
+    }
+
+    private static boolean sameBrokerSeries(
+            PortfolioSnapshotEntry e, String wantBroker, String wantLabel) {
+        String bt = e.getBrokerType() != null ? e.getBrokerType().trim().toUpperCase() : "";
+        if (wantBroker.equals(bt)) {
+            return true;
+        }
+        String pname = e.getPortfolioName() != null ? e.getPortfolioName().trim() : "";
+        if (wantLabel != null && wantLabel.equalsIgnoreCase(pname)) {
+            return true;
+        }
+        return wantBroker.equalsIgnoreCase(pname);
+    }
+
+    private static boolean looksLikeOpaqueName(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        String v = value.trim();
+        return v.matches("(?i)[0-9a-f]{24}")
+                || v.matches("(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
     }
 
     /** [0]=sum gain, [1]=pct vs sum of opens; nulls when no entry freeze. */
@@ -137,7 +223,15 @@ public class PortfolioSnapshotService {
         existing.ifPresent(portfolioSnapshotRepository::delete);
     }
 
-    @org.springframework.cache.annotation.Cacheable(value = "portfolioHistory", key = "#userId + '_' + (#portfolioId != null ? #portfolioId : 'all') + '_' + #timeFrame + '_v3'")
+    /**
+     * Use {@code #p0/#p1/#p2} — named SpEL params need {@code -parameters}, which this module
+     * does not enable. Named keys collapsed every book onto {@code all} and cached empty
+     * results across catch-up.
+     */
+    @org.springframework.cache.annotation.Cacheable(
+            value = "portfolioHistory",
+            key = "#p0 + '_' + (#p1 != null ? #p1 : 'all') + '_' + #p2 + '_v4'",
+            unless = "#result == null || #result.isEmpty()")
     public List<PortfolioSnapshotModel> getHistory(String userId, String portfolioId, String timeFrame) {
         String frame = timeFrame != null ? timeFrame.toUpperCase() : "1M";
         LocalDate today = LocalDate.now(IST);
@@ -152,14 +246,14 @@ public class PortfolioSnapshotService {
             documents = portfolioSnapshotRepository
                 .findByUserIdAndSnapshotDateBetweenOrderBySnapshotDateAsc(userId, fromDate, today.plusDays(1));
         } else {
-            // Real date math: 1M = exactly 1 calendar month ago; 1D = configurable lookback days
+            // Fixed-day windows aligned with modern-ui TimeFrame.dateRange (1M=30d, …).
+            // 1D uses configurable lookback so weekends/holidays still yield a prior session.
             java.time.Period period;
             if ("1D".equals(frame)) {
-                // @Value default 10; guard 0 from non-Spring construction
                 int days = oneDayLookbackDays > 0 ? oneDayLookbackDays : 10;
                 period = java.time.Period.ofDays(days);
             } else {
-                period = TIMEFRAME_PERIODS.getOrDefault(frame, java.time.Period.ofMonths(1));
+                period = TIMEFRAME_PERIODS.getOrDefault(frame, java.time.Period.ofDays(30));
             }
             LocalDate fromDate = today.minus(period);
             documents = portfolioSnapshotRepository

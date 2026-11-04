@@ -11,6 +11,8 @@ import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.Heatmap;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.market.MarketData;
+import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
+import com.portfolio.model.resolver.TradingSymbolResolver;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -59,29 +61,40 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             request,
             this::createEmptyResult,
             (portfolio, portfolioSymbols, marketData) -> {
+                // ISIN-as-symbol (INF… ETF / unlisted) → broker display ticker for mosaic labels.
+                applyDisplayTickers(portfolio);
+                List<String> displaySymbols = getPortfolioSymbols(portfolio);
+                Map<String, MarketData> displayMarketData = remappedMarketData(marketData, portfolio);
+
                 // Create a map of symbol to holding quantity
                 Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
                 
                 // Retrieve market cap and sector data using the new helper
-                Map<String, com.am.common.amcommondata.model.security.SecurityModel> securityDetails = getSecurityDetails(portfolioSymbols, request);
+                Map<String, com.am.common.amcommondata.model.security.SecurityModel> securityDetails =
+                        getSecurityDetails(displaySymbols, request);
                 
                 // Align with sector allocation: group by security metadata sectors.
                 Map<String, List<String>> sectorToStocks = securityDetailsService
-                    .groupSymbolsBySector(portfolioSymbols, securityDetails);
+                    .groupSymbolsBySector(displaySymbols, securityDetails);
 
-                // Equity holding sector fills gaps when security metadata is Unknown.
+                Map<String, EquityModel> equityBySymbol = indexEquities(portfolio);
+                // Equity holding sector + instrument classifier fills Unknown / blank meta.
                 if (portfolio.getEquityModels() != null) {
                     for (EquityModel model : portfolio.getEquityModels()) {
                         String symbol = model.getSymbol();
                         if (symbol == null || symbol.trim().isEmpty()) {
                             continue;
                         }
-                        String equitySector = (model.getSector() != null
-                                && !model.getSector().trim().isEmpty()
-                                && !model.getSector().trim().equals("-"))
-                            ? model.getSector().trim()
-                            : null;
+                        String equitySector = usableEquitySector(model.getSector());
                         if (equitySector == null) {
+                            boolean hasMd = AnalyticsUtils.resolveMarketData(displayMarketData, symbol) != null;
+                            String priceSourceHint = hasMd
+                                    ? HoldingInstrumentClassifier.PRICE_LIVE
+                                    : HoldingInstrumentClassifier.PRICE_COST;
+                            equitySector = HoldingInstrumentClassifier.resolveSector(
+                                    null, symbol, model.getIsin(), priceSourceHint);
+                        }
+                        if (equitySector == null || HoldingInstrumentClassifier.isMissingSector(equitySector)) {
                             continue;
                         }
 
@@ -93,8 +106,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                             }
                         }
                         if (currentSector == null
-                                || "Unknown".equalsIgnoreCase(currentSector)
-                                || "-".equals(currentSector)) {
+                                || HoldingInstrumentClassifier.isMissingSector(currentSector)) {
                             if (currentSector != null) {
                                 sectorToStocks.get(currentSector).remove(symbol);
                                 if (sectorToStocks.get(currentSector).isEmpty()) {
@@ -109,8 +121,17 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 // Process market data by sector and compute total portfolio value in one pass
                 Map<String, List<MarketData>> sectorMarketDataMap = new HashMap<>();
                 Map<String, List<Double>> sectorQuantitiesMap = new HashMap<>();
+                Map<String, String> symbolPriceSource = new HashMap<>();
                 double[] totalPortfolioValue = {0.0};
-                groupMarketDataBySector(marketData, sectorToStocks, symbolToQuantity, sectorMarketDataMap, sectorQuantitiesMap, totalPortfolioValue);
+                groupMarketDataBySector(
+                        displayMarketData,
+                        sectorToStocks,
+                        symbolToQuantity,
+                        equityBySymbol,
+                        sectorMarketDataMap,
+                        sectorQuantitiesMap,
+                        symbolPriceSource,
+                        totalPortfolioValue);
                 
                 // Day/% live override only for 1D / live requests. Historical TF uses
                 // HeatmapUtils period return from hist previousClose → lastPrice.
@@ -124,7 +145,13 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 }
                 
                 // Calculate performance for each sector
-                List<Heatmap.SectorPerformance> sectorPerformances = calculateSectorPerformances(sectorMarketDataMap, sectorQuantitiesMap, symbolToQuantity, symbolToChangePercent, totalPortfolioValue[0]);
+                List<Heatmap.SectorPerformance> sectorPerformances = calculateSectorPerformances(
+                        sectorMarketDataMap,
+                        sectorQuantitiesMap,
+                        symbolToQuantity,
+                        symbolToChangePercent,
+                        symbolPriceSource,
+                        totalPortfolioValue[0]);
                 
                 // Create heatmap with domain-driven approach
                 Heatmap heatmap = Heatmap.builder()
@@ -185,16 +212,18 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
     }
     
     /**
-     * Group market data by sector
+     * Group market data by sector. Cost-basis synthetic quotes keep unlisted rows on the mosaic.
      */
     private void groupMarketDataBySector(
             Map<String, MarketData> marketData,
             Map<String, List<String>> sectorToStocks,
             Map<String, Double> symbolToQuantity,
+            Map<String, EquityModel> equityBySymbol,
             Map<String, List<MarketData>> sectorMarketDataMap,
             Map<String, List<Double>> sectorQuantitiesMap,
+            Map<String, String> symbolPriceSource,
             double[] totalPortfolioValue) {
-        log.debug("Grouping {} stocks by sector", marketData.size());
+        log.debug("Grouping {} stocks by sector", marketData != null ? marketData.size() : 0);
         
         // Build inverted index for O(1) sector lookup
         Map<String, String> symbolToSector = new HashMap<>();
@@ -204,12 +233,35 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         
         for (String symbol : symbolToQuantity.keySet()) {
             MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
-            if (data == null) {
-                log.warn("Null market data encountered for symbol: {}", symbol);
-                continue;
+            String priceSource = HoldingInstrumentClassifier.PRICE_LIVE;
+            if (data == null || !hasResolvablePrice(data)) {
+                EquityModel equity = equityBySymbol.get(symbol);
+                Double cost = costBasisPrice(equity);
+                if (cost == null || cost <= 0) {
+                    log.warn("Null market data and no cost basis for symbol: {}", symbol);
+                    continue;
+                }
+                data = MarketData.builder()
+                        .symbol(symbol)
+                        .lastPrice(cost)
+                        .previousClose(cost)
+                        .build();
+                priceSource = HoldingInstrumentClassifier.PRICE_COST;
+                log.info("Heatmap cost-basis fallback for symbol={} price={}", symbol, cost);
             }
 
             String sector = symbolToSector.getOrDefault(symbol, "Unknown");
+            if (HoldingInstrumentClassifier.isMissingSector(sector)) {
+                EquityModel equity = equityBySymbol.get(symbol);
+                String classified = HoldingInstrumentClassifier.resolveSector(
+                        null,
+                        symbol,
+                        equity != null ? equity.getIsin() : null,
+                        priceSource);
+                if (classified != null && !HoldingInstrumentClassifier.isMissingSector(classified)) {
+                    sector = classified;
+                }
+            }
             
             sectorMarketDataMap.computeIfAbsent(sector, k -> new ArrayList<>())
                 .add(data);
@@ -217,6 +269,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             double quantity = symbolToQuantity.getOrDefault(symbol, 0.0);
             sectorQuantitiesMap.computeIfAbsent(sector, k -> new ArrayList<>())
                 .add(quantity);
+            symbolPriceSource.put(symbol, priceSource);
                 
             double resolvedPrice = 0.0;
             if (data.getLastPrice() != null && data.getLastPrice() > 0) {
@@ -229,6 +282,116 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             totalPortfolioValue[0] += resolvedPrice * quantity;
         }
     }
+
+    private static Map<String, EquityModel> indexEquities(PortfolioModelV1 portfolio) {
+        Map<String, EquityModel> map = new HashMap<>();
+        if (portfolio == null || portfolio.getEquityModels() == null) {
+            return map;
+        }
+        for (EquityModel e : portfolio.getEquityModels()) {
+            if (e != null && e.getSymbol() != null && !e.getSymbol().isBlank()) {
+                map.put(e.getSymbol(), e);
+            }
+        }
+        return map;
+    }
+
+    /**
+     * Replace ISIN-shaped equity symbols with broker display tickers (request-scoped; not persisted).
+     */
+    static void applyDisplayTickers(PortfolioModelV1 portfolio) {
+        if (portfolio == null || portfolio.getEquityModels() == null) {
+            return;
+        }
+        for (EquityModel equity : portfolio.getEquityModels()) {
+            if (equity == null) {
+                continue;
+            }
+            String symbol = equity.getSymbol();
+            if (!TradingSymbolResolver.looksLikeIsin(symbol)) {
+                continue;
+            }
+            String suggested = HoldingInstrumentClassifier.suggestDisplayTickerFromName(equity.getName());
+            if (suggested == null || suggested.isBlank()) {
+                continue;
+            }
+            if (HoldingInstrumentClassifier.isUnsafeNameToTickerMap(equity.getName(), suggested)) {
+                continue;
+            }
+            if (equity.getIsin() == null || equity.getIsin().isBlank()) {
+                equity.setIsin(symbol.trim().toUpperCase(Locale.ROOT));
+            }
+            log.info("Heatmap display ticker {} → {} (isin={})", symbol, suggested, equity.getIsin());
+            equity.setSymbol(suggested);
+        }
+    }
+
+    /**
+     * Re-key market data from ISIN keys to display tickers after {@link #applyDisplayTickers}.
+     */
+    static Map<String, MarketData> remappedMarketData(
+            Map<String, MarketData> marketData, PortfolioModelV1 portfolio) {
+        if (marketData == null || marketData.isEmpty() || portfolio == null
+                || portfolio.getEquityModels() == null) {
+            return marketData != null ? marketData : Map.of();
+        }
+        Map<String, MarketData> out = new HashMap<>(marketData);
+        for (EquityModel equity : portfolio.getEquityModels()) {
+            if (equity == null || equity.getSymbol() == null) {
+                continue;
+            }
+            String display = equity.getSymbol();
+            if (out.containsKey(display)) {
+                continue;
+            }
+            String isin = equity.getIsin();
+            MarketData byIsin = isin != null ? AnalyticsUtils.resolveMarketData(marketData, isin) : null;
+            if (byIsin != null) {
+                out.put(display, MarketData.builder()
+                        .symbol(display)
+                        .lastPrice(byIsin.getLastPrice())
+                        .previousClose(byIsin.getPreviousClose())
+                        .ohlc(byIsin.getOhlc())
+                        .build());
+            }
+        }
+        return out;
+    }
+
+    private static String usableEquitySector(String sector) {
+        if (HoldingInstrumentClassifier.isMissingSector(sector)) {
+            return null;
+        }
+        return sector.trim();
+    }
+
+    private static boolean hasResolvablePrice(MarketData data) {
+        if (data == null) {
+            return false;
+        }
+        if (data.getLastPrice() != null && data.getLastPrice() > 0) {
+            return true;
+        }
+        if (data.getOhlc() != null && data.getOhlc().getClose() > 0) {
+            return true;
+        }
+        return data.getPreviousClose() != null && data.getPreviousClose() > 0;
+    }
+
+    private static Double costBasisPrice(EquityModel equity) {
+        if (equity == null) {
+            return null;
+        }
+        if (equity.getAvgBuyingPrice() != null && equity.getAvgBuyingPrice() > 0) {
+            return equity.getAvgBuyingPrice();
+        }
+        if (equity.getInvestmentValue() != null
+                && equity.getQuantity() != null
+                && equity.getQuantity() > 0) {
+            return equity.getInvestmentValue() / equity.getQuantity();
+        }
+        return null;
+    }
     
     
     
@@ -240,6 +403,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             Map<String, List<Double>> sectorQuantitiesMap,
             Map<String, Double> symbolToQuantity,
             Map<String, Double> symbolToChangePercent,
+            Map<String, String> symbolPriceSource,
             double totalPortfolioValue) {
         
         log.debug("Calculating performance metrics for {} sectors", sectorMarketDataMap.size());
@@ -284,6 +448,14 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 symbols,
                 totalPortfolioValue,
                 symbolToChangePercent);
+
+            if (sectorPerformance.getStocks() != null && symbolPriceSource != null) {
+                for (Heatmap.StockDetail stock : sectorPerformance.getStocks()) {
+                    if (stock != null && stock.getSymbol() != null) {
+                        stock.setPriceSource(symbolPriceSource.get(stock.getSymbol()));
+                    }
+                }
+            }
             
             sectorPerformances.add(sectorPerformance);
         }

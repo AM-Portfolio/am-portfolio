@@ -28,7 +28,7 @@ public class StockPriceHistoryMongoService {
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
     /** 
-     * Save 1 tick per symbol per minute. Idempotent due to compound unique index. 
+     * Save 1 tick per symbol per minute (wall-clock now). Idempotent due to compound unique index. 
      */
     public void saveAll(List<StockPriceDocument> prices) {
         long minuteEpoch = Instant.now().atZone(IST)
@@ -45,15 +45,56 @@ public class StockPriceHistoryMongoService {
                 .build())
             .collect(Collectors.toList());
 
-        if (!docs.isEmpty()) {
-            try {
-                historyRepo.saveAll(docs);
-            } catch (DuplicateKeyException e) {
-                // Already have a tick for this minute — safe to ignore
-                log.debug("[PriceHistory] Duplicate tick for this minute, ignoring.");
-            } catch (Exception e) {
-                log.warn("[PriceHistory] Failed to save history tick: {}", e.getMessage());
-            }
+        persistTicks(docs);
+    }
+
+    /**
+     * Upsert session ticks with explicit timestamps (candle backfill / warm job).
+     * Idempotent via id {@code symbol_timestampMinute} and unique (symbol, timestampMinute).
+     *
+     * @return number of documents attempted (after filter)
+     */
+    public int saveSessionTicks(List<StockPriceHistoryDocument> ticks) {
+        if (ticks == null || ticks.isEmpty()) {
+            return 0;
+        }
+        Date now = new Date();
+        List<StockPriceHistoryDocument> docs = ticks.stream()
+            .filter(t -> t != null
+                    && t.getSymbol() != null && !t.getSymbol().isBlank()
+                    && t.getPrice() != null && t.getPrice() > 0
+                    && t.getTimestampMinute() != null && t.getTimestampMinute() > 0)
+            .map(t -> {
+                String symbol = t.getSymbol().trim();
+                long minute = Instant.ofEpochMilli(t.getTimestampMinute())
+                        .atZone(IST)
+                        .truncatedTo(ChronoUnit.MINUTES)
+                        .toInstant()
+                        .toEpochMilli();
+                return StockPriceHistoryDocument.builder()
+                        .id(symbol + "_" + minute)
+                        .symbol(symbol)
+                        .price(t.getPrice())
+                        .timestampMinute(minute)
+                        .createdAt(t.getCreatedAt() != null ? t.getCreatedAt() : now)
+                        .build();
+            })
+            .collect(Collectors.toList());
+        persistTicks(docs);
+        return docs.size();
+    }
+
+    private void persistTicks(List<StockPriceHistoryDocument> docs) {
+        if (docs.isEmpty()) {
+            return;
+        }
+        try {
+            historyRepo.saveAll(docs);
+        } catch (DuplicateKeyException e) {
+            // Already have a tick for this minute — safe to ignore
+            log.debug("[PriceHistory] Duplicate tick for this minute, ignoring.");
+        } catch (Exception e) {
+            log.warn("[PriceHistory] Failed to save history tick: {}", e.getMessage());
         }
     }
 

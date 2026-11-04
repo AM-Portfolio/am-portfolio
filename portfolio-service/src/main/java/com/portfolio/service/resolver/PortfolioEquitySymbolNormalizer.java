@@ -3,6 +3,7 @@ package com.portfolio.service.resolver;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.portfolio.marketdata.client.MarketDataApiClient;
+import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
 import com.portfolio.model.resolver.TradingSymbolResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -88,16 +89,34 @@ public class PortfolioEquitySymbolNormalizer {
             resolved = tradingSymbolResolver.resolveTradingSymbol(equity.getSymbol(), equity.getIsin());
         }
 
-        // NAME search when still unresolved / ISIN-shaped (no ISIN or MD miss on ISIN).
+        // COMPANY_NAME search when still unresolved / ISIN-shaped (no ISIN or MD miss on ISIN).
         if ((resolved == null || resolved.isBlank() || TradingSymbolResolver.looksLikeIsin(resolved))
                 && equity.getName() != null && !equity.getName().isBlank()) {
             String byName = lookupByName(equity.getName());
-            if (byName != null) {
+            if (byName != null && !HoldingInstrumentClassifier.isUnsafeNameToTickerMap(equity.getName(), byName)) {
                 resolved = byName;
+            } else if (byName != null) {
+                log.warn("Rejected unsafe name→ticker map name={} ticker={}", equity.getName(), byName);
+            }
+        }
+
+        // Broker display-name compact ticker only when there is no ISIN to preserve.
+        // Never overwrite an ISIN-shaped symbol with a compacted company name
+        // (transient MD miss would persist RELIANCEINDUSTRIES and skip heal).
+        if ((resolved == null || resolved.isBlank() || TradingSymbolResolver.looksLikeIsin(resolved))
+                && equity.getName() != null && !equity.getName().isBlank()
+                && isinKey == null) {
+            String fromBrokerName = HoldingInstrumentClassifier.suggestDisplayTickerFromName(equity.getName());
+            if (fromBrokerName != null) {
+                resolved = fromBrokerName;
             }
         }
 
         if (resolved == null || resolved.isBlank() || TradingSymbolResolver.looksLikeIsin(resolved)) {
+            return;
+        }
+        if (HoldingInstrumentClassifier.isUnsafeNameToTickerMap(equity.getName(), resolved)) {
+            log.warn("Rejected unsafe resolved ticker name={} ticker={}", equity.getName(), resolved);
             return;
         }
 
@@ -116,7 +135,7 @@ public class PortfolioEquitySymbolNormalizer {
         try {
             String query = name.trim();
             Map response = marketDataApiClient
-                    .resolveTickersByQueries(List.of(query), List.of("NAME"))
+                    .resolveTickersByQueries(List.of(query), List.of("COMPANY_NAME"))
                     .block();
             if (response == null || response.isEmpty()) {
                 return null;
@@ -139,7 +158,7 @@ public class PortfolioEquitySymbolNormalizer {
             }
             return t;
         } catch (Exception e) {
-            log.warn("NAME lookup failed for {}: {}", name, e.getMessage());
+            log.warn("COMPANY_NAME lookup failed for {}: {}", name, e.getMessage());
             return null;
         }
     }

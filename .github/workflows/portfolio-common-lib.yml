@@ -17,7 +17,9 @@ jobs:
     permissions:
       contents: write
       packages: write
-    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@main
+    # Pin until am-pipelines#fix/publish-library-checkout-token lands on main
+    # (GHCR_TOKEN-as-checkout-token broke git fetch). Revert to @main after merge.
+    uses: AM-Portfolio/am-pipelines/.github/workflows/publish-library.yml@fix/publish-library-checkout-token
     with:
       language: "java"
       working_directory: "am-common-data"

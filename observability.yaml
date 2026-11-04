@@ -22,3 +22,9 @@ signals:
     - portfolio_users_total
     - portfolio_portfolios_total
     - portfolio_holdings_total
+    - portfolio_update_events_received
+    - portfolio_update_events_created
+    - portfolio_update_events_passed
+    - portfolio_update_events_failed
+    - portfolio_history_jobs_passed
+    - portfolio_history_jobs_failed

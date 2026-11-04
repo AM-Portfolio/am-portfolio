@@ -9,7 +9,11 @@ import com.portfolio.redis.service.ActiveMarketSymbolPublisher;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
 import com.portfolio.redis.service.PortfolioIntelligenceRedisService;
 import com.portfolio.redis.service.PortfolioSummaryRedisService;
+import com.am.common.amcommondata.service.PortfolioSnapshotService;
+import com.portfolio.service.intraday.IntradayCandleWarmService;
+import com.portfolio.service.portfolio.PortfolioIntradayService;
 import com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer;
+import com.portfolio.service.scheduler.PortfolioHistoryJobService;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,6 +46,10 @@ class PortfolioUpdateConsumerDeleteTest {
     @Mock private PortfolioEquitySymbolNormalizer equitySymbolNormalizer;
     @Mock private StringRedisTemplate stringRedisTemplate;
     @Mock private ValueOperations<String, String> valueOperations;
+    @Mock private PortfolioHistoryJobService portfolioHistoryJobService;
+    @Mock private PortfolioIntradayService portfolioIntradayService;
+    @Mock private IntradayCandleWarmService intradayCandleWarmService;
+    @Mock private PortfolioSnapshotService portfolioSnapshotService;
     @Mock private Acknowledgment acknowledgment;
 
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
@@ -63,7 +71,11 @@ class PortfolioUpdateConsumerDeleteTest {
                 activeMarketSymbolPublisher,
                 intelligenceRedisService,
                 equitySymbolNormalizer,
-                stringRedisTemplate);
+                stringRedisTemplate,
+                portfolioHistoryJobService,
+                portfolioIntradayService,
+                intradayCandleWarmService,
+                portfolioSnapshotService);
         c.init();
         return c;
     }
