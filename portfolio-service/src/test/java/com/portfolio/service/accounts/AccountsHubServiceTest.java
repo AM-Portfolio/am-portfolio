@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.accounts.AccountsHubModel;
+import com.am.common.amcommondata.model.accounts.AccountsHubModel.AccountsPortfolioRow;
 import com.am.common.amcommondata.model.demat.DematAccountModel;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.family.FamilyMember;
@@ -216,5 +217,43 @@ class AccountsHubServiceTest {
         assertEquals(600.0, hub.getStats().getFamilyTotalValue(), 0.01);
         assertEquals(1000.0, hub.getStats().getHouseholdTotalValue(), 0.01);
         assertEquals(60.0, hub.getStats().getFamilySharePct(), 0.01);
+        assertEquals(1, hub.getFamilyMembers().size());
+        assertEquals(600.0, hub.getFamilyMembers().get(0).getTotalValue(), 0.01);
+    }
+
+    @Test
+    void sumValueForMemberId_sumsTaggedDematBrokerAndNps() {
+        var demat = List.of(
+                DematAccountModel.builder()
+                        .accountNo("D1")
+                        .familyMemberId("fm1")
+                        .holdingValue(100.0)
+                        .build(),
+                DematAccountModel.builder()
+                        .accountNo("P1")
+                        .holdingValue(50.0)
+                        .build());
+        var rows = List.of(
+                AccountsPortfolioRow.builder()
+                        .displayName("Z")
+                        .familyMemberId("fm1")
+                        .current(200.0)
+                        .brokerType("ZERODHA")
+                        .build());
+        var nps = List.of(
+                NpsDocumentMeta.builder()
+                        .pran("2")
+                        .familyMemberId("fm1")
+                        .totalValue(25.0)
+                        .build());
+
+        assertEquals(
+                325.0,
+                AccountsHubService.sumValueForMemberId(demat, rows, nps, "fm1"),
+                0.01);
+        assertEquals(
+                0.0,
+                AccountsHubService.sumValueForMemberId(demat, rows, nps, "other"),
+                0.01);
     }
 }

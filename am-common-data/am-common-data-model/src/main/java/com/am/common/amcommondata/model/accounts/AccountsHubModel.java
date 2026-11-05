@@ -53,8 +53,10 @@ public class AccountsHubModel {
         private Integer dematAccountCount;
         private Boolean npsLinked;
         private Integer brokerPortfolioCount;
-        /** Annualized overall XIRR % across non-paper broker books; null when insufficient cashflows. */
+        /** Annualized overall XIRR % across primary non-paper broker books; null when insufficient cashflows. */
         private Double overallXirrPct;
+        /** Annualized XIRR % across all household (primary + family) non-paper broker books. */
+        private Double householdXirrPct;
         /** Sum of primary-persona demat/MF/NPS/broker values. */
         private Double primaryTotalValue;
         /** Sum of all family-persona demat/MF/NPS/broker values. */
@@ -96,5 +98,9 @@ public class AccountsHubModel {
         private String email;
         private Integer portfolioCount;
         private String source;
+        /** Sum of this member's demat/MF/NPS/broker values. */
+        private Double totalValue;
+        /** Annualized XIRR % for this member's non-paper books; null when insufficient cashflows. */
+        private Double xirrPct;
     }
 }

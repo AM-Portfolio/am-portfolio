@@ -91,16 +91,28 @@ public class AccountsHubService {
                 .filter(r -> r.getCurrent() != null && r.getCurrent() > 0)
                 .count();
 
+        List<PortfolioModelV1> primaryXirrBooks = xirrBooks.stream()
+                .filter(p -> p.getFamilyMemberId() == null || p.getFamilyMemberId().isBlank())
+                .toList();
+
         List<FamilyMember> members = familyMemberService.listForOwner(userId);
         List<FamilyMemberSummary> familySummaries = members.stream()
-                .map(m -> FamilyMemberSummary.builder()
-                        .id(m.getId())
-                        .name(m.getDisplayName())
-                        .email(m.getEmail())
-                        .source(m.getSource())
-                        // portfolioCount = non-MF demat accounts for that persona's CAS.
-                        .portfolioCount(countDematForMember(demat, m.getId()))
-                        .build())
+                .map(m -> {
+                    String mid = m.getId();
+                    List<PortfolioModelV1> memberBooks = xirrBooks.stream()
+                            .filter(p -> mid != null && mid.equals(p.getFamilyMemberId()))
+                            .toList();
+                    return FamilyMemberSummary.builder()
+                            .id(mid)
+                            .name(m.getDisplayName())
+                            .email(m.getEmail())
+                            .source(m.getSource())
+                            // portfolioCount = non-MF demat accounts for that persona's CAS.
+                            .portfolioCount(countDematForMember(demat, mid))
+                            .totalValue(round2(sumValueForMemberId(demat, rows, npsAccounts, mid)))
+                            .xirrPct(computeOverallXirr(memberBooks))
+                            .build();
+                })
                 .toList();
 
         double primaryTotal = sumPersonaValue(demat, rows, npsAccounts, true);
@@ -116,7 +128,8 @@ public class AccountsHubService {
                         .mfFolioCount(mfCount)
                         .npsLinked(nps != null && nps.getPran() != null && !nps.getPran().isBlank())
                         .brokerPortfolioCount(brokerCount)
-                        .overallXirrPct(computeOverallXirr(xirrBooks))
+                        .overallXirrPct(computeOverallXirr(primaryXirrBooks))
+                        .householdXirrPct(computeOverallXirr(xirrBooks))
                         .primaryTotalValue(round2(primaryTotal))
                         .familyTotalValue(round2(familyTotal))
                         .householdTotalValue(round2(household))
@@ -193,6 +206,52 @@ public class AccountsHubService {
                 .filter(a -> a != null && familyMemberId.equals(a.getFamilyMemberId()))
                 .filter(a -> !"mf".equalsIgnoreCase(nullToEmpty(a.getAccountType())))
                 .count();
+    }
+
+    /** Sum demat + broker rows + NPS for one soft-family member id. */
+    static double sumValueForMemberId(
+            List<DematAccountModel> demat,
+            List<AccountsPortfolioRow> rows,
+            List<NpsDocumentMeta> npsAccounts,
+            String familyMemberId) {
+        if (familyMemberId == null || familyMemberId.isBlank()) {
+            return 0.0;
+        }
+        double sum = 0.0;
+        if (demat != null) {
+            for (DematAccountModel a : demat) {
+                if (a == null || !familyMemberId.equals(a.getFamilyMemberId())) {
+                    continue;
+                }
+                if (a.getHoldingValue() != null && a.getHoldingValue() > 0) {
+                    sum += a.getHoldingValue();
+                }
+            }
+        }
+        if (rows != null) {
+            for (AccountsPortfolioRow r : rows) {
+                if (r == null || isPaperLike(r) || isNpsRow(r)) {
+                    continue;
+                }
+                if (!familyMemberId.equals(r.getFamilyMemberId())) {
+                    continue;
+                }
+                if (r.getCurrent() != null && r.getCurrent() > 0) {
+                    sum += r.getCurrent();
+                }
+            }
+        }
+        if (npsAccounts != null) {
+            for (NpsDocumentMeta m : npsAccounts) {
+                if (m == null || !familyMemberId.equals(m.getFamilyMemberId())) {
+                    continue;
+                }
+                if (m.getTotalValue() != null && m.getTotalValue() > 0) {
+                    sum += m.getTotalValue();
+                }
+            }
+        }
+        return sum;
     }
 
     private static Double computeOverallXirr(List<PortfolioModelV1> books) {
