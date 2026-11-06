@@ -63,12 +63,18 @@ public class PortfolioMapperv1 {
         int mfCount = mappedFunds != null ? mappedFunds.size() : 0;
         int npsCount = mappedNps != null ? mappedNps.size() : 0;
 
-        // Broker books always use broker display name (Dhan/Zerodha…). Never persist
-        // email Mongo doc ObjectIds as the portfolio name — that surfaces in the UI selector.
+        // Prefer explicit event name (short DP / Mutual Funds), then portfolioId, then broker code.
+        // Never persist opaque Mongo ObjectIds as the selector label.
         String brokerName = brokerType != null ? brokerType.getCode() : null;
-        String eventName = portfolioEvent.getPortfolioId();
+        String eventName = firstNonBlank(portfolioEvent.getName(), portfolioEvent.getPortfolioId());
         String name = looksLikeOpaqueId(eventName) ? brokerName
                 : (eventName != null && !eventName.isBlank() ? eventName : brokerName);
+        String dematBoid = null;
+        if (portfolioEvent.getDematRef() != null
+                && portfolioEvent.getDematRef().getBoid() != null
+                && !portfolioEvent.getDematRef().getBoid().isBlank()) {
+            dematBoid = portfolioEvent.getDematRef().getBoid().trim();
+        }
 
         return PortfolioModelV1.builder()
                 .id(portfolioEvent.getId())
@@ -76,6 +82,7 @@ public class PortfolioMapperv1 {
                 .owner(portfolioEvent.getUserId())
                 .familyMemberId(portfolioEvent.getFamilyMemberId())
                 .familyMemberName(portfolioEvent.getFamilyMemberName())
+                .dematBoid(dematBoid)
                 .brokerType(brokerType)
                 .fundType(FundType.DEFAULT)
                 .status("Active")
@@ -92,6 +99,16 @@ public class PortfolioMapperv1 {
                 .updatedAt(asOfTs)
                 .version(0L)
                 .build();
+    }
+
+    private static String firstNonBlank(String a, String b) {
+        if (a != null && !a.isBlank()) {
+            return a;
+        }
+        if (b != null && !b.isBlank()) {
+            return b;
+        }
+        return null;
     }
 
     private AssetModel mapNpsHolding(NPSModel n, BrokerType brokerType, LocalDateTime asOfTs) {

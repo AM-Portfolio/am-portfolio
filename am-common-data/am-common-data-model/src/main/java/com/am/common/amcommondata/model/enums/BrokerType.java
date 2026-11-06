@@ -12,6 +12,8 @@ public enum BrokerType {
     FYERS("Fyers"),
     HDFC("HDFC"),
     CDSL("CDSL"),
+    // Named CAS demat book; UI label is portfolio.name (Mirae/Finwizard), not this code.
+    CAS_DEMAT("Demat"),
     NPS("NPS");
 
     private final String brokerName;
@@ -82,6 +84,10 @@ public enum BrokerType {
 
     public boolean isCdsl() {
         return this == CDSL;
+    }
+
+    public boolean isCasDemat() {
+        return this == CAS_DEMAT;
     }
 
     public boolean isNps() {

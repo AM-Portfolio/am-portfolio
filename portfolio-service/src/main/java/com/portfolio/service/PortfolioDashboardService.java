@@ -32,10 +32,14 @@ public class PortfolioDashboardService {
      * @return the portfolio summary
      */
     public PortfolioSummaryV1 overviewPortfolio(String userId, TimeInterval interval) {
-        log.info("PortfolioDashboardService - Starting overviewPortfolio for user: {}, interval: {}", 
-            userId, interval != null ? interval.getCode() : "null");
+        return overviewPortfolio(userId, interval, null);
+    }
+
+    public PortfolioSummaryV1 overviewPortfolio(String userId, TimeInterval interval, String persona) {
+        log.info("PortfolioDashboardService - Starting overviewPortfolio for user: {}, interval: {}, persona: {}", 
+            userId, interval != null ? interval.getCode() : "null", persona);
         
-        PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, interval);
+        PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, interval, persona);
         
         log.info("PortfolioDashboardService - Completed overviewPortfolio for user: {}, found summary: {}", 
             userId, result != null ? "yes" : "no");
@@ -90,10 +94,14 @@ public class PortfolioDashboardService {
      * @return the portfolio holdings
      */
     public PortfolioHoldings getPortfolioHoldings(String userId, TimeInterval interval) {
-        log.info("PortfolioDashboardService - Starting getPortfolioHoldings for user: {}, interval: {}", 
-            userId, interval != null ? interval.getCode() : "null");
+        return getPortfolioHoldings(userId, interval, null);
+    }
+
+    public PortfolioHoldings getPortfolioHoldings(String userId, TimeInterval interval, String persona) {
+        log.info("PortfolioDashboardService - Starting getPortfolioHoldings for user: {}, interval: {}, persona: {}", 
+            userId, interval != null ? interval.getCode() : "null", persona);
         
-        PortfolioHoldings result = portfolioHoldingsService.getPortfolioHoldings(userId, interval);
+        PortfolioHoldings result = portfolioHoldingsService.getPortfolioHoldings(userId, interval, true, persona);
         
         log.info("PortfolioDashboardService - Completed getPortfolioHoldings for user: {}, found holdings: {}", 
             userId, result != null ? "yes" : "no");

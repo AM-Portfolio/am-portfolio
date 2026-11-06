@@ -39,12 +39,16 @@ public enum PortfolioKind {
 
     /**
      * Real broker book that should hide Demo: BROKER/null with a concrete {@link BrokerType}.
-     * Paper, baskets, demos, and broker-kind rows without brokerType do not qualify.
+     * Paper, baskets, demos, CDSL (CAS aggregator), and broker-kind rows without brokerType
+     * do not qualify — CDSL alone must not soft-hide Demo or empty the portfolio list.
      */
     public static boolean isRealBrokerBook(PortfolioKind kind, BrokerType brokerType) {
         if (!isBroker(kind)) {
             return false;
         }
-        return brokerType != null;
+        if (brokerType == null || brokerType.isCdsl()) {
+            return false;
+        }
+        return true;
     }
 }

@@ -571,15 +571,17 @@ public class PortfolioController {
             @Parameter(description = "Optional portfolio ID to filter results for specific portfolio") @RequestParam(required = false) String portfolioId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
-            @RequestParam(required = false) String interval) {
+            @RequestParam(required = false) String interval,
+            @Parameter(description = "All-books scope: you, household, or a family member id")
+            @RequestParam(required = false) String persona) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
 
         NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
 
 
         log.info(
-                "PortfolioController - getPortfolioSummary called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}",
-                res.userId(), res.portfolioId() != null ? res.portfolioId() : "all", page, size, interval != null ? interval : "null");
+                "PortfolioController - getPortfolioSummary called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}, Persona: {}",
+                res.userId(), res.portfolioId() != null ? res.portfolioId() : "all", page, size, interval != null ? interval : "null", persona);
 
         try {
             TimeInterval timeInterval = TimeInterval.fromCode(interval);
@@ -591,7 +593,7 @@ public class PortfolioController {
                 portfolioSummary = portfolioDashboardService.overviewPortfolio(res.userId(), res.portfolioId(), timeInterval);
             } else {
                 // Get summary for all portfolios
-                portfolioSummary = portfolioDashboardService.overviewPortfolio(res.userId(), timeInterval);
+                portfolioSummary = portfolioDashboardService.overviewPortfolio(res.userId(), timeInterval, persona);
             }
 
             if (portfolioSummary == null) {
@@ -622,7 +624,9 @@ public class PortfolioController {
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval,
             @Parameter(description = "Optional CAS asset class filter: equity|mutual_fund_demat|debt|mutual_fund_folio")
-            @RequestParam(required = false) String assetClass) {
+            @RequestParam(required = false) String assetClass,
+            @Parameter(description = "All-books scope: you, household, or a family member id")
+            @RequestParam(required = false) String persona) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
 
         NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
@@ -643,7 +647,7 @@ public class PortfolioController {
                 portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(res.userId(), res.portfolioId(), timeInterval);
             } else {
                 // Get holdings for all portfolios
-                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(res.userId(), timeInterval);
+                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(res.userId(), timeInterval, persona);
             }
 
             if (portfolioHoldings == null) {

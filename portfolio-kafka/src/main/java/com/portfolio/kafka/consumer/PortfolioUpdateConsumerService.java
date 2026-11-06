@@ -241,8 +241,22 @@ public class PortfolioUpdateConsumerService {
         }
     }
 
+    private static boolean isUnresolvedFamily(PortfolioUpdateEvent event) {
+        if (event == null || event.getIdentityMatch() == null
+                || !"FAMILY".equalsIgnoreCase(event.getIdentityMatch().trim())) {
+            return false;
+        }
+        return event.getFamilyMemberId() == null || event.getFamilyMemberId().isBlank();
+    }
+
     private void processDocumentMessage(PortfolioUpdateEvent event) {
         attachFamilyMember(event);
+        if (isUnresolvedFamily(event)) {
+            log.warn("Skipping FAMILY upsert with no family member userId={} holderEmail={} holderName={} portfolioId={} broker={}",
+                    event.getUserId(), event.getHolderEmail(), event.getHolderName(),
+                    event.getPortfolioId(), event.getBrokerType());
+            return;
+        }
         PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
         // Batch ISIN→ticker normalize (same as HTTP /sync) before persist.
         // Must not block Mongo upsert + trade fan-out if Market Data is slow/down.
@@ -256,6 +270,10 @@ public class PortfolioUpdateConsumerService {
         if (saved != null && saved.getOwner() != null) {
             String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
             portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
+            if (saved.getFamilyMemberId() != null && !saved.getFamilyMemberId().isBlank()) {
+                portfolioHoldingsRedisService.evictPortfolioHoldings(
+                        saved.getOwner(), "all:" + saved.getFamilyMemberId());
+            }
             portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
             if (portfolioId != null) {
                 portfolioIntelligenceRedisService.evict(portfolioId);
@@ -420,6 +438,10 @@ public class PortfolioUpdateConsumerService {
         if (saved != null && saved.getOwner() != null) {
             String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
             portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
+            if (saved.getFamilyMemberId() != null && !saved.getFamilyMemberId().isBlank()) {
+                portfolioHoldingsRedisService.evictPortfolioHoldings(
+                        saved.getOwner(), "all:" + saved.getFamilyMemberId());
+            }
             portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
             if (portfolioId != null) {
                 portfolioIntelligenceRedisService.evict(portfolioId);

@@ -69,4 +69,6 @@ public class PortfolioModelV1 {
     /** Soft family persona id under {@link #owner}; null = primary user. */
     private String familyMemberId;
     private String familyMemberName;
+    /** BOID for CAS_DEMAT books; null for first-class brokers. */
+    private String dematBoid;
 }

@@ -62,9 +62,10 @@ public class PortfolioAnalyticsController {
     @Operation(summary = "All-portfolios advanced analytics", operationId = "getAllPortfoliosAdvancedAnalytics")
     @PostMapping("/all/advanced")
     public ResponseEntity<AdvancedAnalyticsResponse> getAllAdvancedAnalytics(
-            @RequestBody(required = false) AdvancedAnalyticsRequest request) {
+            @RequestBody(required = false) AdvancedAnalyticsRequest request,
+            @RequestParam(required = false) String persona) {
         String userId = UserContext.getUserIdOrThrow();
-        PortfolioModelV1 merged = aggregatePortfolioLoader.loadMerged(userId);
+        PortfolioModelV1 merged = aggregatePortfolioLoader.loadMerged(userId, persona);
         request = normalizeAdvancedRequest(request, AggregatePortfolioKeys.RESPONSE_PORTFOLIO_ID);
         request.setPrefetchedPortfolio(merged);
         log.info("REST request for advanced analytics on ALL portfolios user={}", userId);
@@ -76,7 +77,7 @@ public class PortfolioAnalyticsController {
                 if (request.getTimeFrame() != null) {
                     interval = TimeInterval.fromCode(request.getTimeFrame().name());
                 }
-                PortfolioSummaryV1 summary = portfolioDashboardService.overviewPortfolio(userId, interval);
+                PortfolioSummaryV1 summary = portfolioDashboardService.overviewPortfolio(userId, interval, persona);
                 if (summary != null) {
                     summary.setMarketCapHoldings(null);
                     summary.setSectorialHoldings(null);
@@ -109,23 +110,30 @@ public class PortfolioAnalyticsController {
     @Operation(summary = "All-portfolios intelligence", operationId = "getAllPortfoliosIntelligence")
     @PostMapping("/all/intelligence")
     public ResponseEntity<PortfolioIntelligenceResponse> getAllIntelligence(
-            @RequestBody(required = false) Object ignored) {
+            @RequestBody(required = false) Object ignored,
+            @RequestParam(required = false) String persona) {
         String userId = UserContext.getUserIdOrThrow();
-        String cacheKey = AggregatePortfolioKeys.cacheKey(userId);
+        String cacheKey = AggregatePortfolioKeys.cacheKey(userId)
+                + (persona == null || persona.isBlank() ? "" : ":" + persona.trim());
         // Skip Mongo merge when Overview intel is already warm in Redis.
         var cached = portfolioIntelligenceRedisService.get(cacheKey);
         if (cached.isPresent()) {
             log.info("REST request for intelligence on ALL portfolios user={} cache=hit", userId);
-            return ResponseEntity.ok(withPortfolioWeights(userId, cached.get()));
+            return ResponseEntity.ok(withPortfolioWeights(userId, persona, cached.get()));
         }
-        PortfolioModelV1 merged = aggregatePortfolioLoader.loadMerged(userId);
+        PortfolioModelV1 merged = aggregatePortfolioLoader.loadMerged(userId, persona);
         log.info("REST request for intelligence on ALL portfolios user={} cache=miss", userId);
         return ResponseEntity.ok(
-                withPortfolioWeights(userId, portfolioIntelligenceService.intelligence(cacheKey, merged)));
+                withPortfolioWeights(userId, persona, portfolioIntelligenceService.intelligence(cacheKey, merged)));
     }
 
     private PortfolioIntelligenceResponse withPortfolioWeights(
             String userId, PortfolioIntelligenceResponse response) {
+        return withPortfolioWeights(userId, null, response);
+    }
+
+    private PortfolioIntelligenceResponse withPortfolioWeights(
+            String userId, String persona, PortfolioIntelligenceResponse response) {
         if (response == null) {
             return null;
         }
@@ -136,7 +144,7 @@ public class PortfolioAnalyticsController {
         }
         xray.setPortfolioWeights(
                 xRaySummaryBuilder.portfolioWeightsFromBookValues(
-                        aggregatePortfolioLoader.loadBrokerBookValues(userId)));
+                        aggregatePortfolioLoader.loadBrokerBookValues(userId, persona)));
         return response;
     }
 

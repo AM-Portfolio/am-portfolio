@@ -61,6 +61,7 @@ public class PortfolioMapper {
                 .owner(document.getOwner())
                 .familyMemberId(document.getFamilyMemberId())
                 .familyMemberName(document.getFamilyMemberName())
+                .dematBoid(document.getDematBoid())
                 .currency(document.getCurrency() != null ? document.getCurrency().name() : null)
                 .fundType(document.getFundType())
                 .notes(document.getNotes())
@@ -109,6 +110,7 @@ public class PortfolioMapper {
                 .owner(model.getOwner())
                 .familyMemberId(model.getFamilyMemberId())
                 .familyMemberName(model.getFamilyMemberName())
+                .dematBoid(model.getDematBoid())
                 .fundType(model.getFundType())
                 .notes(model.getNotes())
                 .equities(model.getEquityModels() != null

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -38,6 +39,9 @@ public class PortfolioHoldingsService {
 
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
     private static final long LIVE_MAX_AGE_SECONDS = 60;
+    private static final long PAINT_TTL_MS = 45_000L;
+
+    private final ConcurrentHashMap<String, PaintCache> paintCache = new ConcurrentHashMap<>();
 
     private final PortfolioService portfolioService;
     private final PortfolioHoldingsMapper portfolioHoldingsMapper;
@@ -79,14 +83,22 @@ public class PortfolioHoldingsService {
     }
 
     public PortfolioHoldings getPortfolioHoldings(String userId, TimeInterval interval, boolean enrich) {
-        log.info("Starting getPortfolioHoldings - User: {}, Interval: {}, Enrich: {}", userId,
-                interval != null ? interval.getCode() : "null", enrich);
+        return getPortfolioHoldings(userId, interval, enrich, null);
+    }
+
+    public PortfolioHoldings getPortfolioHoldings(String userId, TimeInterval interval, boolean enrich, String persona) {
+        String cacheId = com.am.common.amcommondata.model.family.HoldingsPersona.cacheId(persona);
+        log.info("Starting getPortfolioHoldings - User: {}, Interval: {}, Enrich: {}, Persona: {}", userId,
+                interval != null ? interval.getCode() : "null", enrich, persona);
 
         if (enrich) {
-            Optional<PortfolioHoldings> cachedHoldings = getCachedHoldings(userId, interval, null);
-            // ISIN-shaped symbols mean heal never ran (or MD was empty); skip cache so heal can fix.
-            if (cachedHoldings.isPresent() && !hasIsinShapedSymbols(cachedHoldings.get())) {
-                return overlayAndReturn(cachedHoldings.get());
+            PortfolioHoldings painted = freshPaint(userId, interval, cacheId);
+            if (painted != null) {
+                return painted;
+            }
+            Optional<PortfolioHoldings> cachedHoldings = getCachedHoldings(userId, interval, cacheId);
+            if (cachedHoldings.isPresent()) {
+                return serveCachedHoldings(userId, interval, cacheId, cachedHoldings.get());
             }
         }
 
@@ -98,10 +110,11 @@ public class PortfolioHoldingsService {
         }
         portfolios = portfolios.stream()
                 .filter(p -> PortfolioKind.isBroker(p.getPortfolioKind()))
+                .filter(p -> com.am.common.amcommondata.model.family.HoldingsPersona.matches(p.getFamilyMemberId(), persona))
                 .collect(Collectors.toList());
-        log.info("Found {} BROKER portfolios for user All-view: {}", portfolios.size(), userId);
+        log.info("Found {} BROKER portfolios for user All-view: {} persona={}", portfolios.size(), userId, persona);
 
-        return buildPortfolioHoldings(portfolios, userId, null, interval, enrich);
+        return buildPortfolioHoldings(portfolios, userId, cacheId, interval, enrich);
     }
 
     public PortfolioHoldings getPortfolioHoldings(String userId, String portfolioId, TimeInterval interval) {
@@ -119,17 +132,19 @@ public class PortfolioHoldingsService {
 
         // Always prefer cache. Discover/basket (enrich=false) needs structure + ISINs only —
         // skip price overlay so the request path stays sub-second.
+        if (enrich) {
+            PortfolioHoldings painted = freshPaint(userId, interval, portfolioId);
+            if (painted != null) {
+                return painted;
+            }
+        }
         Optional<PortfolioHoldings> cachedHoldings = getCachedHoldings(userId, interval, portfolioId);
         if (cachedHoldings.isPresent()) {
-            if (enrich) {
-                if (!hasIsinShapedSymbols(cachedHoldings.get())) {
-                    return overlayAndReturn(cachedHoldings.get());
-                }
-                log.info("Bypassing holdings cache for portfolio {} — ISIN-shaped symbols need heal", portfolioId);
-            } else {
+            if (!enrich) {
                 log.info("Serving cached holdings structure (no price overlay) for portfolio {}", portfolioId);
                 return cachedHoldings.get();
             }
+            return serveCachedHoldings(userId, interval, portfolioId, cachedHoldings.get());
         }
 
         log.info("Cache miss for specific portfolio holdings - User: {}, Portfolio: {}", userId, portfolioId);
@@ -157,6 +172,19 @@ public class PortfolioHoldingsService {
         return buildPortfolioHoldings(List.of(portfolio), userId, portfolioId, interval, enrich);
     }
 
+    private static boolean sectorMissing(EquityHoldings h) {
+        if (h == null) {
+            return false;
+        }
+        String sector = h.getSector();
+        if (sector == null) {
+            return false;
+        }
+        return sector.isBlank()
+                || "-".equals(sector)
+                || "Unknown".equalsIgnoreCase(sector);
+    }
+
     /** True when any equity holding still uses an ISIN as its trading symbol. */
     private static boolean hasIsinShapedSymbols(PortfolioHoldings holdings) {
         if (holdings == null || holdings.getEquityHoldings() == null) {
@@ -166,17 +194,36 @@ public class PortfolioHoldingsService {
                 .anyMatch(h -> h != null && TradingSymbolResolver.looksLikeIsin(h.getSymbol()));
     }
 
-    private PortfolioHoldings overlayAndReturn(PortfolioHoldings cached) {
+    /**
+     * An unresolved listing (ISIN still the symbol) must not throw away the cache.
+     * Heal runs in the background at most every 15 minutes. The response reprices
+     * the book that is already stored.
+     */
+    private PortfolioHoldings serveCachedHoldings(String userId, TimeInterval interval, String portfolioId,
+            PortfolioHoldings cached) {
+        PortfolioHoldings painted = freshPaint(userId, interval, portfolioId);
+        if (painted != null) {
+            return painted;
+        }
+        if (hasIsinShapedSymbols(cached)) {
+            LocalDateTime last = cached.getLastUpdated();
+            if (last == null || last.isBefore(LocalDateTime.now().minusMinutes(15))) {
+                triggerAsyncStructureRebuild(userId, interval, portfolioId);
+            }
+            log.info("Unresolved ISIN kept; overlaying cached holdings user={} portfolio={}", userId, portfolioId);
+        }
+        return overlayAndReturn(userId, interval, portfolioId, cached);
+    }
+
+    private PortfolioHoldings overlayAndReturn(String userId, TimeInterval interval, String portfolioId,
+            PortfolioHoldings cached) {
         List<EquityHoldings> list = cached.getEquityHoldings();
         if (list != null && !list.isEmpty()) {
             try {
-                // Re-run full enrich when any sector is missing so X-Ray/holdings
-                // don't stay on "—" after a cold MD miss was cached.
+                // A stored "Unknown" or "-" on a listed ticker still needs a sector lookup.
+                // Null sector and unresolved ISINs stay on the price overlay.
                 boolean needsSectorEnrich = list.stream().anyMatch(h ->
-                        h.getSector() == null
-                                || h.getSector().isBlank()
-                                || "-".equals(h.getSector())
-                                || "Unknown".equalsIgnoreCase(h.getSector()));
+                        sectorMissing(h) && !TradingSymbolResolver.looksLikeIsin(h.getSymbol()));
                 if (needsSectorEnrich) {
                     list = portfolioCalculator.enrichHoldings(list);
                 } else {
@@ -189,10 +236,35 @@ public class PortfolioHoldingsService {
             }
         }
         stampFreshness(cached, "TICK");
+        rememberPaint(userId, interval, portfolioId, cached);
         log.info("Serving holdings with price overlay asOf={} freshness={}",
                 cached.getAsOf(), cached.getPriceFreshness());
         return cached;
     }
+
+    private PortfolioHoldings freshPaint(String userId, TimeInterval interval, String portfolioId) {
+        PaintCache hit = paintCache.get(paintKey(userId, interval, portfolioId));
+        if (hit == null || hit.expiresAtMs() <= System.currentTimeMillis()) {
+            return null;
+        }
+        return hit.holdings();
+    }
+
+    private void rememberPaint(String userId, TimeInterval interval, String portfolioId, PortfolioHoldings holdings) {
+        if (holdings == null) {
+            return;
+        }
+        paintCache.put(paintKey(userId, interval, portfolioId),
+                new PaintCache(holdings, System.currentTimeMillis() + PAINT_TTL_MS));
+    }
+
+    private static String paintKey(String userId, TimeInterval interval, String portfolioId) {
+        String intervalCode = interval != null ? interval.getCode() : "all";
+        String book = portfolioId == null || portfolioId.isBlank() ? "all" : portfolioId;
+        return userId + "|" + intervalCode + "|" + book;
+    }
+
+    private record PaintCache(PortfolioHoldings holdings, long expiresAtMs) {}
 
     private void stampFreshness(PortfolioHoldings holdings, String priceSource) {
         LocalDateTime now = LocalDateTime.now(IST);
@@ -299,6 +371,7 @@ public class PortfolioHoldingsService {
             } else {
                 log.warn("Skipping cache update for user {} — only {}/{} priced", userId, priced, total);
             }
+            rememberPaint(userId, interval, portfolioId, portfolioHoldings);
         }
 
         return portfolioHoldings;
@@ -414,7 +487,10 @@ public class PortfolioHoldingsService {
         CompletableFuture.runAsync(() -> {
             try {
                 log.info("Async holdings cold rebuild for user: {}", userId);
-                if (portfolioId != null && !portfolioId.isBlank()) {
+                if (portfolioId != null && portfolioId.startsWith("all:")) {
+                    String persona = com.am.common.amcommondata.model.family.HoldingsPersona.personaFromCacheId(portfolioId);
+                    getPortfolioHoldings(userId, interval, true, persona);
+                } else if (portfolioId != null && !portfolioId.isBlank()) {
                     UUID id = UUID.fromString(portfolioId);
                     PortfolioModelV1 p = portfolioService.getPortfolioById(id);
                     if (p != null && userId.equals(p.getOwner())) {

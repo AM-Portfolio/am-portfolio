@@ -129,9 +129,11 @@ private final RedisTemplate<String, PortfolioHoldings> portfolioHoldingsRedisTem
                 portfolioHoldingsRedisTemplate.delete(key);
                 log.debug("Evicted portfolio holdings cache for key: {}", key);
                 
-                // Also clear the "all" portfolios cache since it includes this one
+                // Also clear the "all" portfolios cache since it includes this one.
+                // Scoped keys (you / family member) must not keep serving a mixed book.
                 String allKey = buildKey(userId, interval, null);
                 portfolioHoldingsRedisTemplate.delete(allKey);
+                portfolioHoldingsRedisTemplate.delete(buildKey(userId, interval, "all:you"));
                 log.debug("Evicted 'all' portfolio holdings cache for key: {}", allKey);
             }
         } catch (Exception e) {

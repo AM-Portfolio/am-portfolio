@@ -17,6 +17,11 @@ public interface PortfolioDocumentRepository extends BaseRepository<PortfolioDoc
     Optional<PortfolioDocument> findById(String id);
     List<PortfolioDocument> findByOwnerAndBrokerType(String owner, com.am.common.amcommondata.model.enums.BrokerType brokerType);
 
+    List<PortfolioDocument> findByOwnerAndBrokerTypeAndDematBoid(
+            String owner,
+            com.am.common.amcommondata.model.enums.BrokerType brokerType,
+            String dematBoid);
+
     List<PortfolioDocument> findByOwnerAndFamilyMemberId(String owner, String familyMemberId);
 
     List<PortfolioDocument> findByOwnerAndPortfolioKind(

@@ -95,6 +95,27 @@ class AggregatePortfolioFactoryTest {
     }
 
     @Test
+    void skipsCdslWhenNamedBooksExist_avoidsDoubleCount() {
+        PortfolioModelV1 groww = broker("Groww", BrokerType.GROWW, equity("IDEA", 10, 1.0));
+        PortfolioModelV1 mirae = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .name("Mirae")
+                .owner("user-1")
+                .brokerType(BrokerType.CAS_DEMAT)
+                .dematBoid("12088700XXXX")
+                .portfolioKind(PortfolioKind.BROKER)
+                .equityModels(List.of(equity("IDEA", 10, 1.0)))
+                .build();
+        PortfolioModelV1 staleCdsl = broker("CDSL CAS", BrokerType.CDSL, equity("IDEA", 10, 1.0));
+
+        PortfolioModelV1 merged = factory.mergeBrokerBooks("user-1", List.of(groww, mirae, staleCdsl));
+
+        assertEquals(1, merged.getEquityModels().size());
+        assertEquals("IDEA", merged.getEquityModels().get(0).getSymbol());
+        assertEquals(20.0, merged.getEquityModels().get(0).getQuantity(), 1e-9);
+    }
+
+    @Test
     void brokerBookValuesSkipsZeroCurrent() {
         PortfolioModelV1 zero = PortfolioModelV1.builder()
                 .id(UUID.randomUUID())
@@ -117,6 +138,47 @@ class AggregatePortfolioFactoryTest {
         assertEquals(1, values.size());
         assertEquals(100_000.0, values.get("Dhan"), 1e-9);
         assertTrue(!values.containsKey("Zerodha"));
+    }
+
+    @Test
+    void brokerBookValuesUsesLineMarksWhenSavedTotalIsZero() {
+        EquityModel line = equity("TITAN", 10, 100.0);
+        line.setCurrentValue(930_000.0);
+        PortfolioModelV1 zerodha = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .name("Zerodha")
+                .owner("user-1")
+                .brokerType(BrokerType.ZERODHA)
+                .portfolioKind(PortfolioKind.BROKER)
+                .totalValue(0.0)
+                .equityModels(List.of(line))
+                .build();
+        var values = AggregatePortfolioFactory.brokerBookValues(List.of(zerodha));
+        assertEquals(930_000.0, values.get("Zerodha"), 1e-9);
+    }
+
+    @Test
+    void brokerBookValuesSplitsDuplicateNamesByOwner() {
+        PortfolioModelV1 yours = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .name("Mirae")
+                .owner("user-1")
+                .brokerType(BrokerType.CAS_DEMAT)
+                .portfolioKind(PortfolioKind.BROKER)
+                .totalValue(1_000.0)
+                .build();
+        PortfolioModelV1 family = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .name("Mirae")
+                .owner("user-1")
+                .familyMemberName("Priyanshu")
+                .brokerType(BrokerType.CAS_DEMAT)
+                .portfolioKind(PortfolioKind.BROKER)
+                .totalValue(2_000.0)
+                .build();
+        var values = AggregatePortfolioFactory.brokerBookValues(List.of(yours, family));
+        assertEquals(1_000.0, values.get("Mirae (You)"), 1e-9);
+        assertEquals(2_000.0, values.get("Mirae (Priyanshu)"), 1e-9);
     }
 
     private static PortfolioModelV1 broker(String name, BrokerType type, EquityModel... equities) {

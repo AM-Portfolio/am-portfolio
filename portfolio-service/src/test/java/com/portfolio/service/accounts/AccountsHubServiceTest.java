@@ -156,6 +156,30 @@ class AccountsHubServiceTest {
                         .brokerType(BrokerType.ZERODHA)
                         .familyMemberId("fm1")
                         .totalValue(900000.0)
+                        .build(),
+                PortfolioModelV1.builder()
+                        .id(UUID.randomUUID())
+                        .name("Mirae")
+                        .brokerType(BrokerType.CAS_DEMAT)
+                        .dematBoid("1200000000000001")
+                        .familyMemberId("fm1")
+                        .totalValue(10.0)
+                        .build(),
+                PortfolioModelV1.builder()
+                        .id(UUID.randomUUID())
+                        .name("Indstocks")
+                        .brokerType(BrokerType.CAS_DEMAT)
+                        .dematBoid("1200000000000002")
+                        .familyMemberId("fm1")
+                        .totalValue(20.0)
+                        .build(),
+                PortfolioModelV1.builder()
+                        .id(UUID.randomUUID())
+                        .name("Mutual Funds")
+                        .brokerType(BrokerType.CAS_DEMAT)
+                        .dematBoid("mf:cas")
+                        .familyMemberId("fm1")
+                        .totalValue(30.0)
                         .build()));
         when(familyMemberService.listForOwner("u1")).thenReturn(List.of(
                 FamilyMember.builder()
@@ -166,9 +190,9 @@ class AccountsHubServiceTest {
                         .build()));
 
         AccountsHubModel hub = accountsHubService.hubForUser("u1");
-        assertEquals(1, hub.getPortfolios().size());
+        assertEquals(4, hub.getPortfolios().size());
         assertEquals(1, hub.getFamilyMembers().size());
-        assertEquals(3, hub.getFamilyMembers().get(0).getPortfolioCount());
+        assertEquals(2, hub.getFamilyMembers().get(0).getPortfolioCount());
     }
 
     @Test
@@ -211,14 +235,12 @@ class AccountsHubServiceTest {
                 FamilyMember.builder().id("fm1").displayName("Priyanshu").build()));
 
         AccountsHubModel hub = accountsHubService.hubForUser("u1");
-        // primary: demat 100 + nps 100 + broker 200 = 400
-        // family: demat 300 + nps 100 + broker 200 = 600
-        assertEquals(400.0, hub.getStats().getPrimaryTotalValue(), 0.01);
-        assertEquals(600.0, hub.getStats().getFamilyTotalValue(), 0.01);
-        assertEquals(1000.0, hub.getStats().getHouseholdTotalValue(), 0.01);
-        assertEquals(60.0, hub.getStats().getFamilySharePct(), 0.01);
+        assertEquals(300.0, hub.getStats().getPrimaryTotalValue(), 0.01);
+        assertEquals(300.0, hub.getStats().getFamilyTotalValue(), 0.01);
+        assertEquals(600.0, hub.getStats().getHouseholdTotalValue(), 0.01);
+        assertEquals(50.0, hub.getStats().getFamilySharePct(), 0.01);
         assertEquals(1, hub.getFamilyMembers().size());
-        assertEquals(600.0, hub.getFamilyMembers().get(0).getTotalValue(), 0.01);
+        assertEquals(300.0, hub.getFamilyMembers().get(0).getTotalValue(), 0.01);
     }
 
     @Test
@@ -248,8 +270,19 @@ class AccountsHubServiceTest {
                         .build());
 
         assertEquals(
-                325.0,
+                225.0,
                 AccountsHubService.sumValueForMemberId(demat, rows, nps, "fm1"),
+                0.01);
+        var zeroBooks = List.of(
+                AccountsPortfolioRow.builder()
+                        .displayName("Mirae")
+                        .familyMemberId("fm1")
+                        .current(0.0)
+                        .brokerType("CAS_DEMAT")
+                        .build());
+        assertEquals(
+                125.0,
+                AccountsHubService.sumValueForMemberId(demat, zeroBooks, nps, "fm1"),
                 0.01);
         assertEquals(
                 0.0,

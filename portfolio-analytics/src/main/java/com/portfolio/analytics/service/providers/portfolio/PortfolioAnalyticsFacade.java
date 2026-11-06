@@ -332,25 +332,44 @@ public class PortfolioAnalyticsFacade {
                         if (eq == null || eq.getQuantity() == null || eq.getQuantity() <= 0) continue;
                         activeCount++;
                         double qty = eq.getQuantity();
-                        double cost = (eq.getAvgBuyingPrice() != null ? eq.getAvgBuyingPrice() : 0.0) * qty;
-                        totalInvested += cost;
+                        Double avg = eq.getAvgBuyingPrice();
+                        boolean costKnown = avg != null && avg > 0;
+                        double cost = costKnown ? avg * qty : 0.0;
+                        if (!costKnown
+                                && eq.getInvestmentValue() != null
+                                && eq.getInvestmentValue() > 0) {
+                            cost = eq.getInvestmentValue();
+                            costKnown = true;
+                        }
+                        if (costKnown) {
+                            totalInvested += cost;
+                        }
 
                         String sym = com.portfolio.model.util.SymbolResolver.normalize(eq.getSymbol());
                         MarketData md = mdMap != null ? mdMap.get(sym) : null;
-                        double ltp = (md != null && md.getLastPrice() != null && md.getLastPrice() > 0)
-                            ? md.getLastPrice()
-                            : (eq.getAvgBuyingPrice() != null ? eq.getAvgBuyingPrice() : 0.0);
+                        double ltp = 0.0;
+                        if (md != null && md.getLastPrice() != null && md.getLastPrice() > 0) {
+                            ltp = md.getLastPrice();
+                        } else if (eq.getImportMarkPrice() != null && eq.getImportMarkPrice() > 0) {
+                            ltp = eq.getImportMarkPrice();
+                        } else if (eq.getCurrentPrice() != null && eq.getCurrentPrice() > 0) {
+                            ltp = eq.getCurrentPrice();
+                        } else if (avg != null && avg > 0) {
+                            ltp = avg;
+                        }
                         double val = ltp * qty;
                         totalCurrent += val;
 
-                        double overallGL = val - cost;
-                        if (overallGL > 0) gainers++; else if (overallGL < 0) losers++;
+                        if (costKnown) {
+                            double overallGL = val - cost;
+                            if (overallGL > 0) gainers++; else if (overallGL < 0) losers++;
+                        }
 
                         Double prevClose = (md != null && md.getPreviousClose() != null && md.getPreviousClose() > 0)
                             ? md.getPreviousClose()
                             : null;
 
-                        if (prevClose != null && prevClose > 0) {
+                        if (prevClose != null && prevClose > 0 && ltp > 0) {
                             double dayGL = (ltp - prevClose) * qty;
                             todayGainLoss += dayGL;
                             if (dayGL > 0) todayGainers++; else if (dayGL < 0) todayLosers++;
@@ -361,16 +380,25 @@ public class PortfolioAnalyticsFacade {
                 if (totalCurrent == 0.0 && totalInvested > 0) {
                     totalCurrent = totalInvested;
                 }
-                double totalGL = totalCurrent - totalInvested;
-                double totalGLPct = totalInvested > 0 ? (totalGL / totalInvested) * 100.0 : 0.0;
+                Double investmentValue = totalInvested > 0
+                        ? BigDecimal.valueOf(totalInvested).setScale(2, RoundingMode.HALF_UP).doubleValue()
+                        : null;
+                Double totalGL = null;
+                Double totalGLPct = null;
+                if (totalInvested > 0) {
+                    double gain = totalCurrent - totalInvested;
+                    totalGL = BigDecimal.valueOf(gain).setScale(2, RoundingMode.HALF_UP).doubleValue();
+                    totalGLPct = BigDecimal.valueOf((gain / totalInvested) * 100.0)
+                            .setScale(2, RoundingMode.HALF_UP).doubleValue();
+                }
                 double prevVal = totalCurrent - todayGainLoss;
                 double todayGLPct = prevVal > 0 ? (todayGainLoss / prevVal) * 100.0 : 0.0;
 
                 com.portfolio.model.portfolio.v1.PortfolioSummaryV1 summary = com.portfolio.model.portfolio.v1.PortfolioSummaryV1.builder()
-                    .investmentValue(BigDecimal.valueOf(totalInvested).setScale(2, RoundingMode.HALF_UP).doubleValue())
+                    .investmentValue(investmentValue)
                     .currentValue(BigDecimal.valueOf(totalCurrent).setScale(2, RoundingMode.HALF_UP).doubleValue())
-                    .totalGainLoss(BigDecimal.valueOf(totalGL).setScale(2, RoundingMode.HALF_UP).doubleValue())
-                    .totalGainLossPercentage(BigDecimal.valueOf(totalGLPct).setScale(2, RoundingMode.HALF_UP).doubleValue())
+                    .totalGainLoss(totalGL)
+                    .totalGainLossPercentage(totalGLPct)
                     .todayGainLoss(BigDecimal.valueOf(todayGainLoss).setScale(2, RoundingMode.HALF_UP).doubleValue())
                     .todayGainLossPercentage(BigDecimal.valueOf(todayGLPct).setScale(2, RoundingMode.HALF_UP).doubleValue())
                     .totalAssets(activeCount)

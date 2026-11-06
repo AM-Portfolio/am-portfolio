@@ -74,22 +74,47 @@ public class AggregatePortfolioFactory {
 
     /**
      * Display name → current book value for By-Portfolio X-Ray slices.
-     * Prefers {@link PortfolioModelV1#getTotalValue()}; falls back to summing asset current values.
+     * A saved total above zero wins. A saved zero falls back to the line marks,
+     * so a book such as Zerodha is not dropped while its lines still have value.
+     * Duplicate names are split by owner so two Mirae books stay two bars.
      */
     public static Map<String, Double> brokerBookValues(List<PortfolioModelV1> portfolios) {
+        List<PortfolioModelV1> books = filterBrokers(portfolios);
+        Map<String, Integer> nameCounts = new LinkedHashMap<>();
+        for (PortfolioModelV1 p : books) {
+            nameCounts.merge(baseName(p), 1, Integer::sum);
+        }
         Map<String, Double> out = new LinkedHashMap<>();
-        for (PortfolioModelV1 p : filterBrokers(portfolios)) {
-            String name = p.getName();
-            if (name == null || name.isBlank()) {
-                name = p.getBrokerType() != null ? p.getBrokerType().name() : "Unknown";
-            }
-            double value = p.getTotalValue() != null ? p.getTotalValue() : sumBookValue(p);
+        for (PortfolioModelV1 p : books) {
+            double stored = p.getTotalValue() != null ? p.getTotalValue() : 0.0;
+            double lines = sumBookValue(p);
+            double value = stored > 0 ? stored : lines;
             if (value <= 0) {
                 continue;
             }
-            out.merge(name.trim(), value, Double::sum);
+            String base = baseName(p);
+            String label = nameCounts.getOrDefault(base, 1) > 1 ? withOwner(p, base) : base;
+            out.merge(label, value, Double::sum);
         }
         return out;
+    }
+
+    private static String baseName(PortfolioModelV1 p) {
+        if (p.getName() != null && !p.getName().isBlank()) {
+            return p.getName().trim();
+        }
+        if (p.getBrokerType() != null) {
+            return p.getBrokerType().name();
+        }
+        return "Unknown";
+    }
+
+    private static String withOwner(PortfolioModelV1 p, String base) {
+        String owner = p.getFamilyMemberName();
+        if (owner == null || owner.isBlank()) {
+            owner = "You";
+        }
+        return base + " (" + owner.trim() + ")";
     }
 
     private static double sumBookValue(PortfolioModelV1 p) {
@@ -119,6 +144,19 @@ public class AggregatePortfolioFactory {
         if (portfolios == null || portfolios.isEmpty()) {
             return List.of();
         }
+        boolean hasNonCdslBroker = false;
+        for (PortfolioModelV1 p : portfolios) {
+            if (p == null || p.getPortfolioKind() == PortfolioKind.DELETED) {
+                continue;
+            }
+            if (!PortfolioKind.isBroker(p.getPortfolioKind())) {
+                continue;
+            }
+            if (p.getBrokerType() != null && !p.getBrokerType().isCdsl()) {
+                hasNonCdslBroker = true;
+                break;
+            }
+        }
         List<PortfolioModelV1> out = new ArrayList<>();
         for (PortfolioModelV1 p : portfolios) {
             if (p == null) {
@@ -128,6 +166,10 @@ public class AggregatePortfolioFactory {
                 continue;
             }
             if (!PortfolioKind.isBroker(p.getPortfolioKind())) {
+                continue;
+            }
+            // Defense: when real/named books exist, skip CDSL aggregator to avoid double-count.
+            if (hasNonCdslBroker && p.getBrokerType() != null && p.getBrokerType().isCdsl()) {
                 continue;
             }
             out.add(p);

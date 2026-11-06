@@ -85,6 +85,7 @@ public class AccountsHubModel {
         private Boolean dummy;
         private String familyMemberId;
         private String familyMemberName;
+        private String dematBoid;
     }
 
     @Data

@@ -114,7 +114,12 @@ public class PortfolioOverviewService {
     }
 
     public PortfolioSummaryV1 overviewPortfolio(String userId, TimeInterval interval) {
-        try (var span = flowLogger.start("overviewPortfolio", "user", userId, "interval", interval != null ? interval.getCode() : "null")) {
+        return overviewPortfolio(userId, interval, null);
+    }
+
+    public PortfolioSummaryV1 overviewPortfolio(String userId, TimeInterval interval, String persona) {
+        String cacheId = com.am.common.amcommondata.model.family.HoldingsPersona.cacheId(persona);
+        try (var span = flowLogger.start("overviewPortfolio", "user", userId, "interval", interval != null ? interval.getCode() : "null", "persona", persona)) {
         // Soft-hide Demo even on cache hits so dropdown/list stay consistent with aggregates.
         if (newUserPortfolioFallbackService != null) {
             try {
@@ -123,14 +128,16 @@ public class PortfolioOverviewService {
                 log.warn("Demo lifecycle on overview cache path failed for {}: {}", userId, e.getMessage());
             }
         }
-        Optional<PortfolioSummaryV1> cachedSummary = getCachedSummary(userId, interval);
+        Optional<PortfolioSummaryV1> cachedSummary = getCachedSummary(userId, interval, cacheId);
         if (cachedSummary.isPresent()) {
             log.info("Returning cached portfolio summary for user: {} (with price overlay)", userId);
-            return repriceCachedSummary(cachedSummary.get(), userId, null, interval);
+            return repriceCachedSummary(cachedSummary.get(), userId, cacheId, interval);
         }
 
         log.info("Cache miss for portfolio summary - User: {}, fetching from source", userId);
-        var portfolios = brokerBooksForUser(userId);
+        var portfolios = brokerBooksForUser(userId).stream()
+                .filter(p -> com.am.common.amcommondata.model.family.HoldingsPersona.matches(p.getFamilyMemberId(), persona))
+                .collect(Collectors.toList());
         log.info("Retrieved {} BROKER portfolios for user: {}", portfolios.size(), userId);
 
         if (portfolios.isEmpty()) {
@@ -153,7 +160,7 @@ public class PortfolioOverviewService {
             return emptySummary;
         }
 
-        PortfolioSummaryV1 finalSummary = buildPortfolioSummary(portfolios, userId, null, interval);
+        PortfolioSummaryV1 finalSummary = buildPortfolioSummary(portfolios, userId, cacheId, interval);
         return finalSummary;
         } catch (Exception e) {
             log.error("Error in overviewPortfolio", e);
@@ -298,9 +305,15 @@ public class PortfolioOverviewService {
         com.portfolio.model.portfolio.PortfolioHoldings pricedHoldings = null;
         if (userId != null) {
             try {
-                pricedHoldings = (portfolioId == null || portfolioId.isBlank())
-                        ? portfolioHoldingsService.getPortfolioHoldings(userId, interval, true)
-                        : portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, interval, true);
+                if (portfolioId != null && portfolioId.startsWith("all:")) {
+                    pricedHoldings = portfolioHoldingsService.getPortfolioHoldings(
+                            userId, interval, true,
+                            com.am.common.amcommondata.model.family.HoldingsPersona.personaFromCacheId(portfolioId));
+                } else if (portfolioId == null || portfolioId.isBlank()) {
+                    pricedHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, interval, true);
+                } else {
+                    pricedHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, interval, true);
+                }
                 if (pricedHoldings != null && pricedHoldings.getEquityHoldings() != null) {
                     equityHoldings = pricedHoldings.getEquityHoldings();
                 }
@@ -343,9 +356,12 @@ public class PortfolioOverviewService {
                 return cached;
             }
             // Never keep a stale cached invested figure (old Zerodha / Demo) over live holdings.
+            // When cost is unknown, keep investmentValue null (not 0.0) so UI hides Invested/Return.
             double investmentValue = PortfolioCalculator.sumInvestmentBasis(ph.getEquityHoldings());
             PortfolioSummaryV1 live = portfolioCalculator.calculateSummary(ph.getEquityHoldings(), investmentValue);
-            cached.setInvestmentValue(live.getInvestmentValue() != null ? live.getInvestmentValue() : investmentValue);
+            cached.setInvestmentValue(live.getInvestmentValue() != null
+                    ? live.getInvestmentValue()
+                    : (investmentValue > 0 ? investmentValue : null));
             cached.setCurrentValue(live.getCurrentValue());
             // Overall Total Return from calculator; session day may still be null when quotes collapse.
             cached.setTotalGainLoss(live.getTotalGainLoss());

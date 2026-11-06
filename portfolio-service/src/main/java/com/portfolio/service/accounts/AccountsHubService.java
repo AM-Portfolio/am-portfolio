@@ -108,7 +108,7 @@ public class AccountsHubService {
                             .email(m.getEmail())
                             .source(m.getSource())
                             // portfolioCount = non-MF demat accounts for that persona's CAS.
-                            .portfolioCount(countDematForMember(demat, mid))
+                            .portfolioCount(countDematBooks(rows, mid))
                             .totalValue(round2(sumValueForMemberId(demat, rows, npsAccounts, mid)))
                             .xirrPct(computeOverallXirr(memberBooks))
                             .build();
@@ -152,17 +152,7 @@ public class AccountsHubService {
             List<AccountsPortfolioRow> rows,
             List<NpsDocumentMeta> npsAccounts,
             boolean primaryOnly) {
-        double sum = 0.0;
-        if (demat != null) {
-            for (DematAccountModel a : demat) {
-                if (a == null || !personaMatches(a.getFamilyMemberId(), primaryOnly)) {
-                    continue;
-                }
-                if (a.getHoldingValue() != null && a.getHoldingValue() > 0) {
-                    sum += a.getHoldingValue();
-                }
-            }
-        }
+        double books = 0.0;
         if (rows != null) {
             for (AccountsPortfolioRow r : rows) {
                 if (r == null || isPaperLike(r) || isNpsRow(r)) {
@@ -172,10 +162,11 @@ public class AccountsHubService {
                     continue;
                 }
                 if (r.getCurrent() != null && r.getCurrent() > 0) {
-                    sum += r.getCurrent();
+                    books += r.getCurrent();
                 }
             }
         }
+        double sum = books > 0 ? books : directoryValue(demat, primaryOnly, null);
         if (npsAccounts != null) {
             for (NpsDocumentMeta m : npsAccounts) {
                 if (m == null || !personaMatches(m.getFamilyMemberId(), primaryOnly)) {
@@ -189,6 +180,28 @@ public class AccountsHubService {
         return sum;
     }
 
+    /** Directory values fill in only when every book for the persona is stored at 0. */
+    private static double directoryValue(List<DematAccountModel> demat, boolean primaryOnly, String memberId) {
+        if (demat == null) {
+            return 0.0;
+        }
+        double sum = 0.0;
+        for (DematAccountModel a : demat) {
+            if (a == null || a.getHoldingValue() == null || a.getHoldingValue() <= 0) {
+                continue;
+            }
+            if (memberId != null) {
+                if (!memberId.equals(a.getFamilyMemberId())) {
+                    continue;
+                }
+            } else if (!personaMatches(a.getFamilyMemberId(), primaryOnly)) {
+                continue;
+            }
+            sum += a.getHoldingValue();
+        }
+        return sum;
+    }
+
     private static boolean personaMatches(String familyMemberId, boolean primaryOnly) {
         boolean isPrimary = familyMemberId == null || familyMemberId.isBlank();
         return primaryOnly ? isPrimary : !isPrimary;
@@ -196,6 +209,27 @@ public class AccountsHubService {
 
     private static Double round2(double v) {
         return Math.round(v * 100.0) / 100.0;
+    }
+
+    static int countDematBooks(List<AccountsPortfolioRow> rows, String familyMemberId) {
+        if (familyMemberId == null || familyMemberId.isBlank() || rows == null) {
+            return 0;
+        }
+        return (int) rows.stream()
+                .filter(r -> r != null && familyMemberId.equals(r.getFamilyMemberId()))
+                .filter(r -> "CAS_DEMAT".equalsIgnoreCase(nullToEmpty(r.getBrokerType())))
+                .filter(r -> !isMfBook(r))
+                .count();
+    }
+
+    static boolean isMfBook(AccountsPortfolioRow r) {
+        if (r == null) {
+            return false;
+        }
+        if ("mf:cas".equalsIgnoreCase(nullToEmpty(r.getDematBoid()))) {
+            return true;
+        }
+        return "mutual funds".equalsIgnoreCase(nullToEmpty(r.getDisplayName()).trim());
     }
 
     static int countDematForMember(List<DematAccountModel> demat, String familyMemberId) {
@@ -217,17 +251,7 @@ public class AccountsHubService {
         if (familyMemberId == null || familyMemberId.isBlank()) {
             return 0.0;
         }
-        double sum = 0.0;
-        if (demat != null) {
-            for (DematAccountModel a : demat) {
-                if (a == null || !familyMemberId.equals(a.getFamilyMemberId())) {
-                    continue;
-                }
-                if (a.getHoldingValue() != null && a.getHoldingValue() > 0) {
-                    sum += a.getHoldingValue();
-                }
-            }
-        }
+        double books = 0.0;
         if (rows != null) {
             for (AccountsPortfolioRow r : rows) {
                 if (r == null || isPaperLike(r) || isNpsRow(r)) {
@@ -237,10 +261,11 @@ public class AccountsHubService {
                     continue;
                 }
                 if (r.getCurrent() != null && r.getCurrent() > 0) {
-                    sum += r.getCurrent();
+                    books += r.getCurrent();
                 }
             }
         }
+        double sum = books > 0 ? books : directoryValue(demat, false, familyMemberId);
         if (npsAccounts != null) {
             for (NpsDocumentMeta m : npsAccounts) {
                 if (m == null || !familyMemberId.equals(m.getFamilyMemberId())) {
@@ -353,7 +378,9 @@ public class AccountsHubService {
     }
 
     private static AccountsPortfolioRow toPortfolioRow(PortfolioModelV1 p) {
-        double current = p.getTotalValue() != null ? p.getTotalValue() : sumCurrent(p);
+        double stored = p.getTotalValue() != null ? p.getTotalValue() : 0.0;
+        double lines = sumCurrent(p);
+        double current = stored > 0 ? stored : lines;
         Double invested = p.getInvestmentAmount();
         if (invested == null) {
             invested = sumInvested(p);
@@ -382,6 +409,7 @@ public class AccountsHubService {
                 .dummy(p.getIsDummy())
                 .familyMemberId(p.getFamilyMemberId())
                 .familyMemberName(p.getFamilyMemberName())
+                .dematBoid(p.getDematBoid())
                 .build();
     }
 
