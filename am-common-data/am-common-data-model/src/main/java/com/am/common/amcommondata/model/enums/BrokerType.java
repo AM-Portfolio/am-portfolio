@@ -4,9 +4,11 @@ public enum BrokerType {
     DHAN("Dhan"),
     ZERODHA("Zerodha"),
     MSTOCK("MStock"),
-    GROW("Grow"),
+    GROWW("Groww"),
+    GROW("Groww"), // Fallback for existing db records
     KOTAK("Kotak"),
-    ANGEL_ONE("Angel One");
+    ANGEL_ONE("Angel One"),
+    UPSTOX("Upstox");
 
     private String brokerName;
 
@@ -39,8 +41,8 @@ public enum BrokerType {
         return "MStock".equals(brokerName);
     }
 
-    public boolean isGrow() {
-        return "Grow".equals(brokerName);
+    public boolean isGroww() {
+        return "Groww".equals(brokerName);
     }
 
     public boolean isKotak() {
@@ -49,5 +51,9 @@ public enum BrokerType {
 
     public boolean isAngelOne() {
         return "Angel One".equals(brokerName);
+    }
+
+    public boolean isUpstox() {
+        return "Upstox".equals(brokerName);
     }
 }

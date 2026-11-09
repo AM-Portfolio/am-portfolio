@@ -9,17 +9,53 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class TopMoverUtilsTest {
 
-    private MarketData md(double last, double open, double close) {
+    private MarketData md(double last, double open, double previousClose) {
         MarketData m = new MarketData();
         m.setLastPrice(last);
-        m.setOhlc(OhlcData.builder().open(open).close(close).build());
+        m.setPreviousClose(previousClose);
+        m.setOhlc(OhlcData.builder().open(open).close(previousClose).build());
         return m;
+    }
+
+    @Test void shouldSkipWhenPreviousCloseIsMissing() {
+        MarketData data = MarketData.builder()
+            .symbol("OPENONLY")
+            .lastPrice(425.0)
+            .ohlc(OhlcData.builder().open(420.0).close(425.0).build())
+            .build();
+
+        Map<String, Double> symbolToPerformance = new HashMap<>();
+        Map<String, Double> symbolToChangePercent = new HashMap<>();
+        TopMoverUtils.calculatePerformanceMetrics(
+            List.of("OPENONLY"), Map.of("OPENONLY", data), symbolToPerformance, symbolToChangePercent);
+
+        assertFalse(symbolToPerformance.containsKey("OPENONLY"));
+        assertTrue(symbolToChangePercent.isEmpty());
+    }
+
+    @Test void shouldCorrectlyClassifyLoserWithGapDownOpenAndIntradayRecovery() {
+        // Given: Stock that gapped down but recovered intraday
+        MarketData data = MarketData.builder()
+            .symbol("LAURUSLABS")
+            .lastPrice(425.0)          // current price
+            .previousClose(450.0)      // yesterday's close <- correct reference
+            .ohlc(OhlcData.builder().open(420.0).close(425.0).build())
+            .build();
+        
+        Map<String, Double> symbolToPerformance = new HashMap<>();
+        Map<String, Double> symbolToChangePercent = new HashMap<>();
+        TopMoverUtils.calculatePerformanceMetrics(
+            List.of("LAURUSLABS"), Map.of("LAURUSLABS", data), symbolToPerformance, symbolToChangePercent);
+        
+        // Then: Must be classified as a LOSER (-5.56%), not a gainer
+        assertTrue(symbolToPerformance.get("LAURUSLABS") < 0);
+        assertEquals(-5.56, symbolToChangePercent.get("LAURUSLABS"), 0.01);
     }
 
     @Test void performanceMetrics_calculates() {
         Map<String, Double> perf = new HashMap<>();
         Map<String, Double> change = new HashMap<>();
-        TopMoverUtils.calculatePerformanceMetrics(Map.of("A", md(110, 100, 105)), perf, change);
+        TopMoverUtils.calculatePerformanceMetrics(List.of("A"), Map.of("A", md(110, 100, 105)), perf, change);
         assertEquals(1, perf.size());
         assertTrue(perf.get("A") > 0);
         assertTrue(change.get("A") > 0);
@@ -28,7 +64,7 @@ class TopMoverUtilsTest {
     @Test void performanceMetrics_zeroPricesSkipped() {
         Map<String, Double> perf = new HashMap<>();
         Map<String, Double> change = new HashMap<>();
-        TopMoverUtils.calculatePerformanceMetrics(Map.of("A", md(100, 0, 0)), perf, change);
+        TopMoverUtils.calculatePerformanceMetrics(List.of("A"), Map.of("A", md(100, 0, 0)), perf, change);
         assertTrue(perf.isEmpty());
     }
 
@@ -36,7 +72,7 @@ class TopMoverUtilsTest {
         MarketData m = new MarketData(); m.setLastPrice(100.0); m.setOhlc(null);
         Map<String, Double> perf = new HashMap<>();
         Map<String, Double> change = new HashMap<>();
-        TopMoverUtils.calculatePerformanceMetrics(Map.of("A", m), perf, change);
+        TopMoverUtils.calculatePerformanceMetrics(List.of("A"), Map.of("A", m), perf, change);
         assertTrue(perf.isEmpty());
     }
 
@@ -56,6 +92,22 @@ class TopMoverUtilsTest {
         var losers = TopMoverUtils.getTopLosers(data, perf, change, 10);
         assertEquals(1, losers.size());
         assertEquals("DOWN", losers.get(0).getSymbol());
+    }
+
+    @Test void topLosers_emptyWhenNoNegatives() {
+        Map<String, Double> perf = Map.of("UP", 5.0, "FLAT", 0.0);
+        Map<String, Double> change = Map.of("UP", 5.0, "FLAT", 0.0);
+        Map<String, MarketData> data = Map.of("UP", md(105, 100, 100), "FLAT", md(100, 100, 100));
+        var losers = TopMoverUtils.getTopLosers(data, perf, change, 10);
+        assertTrue(losers.isEmpty());
+    }
+
+    @Test void topGainers_emptyWhenNoPositives() {
+        Map<String, Double> perf = Map.of("DOWN", -3.0);
+        Map<String, Double> change = Map.of("DOWN", -3.0);
+        Map<String, MarketData> data = Map.of("DOWN", md(97, 100, 100));
+        var gainers = TopMoverUtils.getTopGainers(data, perf, change, 10);
+        assertTrue(gainers.isEmpty());
     }
 
     @Test void topGainers_respectsLimit() {
@@ -78,13 +130,14 @@ class TopMoverUtilsTest {
                 List.of("A"), Map.of("A", md(110, 100, 105)), Map.of("A", 10.0));
         assertEquals(1, movements.size());
         assertEquals(110.0, movements.get(0).getLastPrice());
-        assertEquals(10.0, movements.get(0).getChangeAmount());
+        assertEquals(5.0, movements.get(0).getChangeAmount());
+        assertEquals(10.0, movements.get(0).getChangePercent());
     }
 
     @Test void buildTopMoversResponse_basic() {
         Map<String, MarketData> data = Map.of(
                 "UP", md(110, 100, 100), "DOWN", md(90, 100, 100));
-        GainerLoser result = TopMoverUtils.buildTopMoversResponse(data, 5, "idx1", false, null);
+        GainerLoser result = TopMoverUtils.buildTopMoversResponse(List.of("UP", "DOWN"), data, 5, "idx1", false, null);
         assertNotNull(result);
         assertFalse(result.getTopGainers().isEmpty());
         assertFalse(result.getTopLosers().isEmpty());
@@ -93,7 +146,7 @@ class TopMoverUtilsTest {
     @Test void buildTopMoversResponse_withSectorInfo() {
         Map<String, MarketData> data = Map.of("UP", md(110, 100, 100));
         Map<String, String> sectors = Map.of("UP", "Tech");
-        GainerLoser result = TopMoverUtils.buildTopMoversResponse(data, 5, "p1", true, sectors);
+        GainerLoser result = TopMoverUtils.buildTopMoversResponse(List.of("UP"), data, 5, "p1", true, sectors);
         assertEquals("Tech", result.getTopGainers().get(0).getSector());
     }
 

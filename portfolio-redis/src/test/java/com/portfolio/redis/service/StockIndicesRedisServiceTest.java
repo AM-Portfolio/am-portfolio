@@ -26,6 +26,7 @@ class StockIndicesRedisServiceTest {
     @InjectMocks private StockIndicesRedisService service;
 
     @BeforeEach void setUp() {
+        ReflectionTestUtils.setField(service, "isRedisEnabled", true);
         ReflectionTestUtils.setField(service, "stockTtl", 300);
         ReflectionTestUtils.setField(service, "stockKeyPrefix", "stock:");
         ReflectionTestUtils.setField(service, "historicalKeyPrefix", "hist:");
@@ -42,12 +43,12 @@ class StockIndicesRedisServiceTest {
     }
 
     @Test void getLatestPrice_notFound() {
-        when(valueOps.get("stock:MISSING")).thenReturn(null);
+        lenient().when(valueOps.get("stock:MISSING")).thenReturn(null);
         assertTrue(service.getLatestPrice("MISSING").isEmpty());
     }
 
     @Test void getLatestPrice_redisError_returnsEmpty() {
-        when(valueOps.get(anyString())).thenThrow(new RuntimeException("connection error"));
+        lenient().when(valueOps.get(anyString())).thenThrow(new RuntimeException("connection error"));
         assertTrue(service.getLatestPrice("ERR").isEmpty());
     }
 
@@ -63,19 +64,19 @@ class StockIndicesRedisServiceTest {
     }
 
     @Test void getHistoricalPrices_noKeys() {
-        when(redisTemplate.keys("hist:SYM:*")).thenReturn(Collections.emptySet());
+        lenient().when(redisTemplate.keys("hist:SYM:*")).thenReturn(Collections.emptySet());
         assertTrue(service.getHistoricalPrices("SYM", LocalDateTime.now(), LocalDateTime.now()).isEmpty());
     }
 
     @Test void getHistoricalPrices_redisError() {
-        when(redisTemplate.keys(anyString())).thenThrow(new RuntimeException("error"));
+        lenient().when(redisTemplate.keys(anyString())).thenThrow(new RuntimeException("error"));
         assertTrue(service.getHistoricalPrices("ERR", LocalDateTime.now(), LocalDateTime.now()).isEmpty());
     }
 
     @Test void getHistoricalPrices_nullTimestampSkipped() {
         StockPriceCache cache = StockPriceCache.builder().symbol("A").timestamp(null).build();
-        when(redisTemplate.keys("hist:A:*")).thenReturn(Set.of("hist:A:1"));
-        when(valueOps.get("hist:A:1")).thenReturn(cache);
+        lenient().when(redisTemplate.keys("hist:A:*")).thenReturn(Set.of("hist:A:1"));
+        lenient().when(valueOps.get("hist:A:1")).thenReturn(cache);
         assertTrue(service.getHistoricalPrices("A", LocalDateTime.now(), LocalDateTime.now()).isEmpty());
     }
 
@@ -91,7 +92,7 @@ class StockIndicesRedisServiceTest {
     }
 
     @Test void deleteOldPrices_redisError_doesNotThrow() {
-        when(redisTemplate.keys(anyString())).thenThrow(new RuntimeException("err"));
+        lenient().when(redisTemplate.keys(anyString())).thenThrow(new RuntimeException("err"));
         assertDoesNotThrow(() -> service.deleteOldPrices("A", LocalDateTime.now()));
     }
 

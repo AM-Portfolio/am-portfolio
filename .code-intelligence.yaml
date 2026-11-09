@@ -1,0 +1,49 @@
+enabled: true
+tool: gitnexus
+phase: local
+versions:
+  gitnexus: 1.6.9
+  graphifyy: 0.4.11
+production:
+  branch: main
+  embeddings: false
+  ci: false
+  mode: verify
+local:
+  sync_on_commit: true
+  sync_on_save: false
+  index_workspace: true
+  watch_debounce_sec: 30
+gitnexus:
+  skipAgentsMd: true
+  skipSkills: true
+  group_path: am-portfolio
+capabilities:
+  domain: portfolios
+  surfaces:
+  - http
+  - kafka
+  - redis
+  pdg: true
+  scan:
+    scan_roots:
+    - portfolio-app
+    - portfolio-api
+    - portfolio-service
+    - portfolio-redis
+    - portfolio-kafka
+    - portfolio-market-data
+    - am-common-data
+  topics:
+  - am-portfolio
+  - am-stock-price-update
+  - nse-stock-indices-update
+  config_prefixes:
+  - am.api.core
+  - portfolio
+  - cache
+  flows:
+  - slug: redis-caching
+    tier: A
+    query: redis cache heatmap
+    entry_contract: HTTP /v1/portfolios

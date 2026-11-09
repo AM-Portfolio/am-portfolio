@@ -1,0 +1,186 @@
+{
+  "info": {
+    "name": "Portfolio Backend (Dev)",
+    "description": "API collection for the am-portfolio backend running in the dev environment",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Portfolios",
+      "item": [
+        {
+          "name": "1. Get All Portfolios",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "https://am-dev.asrax.in/portfolio/v1/portfolios",
+              "protocol": "https",
+              "host": ["am-dev", "asrax", "in"],
+              "path": ["portfolio", "v1", "portfolios"]
+            },
+            "description": "Retrieves all portfolios associated with the authenticated user."
+          }
+        },
+        {
+          "name": "2. Get Portfolio by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "https://am-dev.asrax.in/portfolio/v1/portfolios/{{portfolio_id}}",
+              "protocol": "https",
+              "host": ["am-dev", "asrax", "in"],
+              "path": ["portfolio", "v1", "portfolios", "{{portfolio_id}}"]
+            },
+            "description": "Retrieves detailed portfolio information for a specific portfolio ID."
+          }
+        },
+        {
+          "name": "3. Get Portfolio List (Basic Info)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "https://am-dev.asrax.in/portfolio/v1/portfolios/list",
+              "protocol": "https",
+              "host": ["am-dev", "asrax", "in"],
+              "path": ["portfolio", "v1", "portfolios", "list"]
+            },
+            "description": "Retrieves a lightweight list of portfolio IDs and names."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboards & Summaries",
+      "item": [
+        {
+          "name": "4. Get Portfolio Summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "https://am-dev.asrax.in/portfolio/v1/portfolios/summary?interval=1M",
+              "protocol": "https",
+              "host": ["am-dev", "asrax", "in"],
+              "path": ["portfolio", "v1", "portfolios", "summary"],
+              "query": [
+                {
+                  "key": "interval",
+                  "value": "1M",
+                  "description": "Optional interval (e.g. 1D, 1W, 1M, all)"
+                },
+                {
+                  "key": "portfolioId",
+                  "value": "{{portfolio_id}}",
+                  "disabled": true,
+                  "description": "Optional portfolio ID to filter"
+                }
+              ]
+            },
+            "description": "Retrieves a summary of portfolios with performance metrics."
+          }
+        },
+        {
+          "name": "5. Get Portfolio Holdings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "https://am-dev.asrax.in/portfolio/v1/portfolios/holdings",
+              "protocol": "https",
+              "host": ["am-dev", "asrax", "in"],
+              "path": ["portfolio", "v1", "portfolios", "holdings"],
+              "query": [
+                {
+                  "key": "portfolioId",
+                  "value": "{{portfolio_id}}",
+                  "disabled": true,
+                  "description": "Optional portfolio ID to filter"
+                }
+              ]
+            },
+            "description": "Retrieves all holdings across portfolios for a user with current values."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Analytics",
+      "item": [
+        {
+          "name": "6. Advanced Portfolio Analytics",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"timeFrame\": \"1M\",\n  \"components\": [\"PERFORMANCE\", \"RISK\"]\n}"
+            },
+            "url": {
+              "raw": "https://am-dev.asrax.in/portfolio/v1/analytics/portfolio/{{portfolio_id}}/advanced",
+              "protocol": "https",
+              "host": ["am-dev", "asrax", "in"],
+              "path": ["portfolio", "v1", "analytics", "portfolio", "{{portfolio_id}}", "advanced"]
+            },
+            "description": "Retrieves comprehensive analytics for a portfolio."
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "jwt_token",
+      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZjMwZTBlNi02YTk4LTQwYmEtODc1ZS1hMTQ5MGMwYzhhMTEiLCJpYXQiOjE3ODI1NTI5ODcsImV4cCI6MTgxNDA4ODk4N30.V-XNQww83DqSD4dwPniqwQFcib35dDqCqO75AXIuHvo",
+      "type": "string"
+    },
+    {
+      "key": "portfolio_id",
+      "value": "7b43596e-12ef-4ddf-bff6-01c17c2f059a",
+      "type": "string"
+    }
+  ]
+}

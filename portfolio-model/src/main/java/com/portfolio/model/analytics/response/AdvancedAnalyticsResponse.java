@@ -35,6 +35,8 @@ public class AdvancedAnalyticsResponse {
     
     private AnalyticsComponent analytics;
     
+    private com.portfolio.model.portfolio.v1.PortfolioSummaryV1 summary;
+    
     private PerformanceMetrics performanceMetrics;
     
     @Data

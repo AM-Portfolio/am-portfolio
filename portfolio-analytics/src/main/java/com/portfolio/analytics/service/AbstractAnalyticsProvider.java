@@ -2,12 +2,9 @@ package com.portfolio.analytics.service;
 
 import com.portfolio.analytics.model.AnalyticsType;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
-import com.portfolio.marketdata.model.FilterType;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
-import com.portfolio.marketdata.model.InstrumentType;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
-import com.portfolio.model.analytics.request.PaginationRequest;
 import com.portfolio.model.analytics.request.TimeFrameRequest;
 import com.portfolio.model.market.MarketData;
 
@@ -62,7 +59,9 @@ public abstract class AbstractAnalyticsProvider<T, I> {
         
         log.info("Fetching market data for {} symbols", symbols.size());
         try {
-            Map<String, MarketData> marketData = marketDataService.getOhlcData(symbols, false);
+            // Use the smart cache-first method (Redis -> OHLC fallback -> EOD fallback)
+            // This is fast (~1ms on cache hit, max 15s on cold cache with fallback)
+            Map<String, MarketData> marketData = marketDataService.getMarketData(symbols);
             if (marketData == null) {
                 log.warn("Market data service returned null response");
                 return Collections.emptyMap();
@@ -84,23 +83,21 @@ public abstract class AbstractAnalyticsProvider<T, I> {
         if (symbols.isEmpty()) {
             return Collections.emptyMap();
         }
-        
-        log.info("Fetching historical data for {} symbols with time frame: {} to {}, interval: {}", 
-                symbols.size(), timeFrameRequest.getFromDate(), timeFrameRequest.getToDate(), 
-                timeFrameRequest.getTimeFrame());
-        
+
+        if (com.portfolio.marketdata.util.HistoricalDataRequestFactory.isSameDayLiveWindow(timeFrameRequest)) {
+            log.info("[SmartRoute] Same-day range detected for {} symbols, routing to Live Data instead of Historical", symbols.size());
+            return marketDataService.getMarketData(symbols);
+        }
+
+        TimeFrameRequest resolvedTf = com.portfolio.marketdata.util.HistoricalDataRequestFactory.resolveWindow(timeFrameRequest);
+
+        log.info("Fetching historical data for {} symbols with time frame: {} to {}, candle interval: 1D",
+                symbols.size(), resolvedTf.getFromDate(), resolvedTf.getToDate());
+
         try {
-            // Create HistoricalDataRequest from TimeFrameRequest
-            HistoricalDataRequest request = HistoricalDataRequest.builder()
-                    .symbols(String.join(",", symbols))
-                    .fromDate(timeFrameRequest.getFromDate())
-                    .toDate(timeFrameRequest.getToDate())
-                    .filterType(FilterType.START_END.getValue())
-                    .instrumentType(InstrumentType.STOCK.getValue())
-                    .continuous(false)
-                    .interval(timeFrameRequest.getTimeFrame().getValue())
-                    .build();
-            
+            HistoricalDataRequest request =
+                    com.portfolio.marketdata.util.HistoricalDataRequestFactory.forPeriodEndpoints(symbols, resolvedTf);
+
             Map<String, MarketData> historicalData = marketDataService.getHistoricalData(request);
             if (historicalData == null) {
                 log.warn("Historical data service returned null response");

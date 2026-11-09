@@ -6,10 +6,15 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 
+import com.portfolio.marketdata.client.MarketCalendarClient;
 import com.portfolio.marketdata.client.MarketDataApiClient;
 import com.portfolio.marketdata.client.NseIndicesApiClient;
+import com.portfolio.marketdata.service.DefaultCashSessionClock;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
+import com.portfolio.redis.session.CashSessionClock;
+
+import org.springframework.web.reactive.function.client.WebClient;
 
 /**
  * Auto-configuration for the Market Data API module.
@@ -21,20 +26,38 @@ public class MarketDataAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public MarketDataApiClient marketDataApiClient(MarketDataApiConfig config) {
-        return new MarketDataApiClient(config);
+    public MarketDataApiClient marketDataApiClient(WebClient.Builder webClientBuilder, MarketDataApiConfig config) {
+        return new MarketDataApiClient(webClientBuilder, config);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(CashSessionClock.class)
+    public CashSessionClock cashSessionClock(MarketCalendarClient marketCalendarClient) {
+        return new DefaultCashSessionClock(marketCalendarClient);
     }
     
     @Bean
     @ConditionalOnMissingBean
-    public MarketDataService marketDataService(MarketDataApiClient marketDataApiClient) {
-        return new MarketDataService(marketDataApiClient);
+    public MarketDataService marketDataService(
+            MarketDataApiClient marketDataApiClient,
+            org.springframework.beans.factory.ObjectProvider<com.portfolio.redis.service.PortfolioMarketDataRedisService> marketDataRedisServiceProvider,
+            org.springframework.beans.factory.ObjectProvider<com.am.common.amcommondata.service.price.StockPriceMongoService> stockPriceMongoServiceProvider,
+            org.springframework.beans.factory.ObjectProvider<com.am.common.amcommondata.service.price.StockPriceHistoryMongoService> stockPriceHistoryMongoServiceProvider,
+            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
+            @org.springframework.beans.factory.annotation.Qualifier("externalApiExecutor") java.util.concurrent.Executor externalApiExecutor) {
+        return new MarketDataService(
+                marketDataApiClient, 
+                marketDataRedisServiceProvider.getIfAvailable(), 
+                stockPriceMongoServiceProvider.getIfAvailable(), 
+                stockPriceHistoryMongoServiceProvider.getIfAvailable(),
+                taskExecutor,
+                externalApiExecutor);
     }
     
     @Bean
     @ConditionalOnMissingBean
-    public NseIndicesApiClient nseIndicesApiClient(MarketDataApiConfig config) {
-        return new NseIndicesApiClient(config);
+    public NseIndicesApiClient nseIndicesApiClient(WebClient.Builder webClientBuilder, MarketDataApiConfig config) {
+        return new NseIndicesApiClient(webClientBuilder, config);
     }
     
     @Bean

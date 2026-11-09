@@ -45,26 +45,57 @@ public class PortfolioTopMoversProvider extends AbstractPortfolioAnalyticsProvid
         int limit = moversLimit != null ? moversLimit : 
                     (request.getPagination().isReturnAllData() ? DEFAULT_LIMIT : request.getPagination().getSize());
         
-        log.info("Generating top {} movers for portfolio {} with time frame, pagination, and feature configuration", 
+        log.info("Generating top {} movers for portfolio {} (always live day change)", 
                 limit, portfolioId);
         
-        // Use the common portfolio data processing method
+        // Always use live market data for Overview day movers — ignore chart timeframe
+        // so historical candle open is never mistaken for previousClose.
         return processPortfolioData(
             portfolioId,
-            request.getTimeFrameRequest(),
+            request,
             this::createEmptyResponse,
             (portfolio, portfolioSymbols, marketData) -> {
-                // Get sector information for symbols
-                Map<String, String> symbolSectors = securityDetailsService.getSymbolMapSectors(portfolioSymbols);
+                Map<String, String> symbolSectors = new HashMap<>();
+                if (portfolio.getEquityModels() != null) {
+                    for (com.am.common.amcommondata.model.asset.equity.EquityModel model : portfolio.getEquityModels()) {
+                        String symbol = model.getSymbol();
+                        if (symbol != null && !symbol.trim().isEmpty()) {
+                            String sector = (model.getSector() != null && !model.getSector().trim().isEmpty() && !model.getSector().trim().equals("-"))
+                                ? model.getSector().trim() : "Unknown";
+                            symbolSectors.put(symbol, sector);
+                        }
+                    }
+                }
                 
-                // Calculate top movers using the determined limit and include sector information
-                return TopMoverUtils.buildTopMoversResponse(marketData, limit, portfolioId, true, symbolSectors);
+                return TopMoverUtils.buildTopMoversResponse(portfolioSymbols, marketData, limit, portfolioId, true, symbolSectors);
             }
         );
     }
 
-    
-    
+    @Override
+    protected Map<String, com.portfolio.model.market.MarketData> resolvePrefetchedMarketData(AdvancedAnalyticsRequest request) {
+        if (request != null
+                && request.getPrefetchedLiveMarketData() != null
+                && !request.getPrefetchedLiveMarketData().isEmpty()) {
+            return request.getPrefetchedLiveMarketData();
+        }
+        return super.resolvePrefetchedMarketData(request);
+    }
+
+    /**
+     * Movers must always try live OHLC when live prefetch is empty — never inherit
+     * period-hist prefetchAttempted skip that leaves Overview with empty gainers/losers.
+     */
+    @Override
+    protected boolean allowsPrefetchFanOut() {
+        return true;
+    }
+
+    @Override
+    protected boolean preferLiveMarketDataOnFanOut() {
+        return true;
+    }
+
     /**
      * Creates an empty response when no data is available
      */

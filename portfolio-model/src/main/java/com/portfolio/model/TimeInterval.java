@@ -14,7 +14,10 @@ public enum TimeInterval {
     ONE_DAY(Duration.ofDays(1), "1D"),
     ONE_WEEK(Duration.ofDays(7), "1W"),
     ONE_MONTH(Duration.ofDays(30), "1M"),
+    THREE_MONTHS(Duration.ofDays(90), "3M"),
+    SIX_MONTHS(Duration.ofDays(180), "6M"),
     ONE_YEAR(Duration.ofDays(365), "1Y"),
+    YTD(null, "YTD"),
     OVERALL(null, "all");
 
     private final Duration duration;

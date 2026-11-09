@@ -17,4 +17,5 @@ public class PortfolioSummary {
     private int losersCount;
     private double averageGainLossPercentage;
     private Instant lastUpdated;
+    private DataStatus dataStatus;
 }

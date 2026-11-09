@@ -1,99 +1,569 @@
 package com.portfolio.basket.client;
 
+import com.portfolio.basket.util.SectorNormalizer;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.portfolio.basket.model.EtfData;
 import com.portfolio.basket.model.EtfHolding;
+import com.portfolio.model.basket.cache.CachedSecurityMatch;
+import com.portfolio.redis.service.BasketSecurityMatchRedisService;
+import com.portfolio.basket.service.BasketCatalogService;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import jakarta.annotation.PostConstruct;
 import lombok.Data;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class EtfApiClient {
 
     @Value("${etf.url:http://localhost:8022}")
     private String apiUrl;
 
-    private final RestTemplate restTemplate = new RestTemplate();
-    private final java.util.Map<String, EtfData> etfCache = new java.util.concurrent.ConcurrentHashMap<>();
+    @Value("${market-data.api.base-url}")
+    private String marketDataUrl;
 
+    @Value("${basket.holdings.enrichment.enabled:true}")
+    private boolean holdingsEnrichmentEnabled;
+
+    @Value("${basket.enrichment.connect-timeout-ms:3000}")
+    private int enrichmentConnectTimeoutMs;
+
+    @Value("${basket.enrichment.read-timeout-ms:15000}")
+    private int enrichmentReadTimeoutMs;
+
+    @Value("${basket.enrichment.chunk-size:20}")
+    private int batchSearchChunkSize;
+
+    @Value("${basket.enrichment.parallel-workers:4}")
+    private int parallelWorkers;
+
+    @Value("${basket.cache.secmatch-ttl-seconds:21600}")
+    private long secmatchL1TtlSeconds;
+
+    @Value("${basket.cache.etf-ttl-seconds:3600}")
+    private long etfL1TtlSeconds;
+
+    private static final Pattern INF_ISIN = Pattern.compile("(?i)^INF[A-Z0-9]{10}$");
+    private static final Pattern GENERIC_ISIN = Pattern.compile("(?i)^[A-Z]{2}[A-Z0-9]{10}$");
+    private static final Pattern DIRECT_HOLDINGS_KEY = Pattern.compile("^[A-Za-z0-9._-]+$");
+
+    private RestTemplate etfRestTemplate;
+    private RestTemplate marketRestTemplate;
+    private Cache<String, EtfData> etfCache;
+    private final Map<String, Boolean> etfSymbolCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private Cache<String, SecurityMatch> secmatchL1;
+    private Cache<String, String> isinToSymbolCache;
+    private ExecutorService enrichmentExecutor;
+    private final BasketSecurityMatchRedisService securityMatchRedisService;
+    private final BasketCatalogService basketCatalogService;
+
+    public EtfApiClient(
+            @Nullable BasketSecurityMatchRedisService securityMatchRedisService,
+            @Nullable BasketCatalogService basketCatalogService) {
+        this.securityMatchRedisService = securityMatchRedisService;
+        this.basketCatalogService = basketCatalogService;
+    }
+
+    @PostConstruct
+    void initRestTemplates() {
+        etfRestTemplate = new RestTemplate(clientFactory(15_000, 30_000));
+        marketRestTemplate = new RestTemplate(clientFactory(enrichmentConnectTimeoutMs, enrichmentReadTimeoutMs));
+        int workers = Math.max(1, parallelWorkers);
+        enrichmentExecutor = Executors.newFixedThreadPool(workers, r -> {
+            Thread t = new Thread(r, "basket-enrichment");
+            t.setDaemon(true);
+            return t;
+        });
+        secmatchL1 = Caffeine.newBuilder()
+                .expireAfterWrite(Math.max(60, secmatchL1TtlSeconds), TimeUnit.SECONDS)
+                .maximumSize(20_000)
+                .build();
+        etfCache = Caffeine.newBuilder()
+                .expireAfterWrite(Math.max(60, etfL1TtlSeconds), TimeUnit.SECONDS)
+                .maximumSize(2_000)
+                .build();
+        isinToSymbolCache = Caffeine.newBuilder()
+                .expireAfterWrite(86400, TimeUnit.SECONDS)
+                .maximumSize(10_000)
+                .build();
+    }
+
+    private static SimpleClientHttpRequestFactory clientFactory(int connectMs, int readMs) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(connectMs);
+        factory.setReadTimeout(readMs);
+        return factory;
+    }
+
+    /**
+     * POST /v2/funds/holdings — primary contract (symbol, ISIN, or name query per item).
+     */
+    public HoldingsLookupResponse lookupHoldings(List<String> items) {
+        if (items == null || items.isEmpty()) {
+            return new HoldingsLookupResponse(items, 0, Collections.emptyList(), Collections.emptyList());
+        }
+        String url = apiUrl + "/v2/funds/holdings";
+        HoldingsLookupRequest request = new HoldingsLookupRequest(items);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<HoldingsLookupRequest> entity = new HttpEntity<>(request, headers);
+        log.info("POST fund holdings lookup: {} items -> {}", items.size(), url);
+        return etfRestTemplate.postForObject(url, entity, HoldingsLookupResponse.class);
+    }
+
+    /**
+     * Single ETF by symbol, ISIN, or name (uses first match when search returns one ETF).
+     */
     public EtfData fetchEtfHoldings(String symbolOrIsin) {
-        if (etfCache.containsKey(symbolOrIsin)) {
+        if (symbolOrIsin == null || symbolOrIsin.isBlank()) {
+            return null;
+        }
+        EtfData cached = etfCache.getIfPresent(symbolOrIsin);
+        if (cached != null) {
             log.info("Returning cached ETF holdings for: {}", symbolOrIsin);
-            return etfCache.get(symbolOrIsin);
+            return cached;
         }
         try {
-            String url = String.format("%s/v1/etf/holdings/%s", apiUrl, symbolOrIsin);
-            log.info("Fetching ETF holdings from: {}", url);
-
-            EtfApiResponse response = restTemplate.getForObject(url, EtfApiResponse.class);
-            log.info("ETF API Response received: {}", response != null ? "Not Null" : "Null");
-
-            if (response != null && response.getHoldings() != null) {
-                log.info("ETF Holdings found. Count: {}, Name: {}", response.getHoldings().size(), response.getName());
-
-                EtfData data = new EtfData();
-                data.setName(response.getName());
-                data.setSymbol(response.getSymbol());
-
-                List<EtfHolding> holdings = response.getHoldings().stream()
-                        .map(h -> {
-                            EtfHolding holding = new EtfHolding();
-                            holding.setIsin(h.getIsinCode());
-                            holding.setSymbol(h.getStockName()); // Use Name as symbol if symbol missing in response
-                            // API response might not have sector, default to Unknown if needed
-                            holding.setSector("Unknown");
-                            holding.setWeight(h.getPercentage() != null ? h.getPercentage() : 0.0);
-                            return holding;
-                        })
-                        .collect(Collectors.toList());
-
-                data.setHoldings(holdings);
-                log.info("Successfully mapped ETF Data for {}. Holdings: {}", symbolOrIsin, holdings.size());
-                etfCache.put(symbolOrIsin, data);
-                return data;
-            } else {
-                log.warn("ETF Response was null or had no holdings for: {}", symbolOrIsin);
-            }
+            HoldingsLookupResponse response = lookupHoldings(List.of(symbolOrIsin));
+            EtfData data = mapFirstEtfFromResponse(symbolOrIsin, response);
+            maybeCacheEtf(symbolOrIsin, data);
+            return data;
         } catch (Exception e) {
             log.error("Failed to fetch ETF holdings for {}. Error: {}", symbolOrIsin, e.getMessage());
             log.debug("Stack Trace:", e);
+            return null;
+        }
+    }
+
+    private void maybeCacheEtf(String key, EtfData data) {
+        if (data == null) {
+            return;
+        }
+        if (unknownSectorCoverage(data) > 0.40) {
+            log.info("Skipping ETF L1 cache for {} — unknown sector coverage too high", key);
+            return;
+        }
+        etfCache.put(key, data);
+        if (data.getSymbol() != null && !data.getSymbol().isBlank()) {
+            etfCache.put(data.getSymbol(), data);
+        }
+    }
+
+    private static double unknownSectorCoverage(EtfData data) {
+        if (data.getHoldings() == null || data.getHoldings().isEmpty()) {
+            return 1.0;
+        }
+        double total = 0;
+        double unknown = 0;
+        for (EtfHolding h : data.getHoldings()) {
+            double w = h.getWeight() > 0 ? h.getWeight() : 1.0;
+            total += w;
+            if (h.getSector() == null || SectorNormalizer.isUnknown(h.getSector())) {
+                unknown += w;
+            }
+        }
+        return total <= 0 ? 1.0 : unknown / total;
+    }
+
+    /**
+     * Checks if a symbol is an ETF dynamically using am-parser search.
+     * Uses an in-memory cache to ensure O(1) lookups after initial fetch.
+     */
+    public boolean isEtf(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            return false;
+        }
+        String upperSymbol = symbol.toUpperCase(Locale.ROOT).trim();
+        if (etfSymbolCache.containsKey(upperSymbol)) {
+            return etfSymbolCache.get(upperSymbol);
+        }
+        
+        try {
+            String encoded = URLEncoder.encode(upperSymbol, StandardCharsets.UTF_8);
+            String searchUrl = apiUrl + "/v2/funds/search?query=" + encoded + "&limit=10&productTypes=ETF";
+            EtfSearchResponse response = etfRestTemplate.getForObject(searchUrl, EtfSearchResponse.class);
+            
+            boolean isEtf = false;
+            if (response != null && response.getEtfs() != null) {
+                for (EtfInfo etf : response.getEtfs()) {
+                    if (upperSymbol.equalsIgnoreCase(etf.getSymbol())) {
+                        isEtf = true;
+                        break;
+                    }
+                }
+            }
+            etfSymbolCache.put(upperSymbol, isEtf);
+            return isEtf;
+        } catch (Exception e) {
+            log.warn("Failed to check if {} is an ETF via am-parser: {}. Falling back to naming conventions.", symbol, e.getMessage());
+            return upperSymbol.endsWith("BEES") || upperSymbol.endsWith("ETF");
+        }
+    }
+
+    /**
+     * Batch lookup for index names, symbols, or ISINs.
+     * Direct keys (ISIN / ticker) go straight to holdings lookup — no per-item
+     * {@code /v2/funds/search} (that N+1 was ~20–30s on exposure). Index / free-text
+     * names still resolve via search once, then one holdings POST.
+     */
+    public Map<String, EtfData> fetchEtfHoldingsBatch(List<String> items) {
+        Map<String, EtfData> out = new LinkedHashMap<>();
+        if (items == null || items.isEmpty()) {
+            return out;
+        }
+        try {
+            Map<String, String> queryToLookupKey = new LinkedHashMap<>();
+            List<String> holdingsKeys = new ArrayList<>();
+            for (String item : items) {
+                if (item == null || item.isBlank()) {
+                    continue;
+                }
+                String key = item.trim();
+                String lookupKey;
+                if (isIsinKey(key) || isDirectHoldingsKey(key)) {
+                    lookupKey = key.toUpperCase(Locale.ROOT);
+                } else {
+                    lookupKey = resolveQueryToSymbol(key);
+                    if (lookupKey == null) {
+                        log.warn("Could not resolve ETF query '{}' to a symbol", key);
+                        continue;
+                    }
+                }
+                queryToLookupKey.put(key, lookupKey);
+                if (!holdingsKeys.contains(lookupKey)) {
+                    holdingsKeys.add(lookupKey);
+                }
+            }
+            if (holdingsKeys.isEmpty()) {
+                return out;
+            }
+            long start = System.currentTimeMillis();
+            HoldingsLookupResponse response = lookupHoldings(holdingsKeys);
+            log.info("ETF holdings batch lookup keys={} durationMs={}",
+                    holdingsKeys.size(), System.currentTimeMillis() - start);
+            Map<String, EtfData> bySymbol = indexHoldingsBySymbol(response);
+            for (Map.Entry<String, String> entry : queryToLookupKey.entrySet()) {
+                String lookup = entry.getValue();
+                EtfData data = bySymbol.get(lookup.toUpperCase(Locale.ROOT));
+                if (data == null) {
+                    data = resolveEtfForInput(lookup, response);
+                }
+                if (data == null) {
+                    data = resolveEtfForInput(entry.getKey(), response);
+                }
+                if (data != null) {
+                    out.put(entry.getKey(), data);
+                    log.info("Resolved query '{}' -> symbol {} ({} holdings)", entry.getKey(), data.getSymbol(),
+                            data.getHoldings() != null ? data.getHoldings().size() : 0);
+                    if (data.getSymbol() != null && !data.getSymbol().isBlank()) {
+                        out.putIfAbsent(data.getSymbol(), data);
+                    }
+                }
+            }
+            indexEtfsByIsinAndSymbol(response, out);
+        } catch (Exception e) {
+            log.error("Failed batch ETF holdings lookup: {}", e.getMessage());
+        }
+        return out;
+    }
+
+    static boolean isIsinKey(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String trimmed = value.trim();
+        return INF_ISIN.matcher(trimmed).matches() || GENERIC_ISIN.matcher(trimmed).matches();
+    }
+
+    private String resolveIsinToSymbol(String isin) {
+        String cached = isinToSymbolCache.getIfPresent(isin.toUpperCase());
+        if (cached != null) return cached;
+        // Use the existing search API to resolve ISIN → symbol
+        String symbol = resolveQueryToSymbol(isin);
+        if (symbol != null) {
+            isinToSymbolCache.put(isin.toUpperCase(), symbol);
+        }
+        return symbol;
+    }
+
+    /** Resolve index name via parser search, or pass through symbol/ISIN. */
+    public String resolveToSymbol(String query) {
+        if (query == null || query.isBlank()) {
+            return null;
+        }
+        String trimmed = query.trim();
+        // If it's an ISIN (12 chars, starts with IN/INF), resolve to symbol first
+        if (INF_ISIN.matcher(trimmed).matches() || GENERIC_ISIN.matcher(trimmed).matches()) {
+            String symbol = resolveIsinToSymbol(trimmed);
+            return symbol != null ? symbol : trimmed;
+        }
+        if (isDirectHoldingsKey(trimmed)) {
+            return trimmed.toUpperCase(Locale.ROOT);
+        }
+        return resolveQueryToSymbol(trimmed);
+    }
+
+    private boolean isDirectHoldingsKey(String value) {
+        if (value.contains(" ")) {
+            return false;
+        }
+        if (INF_ISIN.matcher(value).matches()) {
+            return true;
+        }
+        return DIRECT_HOLDINGS_KEY.matcher(value).matches() && value.length() <= 24;
+    }
+
+    public String resolveQueryToSymbol(String query) {
+        try {
+            String encoded = URLEncoder.encode(query, StandardCharsets.UTF_8);
+            String url = apiUrl + "/v2/funds/search?query=" + encoded + "&limit=20&productTypes=ETF";
+            log.info("Fund search: {}", url);
+            EtfSearchResponse response = etfRestTemplate.getForObject(url, EtfSearchResponse.class);
+            if (response == null || response.getEtfs() == null || response.getEtfs().isEmpty()) {
+                log.warn("ETF search returned no results for '{}'", query);
+                return null;
+            }
+            List<String> symbols = response.getEtfs().stream()
+                    .map(EtfInfo::getSymbol)
+                    .filter(s -> s != null && !s.isBlank())
+                    .collect(Collectors.toList());
+            log.info("ETF search '{}' -> symbols {}", query, symbols);
+            String preferred = preferredSymbolFor(query);
+            if (preferred != null) {
+                for (EtfInfo etf : response.getEtfs()) {
+                    if (preferred.equalsIgnoreCase(etf.getSymbol())) {
+                        return preferred;
+                    }
+                }
+            }
+            return response.getEtfs().get(0).getSymbol();
+        } catch (Exception e) {
+            log.error("ETF search failed for '{}': {}", query, e.getMessage());
+            return null;
+        }
+    }
+
+    private String preferredSymbolFor(String query) {
+        if (basketCatalogService == null || query == null) {
+            return null;
+        }
+        return basketCatalogService.preferredSymbolByAlias().get(query.toLowerCase(Locale.ROOT).trim());
+    }
+
+    private Map<String, EtfData> indexHoldingsBySymbol(HoldingsLookupResponse response) {
+        Map<String, EtfData> bySymbol = new LinkedHashMap<>();
+        if (response == null || response.getEtfs() == null) {
+            return bySymbol;
+        }
+        for (EtfApiResponse etf : response.getEtfs()) {
+            EtfData data = toEtfData(etf);
+            if (data != null && etf.getSymbol() != null && !etf.getSymbol().isBlank()) {
+                bySymbol.put(etf.getSymbol().toUpperCase(Locale.ROOT), data);
+            }
+        }
+        return bySymbol;
+    }
+
+    private EtfData mapFirstEtfFromResponse(String input, HoldingsLookupResponse response) {
+        return resolveEtfForInput(input, response);
+    }
+
+    private EtfData resolveEtfForInput(String input, HoldingsLookupResponse response) {
+        if (response == null || response.getEtfs() == null || response.getEtfs().isEmpty()) {
+            log.warn("Empty holdings lookup response for: {}", input);
+            return null;
+        }
+        String needle = input == null ? "" : input.trim();
+        List<EtfApiResponse> candidates = filterEtfsForQuery(response.getEtfs(), needle);
+        if (candidates.isEmpty()) {
+            if (response.getTotalFound() != null && response.getTotalFound() == 1) {
+                return toEtfData(response.getEtfs().get(0));
+            }
+            log.warn("No ETF match for '{}' among {} ETFs in batch", input, response.getEtfs().size());
+            return null;
+        }
+        return toEtfData(pickRepresentativeEtf(candidates, needle));
+    }
+
+    /** Same matching rules as am-parser search: substring on symbol, name, or ISIN. */
+    private List<EtfApiResponse> filterEtfsForQuery(List<EtfApiResponse> etfs, String query) {
+        if (etfs == null || query == null || query.isBlank()) {
+            return Collections.emptyList();
+        }
+        List<EtfApiResponse> matched = new ArrayList<>();
+        for (EtfApiResponse etf : etfs) {
+            if (matchesInput(etf, query)) {
+                matched.add(etf);
+            }
+        }
+        if (!matched.isEmpty()) {
+            return matched;
+        }
+        String queryLower = query.toLowerCase(Locale.ROOT).trim();
+        for (EtfApiResponse etf : etfs) {
+            if (etf.getSymbol() != null && etf.getSymbol().toLowerCase(Locale.ROOT).contains(queryLower)) {
+                matched.add(etf);
+            } else if (etf.getName() != null && etf.getName().toLowerCase(Locale.ROOT).contains(queryLower)) {
+                matched.add(etf);
+            } else if (etf.getIsin() != null && etf.getIsin().toLowerCase(Locale.ROOT).contains(queryLower)) {
+                matched.add(etf);
+            }
+        }
+        return matched;
+    }
+
+    private EtfApiResponse pickRepresentativeEtf(List<EtfApiResponse> candidates, String query) {
+        if (candidates.size() == 1) {
+            return candidates.get(0);
+        }
+        String preferred = preferredSymbolFor(query);
+        if (preferred != null) {
+            for (EtfApiResponse etf : candidates) {
+                if (etf.getSymbol() != null && preferred.equalsIgnoreCase(etf.getSymbol())) {
+                    return etf;
+                }
+            }
+        }
+        return candidates.get(0);
+    }
+
+    private void indexEtfsByIsinAndSymbol(HoldingsLookupResponse response, Map<String, EtfData> out) {
+        if (response == null || response.getEtfs() == null) {
+            return;
+        }
+        for (EtfApiResponse etf : response.getEtfs()) {
+            EtfData data = toEtfData(etf);
+            if (data == null) {
+                continue;
+            }
+            if (etf.getIsin() != null && !etf.getIsin().isBlank()) {
+                out.putIfAbsent(etf.getIsin(), data);
+            }
+            if (etf.getSymbol() != null && !etf.getSymbol().isBlank()) {
+                out.putIfAbsent(etf.getSymbol(), data);
+            }
+        }
+    }
+
+    private boolean matchesInput(EtfApiResponse etf, String input) {
+        if (input == null || input.isBlank() || etf == null) {
+            return false;
+        }
+        if (etf.getIsin() != null && input.equalsIgnoreCase(etf.getIsin())) {
+            return true;
+        }
+        if (etf.getSymbol() != null && input.equalsIgnoreCase(etf.getSymbol())) {
+            return true;
+        }
+        String inputLower = input.toLowerCase(Locale.ROOT);
+        if (etf.getName() != null) {
+            String nameLower = etf.getName().toLowerCase(Locale.ROOT);
+            int idx = nameLower.indexOf(inputLower);
+            if (idx >= 0 && !nameContinuesPastQuery(nameLower, idx, inputLower.length())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Avoid matching "Nifty 50" to "Nifty 500" when the name continues with another digit. */
+    private boolean nameContinuesPastQuery(String nameLower, int matchStart, int queryLen) {
+        int end = matchStart + queryLen;
+        if (end >= nameLower.length()) {
+            return false;
+        }
+        char next = nameLower.charAt(end);
+        if (!Character.isDigit(next)) {
+            return false;
+        }
+        return queryLen > 0 && Character.isDigit(nameLower.charAt(end - 1));
+    }
+
+    private EtfData toEtfData(EtfApiResponse response) {
+        if (response == null) {
+            return null;
+        }
+        // Discover still needs a symbol stub when holdings are temporarily unavailable
+        // so performance (1Y/3Y/5Y) can be filled from market history.
+        if (response.getSymbol() == null && response.getName() == null && response.getHoldings() == null) {
+            return null;
+        }
+        EtfData data = new EtfData();
+        data.setName(response.getName());
+        data.setSymbol(response.getSymbol());
+        data.setCategoryLabel(firstNonBlank(response.getCategoryLabel(), response.getMarketCapCategory(), response.getAssetClass()));
+        data.setReturn1Y(response.getReturn1Y());
+        data.setReturn3Y(response.getReturn3Y());
+        data.setReturn5Y(response.getReturn5Y());
+        data.setReturnsAsOf(response.getReturnsAsOf());
+        data.setSparklineCloses(response.getSparklineCloses());
+
+        List<EtfHolding> holdings = response.getHoldings() == null
+                ? List.of()
+                : response.getHoldings().stream()
+                .map(h -> {
+                    EtfHolding holding = new EtfHolding();
+                    holding.setIsin(h.getIsinCode());
+                    holding.setSymbol(h.getStockName());
+                    holding.setSector("Unknown");
+                    holding.setWeight(h.getPercentage() != null ? h.getPercentage() : 0.0);
+                    return holding;
+                })
+                .collect(Collectors.toList());
+
+        data.setHoldings(holdings);
+        log.info(
+                "Mapped ETF {} (isin={}), holdings count={}",
+                data.getSymbol(),
+                response.getIsin(),
+                holdings.size());
+        return data;
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String v : values) {
+            if (v != null && !v.isBlank()) {
+                return v;
+            }
         }
         return null;
     }
 
     public List<String> searchEtfs(String query) {
-        try {
-            // Updated to use the search endpoint with limit as suggested
-            String url = String.format("%s/v1/etf/search?query=%s&limit=10", apiUrl, query);
-            log.info("Searching ETFs with query: {}", url);
-
-            EtfSearchResponse response = restTemplate.getForObject(url, EtfSearchResponse.class);
-            if (response != null && response.getEtfs() != null) {
-                List<String> isins = response.getEtfs().stream()
-                        .map(EtfInfo::getIsin)
-                        .filter(isin -> isin != null && !isin.isEmpty())
-                        .collect(Collectors.toList());
-                log.info("Found {} ETFs matching query: {}", isins.size(), query);
-                return isins;
-            }
-        } catch (Exception e) {
-            log.error("Failed to search ETFs: {}", e.getMessage());
+        String symbol = resolveQueryToSymbol(query);
+        if (symbol != null) {
+            return List.of(symbol);
         }
         return Collections.emptyList();
     }
-
-    @Value("${market-data.api.base-url}")
-    private String marketDataUrl;
 
     private List<SecurityDocumentDTO> referenceSecurities = null;
 
@@ -108,10 +578,7 @@ public class EtfApiClient {
             SecuritySearchRequest request = new SecuritySearchRequest();
             request.setIndex("NIFTY 500");
 
-            // Assuming the response is a List<SecurityDocumentDTO>
-            // We need to map it properly. RestTemplate might need
-            // ParameterizedTypeReference but array works too.
-            SecurityDocumentDTO[] response = restTemplate.postForObject(url, request, SecurityDocumentDTO[].class);
+            SecurityDocumentDTO[] response = marketRestTemplate.postForObject(url, request, SecurityDocumentDTO[].class);
 
             if (response != null) {
                 referenceSecurities = java.util.Arrays.asList(response);
@@ -129,7 +596,6 @@ public class EtfApiClient {
 
         String normalizedRaw = normalize(rawName);
 
-        // Strategy 1: Exact match on normalized name
         for (SecurityDocumentDTO doc : candidates) {
             if (doc.getMetadata() != null && doc.getMetadata().getCompanyName() != null) {
                 String normalizedCandidate = normalize(doc.getMetadata().getCompanyName());
@@ -139,13 +605,10 @@ public class EtfApiClient {
             }
         }
 
-        // Strategy 2: Contains match (if one contains the other and length difference
-        // is small)
         for (SecurityDocumentDTO doc : candidates) {
             if (doc.getMetadata() != null && doc.getMetadata().getCompanyName() != null) {
                 String normalizedCandidate = normalize(doc.getMetadata().getCompanyName());
                 if (normalizedRaw.contains(normalizedCandidate) || normalizedCandidate.contains(normalizedRaw)) {
-                    // Simple heuristic: if length ratio > 0.7
                     double ratio = (double) Math.min(normalizedRaw.length(), normalizedCandidate.length())
                             / Math.max(normalizedRaw.length(), normalizedCandidate.length());
                     if (ratio > 0.6) {
@@ -172,99 +635,283 @@ public class EtfApiClient {
     }
 
     public void enrichHoldings(List<EtfHolding> holdings) {
-        if (holdings == null || holdings.isEmpty())
+        if (holdings == null || holdings.isEmpty()) {
             return;
+        }
+        if (!holdingsEnrichmentEnabled) {
+            log.debug("Skipping holdings enrichment (basket.holdings.enrichment.enabled=false)");
+            return;
+        }
+
+        List<EtfHolding> needsIsin = holdings.stream()
+                .filter(h -> !hasValidIsin(h) || SectorNormalizer.isUnknown(h.getSector()) || h.getMarketCapCategory() == null)
+                .collect(Collectors.toList());
+        if (needsIsin.isEmpty()) {
+            log.debug("All {} ETF constituents are fully enriched", holdings.size());
+            return;
+        }
 
         try {
-            List<String> queries = holdings.stream()
-                    .map(h -> (h.getIsin() != null && !h.getIsin().isEmpty()) ? h.getIsin() : h.getSymbol())
+            Map<String, SecurityMatch> matchMap = batchSearchByStockNames(needsIsin);
+            if (matchMap.isEmpty()) {
+                log.warn(
+                        "Market batch-search returned no matches ({}). Check MARKET_DATA_API_URL={} is reachable from this machine.",
+                        needsIsin.size(), marketDataUrl);
+                return;
+            }
+
+            for (EtfHolding h : needsIsin) {
+                String query = hasValidIsin(h) ? h.getIsin() : h.getSymbol();
+                if (query == null || query.isBlank()) {
+                    continue;
+                }
+                SecurityMatch match = matchMap.get(query);
+                if (match == null) {
+                    continue;
+                }
+                applySecurityMatch(h, match);
+            }
+            log.info("Enriched {}/{} ETF constituents with ISINs via market batch-search", matchMap.size(), needsIsin.size());
+
+            // Second pass: query by symbol for any constituents that STILL have Unknown sector
+            List<EtfHolding> stillUnknown = needsIsin.stream()
+                    .filter(h -> SectorNormalizer.isUnknown(h.getSector()))
+                    .filter(h -> h.getSymbol() != null && !h.getSymbol().isBlank())
                     .collect(Collectors.toList());
 
-            // Split into chunks if necessary, but for now assuming one batch is fine or
-            // logic inside BatchSearch handles it
-            BatchSearchRequest request = new BatchSearchRequest();
-            request.setQueries(queries);
-            request.setLimit(1); // We only need the best match
+            if (!stillUnknown.isEmpty()) {
+                List<String> fallbackSymbols = stillUnknown.stream()
+                        .map(EtfHolding::getSymbol)
+                        .distinct()
+                        .collect(Collectors.toList());
 
-            String url = String.format("%s/v1/securities/batch-search", marketDataUrl);
-            log.info("Enriching {} holdings via {}", holdings.size(), url);
-
-            BatchSearchResponse response = restTemplate.postForObject(url, request, BatchSearchResponse.class);
-            Map<String, SecurityMatch> matchMap = new java.util.HashMap<>();
-
-            if (response != null && response.getResults() != null) {
-                for (BatchSearchResult result : response.getResults()) {
-                    if (result.getMatches() != null && !result.getMatches().isEmpty()) {
-                        matchMap.put(result.getQuery(), result.getMatches().get(0));
+                Map<String, SecurityMatch> symbolMatchMap = batchSearchByQueries(fallbackSymbols);
+                for (EtfHolding h : stillUnknown) {
+                    SecurityMatch match = symbolMatchMap.get(h.getSymbol());
+                    if (match != null && match.getSector() != null) {
+                        applySecurityMatch(h, match);
                     }
                 }
-            }
-
-            // Check if we need fallback
-            boolean needsFallback = holdings.stream().anyMatch(h -> {
-                String query = (h.getIsin() != null && !h.getIsin().isEmpty()) ? h.getIsin() : h.getSymbol();
-                SecurityMatch match = matchMap.get(query);
-                return match == null || (h.getIsin() == null && match.getIsin() == null); // If we still don't have ISIN
-            });
-
-            if (needsFallback) {
-                fetchReferenceSecurities();
-            }
-
-            for (EtfHolding h : holdings) {
-                String query = (h.getIsin() != null && !h.getIsin().isEmpty()) ? h.getIsin() : h.getSymbol();
-                SecurityMatch match = matchMap.get(query);
-
-                // Fallback Logic
-                if (match == null && referenceSecurities != null) {
-                    SecurityDocumentDTO bestMatch = findBestMatch(h.getSymbol(), referenceSecurities); // h.getSymbol is
-                                                                                                       // stockName if
-                                                                                                       // ISIN missing
-                    if (bestMatch != null) {
-                        log.info("Fuzzy matched '{}' to '{}' ({})", h.getSymbol(),
-                                bestMatch.getMetadata().getCompanyName(), bestMatch.getKey().getSymbol());
-                        match = new SecurityMatch();
-                        match.setSymbol(bestMatch.getKey().getSymbol());
-                        match.setIsin(bestMatch.getKey().getIsin());
-                        match.setSector(bestMatch.getMetadata().getSector());
-                        match.setIndustry(bestMatch.getMetadata().getIndustry());
-                        match.setMarketCapType(bestMatch.getMetadata().getMarketCapType());
-                        if (bestMatch.getMetadata().getMarketCapValue() != null)
-                            match.setMarketCapValue(Double.valueOf(bestMatch.getMetadata().getMarketCapValue()));
-                    }
-                }
-
-                if (match != null) {
-                    // CRITICAL: Update symbol from market data match (e.g., "Indusind Bank Ltd." ->
-                    // "INDUSINDBK")
-                    if (match.getSymbol() != null)
-                        h.setSymbol(match.getSymbol());
-
-                    if (match.getIsin() != null)
-                        h.setIsin(match.getIsin());
-
-                    if (match.getIndustry() != null) {
-                        h.setSector(match.getIndustry());
-                    } else if (match.getSector() != null) {
-                        h.setSector(match.getSector());
-                    }
-
-                    // Fix for Market Cap mapping
-                    // The field in EtfHolding is marketCapCategory (String) and marketCapValue
-                    // (Double)
-                    // The field in SecurityMatch is marketCapType (String) and marketCapValue
-                    // (Double)
-                    if (match.getMarketCapType() != null) {
-                        h.setMarketCapCategory(match.getMarketCapType());
-                    }
-                    if (match.getMarketCapValue() != null) {
-                        h.setMarketCapValue(match.getMarketCapValue());
-                    }
-                }
+                log.info("Enriched {}/{} ETF constituents with fallback symbols", symbolMatchMap.size(), stillUnknown.size());
             }
 
         } catch (Exception e) {
-            log.error("Failed to enrich holdings: {}", e.getMessage());
+            log.warn("Market batch-search failed ({}). Basket overlap may be weaker without constituent ISINs.", e.getMessage());
+        }
+    }
+
+    private boolean hasValidIsin(EtfHolding h) {
+        return h.getIsin() != null && h.getIsin().length() >= 10 && !"-".equals(h.getIsin());
+    }
+
+    private Map<String, SecurityMatch> batchSearchByStockNames(List<EtfHolding> holdings) {
+        List<String> names = holdings.stream()
+                .map(h -> hasValidIsin(h) ? h.getIsin() : h.getSymbol())
+                .filter(s -> s != null && !s.isBlank())
+                .distinct()
+                .collect(Collectors.toList());
+        return batchSearchByQueries(names);
+    }
+
+    private Map<String, SecurityMatch> batchSearchByQueries(List<String> names) {
+        if (names.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<String, SecurityMatch> matchMap = new LinkedHashMap<>();
+        List<String> missing = new ArrayList<>();
+
+        for (String name : names) {
+            SecurityMatch l1 = secmatchL1.getIfPresent(normalizeSecKey(name));
+            if (l1 != null) {
+                matchMap.put(name, l1);
+            } else {
+                missing.add(name);
+            }
+        }
+
+        if (!missing.isEmpty() && securityMatchRedisService != null) {
+            try {
+                Map<String, CachedSecurityMatch> l2Hits = securityMatchRedisService.getMatches(missing);
+                List<String> stillMissing = new ArrayList<>();
+                Map<String, CachedSecurityMatch> toKeep = new LinkedHashMap<>();
+                for (String name : missing) {
+                    CachedSecurityMatch cached = l2Hits.get(name);
+                    if (cached != null) {
+                        SecurityMatch match = fromCachedMatch(cached);
+                        matchMap.put(name, match);
+                        secmatchL1.put(normalizeSecKey(name), match);
+                        toKeep.put(name, cached);
+                    } else {
+                        stillMissing.add(name);
+                    }
+                }
+                missing = stillMissing;
+            } catch (Exception e) {
+                log.warn("Secmatch L2 read failed — fail-open: {}", e.getMessage());
+            }
+        }
+
+        if (missing.isEmpty()) {
+            log.info("batch_search.chunks=0 allFromCache names={}", names.size());
+            return matchMap;
+        }
+
+        String url = marketDataUrl + "/v1/securities/batch-search";
+        int chunkSize = Math.max(1, batchSearchChunkSize);
+        List<List<String>> chunks = new ArrayList<>();
+        for (int i = 0; i < missing.size(); i += chunkSize) {
+            chunks.add(missing.subList(i, Math.min(i + chunkSize, missing.size())));
+        }
+
+        log.info("batch_search.chunks={} namesMissing={} chunkSize={} workers={}",
+                chunks.size(), missing.size(), chunkSize, parallelWorkers);
+
+        List<CompletableFuture<Map<String, SecurityMatch>>> futures = new ArrayList<>();
+        for (List<String> chunk : chunks) {
+            futures.add(CompletableFuture.supplyAsync(() -> fetchChunk(url, chunk), enrichmentExecutor));
+        }
+
+        Map<String, CachedSecurityMatch> newlyCached = new LinkedHashMap<>();
+        for (CompletableFuture<Map<String, SecurityMatch>> future : futures) {
+            try {
+                Map<String, SecurityMatch> chunkResult = future.get(enrichmentReadTimeoutMs + 5_000L, TimeUnit.MILLISECONDS);
+                for (Map.Entry<String, SecurityMatch> entry : chunkResult.entrySet()) {
+                    matchMap.put(entry.getKey(), entry.getValue());
+                    secmatchL1.put(normalizeSecKey(entry.getKey()), entry.getValue());
+                    newlyCached.put(entry.getKey(), toCachedMatch(entry.getKey(), entry.getValue()));
+                }
+            } catch (Exception e) {
+                log.warn("batch_search chunk failed — continuing: {}", e.getMessage());
+            }
+        }
+
+        if (!newlyCached.isEmpty() && securityMatchRedisService != null) {
+            try {
+                securityMatchRedisService.cacheMatchesAsync(newlyCached);
+            } catch (Exception e) {
+                log.warn("Secmatch L2 write failed — fail-open: {}", e.getMessage());
+            }
+        }
+
+        return matchMap;
+    }
+
+    private Map<String, SecurityMatch> fetchChunk(String url, List<String> chunk) {
+        Map<String, SecurityMatch> matchMap = new LinkedHashMap<>();
+        try {
+            BatchSearchRequest request = new BatchSearchRequest();
+            request.setQueries(new ArrayList<>(chunk));
+            request.setLimit(1);
+            request.setMinMatchScore(0.7);
+
+            log.info("Enriching {} holdings via {}", chunk.size(), url);
+            BatchSearchResponse response = marketRestTemplate.postForObject(url, request, BatchSearchResponse.class);
+            if (response == null || response.getResults() == null) {
+                return matchMap;
+            }
+            for (BatchSearchResult result : response.getResults()) {
+                if (result.getMatches() != null && !result.getMatches().isEmpty()) {
+                    matchMap.put(result.getQuery(), result.getMatches().get(0));
+                }
+            }
+        } catch (Exception e) {
+            log.warn("batch_search POST failed size={}: {}", chunk.size(), e.getMessage());
+        }
+        return matchMap;
+    }
+
+    private static String normalizeSecKey(String name) {
+        return name.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static CachedSecurityMatch toCachedMatch(String query, SecurityMatch match) {
+        CachedSecurityMatch cached = new CachedSecurityMatch();
+        cached.setQuery(query);
+        cached.setSymbol(match.getSymbol());
+        cached.setIsin(match.getIsin());
+        cached.setSector(match.getSector());
+        cached.setIndustry(match.getIndustry());
+        cached.setMarketCapType(match.getMarketCapType());
+        cached.setMarketCapValue(match.getMarketCapValue());
+        return cached;
+    }
+
+    private static SecurityMatch fromCachedMatch(CachedSecurityMatch cached) {
+        SecurityMatch match = new SecurityMatch();
+        match.setSymbol(cached.getSymbol());
+        match.setIsin(cached.getIsin());
+        match.setSector(cached.getSector());
+        match.setIndustry(cached.getIndustry());
+        match.setMarketCapType(cached.getMarketCapType());
+        match.setMarketCapValue(cached.getMarketCapValue());
+        return match;
+    }
+
+    private void applySecurityMatch(EtfHolding h, SecurityMatch match) {
+        if (match.getSymbol() != null) {
+            h.setSymbol(match.getSymbol());
+        }
+        if (match.getIsin() != null) {
+            h.setIsin(match.getIsin());
+        }
+        
+        String bestSector = match.getSector();
+        if (bestSector != null && "Financial Services".equalsIgnoreCase(bestSector.trim()) 
+                && match.getIndustry() != null && !match.getIndustry().isBlank()) {
+            bestSector = match.getIndustry();
+        } else if (bestSector == null && match.getIndustry() != null) {
+            bestSector = match.getIndustry();
+        }
+        
+        if (bestSector != null) {
+            h.setSector(bestSector);
+        }
+        
+        if (match.getMarketCapType() != null) {
+            h.setMarketCapCategory(match.getMarketCapType());
+        }
+        if (match.getMarketCapValue() != null) {
+            h.setMarketCapValue(match.getMarketCapValue());
+        }
+    }
+
+    @Data
+    public static class HoldingsLookupRequest {
+        private List<String> items;
+        private List<String> productTypes = List.of("ETF");
+
+        public HoldingsLookupRequest(List<String> items) {
+            this.items = new ArrayList<>(items);
+            this.productTypes = List.of("ETF");
+        }
+    }
+
+    @Data
+    public static class HoldingsLookupResponse {
+        private List<String> items;
+        @JsonProperty("total_found")
+        @JsonAlias("totalFound")
+        private Integer totalFound;
+        @JsonProperty("etfs")
+        @JsonAlias("funds")
+        private List<EtfApiResponse> etfs;
+        @JsonProperty("not_found")
+        @JsonAlias("notFound")
+        private List<String> notFound;
+
+        public HoldingsLookupResponse() {
+        }
+
+        public HoldingsLookupResponse(
+                List<String> items,
+                Integer totalFound,
+                List<EtfApiResponse> etfs,
+                List<String> notFound) {
+            this.items = items;
+            this.totalFound = totalFound;
+            this.etfs = etfs;
+            this.notFound = notFound;
         }
     }
 
@@ -272,6 +919,7 @@ public class EtfApiClient {
     private static class BatchSearchRequest {
         private List<String> queries;
         private Integer limit;
+        private Double minMatchScore;
     }
 
     @Data
@@ -286,16 +934,15 @@ public class EtfApiClient {
     }
 
     @Data
-    private static class SecurityMatch {
+    public static class SecurityMatch {
         private String symbol;
-        private String isin; // Added ISIN
+        private String isin;
         private String sector;
         private String industry;
         private String marketCapType;
         private Double marketCapValue;
     }
 
-    // Fallback DTOs
     @Data
     private static class SecuritySearchRequest {
         private String index;
@@ -328,6 +975,8 @@ public class EtfApiClient {
 
     @Data
     private static class EtfSearchResponse {
+        @JsonProperty("etfs")
+        @JsonAlias("funds")
         private List<EtfInfo> etfs;
     }
 
@@ -335,24 +984,51 @@ public class EtfApiClient {
     private static class EtfInfo {
         private String isin;
         private String symbol;
+        private String name;
+        private String productType;
     }
 
     @Data
-    private static class EtfApiResponse {
+    public static class EtfApiResponse {
+        private String productType;
         private String symbol;
         private String name;
         private String isin;
+        @JsonProperty("asset_class")
+        @JsonAlias("assetClass")
+        private String assetClass;
+        @JsonProperty("market_cap_category")
+        @JsonAlias("marketCapCategory")
+        private String marketCapCategory;
+        private String categoryLabel;
         private List<ApiHolding> holdings;
+        @JsonProperty("holdings_count")
+        @JsonAlias("holdingsCount")
+        private Integer holdingsCount;
+        private String message;
+        private Double return1Y;
+        private Double return3Y;
+        private Double return5Y;
+        private String returnsAsOf;
+        private List<Double> sparklineCloses;
     }
 
     @Data
     private static class ApiHolding {
         @JsonProperty("stock_name")
+        @JsonAlias("stockName")
         private String stockName;
 
         @JsonProperty("isin_code")
+        @JsonAlias("isinCode")
         private String isinCode;
 
         private Double percentage;
+
+        @JsonProperty("market_value")
+        @JsonAlias("marketValue")
+        private Double marketValue;
+
+        private Double quantity;
     }
 }

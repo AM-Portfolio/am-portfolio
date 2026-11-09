@@ -1,18 +1,35 @@
 package com.portfolio.basket.service;
 
 import com.portfolio.basket.client.EtfApiClient;
+import com.portfolio.basket.engine.overlap.BasketOverlapCalculator;
+import com.portfolio.basket.engine.sizing.BasketQuantityCalculator;
+import com.portfolio.basket.engine.substitutes.BasketSubstituteApplier;
+import com.portfolio.basket.exception.EtfNotFoundException;
+import com.portfolio.basket.kernel.BasketPortfolioValueCalculator;
+import com.portfolio.basket.kernel.BasketPriceResolver;
+import com.portfolio.basket.kernel.HoldingsContext;
 import com.portfolio.basket.model.BasketOpportunity;
-import com.portfolio.basket.model.BasketOpportunity.BasketItem;
-import com.portfolio.basket.model.BasketOpportunity.ItemStatus;
+import com.portfolio.basket.engine.overlap.SectorProfile;
 import com.portfolio.basket.model.EtfData;
 import com.portfolio.basket.model.EtfHolding;
+import com.portfolio.basket.model.OpportunityMode;
+import com.portfolio.basket.model.SubstituteAssignment;
 import com.portfolio.basket.util.BasketUtils;
+import com.portfolio.basket.util.SectorNormalizer;
 import com.portfolio.model.portfolio.EquityHoldings;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -21,332 +38,266 @@ import java.util.stream.Collectors;
 public class BasketEngineService {
 
     private final EtfApiClient etfApiClient;
-    private final com.portfolio.marketdata.service.MarketDataService marketDataService;
+    private final EnrichedEtfService enrichedEtfService;
+    private final BasketCatalogService basketCatalogService;
+    private final BasketPriceResolver basketPriceResolver;
+    private final BasketPortfolioValueCalculator basketPortfolioValueCalculator;
+    private final BasketOverlapCalculator overlapCalculator;
+    private final BasketSubstituteApplier substituteApplier;
+    private final BasketQuantityCalculator quantityCalculator;
 
     public BasketOpportunity calculateBasketQuantities(Double investmentAmount, BasketOpportunity opportunity,
-            boolean includeHeld) {
-        if (investmentAmount == null || investmentAmount <= 0) {
-            return opportunity;
-        }
-
-        // 1. Gather all unique symbols from the composition (held + missing)
-        Set<String> symbols = new HashSet<>();
-        if (opportunity.getComposition() != null) {
-            for (BasketItem item : opportunity.getComposition()) {
-                if (item.getStockSymbol() != null) {
-                    symbols.add(item.getStockSymbol());
-                }
-            }
-        }
-
-        if (symbols.isEmpty()) {
-            return opportunity;
-        }
-
-        // 2. Fetch Live Prices
-        log.info("Fetching live prices for {} symbols to calculate quantities", symbols.size());
-        Map<String, Double> prices = marketDataService.getCurrentPrices(new ArrayList<>(symbols));
-
-        // 3. Calculate Quantities
-        for (BasketItem item : opportunity.getComposition()) {
-            Double price = prices.get(item.getStockSymbol());
-            if (price == null || price <= 0) {
-                log.warn("Price not found for {}, skipping calculation", item.getStockSymbol());
-                continue;
-            }
-
-            // If includeHeld is false and item is HELD, we skip buying (quantity = 0)
-            if (!includeHeld && item.getStatus() == ItemStatus.HELD) {
-                item.setBuyQuantity(0.0);
-                item.setLastPrice(price);
-                continue;
-            }
-
-            // Target Amount for this stock based on ETF weight and total investment amount
-            double targetAmount = (item.getEtfWeight() / 100.0) * investmentAmount;
-
-            // If we are including held items, we must subtract the value of what we already
-            // hold
-            // so we only buy the "gap" (or nothing if over-held).
-            if (includeHeld && (item.getStatus() == ItemStatus.HELD || item.getStatus() == ItemStatus.SUBSTITUTE)) {
-                double existingValue = 0.0;
-
-                // Method 1: Use Held Quantity * Current Price (Most Accurate)
-                if (item.getHeldQuantity() != null && price != null) {
-                    existingValue = item.getHeldQuantity() * price;
-                }
-                // Method 2: Fallback to User Weight (Less Accurate if TotalValue incorrect)
-                else if (opportunity.getTotalPortfolioValue() != null && item.getUserWeight() != null) {
-                    existingValue = (item.getUserWeight() / 100.0) * opportunity.getTotalPortfolioValue();
-                } else {
-                    log.warn("Cannot determine held value for {}. Qty: {}, TotalVal: {}",
-                            item.getStockSymbol(), item.getHeldQuantity(), opportunity.getTotalPortfolioValue());
-                }
-
-                double requiredAmount = targetAmount - existingValue;
-
-                if (requiredAmount <= 0) {
-                    // We have enough or more than enough
-                    item.setBuyQuantity(0.0);
-                    item.setLastPrice(price);
-                    continue;
-                } else {
-                    // We need to buy more to reach the target
-                    targetAmount = requiredAmount;
-                }
-            }
-
-            // Calculate quantity (floor)
-            int quantity = (int) Math.floor(targetAmount / price);
-
-            item.setBuyQuantity((double) quantity);
-            item.setLastPrice(price);
-        }
-
-        return opportunity;
+            boolean includeHeld, List<String> excludedSymbols) {
+        return quantityCalculator.calculateBasketQuantities(investmentAmount, opportunity, includeHeld, excludedSymbols);
     }
 
     public List<BasketOpportunity> findOpportunities(List<EquityHoldings> userHoldings, String etfQuery) {
-        // 0. Calculate User Portfolio Weights
+        return findOpportunities(userHoldings, etfQuery, OpportunityMode.FULL);
+    }
+
+    public List<BasketOpportunity> findOpportunities(
+            List<EquityHoldings> userHoldings, String etfQuery, OpportunityMode mode) {
+        OpportunityMode effective = mode != null ? mode : OpportunityMode.FULL;
+        long t0 = System.nanoTime();
         BasketUtils.calculateUserWeights(userHoldings);
 
-        // Calculate Total Portfolio Value using Current Value preference
         double totalValue = userHoldings.stream()
                 .mapToDouble(h -> {
-                    if (h.getCurrentValue() != null)
+                    if (h.getCurrentValue() != null) {
                         return h.getCurrentValue();
-                    if (h.getInvestmentCost() != null)
+                    }
+                    if (h.getInvestmentCost() != null) {
                         return h.getInvestmentCost();
+                    }
                     return 0.0;
                 })
                 .sum();
 
-        // 1. Discover ETFs
-        Set<String> allIsins = new HashSet<>();
+        double remainingValue = userHoldings.stream()
+                .mapToDouble(h -> {
+                    double avail = h.getAvailableQuantity() != null ? h.getAvailableQuantity()
+                            : (h.getQuantity() != null ? h.getQuantity() : 0.0);
+                    double price = h.getCurrentPrice() != null ? h.getCurrentPrice() : 0.0;
+                    return avail * price;
+                })
+                .sum();
 
-        if (etfQuery != null && !etfQuery.trim().isEmpty()) {
-            if (etfQuery.contains(",")) {
-                log.info("Processing explicit ISIN list: {}", etfQuery);
-                Arrays.stream(etfQuery.split(","))
-                        .map(String::trim)
-                        .filter(s -> !s.isEmpty())
-                        .forEach(allIsins::add);
+        Set<String> allQueries = new LinkedHashSet<>();
+
+        String effectiveQuery = (etfQuery == null || etfQuery.trim().isEmpty())
+                ? basketCatalogService.resolveDefaultQuery()
+                : etfQuery;
+        if (effectiveQuery != null && !effectiveQuery.trim().isEmpty()) {
+            if (effectiveQuery.contains(",")) {
+                log.info("Processing query list: {}", effectiveQuery);
+                for (String token : effectiveQuery.split(",")) {
+                    String trimmed = token.trim();
+                    if (trimmed.isEmpty()) {
+                        continue;
+                    }
+                    resolveDiscoveryToken(trimmed, allQueries);
+                }
             } else {
-                log.info("Discovering ETFs via search query: {}", etfQuery);
-                allIsins.addAll(etfApiClient.searchEtfs(etfQuery));
+                log.info("Discovering ETFs via search query: {}", effectiveQuery);
+                resolveDiscoveryToken(effectiveQuery.trim(), allQueries);
             }
         }
 
-        // No fallback - require valid search query or discovery mechanism
-        if (allIsins.isEmpty()) {
-            log.warn("No ETFs discovered. Query is required for ETF discovery.");
-        }
-
-        if (allIsins.isEmpty()) {
+        if (allQueries.isEmpty()) {
             log.warn("No ETFs discovered for matching.");
             return Collections.emptyList();
         }
 
-        log.info("Processing {} ETFs for matching", allIsins.size());
-        List<BasketOpportunity> opportunities = findOpportunitiesInternal(userHoldings, allIsins);
+        log.info("Processing {} ETFs for matching mode={}", allQueries.size(), effective);
+        List<BasketOpportunity> opportunities = findOpportunitiesInternal(userHoldings, allQueries, effective);
 
-        // Set total portfolio value on each opportunity
-        opportunities.forEach(op -> op.setTotalPortfolioValue(totalValue));
+        opportunities.forEach(op -> {
+            op.setTotalPortfolioValue(totalValue);
+            op.setRemainingPortfolioValue(remainingValue);
+        });
 
-        // 2. Sort by match score descending
         opportunities.sort(Comparator.comparingDouble(BasketOpportunity::getMatchScore).reversed());
 
+        if (effective.isDiscover()) {
+            // Discover UI only needs summary + sparkline; composition/buyList dominate ~2MB JSON.
+            for (BasketOpportunity op : opportunities) {
+                slimForDiscover(op);
+            }
+        }
+
+        log.info("basket.opp.stage=total mode={} etfCount={} durationMs={}",
+                effective, allQueries.size(), (System.nanoTime() - t0) / 1_000_000L);
         return opportunities;
     }
 
-    // Helper to calculate opportunities for specific ETF ISINs
-    private List<BasketOpportunity> findOpportunitiesInternal(List<EquityHoldings> userHoldings, Set<String> etfIsins) {
+    /** Drop heavy line-item payloads unused by Discover list/cards. */
+    static void slimForDiscover(BasketOpportunity op) {
+        if (op == null) {
+            return;
+        }
+        op.setComposition(null);
+        op.setBuyList(null);
+        op.setEtfConstituentIsins(null);
+    }
+
+    private void resolveDiscoveryToken(String token, Set<String> out) {
+        Map<String, String> aliases = basketCatalogService.preferredSymbolByAlias();
+        String aliasHit = aliases.get(token.toLowerCase(Locale.ROOT));
+        if (aliasHit != null && !aliasHit.isBlank()) {
+            out.add(aliasHit);
+            return;
+        }
+        if (isLikelyIsinOrSymbol(token)) {
+            out.add(token);
+            return;
+        }
+        List<String> found = etfApiClient.searchEtfs(token);
+        if (found.isEmpty()) {
+            out.add(token);
+        } else {
+            out.addAll(found);
+        }
+    }
+
+    private boolean isLikelyIsinOrSymbol(String value) {
+        if (value.contains(" ")) {
+            return false;
+        }
+        if (value.matches("(?i)^INF[A-Z0-9]{10}$") || value.matches("(?i)^[A-Z]{2}[A-Z0-9]{10}$")) {
+            return true;
+        }
+        return value.matches("^[A-Za-z0-9._-]+$") && value.length() <= 24;
+    }
+
+    private List<BasketOpportunity> findOpportunitiesInternal(
+            List<EquityHoldings> userHoldings, Set<String> etfQueries, OpportunityMode mode) {
         Map<String, EquityHoldings> userMap = userHoldings.stream()
+                .filter(h -> h.getIsin() != null && !h.getIsin().isBlank())
                 .collect(Collectors.toMap(EquityHoldings::getIsin, h -> h, (a, b) -> a));
 
         Map<String, List<EquityHoldings>> userSectorMap = userHoldings.stream()
-                .filter(h -> h.getSector() != null)
-                .collect(Collectors.groupingBy(EquityHoldings::getSector));
+                .filter(h -> h.getSector() != null && !SectorNormalizer.isUnknown(h.getSector()))
+                .filter(h -> h.getAvailableQuantity() == null || h.getAvailableQuantity() > 0)
+                .collect(Collectors.groupingBy(h -> SectorNormalizer.normalizeFine(h.getSector())));
 
         List<BasketOpportunity> opportunities = new ArrayList<>();
+        long tEtf = System.nanoTime();
+        Map<String, EtfData> etfDataByInput = enrichedEtfService.getEnrichedEtfsBatch(
+                new ArrayList<>(etfQueries), mode.isDiscover());
+        log.info("basket.opp.stage=etf_batch mode={} size={} durationMs={}",
+                mode, etfQueries.size(), (System.nanoTime() - tEtf) / 1_000_000L);
 
-        for (String etfIsin : etfIsins) {
-            // Get Data (Cache or API)
-            EtfData etf = getEtfData(etfIsin);
-            if (etf == null)
+        Map<String, Double> sharedPrices = Collections.emptyMap();
+        boolean skipPriceFetch = mode.isDiscover();
+        if (!skipPriceFetch) {
+            Set<String> symbolsToFetch = new HashSet<>();
+            for (EquityHoldings h : userHoldings) {
+                if (h.getSymbol() != null && !h.getSymbol().isBlank()) {
+                    symbolsToFetch.add(h.getSymbol());
+                }
+            }
+            for (EtfData etf : etfDataByInput.values()) {
+                if (etf == null || etf.getHoldings() == null) {
+                    continue;
+                }
+                for (EtfHolding holding : etf.getHoldings()) {
+                    if (holding.getSymbol() != null && !holding.getSymbol().isBlank()) {
+                        symbolsToFetch.add(holding.getSymbol());
+                    }
+                }
+            }
+            long tPrices = System.nanoTime();
+            sharedPrices = basketPriceResolver.fetchPricesWithHoldingsFallback(symbolsToFetch, userHoldings);
+            log.info("basket.opp.stage=prices mode={} symbols={} durationMs={}",
+                    mode, symbolsToFetch.size(), (System.nanoTime() - tPrices) / 1_000_000L);
+            log.info("Opportunities shared price map size={} for {} ETF queries", sharedPrices.size(), etfQueries.size());
+        } else {
+            log.info("basket.opp.stage=prices mode=DISCOVER skipped=true durationMs=0");
+        }
+
+        long tOverlap = System.nanoTime();
+        for (String etfQuery : etfQueries) {
+            EtfData etf = etfDataByInput.get(etfQuery);
+            if (etf == null) {
+                log.warn("No ETF resolved for query '{}' after batch lookup", etfQuery);
                 continue;
+            }
 
-            BasketOpportunity opportunity = calculateOverlap(etfIsin, etf, userMap, userSectorMap);
-            // Add all opportunities, sorting happens at top level
+            SectorProfile sectorProfile = overlapCalculator.detectSectorProfile(etf);
+
+            BasketOpportunity opportunity = overlapCalculator.calculateOverlap(
+                    etfQuery, etf, userMap, userSectorMap, userHoldings, sectorProfile,
+                    sharedPrices, skipPriceFetch);
             opportunities.add(opportunity);
         }
+        log.info("basket.opp.stage=overlap mode={} count={} durationMs={}",
+                mode, opportunities.size(), (System.nanoTime() - tOverlap) / 1_000_000L);
 
         return opportunities;
     }
 
-    // Fetch Data from Live API Only
     public EtfData getEtfData(String isin) {
-        log.info("Fetching live ETF data for ISIN: {}", isin);
-        EtfData data = etfApiClient.fetchEtfHoldings(isin);
+        log.info("Fetching enriched ETF data for ISIN/symbol: {}", isin);
+        EtfData data = enrichedEtfService.getEnrichedEtf(isin);
         if (data == null) {
             log.warn("⚠️ No ETF data available from API for ISIN: {}", isin);
-        } else {
-            // Enrich with market data if possible
-            log.info("Enriching ETF data for {}", isin);
-            etfApiClient.enrichHoldings(data.getHoldings());
         }
         return data;
     }
 
-    // Called by Controller for specific preview
     public BasketOpportunity getPreview(String etfIsin, List<EquityHoldings> userHoldings) {
-        // 0. Calculate User Weights
         BasketUtils.calculateUserWeights(userHoldings);
 
         EtfData etf = getEtfData(etfIsin);
         if (etf == null) {
-            throw new RuntimeException("ETF not found for ISIN: " + etfIsin);
+            throw new EtfNotFoundException(
+                    "ETF data not found for '" + etfIsin + "'. " +
+                            "Use the ETF symbol (e.g. BANKBEES) or verify the ETF exists in the catalog."
+            );
         }
 
-        // Convert into singleton list logic
-        Map<String, EquityHoldings> userMap = userHoldings.stream()
-                .collect(Collectors.toMap(EquityHoldings::getIsin, h -> h, (a, b) -> a));
+        HoldingsContext ctx = HoldingsContext.from(userHoldings);
+        SectorProfile sectorProfile = overlapCalculator.detectSectorProfile(etf);
 
-        Map<String, List<EquityHoldings>> userSectorMap = userHoldings.stream()
-                .filter(h -> h.getSector() != null)
-                .collect(Collectors.groupingBy(EquityHoldings::getSector));
-
-        return calculateOverlap(etfIsin, etf, userMap, userSectorMap);
-    }
-
-    private BasketOpportunity calculateOverlap(String etfIsin, EtfData etf,
-            Map<String, EquityHoldings> userMap,
-            Map<String, List<EquityHoldings>> userSectorMap) {
-
-        List<BasketItem> composition = new ArrayList<>();
-        List<BasketItem> buyList = new ArrayList<>();
-        double replicaScoreTotal = 0;
-        int matchCount = 0;
-        int total = etf.getHoldings() != null ? etf.getHoldings().size() : 0;
-
+        Set<String> etfSymbols = new HashSet<>();
         if (etf.getHoldings() != null) {
-            for (EtfHolding req : etf.getHoldings()) {
-                BasketItem item = BasketItem.builder()
-                        .stockSymbol(req.getSymbol())
-                        .isin(req.getIsin())
-                        .sector(req.getSector())
-                        .etfWeight(req.getWeight())
-                        .userWeight(0.0)
-                        .replicaWeight(0.0)
-                        .marketCapCategory(req.getMarketCapCategory())
-                        .marketCapValue(req.getMarketCapValue())
-                        .build();
-
-                boolean isMatch = false;
-
-                // A. Direct Match
-                if (req.getIsin() != null && userMap.containsKey(req.getIsin())) {
-                    isMatch = processDirectMatch(item, req, userMap.get(req.getIsin()));
+            for (EtfHolding h : etf.getHoldings()) {
+                if (h.getSymbol() != null && !h.getSymbol().isBlank()) {
+                    etfSymbols.add(h.getSymbol());
                 }
-                // B. Sector Substitution (Enhanced with Market Cap)
-                else {
-                    isMatch = processSectorSubstitute(item, req, userSectorMap);
-                    if (!isMatch) {
-                        buyList.add(item); // Add to buy list only if no match/substitute found
-                    }
-                }
-
-                if (isMatch) {
-                    replicaScoreTotal += item.getReplicaWeight();
-                    matchCount++;
-                }
-
-                composition.add(item);
             }
         }
+        Set<String> symbolsToFetch = basketPriceResolver.unionSymbols(etfSymbols, userHoldings);
+        Map<String, Double> prefetchedPrices =
+                basketPriceResolver.fetchPricesWithHoldingsFallback(symbolsToFetch, userHoldings, true);
 
-        double matchScore = (total == 0) ? 0 : (double) matchCount / total * 100.0;
-        double replicaScore = replicaScoreTotal; // Aggregated weight match
+        BasketOpportunity opp = overlapCalculator.calculateOverlap(
+                etfIsin, etf, ctx.getUserMap(), ctx.getUserSectorMap(), ctx.getAllUserHoldings(),
+                sectorProfile, prefetchedPrices);
 
-        return BasketOpportunity.builder()
-                .etfIsin(etfIsin)
-                .etfName(etf.getName())
-                .matchScore(BasketUtils.round(matchScore))
-                .replicaScore(BasketUtils.round(replicaScore))
-                .readyToReplicate(replicaScore >= 70.0)
-                .totalItems(total)
-                .heldCount(matchCount)
-                .missingCount(total - matchCount)
-                .composition(composition)
-                .buyList(buyList)
-                .build();
+        BasketPortfolioValueCalculator.PortfolioValues values = basketPortfolioValueCalculator.calculate(userHoldings);
+        opp.setTotalPortfolioValue(values.getTotalPortfolioValue());
+        opp.setRemainingPortfolioValue(values.getRemainingPortfolioValue());
+
+        return opp;
     }
 
-    private boolean processDirectMatch(BasketItem item, EtfHolding req, EquityHoldings userHolding) {
-        log.info("Checking Held Item: {} | Qty: {} | AvgPrice: {}",
-                userHolding.getSymbol(), userHolding.getQuantity(), userHolding.getAverageBuyingPrice());
-
-        item.setStatus(ItemStatus.HELD);
-        item.setUserHoldingSymbol(userHolding.getSymbol());
-        item.setUserWeight(BasketUtils.round(userHolding.getWeightInPortfolio()));
-        item.setHeldQuantity(userHolding.getQuantity());
-        item.setHeldAveragePrice(userHolding.getAverageBuyingPrice());
-
-        // Match weight = min(etfWeight, userWeight)
-        double matchWeight = Math.min(req.getWeight(), userHolding.getWeightInPortfolio());
-        item.setReplicaWeight(BasketUtils.round(matchWeight));
-
-        return true;
+    public BasketOpportunity applySubstitutesOnExisting(BasketOpportunity base, List<EquityHoldings> userHoldings,
+            List<com.portfolio.basket.model.SubstituteAssignment> assignments) {
+        return substituteApplier.applySubstitutesOnExisting(base, userHoldings, assignments);
     }
 
-    private boolean processSectorSubstitute(BasketItem item, EtfHolding req,
-            Map<String, List<EquityHoldings>> userSectorMap) {
-        List<EquityHoldings> sectorPeers = userSectorMap.getOrDefault(req.getSector(), Collections.emptyList());
-
-        // Filter peer candidates by Market Cap Category if available
-        if (req.getMarketCapCategory() != null && !sectorPeers.isEmpty()) {
-            List<EquityHoldings> mcapPeers = sectorPeers.stream()
-                    .filter(p -> req.getMarketCapCategory().equalsIgnoreCase(p.getMarketCapCategory()))
-                    .collect(Collectors.toList());
-            if (!mcapPeers.isEmpty()) {
-                sectorPeers = mcapPeers; // Refine candidates to those matching both Sector AND MCap
-            }
+    /**
+     * @deprecated use {@link SubstituteAssignment}
+     */
+    @Deprecated
+    public static class SubstituteAssignment extends com.portfolio.basket.model.SubstituteAssignment {
+        public SubstituteAssignment() {
+            super();
         }
 
-        if (!sectorPeers.isEmpty()) {
-            // Populate alternatives list of substitutes
-            List<BasketOpportunity.Alternative> alts = sectorPeers.stream()
-                    .map(h -> BasketOpportunity.Alternative.builder()
-                            .symbol(h.getSymbol())
-                            .isin(h.getIsin())
-                            .userWeight(BasketUtils.round(h.getWeightInPortfolio()))
-                            .build())
-                    .collect(Collectors.toList());
-            item.setAlternatives(alts);
-
-            // Pick best substitute (simplistic: highest user weight in that sector)
-            EquityHoldings substitute = sectorPeers.stream()
-                    .max(Comparator.comparingDouble(EquityHoldings::getWeightInPortfolio))
-                    .orElse(sectorPeers.get(0));
-
-            item.setStatus(ItemStatus.SUBSTITUTE);
-            item.setUserHoldingSymbol(substitute.getSymbol());
-            item.setUserWeight(BasketUtils.round(substitute.getWeightInPortfolio()));
-            item.setHeldQuantity(substitute.getQuantity());
-            item.setHeldAveragePrice(substitute.getAverageBuyingPrice());
-            item.setReason("Substitute: " + req.getSector()
-                    + (req.getMarketCapCategory() != null ? "/" + req.getMarketCapCategory() : ""));
-
-            // For substitute, we assume it fills the weight requirement of the ETF stock
-            double matchWeight = Math.min(req.getWeight(), substitute.getWeightInPortfolio());
-            item.setReplicaWeight(BasketUtils.round(matchWeight));
-
-            return true;
-        } else {
-            item.setStatus(ItemStatus.MISSING);
-            item.setUserWeight(0.0);
-            item.setBuyQuantity(1.0); // Placeholder for quantity
-            return false;
+        public SubstituteAssignment(String missingIsin, String substituteIsin, Double assignedWeight) {
+            super(missingIsin, substituteIsin, assignedWeight);
         }
     }
 }

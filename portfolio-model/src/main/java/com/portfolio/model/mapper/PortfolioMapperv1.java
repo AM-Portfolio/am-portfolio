@@ -1,7 +1,11 @@
 package com.portfolio.model.mapper;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
@@ -11,28 +15,177 @@ import com.am.common.amcommondata.model.asset.mutualfund.MutualFundModel;
 import com.am.common.amcommondata.model.enums.AssetType;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.FundType;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.portfolio.model.events.PortfolioUpdateEvent;
 import com.portfolio.model.portfolio.v1.BrokerPortfolioSummary;
+import com.portfolio.model.resolver.TradingSymbolResolver;
+
+import lombok.RequiredArgsConstructor;
 
 @Component
+@RequiredArgsConstructor
 public class PortfolioMapperv1 {
 
-    public PortfolioModelV1 toPortfolioModelV1(PortfolioUpdateEvent portfolioEvent) {
+  private final Optional<TradingSymbolResolver> tradingSymbolResolver;
 
-        PortfolioModelV1 portfolioModel = PortfolioModelV1.builder()
+    public PortfolioModelV1 toPortfolioModelV1(PortfolioUpdateEvent portfolioEvent) {
+        BrokerType brokerType = canonicalizeBrokerType(portfolioEvent.getBrokerType());
+
+        LocalDateTime asOfTs = resolveAsOfDateTime(portfolioEvent);
+
+        // null list = omit on soft-merge upsert; empty list = clear that class
+        List<EquityModel> mappedEquities = portfolioEvent.getEquities() != null
+                ? mapToEquityModels(portfolioEvent, brokerType, asOfTs)
+                : null;
+
+        List<com.am.common.amcommondata.model.asset.AssetModel> mappedFunds = null;
+        if (portfolioEvent.getMutualFunds() != null) {
+            mappedFunds = portfolioEvent.getMutualFunds().stream()
+                    .filter(f -> f != null)
+                    .map(f -> mapToAsset(f, brokerType, asOfTs))
+                    .collect(Collectors.toList());
+        }
+
+        double equityValue = mappedEquities != null ? calculateTotalValue(mappedEquities) : 0.0;
+        double mfValue = mappedFunds != null ? calculateAssetListValue(mappedFunds) : 0.0;
+        int equityCount = mappedEquities != null ? calculateAssetCount(mappedEquities) : 0;
+        int mfCount = mappedFunds != null ? mappedFunds.size() : 0;
+
+        // Broker books always use broker display name (Dhan/Zerodha…). Never persist
+        // email Mongo doc ObjectIds as the portfolio name — that surfaces in the UI selector.
+        String brokerName = brokerType != null ? brokerType.getCode() : null;
+        String eventName = portfolioEvent.getPortfolioId();
+        String name = looksLikeOpaqueId(eventName) ? brokerName
+                : (eventName != null && !eventName.isBlank() ? eventName : brokerName);
+
+        return PortfolioModelV1.builder()
                 .id(portfolioEvent.getId())
-                .name(portfolioEvent.getPortfolioId())
+                .name(name)
                 .owner(portfolioEvent.getUserId())
-                .brokerType(portfolioEvent.getBrokerType())
+                .brokerType(brokerType)
                 .fundType(FundType.DEFAULT)
                 .status("Active")
                 .createdBy(portfolioEvent.getUserId())
-                .equityModels(portfolioEvent.getEquities())
-                .assetCount(calculateAssetCount(portfolioEvent.getEquities()))
-                .totalValue(calculateTotalValue(portfolioEvent.getEquities()))
+                .equityModels(mappedEquities)
+                .mutualFunds(mappedFunds)
+                .bonds(null)
+                .commodities(null)
+                .cash(null)
+                .assetCount(equityCount + mfCount)
+                .totalValue(equityValue + mfValue)
+                .createdAt(asOfTs)
+                .updatedAt(asOfTs)
                 .version(0L)
                 .build();
-        return portfolioModel;
+    }
+
+    /** Mongo ObjectId (24 hex) or UUID — not a human portfolio label. */
+    static boolean looksLikeOpaqueId(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        String v = value.trim();
+        if (v.matches("(?i)[0-9a-f]{24}")) {
+            return true;
+        }
+        return v.matches("(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+    }
+
+    /**
+     * Statement / Gmail calendar day for equity {@code createdAt} (history lifeStart).
+     * Never use {@link PortfolioUpdateEvent#getTimestamp()} — that is Kafka ingest time
+     * and collapses FULL catch-up to a 0–1 day window, leaving TF charts empty after sync.
+     * When {@code asOfDate} is absent, leave null so SnapshotCatchUp uses its ~90d fallback.
+     */
+    private static LocalDateTime resolveAsOfDateTime(PortfolioUpdateEvent event) {
+        LocalDate asOf = event.getAsOfDate();
+        if (asOf == null) {
+            return null;
+        }
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Kolkata"));
+        if (asOf.isAfter(today)) {
+            asOf = today;
+        }
+        return asOf.atStartOfDay();
+    }
+
+    /** GROW (legacy) and GROWW are one broker — document upsert must not create two Mongo books. */
+    private BrokerType canonicalizeBrokerType(BrokerType brokerType) {
+        if (brokerType == null) {
+            return null;
+        }
+        if (brokerType == BrokerType.GROW || brokerType == BrokerType.GROWW) {
+            return BrokerType.GROWW;
+        }
+        return brokerType;
+    }
+
+    public PortfolioModelV1 toPortfolioModelV1(com.portfolio.model.events.trade.TradePortfolioSyncEvent tradeEvent) {
+        String action = tradeEvent.getAction();
+
+        List<EquityModel> equityModels = new ArrayList<>();
+        if (tradeEvent.getEquities() != null && !tradeEvent.getEquities().isEmpty()) {
+            if (action == null) {
+                action = tradeEvent.getEquities().get(0).getAction();
+            }
+            // Trade Kafka path: map each row then resolve symbol (same as document upload path).
+            equityModels = tradeEvent.getEquities().stream()
+                    .map(e -> mapTradeEquityToModel(e, resolveBrokerType(tradeEvent.getBrokerType())))
+                    .collect(Collectors.toList());
+        }
+
+        if (Boolean.TRUE.equals(tradeEvent.getDeleteAllTrades())) {
+            action = "DELETE_PORTFOLIO";
+        }
+
+        BrokerType brokerType = resolveBrokerType(tradeEvent.getBrokerType());
+        PortfolioKind kind = resolveTradePortfolioKind(tradeEvent);
+
+        java.util.UUID portfolioUuid = null;
+        if (tradeEvent.getId() != null) {
+            try {
+                portfolioUuid = java.util.UUID.fromString(tradeEvent.getId());
+            } catch (IllegalArgumentException e) {
+                // Non-UUID identifiers are tolerated; the ID is resolved downstream by name.
+                portfolioUuid = null;
+            }
+        }
+
+        return PortfolioModelV1.builder()
+                .id(portfolioUuid)
+                .name(tradeEvent.getPortfolioId() != null ? tradeEvent.getPortfolioId() : tradeEvent.getId())
+                .owner(tradeEvent.getUserId())
+                .brokerType(brokerType)
+                .portfolioKind(kind)
+                .fundType(FundType.DEFAULT)
+                .status("Active")
+                .createdBy(tradeEvent.getUserId())
+                .equityModels(equityModels)
+                .assetCount(calculateAssetCount(equityModels))
+                .totalValue(calculateTotalValue(equityModels))
+                .version(0L)
+                .lastTradeAction(action)
+                .build();
+    }
+
+    static PortfolioKind resolveTradePortfolioKind(
+            com.portfolio.model.events.trade.TradePortfolioSyncEvent tradeEvent) {
+        if (tradeEvent == null) {
+            return PortfolioKind.BROKER;
+        }
+        String raw = tradeEvent.getPortfolioKind();
+        if (raw != null && !raw.isBlank()) {
+            try {
+                return PortfolioKind.valueOf(raw.trim().toUpperCase(java.util.Locale.ROOT));
+            } catch (IllegalArgumentException ignored) {
+                // fall through
+            }
+        }
+        String name = tradeEvent.getPortfolioId() != null ? tradeEvent.getPortfolioId() : tradeEvent.getId();
+        if (name != null && "paper".equalsIgnoreCase(name.trim())) {
+            return PortfolioKind.PAPER;
+        }
+        return PortfolioKind.BROKER;
     }
 
     public BrokerPortfolioSummary toPortfolioModelV1(PortfolioModelV1 portfolio) {
@@ -45,31 +198,45 @@ public class PortfolioMapperv1 {
         return portfolioModel;
     }
 
-    private List<EquityModel> mapToEquityModels(PortfolioUpdateEvent portfolio, BrokerType brokerType) {
+    private List<EquityModel> mapToEquityModels(
+            PortfolioUpdateEvent portfolio, BrokerType brokerType, LocalDateTime asOfTs) {
         List<EquityModel> equities = portfolio.getEquities();
-        List<MutualFundModel> mutualFunds = portfolio.getMutualFunds();
         List<EquityModel> assets = new ArrayList<>();
 
         if (equities != null) {
             var assetModels = equities.stream()
-                    .filter(e -> e.getIsin() != null && e.getSymbol() != null) // @todo all values symbol, isin, name
-                                                                               // shoudl comes from PortfolioUpdateEvent
-                                                                               // . Remove filter in upcoming release
-                    .map(e -> mapEquityModelToAsset(e, brokerType))
-                    .collect(Collectors.toSet());
+                    .filter(e -> e != null)
+                    .map(e -> mapEquityModelToAsset(e, brokerType, asOfTs))
+                    .collect(Collectors.toList());
             assets.addAll(assetModels);
         }
 
-        // if (mutualFunds != null) {
-        // var fundModels = mutualFunds.stream()
-        // .filter(e -> e.getIsin() != null && e.getSymbol() != null) // @todo all value
-        // shoudl comes from PortfolioUpdateEvent . Remove filter in upcoming release
-        // .map(e -> mapToAsset(e, brokerType))
-        // .collect(Collectors.toSet());
-        // assets.addAll(fundModels);
-        // }
-
         return assets;
+    }
+
+    private EquityModel mapTradeEquityToModel(
+            com.portfolio.model.events.trade.TradeEquityPosition e, BrokerType brokerType) {
+        EquityModel em = new EquityModel();
+        em.setSymbol(e.getSymbol());
+        em.setIsin(e.getIsin());
+        if (e.getName() != null && !e.getName().isBlank()) {
+            em.setName(e.getName());
+            em.setCompanyName(e.getName());
+        }
+        em.setSector(e.getSector());
+        em.setIndustry(e.getIndustry());
+        em.setMarketCap(e.getMarketCap());
+        em.setAssetType(AssetType.EQUITY);
+
+        if ("SELL".equalsIgnoreCase(e.getAction())) {
+            em.setQuantity(e.getSellQuantity() != null ? e.getSellQuantity().doubleValue() : 0.0);
+            em.setAvgBuyingPrice(e.getSellPrice() != null ? e.getSellPrice().doubleValue() : 0.0);
+        } else {
+            em.setQuantity(e.getQuantity() != null ? e.getQuantity().doubleValue() : 0.0);
+            em.setAvgBuyingPrice(e.getAvgBuyingPrice() != null ? e.getAvgBuyingPrice().doubleValue() : 0.0);
+        }
+
+        return mapEquityModelToAsset(em, brokerType, null);
     }
 
     private Double calculateTotalValue(List<EquityModel> equityModels) {
@@ -93,25 +260,147 @@ public class PortfolioMapperv1 {
         return equityModels.size();
     }
 
-    private EquityModel mapEquityModelToAsset(EquityModel equityModel, BrokerType brokerType) {
+    private EquityModel mapEquityModelToAsset(
+            EquityModel equityModel, BrokerType brokerType, LocalDateTime asOfTs) {
+        String resolvedSymbol = resolveSymbolForStorage(equityModel.getSymbol(), equityModel.getIsin());
+
+        if (resolvedSymbol == null || resolvedSymbol.isBlank()) {
+            if (equityModel.getIsin() != null && !equityModel.getIsin().isBlank()) {
+                resolvedSymbol = equityModel.getIsin();
+            } else if (equityModel.getName() != null && !equityModel.getName().isBlank()) {
+                resolvedSymbol = equityModel.getName();
+            }
+        }
+
+        String resolvedIsin = equityModel.getIsin();
+        if (resolvedIsin == null || resolvedIsin.isBlank()) {
+            if (TradingSymbolResolver.looksLikeIsin(equityModel.getSymbol())) {
+                resolvedIsin = equityModel.getSymbol().trim().toUpperCase();
+            }
+        }
+
+        // Fallback for avgBuyingPrice: avgBuyingPrice -> investmentValue / quantity
+        Double resolvedAvgPrice = equityModel.getAvgBuyingPrice();
+        if ((resolvedAvgPrice == null || resolvedAvgPrice == 0.0)
+                && equityModel.getInvestmentValue() != null
+                && equityModel.getQuantity() != null && equityModel.getQuantity() > 0) {
+            resolvedAvgPrice = equityModel.getInvestmentValue() / equityModel.getQuantity();
+        }
+
+        Double computedInvestmentValue = equityModel.getInvestmentValue();
+        if (computedInvestmentValue == null && resolvedAvgPrice != null && equityModel.getQuantity() != null) {
+            computedInvestmentValue = resolvedAvgPrice * equityModel.getQuantity();
+        }
+
+        // Durable import mark: keep existing, else capture statement currentPrice when cost unknown.
+        Double importMark = equityModel.getImportMarkPrice();
+        boolean missingCost = resolvedAvgPrice == null || resolvedAvgPrice <= 0;
+        if ((importMark == null || importMark <= 0) && missingCost
+                && equityModel.getCurrentPrice() != null && equityModel.getCurrentPrice() > 0) {
+            importMark = equityModel.getCurrentPrice();
+        }
+
         return EquityModel.builder()
                 .assetType(AssetType.EQUITY)
                 .brokerType(brokerType)
-                .symbol(equityModel.getSymbol())
+                .symbol(resolvedSymbol)
                 .name(equityModel.getName())
-                .avgBuyingPrice(equityModel.getAvgBuyingPrice())
+                .companyName(
+                        equityModel.getCompanyName() != null ? equityModel.getCompanyName() : equityModel.getName())
+                .isin(resolvedIsin)
+                .avgBuyingPrice(resolvedAvgPrice != null && resolvedAvgPrice > 0 ? resolvedAvgPrice : null)
+                .currentPrice(equityModel.getCurrentPrice())
+                .importMarkPrice(importMark != null && importMark > 0 ? importMark : null)
                 .quantity(equityModel.getQuantity())
+                .currentValue(equityModel.getCurrentValue())
+                .investmentValue(computedInvestmentValue != null && computedInvestmentValue > 0
+                        ? computedInvestmentValue : null)
+                .sector(equityModel.getSector())
+                .industry(equityModel.getIndustry())
+                .marketCap(equityModel.getMarketCap())
+                .todayProfitLoss(equityModel.getTodayProfitLoss())
+                .todayProfitLossPercentage(equityModel.getTodayProfitLossPercentage())
+                .profitLoss(equityModel.getProfitLoss())
+                .profitLossPercentage(equityModel.getProfitLossPercentage())
+                .createdAt(asOfTs != null ? asOfTs : equityModel.getCreatedAt())
+                .updatedAt(asOfTs != null ? asOfTs : equityModel.getUpdatedAt())
                 .build();
     }
 
-    private MutualFundModel mapToAsset(MutualFundModel fundModel, BrokerType brokerType) {
+    /**
+     * Uses injected {@link TradingSymbolResolver} (works in Kafka threads — no servlet context).
+     * Falls back to raw symbol when resolver bean is absent (e.g. unit tests).
+     */
+    private String resolveSymbolForStorage(String symbol, String isin) {
+        return tradingSymbolResolver
+                .map(resolver -> resolver.resolveTradingSymbol(symbol, isin))
+                .orElse(symbol);
+    }
+
+    private MutualFundModel mapToAsset(
+            MutualFundModel fundModel, BrokerType brokerType, LocalDateTime asOfTs) {
+        Double qty = fundModel.getQuantity();
+        Double avg = fundModel.getAvgBuyingPrice();
+        Double currentValue = fundModel.getCurrentValue();
+        if ((currentValue == null || currentValue <= 0) && qty != null && avg != null) {
+            currentValue = qty * avg;
+        }
+        Double investmentValue = fundModel.getInvestmentValue();
+        if ((investmentValue == null || investmentValue <= 0) && qty != null && avg != null) {
+            investmentValue = qty * avg;
+        }
         return MutualFundModel.builder()
                 .assetType(AssetType.MUTUAL_FUND)
                 .brokerType(brokerType)
                 .symbol(fundModel.getSymbol())
                 .name(fundModel.getName())
-                .avgBuyingPrice(fundModel.getAvgBuyingPrice())
-                .quantity(fundModel.getQuantity())
+                .avgBuyingPrice(avg)
+                .quantity(qty)
+                .currentPrice(fundModel.getCurrentPrice() != null ? fundModel.getCurrentPrice() : avg)
+                .currentValue(currentValue)
+                .investmentValue(investmentValue)
+                .createdAt(asOfTs != null ? asOfTs : fundModel.getCreatedAt())
+                .updatedAt(asOfTs != null ? asOfTs : fundModel.getUpdatedAt())
                 .build();
+    }
+
+    private Double calculateAssetListValue(List<com.am.common.amcommondata.model.asset.AssetModel> assets) {
+        if (assets == null || assets.isEmpty()) {
+            return 0.0;
+        }
+        return assets.stream()
+                .filter(a -> a != null)
+                .mapToDouble(a -> {
+                    if (a.getCurrentValue() != null && a.getCurrentValue() > 0) {
+                        return a.getCurrentValue();
+                    }
+                    double q = a.getQuantity() != null ? a.getQuantity() : 0.0;
+                    double p = a.getCurrentPrice() != null ? a.getCurrentPrice()
+                            : (a.getAvgBuyingPrice() != null ? a.getAvgBuyingPrice() : 0.0);
+                    return q * p;
+                })
+                .sum();
+    }
+
+    /**
+     * Trade publishes enum names (ZERODHA, GROW, UNKNOWN, …). Portfolio enum is a
+     * subset
+     * (GROWW not GROW). Fall back via display code, then ZERODHA-safe null
+     * avoidance for create.
+     */
+    private BrokerType resolveBrokerType(String raw) {
+        if (raw == null || raw.isBlank() || "UNKNOWN".equalsIgnoreCase(raw) || "OTHER".equalsIgnoreCase(raw)) {
+            return null;
+        }
+        String normalized = raw.trim().toUpperCase().replace(' ', '_');
+        if ("GROW".equals(normalized) || "GROWW".equals(normalized)) {
+            return BrokerType.GROWW;
+        }
+        try {
+            return BrokerType.valueOf(normalized);
+        } catch (IllegalArgumentException ignored) {
+            BrokerType fromCode = BrokerType.fromCode(raw.trim());
+            return fromCode;
+        }
     }
 }

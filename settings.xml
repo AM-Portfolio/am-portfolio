@@ -3,16 +3,34 @@
           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
           xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
                       http://maven.apache.org/xsd/settings-1.0.0.xsd">
+    <!-- Match CI (am-pipelines): ~/.m2/settings.xml uses env.GITHUB_ACTOR + env.GITHUB_TOKEN.
+         Laptop: set User env GITHUB_ACTOR (GitHub login) and GITHUB_TOKEN (PAT with read:packages).
+         Optional: mvn -s settings.xml -->
     <servers>
         <server>
+            <id>github</id>
+            <username>${env.GITHUB_ACTOR}</username>
+            <password>${env.GITHUB_TOKEN}</password>
+        </server>
+        <server>
             <id>github-investment</id>
-            <username>${env.GITHUB_PACKAGES_USERNAME}</username>
-            <password>${env.GITHUB_PACKAGES_TOKEN}</password>
+            <username>${env.GITHUB_ACTOR}</username>
+            <password>${env.GITHUB_TOKEN}</password>
         </server>
         <server>
             <id>github-am-common</id>
-            <username>${env.GITHUB_PACKAGES_USERNAME}</username>
-            <password>${env.GITHUB_PACKAGES_TOKEN}</password>
+            <username>${env.GITHUB_ACTOR}</username>
+            <password>${env.GITHUB_TOKEN}</password>
+        </server>
+        <server>
+            <id>github-core</id>
+            <username>${env.GITHUB_ACTOR}</username>
+            <password>${env.GITHUB_TOKEN}</password>
+        </server>
+        <server>
+            <id>github-trade</id>
+            <username>${env.GITHUB_ACTOR}</username>
+            <password>${env.GITHUB_TOKEN}</password>
         </server>
     </servers>
 </settings>

@@ -191,6 +191,37 @@
                 "description": "Preview basket composition for a specific ETF against user's current holdings. Shows what stocks need to be bought to replicate the ETF."
             },
             "response": []
+        },
+        {
+            "name": "Calculate Quantities",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"investmentAmount\": 100000,\n    \"opportunity\": {}\n}"
+                },
+                "url": {
+                    "raw": "http://localhost:8072/v1/basket/calculate-quantities",
+                    "protocol": "http",
+                    "host": [
+                        "localhost"
+                    ],
+                    "port": "8072",
+                    "path": [
+                        "v1",
+                        "basket",
+                        "calculate-quantities"
+                    ]
+                },
+                "description": "Pass the full BasketOpportunity from POST /v1/basket/preview (must include composition[] with etfWeight). Do not send etfSymbol/holdings alone."
+            },
+            "response": []
         }
     ]
 }

@@ -53,6 +53,7 @@ application-*.properties
 !application.properties
 application-*.yml
 !application.yml
+!application-security.yml
 
 ### Others ###
 *.swp
@@ -61,9 +62,80 @@ application-*.yml
 *.bak
 *.orig
 
-### Secrets ###
+### Secrets Ã¢â‚¬â€ only .env.template is committed; copy to .env.preprod / .env.dev locally ###
 .env*
+!.env.template
+.env.secrets
+**/.env.secrets
+.env.local
+.env.deploy
+.env.preprod
+.env.dev
 seed-local-db.js
+
+# Vault / credential dumps (scripts write gitignored .env.* only)
+vault/backups/
+**/vault/backups/
+**/vault/*backup*.json
+credentials.json
+**/credentials.json
+docs/feature-portfolio-be-industry-grade/verify/
+*.pem
+*.p12
+*.key
+!**/src/test/**/*.key
 
 ### Custom ###
 test-portfolio
+dev_deploy.ps1
+
+# Local dev PowerShell helper scripts Ã¢â‚¬â€ never committed
+*.ps1
+
+# Binary dumps and build artefacts accidentally left in workspace
+pods.json
+build_err.txt
+build_output.txt
+beans.json
+beans_after.json
+bean_keys.txt
+javap.txt
+
+# Private/Local Files
+node_modules/
+jdk-*/
+*.json
+*.py
+*.js
+*.sh
+report.md
+
+### SPT Test Files ###
+spt/
+
+### Scratch / Temp ###
+dummy_settings.xml
+logs.txt
+parsed_collection.txt
+pr19_diff.patch
+pr_diff.txt
+PRODUCTION_READINESS_REPORT.md
+version_1_axrax_document.md
+
+PRODUCTION_READINESS_REPORT.md
+version_1_axrax_document.md
+inFlight_plan.md
+deploy.yaml
+pod.yaml
+
+# Ignore integration tests to speed up CI
+**/*IntegrationTest.java
+**/integration/
+
+### Local / CI noise ###
+job-log.txt
+mvn.cmd
+
+# Local DEV measure scripts (may hold tokens in env / local copies)
+docs/feature-portfolio-intelligence/measure-xray-dev.ps1
+*.READY.postman_collection.json

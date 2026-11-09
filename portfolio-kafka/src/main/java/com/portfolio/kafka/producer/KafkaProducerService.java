@@ -7,21 +7,24 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 import com.portfolio.model.events.PortfolioUpdateEvent;
 import com.portfolio.model.events.StockHoldingUpdateEvent;
+import io.micrometer.observation.annotation.Observed;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = true)
+@Lazy(false)
+@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = false)
 public class KafkaProducerService {
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
-    @Value("${app.kafka.portfolio.topic:am-portfolio-update}")
+    @Value("${app.kafka.portfolio.publish-topic:am-portfolio-update}")
     private String topicName;
 
     @Value("${app.kafka.portfolio.stream.topic:am-portfolio-stream}")
@@ -55,6 +58,7 @@ public class KafkaProducerService {
         sendRecord(record);
     }
 
+    @Observed(name = "kafka.portfolio.send", contextualName = "portfolio-event-publish")
     public void sendMessage(PortfolioUpdateEvent portfolioUpdateEvent, String correlationId) {
         RecordHeaders headers = new RecordHeaders();
         headers.add("id", portfolioUpdateEvent.getId().toString().getBytes());

@@ -11,11 +11,15 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
 
+import java.util.concurrent.Executor;
 import java.util.List;
+import org.junit.jupiter.api.BeforeEach;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -24,8 +28,24 @@ class MarketDataServiceTest {
     @Mock
     private MarketDataApiClient marketDataApiClient;
 
-    @InjectMocks
+    @Mock
+    private com.portfolio.redis.service.PortfolioMarketDataRedisService portfolioMarketDataRedisService;
+
+    @Mock
+    private com.am.common.amcommondata.service.price.StockPriceMongoService stockPriceMongoService;
+
+    @Mock
+    private com.am.common.amcommondata.service.price.StockPriceHistoryMongoService stockPriceHistoryMongoService;
+
+    private Executor taskExecutor = Runnable::run;
+    private Executor externalApiExecutor = Runnable::run;
+
     private MarketDataService marketDataService;
+
+    @BeforeEach
+    void setUp() {
+        marketDataService = new MarketDataService(marketDataApiClient, portfolioMarketDataRedisService, stockPriceMongoService, stockPriceHistoryMongoService, taskExecutor, externalApiExecutor);
+    }
 
     @Test
     void getOhlcData_Success() {
@@ -83,5 +103,85 @@ class MarketDataServiceTest {
         assertNotNull(result);
         assertTrue(result.containsKey("TCS"));
         assertEquals(3300.0, result.get("TCS").getLastPrice());
+    }
+
+    @Test
+    void getMarketData_whenCashClosed_usesRedisThenOhlcFallback() {
+        when(portfolioMarketDataRedisService.isCashMarketHours()).thenReturn(false);
+        when(portfolioMarketDataRedisService.getMarketData(eq(List.of("GROWWDEFNC"))))
+                .thenReturn(Map.of());
+        when(stockPriceMongoService.getPrices(eq(List.of("GROWWDEFNC"))))
+                .thenReturn(Map.of());
+
+        MarketDataResponseWrapper wrapper = new MarketDataResponseWrapper();
+        MarketDataResponse response = new MarketDataResponse();
+        response.setLastPrice(98.09);
+        wrapper.setData(Map.of("GROWWDEFNC", response));
+
+        when(marketDataApiClient.getOhlcData(eq(List.of("GROWWDEFNC")), anyString(), anyBoolean()))
+                .thenReturn(Mono.just(wrapper));
+
+        Map<String, MarketData> result = marketDataService.getMarketData(List.of("GROWWDEFNC"));
+
+        assertEquals(98.09, result.get("GROWWDEFNC").getLastPrice());
+        verify(portfolioMarketDataRedisService).getMarketData(anyList());
+        verify(stockPriceMongoService).getPrices(anyList());
+        verify(portfolioMarketDataRedisService).cacheMarketData(anyMap());
+    }
+
+    @Test
+    void getMarketData_whenCashClosed_prefersRedisCloseWithoutOhlc() {
+        when(portfolioMarketDataRedisService.isCashMarketHours()).thenReturn(false);
+        MarketData cached = MarketData.builder()
+                .symbol("GROWWDEFNC")
+                .lastPrice(96.33)
+                .previousClose(95.0)
+                .build();
+        when(portfolioMarketDataRedisService.getMarketData(eq(List.of("GROWWDEFNC"))))
+                .thenReturn(Map.of("GROWWDEFNC", cached));
+
+        Map<String, MarketData> result = marketDataService.getMarketData(List.of("GROWWDEFNC"));
+
+        assertEquals(96.33, result.get("GROWWDEFNC").getLastPrice());
+        verify(marketDataApiClient, never()).getOhlcData(anyList(), anyString(), anyBoolean());
+        verify(stockPriceMongoService, never()).getPrices(anyList());
+    }
+
+    @Test
+    void getMarketData_l1Hit_skipsDownstream() {
+        MarketData cached = MarketData.builder()
+                .symbol("INFY")
+                .lastPrice(1500.0)
+                .previousClose(1490.0)
+                .build();
+        // Prime L1 via cash-open redis path
+        when(portfolioMarketDataRedisService.isCashMarketHours()).thenReturn(true);
+        when(portfolioMarketDataRedisService.getMarketData(eq(List.of("INFY"))))
+                .thenReturn(Map.of("INFY", cached));
+        marketDataService.getMarketData(List.of("INFY"));
+
+        // Second call should be L1 only
+        Map<String, MarketData> second = marketDataService.getMarketData(List.of("INFY"));
+        assertEquals(1500.0, second.get("INFY").getLastPrice());
+        verify(portfolioMarketDataRedisService, org.mockito.Mockito.times(1)).getMarketData(anyList());
+        verify(marketDataApiClient, never()).getOhlcData(anyList(), anyString(), anyBoolean());
+    }
+
+    @Test
+    void getMarketData_whenCashOpen_usesRedisLastTrade() {
+        when(portfolioMarketDataRedisService.isCashMarketHours()).thenReturn(true);
+        MarketData cached = MarketData.builder()
+                .symbol("GROWWDEFNC")
+                .lastPrice(96.33)
+                .previousClose(95.0)
+                .build();
+        when(portfolioMarketDataRedisService.getMarketData(eq(List.of("GROWWDEFNC"))))
+                .thenReturn(Map.of("GROWWDEFNC", cached));
+
+        Map<String, MarketData> result = marketDataService.getMarketData(List.of("GROWWDEFNC"));
+
+        assertEquals(96.33, result.get("GROWWDEFNC").getLastPrice());
+        verify(marketDataApiClient, never()).getOhlcData(anyList(), anyString(), anyBoolean());
+        verify(stockPriceMongoService, never()).getPrices(anyList());
     }
 }

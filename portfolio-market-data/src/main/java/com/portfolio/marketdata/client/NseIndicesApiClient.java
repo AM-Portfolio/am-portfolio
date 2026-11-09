@@ -9,6 +9,8 @@ import com.portfolio.marketdata.model.indices.IndexData;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
+import org.springframework.web.reactive.function.client.WebClient;
+
 /**
  * Client for the NSE Indices API.
  */
@@ -19,23 +21,19 @@ public class NseIndicesApiClient extends AbstractApiClient {
     /**
      * Creates a new NseIndicesApiClient with the specified configuration.
      * 
+     * @param webClientBuilder the WebClient.Builder (auto-configured by Spring Boot)
      * @param config the NSE indices API configuration
      */
-    public NseIndicesApiClient(MarketDataApiConfig config) {
-        super(config);
+    public NseIndicesApiClient(WebClient.Builder webClientBuilder, MarketDataApiConfig config) {
+        super(webClientBuilder, config);
     }
 
-    /**
-     * Gets the index data for the specified index symbol.
-     * 
-     * @param indexSymbol the index symbol
-     * @return a Mono of IndexData
-     */
     public Mono<IndexData> getIndexData(String indexSymbol) {
-        String path = config.getNseIndicesEndpoint() + "/" + indexSymbol;
+        String path = config.getNseIndicesEndpoint() + "/batch";
         log.debug("Fetching index data for {} from {}", indexSymbol, path);
         
-        return get(path, IndexData.class)
+        return post(path, java.util.List.of(indexSymbol), IndexData[].class)
+                .map(array -> array != null && array.length > 0 ? array[0] : null)
                 .doOnSuccess(data -> log.debug("Successfully fetched index data for {}", indexSymbol))
                 .doOnError(e -> log.error("Failed to fetch index data for {}: {}", indexSymbol, e.getMessage()));
     }

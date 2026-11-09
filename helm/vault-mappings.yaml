@@ -6,26 +6,52 @@ vault:
         INTERNAL_SECRET_KEY: "SECRET_KEY"
     portfolio:
       # No mappings needed, defaults to dump-all uppercased
-    market-data:
+    parser:
+      mappings:
+        ETF_API_URL: "URL"
+    market:
       mappings:
         MARKET_DATA_API_URL: "URL"
+        MARKET_DATA_CALENDAR_BASE_URL: "URL"
+
+    logging:
+      template: |
+        export LOG_LEVEL="{{ index .Data.data "LOG_LEVEL" }}"
+        export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="{{ index .Data.data "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" | trimSpace }}"
+      # No mappings needed, defaults to dump-all uppercased
     mongodb:
       mappings:
-        MONGODB_URL: "url"
         MONGODB_CONNECTION_URL: "url"
         SPRING_DATA_MONGODB_URI: "url"
+        MONGODB_DATABASE: "AM_PORTFOLIO_MONGO_DATABASE"
+        SPRING_DATA_MONGODB_DATABASE: "AM_PORTFOLIO_MONGO_DATABASE"
     kafka:
       mappings:
         KAFKA_BOOTSTRAP_SERVERS: "bootstrap_servers"
         SPRING_KAFKA_BOOTSTRAP_SERVERS: "bootstrap_servers"
-        KAFKA_JAAS_CONFIG: "__jaas__"
         KAFKA_USERNAME: "username"
         KAFKA_PASSWORD: "password"
+        KAFKA_JAAS_CONFIG: "__jaas__"
     redis:
       mappings:
-        REDIS_HOSTNAME: "host"
-        REDIS_PORT: "port"
-        REDIS_PASSWORD: "password"
         SPRING_DATA_REDIS_HOST: "host"
         SPRING_DATA_REDIS_PASSWORD: "password"
         SPRING_DATA_REDIS_PORT: "port"
+        SPRING_DATA_REDIS_USERNAME: "username"
+        REDIS_HOSTNAME: "host"
+        REDIS_PASSWORD: "password"
+        REDIS_PORT: "port"
+        REDIS_USERNAME: "username"
+    identity-oidc:
+      mappings:
+        OIDC_JWKS_URI: "OIDC_JWKS_URL"
+        OIDC_ISSUER_URI: "OIDC_ISSUER"
+    service-oauth:
+      mappings:
+        OAUTH2_CLIENT_ID: "AM_PORTFOLIO_CLIENT_ID"
+        OAUTH2_CLIENT_SECRET: "AM_PORTFOLIO_CLIENT_SECRET"
+        DEMO_PORTFOLIO_ID: "DEMO_PORTFOLIO_ID"
+
+    otel:
+      mappings:
+        TRACING_SAMPLING_PROBABILITY: "TRACING_SAMPLING_PROBABILITY"

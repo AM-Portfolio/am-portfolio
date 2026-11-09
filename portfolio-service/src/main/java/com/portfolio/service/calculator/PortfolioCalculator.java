@@ -11,38 +11,53 @@ import org.springframework.stereotype.Component;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.portfolio.EquityHoldings;
+import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
-import com.portfolio.redis.service.StockIndicesRedisService;
+import com.portfolio.redis.session.CashSessionClock;
+import com.am.common.amcommondata.service.price.StockPriceMongoService;
+import com.am.common.amcommondata.document.price.StockPriceDocument;
+import com.am.common.amcommondata.service.marketcap.MarketCapMongoService;
+import com.am.common.amcommondata.document.marketcap.MarketCapDocument;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
+
+import org.springframework.lang.Nullable;
+
+import io.micrometer.observation.annotation.Observed;
 
 @Component
 @Slf4j
 public class PortfolioCalculator {
 
     private final MarketDataService marketDataService;
-    private final StockIndicesRedisService stockPriceRedisService;
+    private final MarketCapMongoService marketCapMongoService;
+    private final StockPriceMongoService stockPriceMongoService;
+    private final com.portfolio.basket.client.EtfApiClient etfApiClient;
     private final java.util.concurrent.Executor taskExecutor;
+    private final CashSessionClock cashSessionClock;
 
     public PortfolioCalculator(
             MarketDataService marketDataService,
-            StockIndicesRedisService stockPriceRedisService,
-            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor) {
+            MarketCapMongoService marketCapMongoService,
+            StockPriceMongoService stockPriceMongoService,
+            com.portfolio.basket.client.EtfApiClient etfApiClient,
+            @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
+            @Nullable CashSessionClock cashSessionClock) {
         this.marketDataService = marketDataService;
-        this.stockPriceRedisService = stockPriceRedisService;
+        this.marketCapMongoService = marketCapMongoService;
+        this.stockPriceMongoService = stockPriceMongoService;
+        this.etfApiClient = etfApiClient;
         this.taskExecutor = taskExecutor;
+        this.cashSessionClock = cashSessionClock;
     }
 
     /**
-     * Enriches equity holdings with real-time market data (price, value, P&L).
-     */
-    /**
      * Enriches equity holdings with real-time market data (price, value, P&L) and
-     * market cap info.
+     * market cap info using a 3-Tier Waterfall (Redis -> Mongo -> API).
      */
+    @Observed(name = "portfolio.enrich.holdings", contextualName = "enrich-equity-holdings")
     public List<EquityHoldings> enrichHoldings(List<EquityHoldings> equityHoldings) {
         log.debug("Enriching {} equity holdings with price, performance, and market cap data",
                 equityHoldings != null ? equityHoldings.size() : 0);
@@ -55,114 +70,239 @@ public class PortfolioCalculator {
         List<String> symbols = equityHoldings.stream()
                 .map(EquityHoldings::getSymbol)
                 .filter(symbol -> symbol != null)
+                .filter(symbol -> !symbol.endsWith("-F")) // Skip F&O futures from equity symbols
                 .collect(Collectors.toList());
 
-        // Fetch market data and market cap data in PARALLEL (these are independent calls)
-        var marketDataFuture = java.util.concurrent.CompletableFuture.supplyAsync(
-                () -> marketDataService.getMarketData(symbols), taskExecutor);
-        var marketCapFuture = java.util.concurrent.CompletableFuture.supplyAsync(
-                () -> marketDataService.getMarketCapData(symbols), taskExecutor);
+        // 1. Fetch market cap data (MongoDB Cache first, then API)
+        Map<String, MarketCapDocument> cachedMarketCap = marketCapMongoService.getBySymbols(symbols);
+        List<String> missingMarketCap = symbols.stream()
+                .filter(s -> !cachedMarketCap.containsKey(s))
+                .collect(Collectors.toList());
 
-        // Wait for both to complete
-        Map<String, MarketData> marketDataMap;
-        Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap;
-        try {
-            marketDataMap = marketDataFuture.get(15, java.util.concurrent.TimeUnit.SECONDS);
-            marketCapMap = marketCapFuture.get(15, java.util.concurrent.TimeUnit.SECONDS);
-        } catch (Exception e) {
-            log.error("Parallel market data fetch timed out or failed (15s). Proceeding to check Redis cache for fallback values: {}", e.getMessage());
-            // Attempt to cancel ongoing futures
-            marketDataFuture.cancel(true);
-            marketCapFuture.cancel(true);
+        java.util.concurrent.CompletableFuture<Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch>> marketCapFuture = null;
+        if (!missingMarketCap.isEmpty()) {
+            marketCapFuture = java.util.concurrent.CompletableFuture.supplyAsync(
+                    () -> marketDataService.getMarketCapData(missingMarketCap), taskExecutor)
+                    .completeOnTimeout(Map.of(), 4, java.util.concurrent.TimeUnit.SECONDS)
+                    .exceptionally(ex -> {
+                        log.error("Market cap fetch failed: {}", ex.getMessage());
+                        return Map.of();
+                    });
             
-            marketDataMap = Map.of();
-            marketCapMap = Map.of();
+            marketCapFuture.thenAcceptAsync(apiResults -> {
+                        if (apiResults != null && !apiResults.isEmpty()) {
+                            List<MarketCapDocument> docs = apiResults.values().stream()
+                                    .map(match -> MarketCapDocument.builder()
+                                            .symbol(match.getSymbol())
+                                            .sector(match.getSector())
+                                            .industry(match.getIndustry())
+                                            .marketCapType(match.getMarketCapType())
+                                            .marketCapValue(match.getMarketCapValue() != null ? match.getMarketCapValue().doubleValue() : null)
+                                            .companyName(match.getCompanyName())
+                                            .updatedAt(LocalDateTime.now())
+                                            .build())
+                                    .collect(Collectors.toList());
+                            marketCapMongoService.saveAll(docs);
+                        }
+                    }, taskExecutor);
         }
-        log.debug("Fetched market data for {} and market cap for {} out of {} symbols",
-                marketDataMap.size(), marketCapMap.size(), symbols.size());
 
-        // Enrich each holding
-        final Map<String, MarketData> finalMarketDataMap = marketDataMap;
-        final Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> finalMarketCapMap = marketCapMap;
 
-        // Pre-fetch batch price cache updates for any missing symbols from Redis to eliminate N+1 performance issues
-        List<String> missingFromApi = symbols.stream()
-                .filter(symbol -> symbol != null && !finalMarketDataMap.containsKey(symbol))
-                .collect(Collectors.toList());
+        // 2. Data Lookup (Redis -> Mongo -> API handled automatically by MarketDataService)
+        Map<String, MarketData> apiData = Map.of();
+        try {
+            apiData = marketDataService.getMarketData(symbols);
+        } catch (Exception e) {
+            log.error("MarketDataService fetch failed: {}", e.getMessage());
+        }
+        
+        final Map<String, MarketData> finalApiDataForEnrich = (apiData == null) ? Map.of() : apiData;
 
-        log.debug("Pre-fetching Redis stock prices for {} missing symbols", missingFromApi.size());
-        final Map<String, com.portfolio.model.cache.StockPriceCache> cachedPricesMap =
-                stockPriceRedisService.getLatestPrices(missingFromApi);
+        // Market Cap: do not block holdings first paint (apply when already done)
+        Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> finalMarketCapMapTemp = Map.of();
+        if (marketCapFuture != null && marketCapFuture.isDone() && !marketCapFuture.isCompletedExceptionally()) {
+            try {
+                finalMarketCapMapTemp = marketCapFuture.getNow(Map.of());
+            } catch (Exception e) {
+                log.debug("Market cap future not ready for holdings paint: {}", e.getMessage());
+            }
+        }
+        final Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> finalMarketCapMap = finalMarketCapMapTemp;
 
         return equityHoldings.stream()
-                .map(holding -> enrichHolding(holding, finalMarketDataMap, finalMarketCapMap, cachedPricesMap))
+                .map(holding -> enrichHolding(holding, finalApiDataForEnrich, finalMarketCapMap, cachedMarketCap))
                 .collect(Collectors.toList());
     }
 
-    private EquityHoldings enrichHolding(EquityHoldings holding, Map<String, MarketData> marketDataMap,
+    /**
+     * Re-apply LTP / prevClose from MarketDataService onto an existing holdings structure
+     * (cache hit path). Skips market-cap and ETF HTTP so warm path stays fast.
+     */
+    public List<EquityHoldings> repriceHoldings(List<EquityHoldings> equityHoldings) {
+        if (equityHoldings == null || equityHoldings.isEmpty()) {
+            return equityHoldings;
+        }
+        List<String> symbols = equityHoldings.stream()
+                .map(EquityHoldings::getSymbol)
+                .filter(symbol -> symbol != null)
+                .filter(symbol -> !symbol.endsWith("-F"))
+                .collect(Collectors.toList());
+        Map<String, MarketData> apiData = Map.of();
+        try {
+            apiData = marketDataService.getMarketData(symbols);
+        } catch (Exception e) {
+            log.error("MarketDataService reprice failed: {}", e.getMessage());
+        }
+        final Map<String, MarketData> finalApiData = (apiData == null) ? Map.of() : apiData;
+        return equityHoldings.stream()
+                .map(holding -> enrichHolding(holding, finalApiData, Map.of(), Map.of()))
+                .collect(Collectors.toList());
+    }
+
+    private EquityHoldings enrichHolding(EquityHoldings holding, 
+            Map<String, MarketData> marketDataMap,
             Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap,
-            Map<String, com.portfolio.model.cache.StockPriceCache> cachedPricesMap) {
+            Map<String, MarketCapDocument> cachedMarketCap) {
+            
         String symbol = holding.getSymbol();
         if (symbol == null)
             return holding;
 
         // Enrich with market cap data
-        if (marketCapMap != null && marketCapMap.containsKey(symbol)) {
+        if (cachedMarketCap != null && cachedMarketCap.containsKey(symbol)) {
+            var cache = cachedMarketCap.get(symbol);
+            if (cache.getMarketCapValue() != null) {
+                holding.setMarketCapValue(cache.getMarketCapValue());
+            }
+            if (cache.getMarketCapType() != null) {
+                holding.setMarketCapCategory(cache.getMarketCapType());
+                if (holding.getMarketCap() == null) {
+                    holding.setMarketCap(cache.getMarketCapType());
+                }
+            }
+            if (cache.getCompanyName() != null) {
+                holding.setName(cache.getCompanyName());
+            }
+            if (cache.getSector() != null) {
+                holding.setSector(cache.getSector());
+            }
+            if (cache.getIndustry() != null) {
+                holding.setIndustry(cache.getIndustry());
+            }
+        } else if (marketCapMap != null && marketCapMap.containsKey(symbol)) {
             var match = marketCapMap.get(symbol);
             if (match.getMarketCapValue() != null) {
-                // Convert Long to Double as EquityHoldings expects Double for marketCapValue
                 holding.setMarketCapValue(match.getMarketCapValue().doubleValue());
             }
             if (match.getMarketCapType() != null) {
                 holding.setMarketCapCategory(match.getMarketCapType());
-                // Fallback for older existing field if needed
                 if (holding.getMarketCap() == null) {
                     holding.setMarketCap(match.getMarketCapType());
                 }
             }
+            if (match.getCompanyName() != null) {
+                holding.setName(match.getCompanyName());
+            }
+            if (match.getSector() != null) {
+                holding.setSector(match.getSector());
+            }
+            if (match.getIndustry() != null) {
+                holding.setIndustry(match.getIndustry());
+            }
         }
-
-        MarketData marketData = marketDataMap.get(symbol);
 
         Double currentPrice = null;
         Double previousClosePrice = null;
+        String priceSource = null;
+        // Durable import mark (not live LTP) — survives enrich overwrite of currentPrice.
+        Double importMarkPrice = holding.getImportMarkPrice() != null && holding.getImportMarkPrice() > 0
+                ? holding.getImportMarkPrice()
+                : null;
 
-        if (marketData != null) {
-            // Determine current price
-            if (marketData.getLastPrice() != null) {
-                currentPrice = marketData.getLastPrice();
-            } else if (marketData.getOhlc() != null) {
-                currentPrice = marketData.getOhlc().getClose();
+        // Waterfall Price Assignment
+        if (marketDataMap != null) {
+            MarketData apiItem = marketDataMap.get(symbol);
+            if (apiItem == null) {
+                // Try looking up with cleaned symbol (strips prefix and suffix)
+                String cleaned = cleanSymbol(symbol);
+                apiItem = marketDataMap.get(cleaned);
             }
+            
+            if (apiItem != null) {
+                Double lastPrice = apiItem.getLastPrice();
+                if (lastPrice != null && lastPrice > 0) {
+                    currentPrice = lastPrice;
+                    priceSource = HoldingInstrumentClassifier.PRICE_LIVE;
+                } else if (apiItem.getOhlc() != null && apiItem.getOhlc().getClose() > 0) {
+                    currentPrice = apiItem.getOhlc().getClose();
+                    priceSource = HoldingInstrumentClassifier.PRICE_LIVE;
+                }
+                
+                Double prevClose = apiItem.getPreviousClose();
+                if (prevClose != null && prevClose > 0) {
+                    // After hours, last≈prev usually means broker rolled close — not a flat session.
+                    // MarketDataService already tried hist repair; if still collapsed, omit day P&L.
+                    if (!isCashOpen() && MarketDataService.needsPriorSessionClose(apiItem)) {
+                        log.warn("[Holdings] {} excluded from Today's P&L — collapsed last≈prev after hours (repair miss).", symbol);
+                    } else {
+                        previousClosePrice = prevClose;
+                    }
+                } else {
+                    log.warn("[Holdings] {} excluded from Today's P&L — no previousClose (OHLC open is not a day baseline).", symbol);
+                }
 
-            // Determine previous close (for day's gain/loss)
-            if (marketData.getOhlc() != null) {
-                previousClosePrice = marketData.getOhlc().getOpen(); // Using Open as proxy for prev close for today's
-                                                                     // change within day
-            }
-        } else {
-            // Fallback to pre-fetched batch Redis values instead of sequential blocking operations
-            var cacheItem = cachedPricesMap != null ? cachedPricesMap.get(symbol) : null;
-            if (cacheItem != null) {
-                currentPrice = cacheItem.getClosePrice();
+                if (apiItem.getTimestamp() != null) {
+                    holding.setPriceAsOf(LocalDateTime.ofInstant(apiItem.getTimestamp(), java.time.ZoneId.of("Asia/Kolkata")));
+                }
             }
         }
 
-        // Local development fallback to prevent UI from showing 0.0 values
+        // Fallback Tier 2: Mongo for last and/or previousClose when live data is incomplete
+        if ((currentPrice == null || previousClosePrice == null) && stockPriceMongoService != null && symbol != null) {
+            try {
+                Map<String, StockPriceDocument> priceDocs = stockPriceMongoService.getPrices(List.of(symbol, cleanSymbol(symbol)));
+                if (priceDocs != null && !priceDocs.isEmpty()) {
+                    StockPriceDocument priceDoc = priceDocs.get(symbol);
+                    if (priceDoc == null) {
+                        priceDoc = priceDocs.get(cleanSymbol(symbol));
+                    }
+                    if (priceDoc != null) {
+                        if (currentPrice == null && priceDoc.getLastPrice() != null && priceDoc.getLastPrice() > 0) {
+                            currentPrice = priceDoc.getLastPrice();
+                            priceSource = HoldingInstrumentClassifier.PRICE_LAST;
+                        }
+                        if (previousClosePrice == null && priceDoc.getPreviousClose() != null && priceDoc.getPreviousClose() > 0) {
+                            Double mongoPrev = priceDoc.getPreviousClose();
+                            if (!isCashOpen() && currentPrice != null
+                                    && !MarketDataService.isDistinctPrior(mongoPrev, currentPrice)) {
+                                log.warn("[Holdings] {} Mongo previousClose still collapsed after hours — omit day P&L.", symbol);
+                            } else {
+                                previousClosePrice = mongoPrev;
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("[Holdings] Could not retrieve Mongo price fallback for {}: {}", symbol, e.getMessage());
+            }
+        }
+
+        // Fallback Tier 3: Cost basis average buying price (at par / 0% unrealized P&L)
         if (currentPrice == null) {
-            log.debug("No market data or Redis data for {}. Using local dev fallback price.", symbol);
             if (holding.getAverageBuyingPrice() != null && holding.getAverageBuyingPrice() > 0) {
-                currentPrice = holding.getAverageBuyingPrice() * 1.05; // 5% mock gain
-                previousClosePrice = holding.getAverageBuyingPrice() * 1.02; // Mock previous close
+                currentPrice = holding.getAverageBuyingPrice();
+                priceSource = HoldingInstrumentClassifier.PRICE_COST;
             } else if (holding.getInvestmentCost() != null && holding.getQuantity() != null && holding.getQuantity() > 0) {
-                double impliedAvgPrice = holding.getInvestmentCost() / holding.getQuantity();
-                currentPrice = impliedAvgPrice * 1.05;
-                previousClosePrice = impliedAvgPrice * 1.02;
-            } else {
-                currentPrice = 100.0;
-                previousClosePrice = 95.0;
+                currentPrice = holding.getInvestmentCost() / holding.getQuantity();
+                priceSource = HoldingInstrumentClassifier.PRICE_COST;
             }
         }
+
+        holding.setPriceSource(priceSource);
+        String isin = holding.getIsin();
+        holding.setSector(HoldingInstrumentClassifier.resolveSector(holding.getSector(), symbol, isin, priceSource));
+        holding.setIndustry(HoldingInstrumentClassifier.resolveIndustry(holding.getIndustry(), symbol, isin, priceSource));
+        holding.setProductClass(HoldingInstrumentClassifier.productClass(symbol, isin, priceSource));
 
         if (currentPrice != null) {
             holding.setCurrentPrice(round(currentPrice));
@@ -177,13 +317,23 @@ public class PortfolioCalculator {
                     double gainLossPct = (gainLoss / holding.getInvestmentCost()) * 100;
                     holding.setGainLoss(round(gainLoss));
                     holding.setGainLossPercentage(round(gainLossPct));
+                } else if (importMarkPrice != null && holding.getQuantity() != null && holding.getQuantity() > 0) {
+                    // No avg cost (email demat): overall vs import/statement mark — never vs ₹0.
+                    double importValue = importMarkPrice * holding.getQuantity();
+                    if (importValue > 0) {
+                        double gainLoss = currentValue - importValue;
+                        double gainLossPct = (gainLoss / importValue) * 100;
+                        holding.setGainLoss(round(gainLoss));
+                        holding.setGainLossPercentage(round(gainLossPct));
+                    }
                 }
 
                 // Calculate Day's Gain/Loss (if previous close available)
-                if (previousClosePrice != null && previousClosePrice > 0) {
+                if (previousClosePrice != null && previousClosePrice > 0
+                        && !HoldingInstrumentClassifier.PRICE_COST.equals(priceSource)) {
                     double previousValue = previousClosePrice * holding.getQuantity();
                     double dayGainLoss = currentValue - previousValue;
-                    double dayGainLossPct = (dayGainLoss / previousValue) * 100;
+                    double dayGainLossPct = previousValue > 0 ? (dayGainLoss / previousValue) * 100 : 0.0;
                     holding.setTodayGainLoss(round(dayGainLoss));
                     holding.setTodayGainLossPercentage(round(dayGainLossPct));
 
@@ -191,40 +341,82 @@ public class PortfolioCalculator {
                     double priceChange = currentPrice - previousClosePrice;
                     double priceChangePct = (priceChange / previousClosePrice) * 100;
                     holding.setPercentageChange(round(priceChangePct));
+                } else {
+                    log.warn("[Holdings] {} excluded from Today's P&L — no previousClosePrice.", holding.getSymbol());
+                    holding.setTodayGainLoss(null);
+                    holding.setTodayGainLossPercentage(null);
+                    holding.setPercentageChange(null);
                 }
-
-                // Calculate weight (requires total value, done separately if needed,
-                // but usually done after all holdings enriched.
-                // We'll skip weight here as it requires aggregation of all holdings first)
             }
         }
 
         return holding;
     }
 
-    /**
-     * Calculates the portfolio summary based on enriched holdings.
-     */
     public PortfolioSummaryV1 calculateSummary(List<EquityHoldings> enrichedHoldings, double totalInvestmentValue) {
         double currentValue = enrichedHoldings.stream()
-                .filter(h -> h.getCurrentValue() != null)
-                .mapToDouble(EquityHoldings::getCurrentValue)
+                .mapToDouble(h -> {
+                    if (h.getCurrentValue() != null) {
+                        return h.getCurrentValue();
+                    }
+                    if (h.getInvestmentCost() != null && h.getInvestmentCost() > 0) {
+                        return h.getInvestmentCost();
+                    }
+                    if (h.getCurrentPrice() != null && h.getQuantity() != null) {
+                        return h.getCurrentPrice() * h.getQuantity();
+                    }
+                    return 0.0;
+                })
                 .sum();
 
-        double totalGainLoss = currentValue - totalInvestmentValue;
-        double totalGainLossPct = totalInvestmentValue > 0 ? (totalGainLoss / totalInvestmentValue) * 100 : 0.0;
+        if (currentValue == 0.0 && totalInvestmentValue > 0) {
+            currentValue = totalInvestmentValue;
+        }
 
-        double todayGainLoss = enrichedHoldings.stream()
-                .filter(h -> h.getTodayGainLoss() != null)
-                .mapToDouble(EquityHoldings::getTodayGainLoss)
-                .sum();
+        // When cost basis is unknown, prefer sum of per-holding gainLoss (import-mark / cost)
+        // instead of treating invested=0 as "entire market value is profit".
+        Double totalGainLoss;
+        Double totalGainLossPct;
+        if (totalInvestmentValue > 0) {
+            double gain = currentValue - totalInvestmentValue;
+            totalGainLoss = round(gain);
+            totalGainLossPct = round((gain / totalInvestmentValue) * 100);
+        } else {
+            boolean anyOverall = enrichedHoldings.stream().anyMatch(h -> h.getGainLoss() != null);
+            if (anyOverall) {
+                double gainSum = enrichedHoldings.stream()
+                        .filter(h -> h.getGainLoss() != null)
+                        .mapToDouble(EquityHoldings::getGainLoss)
+                        .sum();
+                double baseline = currentValue - gainSum;
+                totalGainLoss = round(gainSum);
+                totalGainLossPct = baseline > 0 ? round((gainSum / baseline) * 100) : null;
+            } else {
+                totalGainLoss = null;
+                totalGainLossPct = null;
+            }
+        }
 
-        // For today's gain %, we interpret it against the current value (as per
-        // original logic logic usually)
-        // OR against yesterday's value.
-        // Original logic: currentValue > 0 ? (todayGainLoss / currentValue) * 100 :
-        // 0.0;
-        double todayGainLossPct = currentValue > 0 ? (todayGainLoss / currentValue) * 100 : 0.0;
+        // Missing baselines must stay null — never collapse to 0.0 (looks like a flat session).
+        boolean anyDayBaseline = enrichedHoldings.stream().anyMatch(h -> h.getTodayGainLoss() != null);
+        Double todayGainLoss = null;
+        Double todayGainLossPct = null;
+        if (anyDayBaseline) {
+            double daySum = enrichedHoldings.stream()
+                    .filter(h -> h.getTodayGainLoss() != null)
+                    .mapToDouble(EquityHoldings::getTodayGainLoss)
+                    .sum();
+            // After hours, last≈prev quotes often sum to ~0 — treat as missing so overview can
+            // freeze day P&L from LTP mark vs prior session (not a fake flat day).
+            if (!isCashOpen() && Math.abs(daySum) < 0.005) {
+                todayGainLoss = null;
+                todayGainLossPct = null;
+            } else {
+                double previousValue = currentValue - daySum;
+                todayGainLoss = round(daySum);
+                todayGainLossPct = previousValue > 0 ? round((daySum / previousValue) * 100) : 0.0;
+            }
+        }
 
         int gainers = count(enrichedHoldings, false, true);
         int losers = count(enrichedHoldings, false, false);
@@ -232,13 +424,13 @@ public class PortfolioCalculator {
         int todayLosers = count(enrichedHoldings, true, false);
 
         return PortfolioSummaryV1.builder()
-                .investmentValue(round(totalInvestmentValue))
+                .investmentValue(totalInvestmentValue > 0 ? round(totalInvestmentValue) : null)
                 .currentValue(round(currentValue))
-                .totalGainLoss(round(totalGainLoss))
-                .totalGainLossPercentage(round(totalGainLossPct))
-                .todayGainLoss(round(todayGainLoss))
-                .todayGainLossPercentage(round(todayGainLossPct))
-                .totalAssets(enrichedHoldings.size())
+                .totalGainLoss(totalGainLoss)
+                .totalGainLossPercentage(totalGainLossPct)
+                .todayGainLoss(todayGainLoss)
+                .todayGainLossPercentage(todayGainLossPct)
+                .totalAssets((int) enrichedHoldings.stream().filter(h -> h.getQuantity() != null && h.getQuantity() > 0).count())
                 .gainersCount(gainers)
                 .losersCount(losers)
                 .todayGainersCount(todayGainers)
@@ -249,7 +441,15 @@ public class PortfolioCalculator {
                 .build();
     }
 
-    // Also add the weight calculation logic that was in PortfolioHoldingsService
+    private boolean isCashOpen() {
+        if (cashSessionClock != null) {
+            return cashSessionClock.isCashOpen();
+        }
+        // Unknown clock: use IST cash hours — never assume open (weekend would fake day P&L ≈ 0).
+        return com.portfolio.service.portfolio.PortfolioHoldingsService.isCashOpenIst(
+                LocalDateTime.now(java.time.ZoneId.of("Asia/Kolkata")));
+    }
+
     public void calculateWeights(List<EquityHoldings> holdings) {
         double totalValue = holdings.stream()
                 .filter(h -> h.getCurrentValue() != null)
@@ -276,19 +476,43 @@ public class PortfolioCalculator {
 
     private Map<String, List<EquityHoldings>> groupSector(List<EquityHoldings> holdings) {
         return holdings.stream()
-                .filter(e -> e.getSector() != null)
-                .collect(Collectors.groupingBy(EquityHoldings::getSector));
+                .collect(Collectors.groupingBy(e -> {
+                    String sector = e.getSector();
+                    return (sector != null && !sector.trim().isEmpty()) ? sector : "-";
+                }));
     }
 
     private Map<String, List<EquityHoldings>> groupMarketCap(List<EquityHoldings> holdings) {
         return holdings.stream()
-                .filter(e -> e.getMarketCap() != null)
-                .collect(Collectors.groupingBy(EquityHoldings::getMarketCap));
+                .collect(Collectors.groupingBy(e -> {
+                    String mc = e.getMarketCap();
+                    return (mc != null && !mc.trim().isEmpty()) ? mc : "UNKNOWN";
+                }));
     }
 
     private Double round(Double value) {
-        if (value == null)
+        if (value == null || Double.isNaN(value) || Double.isInfinite(value)) {
             return null;
+        }
         return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).doubleValue();
     }
+
+    /** Request-path ETF hint only — never blocks on funds HTTP search. */
+    static boolean looksLikeEtf(String symbol) {
+        return HoldingInstrumentClassifier.looksLikeEtfSymbol(symbol)
+                || HoldingInstrumentClassifier.looksLikeEtfOrScheme(symbol, null);
+    }
+
+    private String cleanSymbol(String symbol) {
+        if (symbol == null || symbol.isEmpty()) {
+            return symbol;
+        }
+        int colonIndex = symbol.indexOf(':');
+        String cleaned = symbol;
+        if (colonIndex > 0 && colonIndex < symbol.length() - 1) {
+            cleaned = symbol.substring(colonIndex + 1);
+        }
+        return com.portfolio.model.util.SymbolResolver.normalize(cleaned);
+    }
 }
+

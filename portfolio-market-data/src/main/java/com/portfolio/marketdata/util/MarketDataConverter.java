@@ -14,10 +14,13 @@ import com.portfolio.model.market.MarketData.MarketDataBuilder;
 import com.portfolio.model.market.OhlcData;
 import com.portfolio.model.market.TimeFrame;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Utility class for converting between different market data model formats.
  * Provides conversion methods between the unified MarketData model and other models.
  */
+@Slf4j
 public class MarketDataConverter {
 
     /**
@@ -31,9 +34,17 @@ public class MarketDataConverter {
             return null;
         }
         
+        Double effectivePreviousClose = response.getPreviousClose();
+
+        // Avoid emitting previousClose without a usable lastPrice (prevents NPEs and -100% drops)
+        if (response.getLastPrice() <= 0) {
+            effectivePreviousClose = null;
+        }
+
         MarketDataBuilder builder = MarketData.builder()
             .instrumentToken(response.getInstrumentToken())
             .lastPrice(response.getLastPrice())
+            .previousClose(effectivePreviousClose)
             .ohlc(response.getOhlc())
             .timestamp(response.getTimestamp())
             .timeFrame(response.getTimeFrame())
@@ -56,29 +67,58 @@ public class MarketDataConverter {
     }
     
     /**
-     * Convert from HistoricalDataResponse to the unified MarketData model
-     * 
-     * @param response The HistoricalDataResponse to convert
-     * @return A new MarketData instance
+     * Convert {@link HistoricalDataResponse} (flat am-market or legacy nested) to MarketData.
      */
     public static MarketData fromHistoricalDataResponse(HistoricalDataResponse response) {
-        if (response == null || response.getData() == null || 
-            response.getData().getDataPoints() == null || 
-            response.getData().getDataPoints().isEmpty()) {
+        if (response == null) {
             return null;
         }
-        
-        // Convert interval string to TimeFrame enum
-        TimeFrame timeFrame = null;
-        if (response.getInterval() != null) {
-            timeFrame = TimeFrame.fromValue(response.getInterval());
+        HistoricalData series = response.getData();
+        if (series == null || series.getDataPoints() == null || series.getDataPoints().isEmpty()) {
+            var points = response.effectiveDataPoints();
+            if (points.isEmpty()) {
+                return null;
+            }
+            series = HistoricalData.builder()
+                    .tradingSymbol(response.effectiveSymbol())
+                    .interval(response.getInterval())
+                    .dataPoints(points)
+                    .dataPointCount(points.size())
+                    .build();
         }
-        
-        // Convert data points
+        MarketData md = fromHistoricalData(series, response.effectiveSymbol());
+        if (md == null) {
+            return null;
+        }
+        if (response.getFromDate() != null) {
+            md.setFromDate(response.getFromDate());
+        }
+        if (response.getToDate() != null) {
+            md.setToDate(response.getToDate());
+        }
+        return md;
+    }
+
+    /**
+     * Convert am-market flat {@link HistoricalData} (per-symbol map value) to MarketData.
+     */
+    public static MarketData fromHistoricalData(HistoricalData series, String symbol) {
+        if (series == null || series.getDataPoints() == null || series.getDataPoints().isEmpty()) {
+            return null;
+        }
+
+        TimeFrame timeFrame = null;
+        String interval = series.getInterval();
+        if (interval != null) {
+            timeFrame = TimeFrame.fromValue(interval);
+        }
+
         List<MarketData.MarketDataPoint> dataPoints = new ArrayList<>();
-        for (OHLCVTPoint point : response.getData().getDataPoints()) {
+        for (OHLCVTPoint point : series.getDataPoints()) {
             dataPoints.add(MarketData.MarketDataPoint.builder()
-                .timestamp(Instant.now()) // In a real implementation, use point's timestamp
+                .timestamp(point.getTime() != null
+                        ? point.getTime().atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant()
+                        : Instant.now())
                 .ohlcData(OhlcData.builder()
                     .open(point.getOpen())
                     .high(point.getHigh())
@@ -88,14 +128,37 @@ public class MarketDataConverter {
                 .volume(point.getVolume())
                 .build());
         }
-        
-        return MarketData.builder()
-            .symbol(response.getSymbol())
-            .fromDate(response.getFromDate())
-            .toDate(response.getToDate())
+
+        String resolvedSymbol = symbol != null ? symbol : series.getTradingSymbol();
+        MarketDataBuilder builder = MarketData.builder()
+            .symbol(resolvedSymbol)
             .timeFrame(timeFrame)
             .historical(true)
-            .dataPoints(dataPoints)
-            .build();
+            .dataPoints(dataPoints);
+
+        if (!dataPoints.isEmpty()) {
+            // Derive first/last by candle time (payload order is not guaranteed).
+            List<MarketData.MarketDataPoint> ordered = new ArrayList<>(dataPoints);
+            ordered.sort(java.util.Comparator.comparing(
+                    MarketData.MarketDataPoint::getTimestamp,
+                    java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())));
+            MarketData.MarketDataPoint firstPoint = ordered.get(0);
+            MarketData.MarketDataPoint latestPoint = ordered.get(ordered.size() - 1);
+
+            builder.ohlc(latestPoint.getOhlcData());
+            if (latestPoint.getOhlcData() != null) {
+                builder.lastPrice(latestPoint.getOhlcData().getClose());
+            }
+            if (firstPoint.getOhlcData() != null
+                    && latestPoint.getOhlcData() != null
+                    && latestPoint.getOhlcData().getClose() > 0
+                    && firstPoint.getOhlcData().getOpen() > 0) {
+                // Prior close = chronologically first bar open (incl. single-bar series).
+                // Skip zero open — downstream % change treats previousClose as denominator.
+                builder.previousClose(firstPoint.getOhlcData().getOpen());
+            }
+        }
+
+        return builder.build();
     }
 }

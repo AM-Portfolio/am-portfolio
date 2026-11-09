@@ -18,12 +18,22 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
+import io.lettuce.core.resource.DefaultClientResources;
+import io.lettuce.core.tracing.MicrometerTracing;
+import io.micrometer.observation.ObservationRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
+
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.portfolio.model.market.IndexIndices;
 import com.portfolio.model.cache.StockIndicesEventDataCache;
 import com.portfolio.model.cache.StockPriceCache;
+import com.portfolio.model.analytics.Heatmap;
+import com.portfolio.model.analytics.intelligence.PortfolioIntelligenceResponse;
+import com.portfolio.model.basket.cache.CachedEtfData;
+import com.portfolio.model.basket.cache.CachedSecurityMatch;
 import com.portfolio.model.portfolio.PortfolioAnalysis;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
@@ -46,6 +56,12 @@ public class RedisConfig {
     @Value("${market.data.cache.ttl.seconds:300}")
     private long cacheTimeToLiveSeconds;
 
+    @Autowired
+    private ObservationRegistry observationRegistry;
+
+    @Autowired(required = false)
+    private com.am.libraries.featureflag.service.GrowthBookService growthBookService;
+
     @Bean
     public RedisConnectionFactory redisConnectionFactory() {
         RedisStandaloneConfiguration redisConfig = new RedisStandaloneConfiguration();
@@ -63,11 +79,15 @@ public class RedisConfig {
             log.warn("No Redis password provided, connecting without authentication");
         }
 
-        // Configure Lettuce client with a 5-second command timeout.
-        // This prevents health probes from hanging for 60s (Lettuce default)
-        // when Redis is in LOADING state during snapshot restore.
+        // 5s command timeout + Micrometer tracing for Redis spans.
+        // Safe only if no Redis I/O runs during bean @PostConstruct: tracing finish() on the
+        // epoll thread can resolve Spring beans (Prometheus exemplars); that deadlocks if the
+        // factory lock is still held. ETF warm moved to ApplicationReadyEvent for that reason.
         LettuceClientConfiguration clientConfig = LettuceClientConfiguration.builder()
             .commandTimeout(Duration.ofSeconds(5))
+            .clientResources(DefaultClientResources.builder()
+                .tracing(new MicrometerTracing(observationRegistry, "redis"))
+                .build())
             .build();
         
         return new LettuceConnectionFactory(redisConfig, clientConfig);
@@ -80,6 +100,8 @@ public class RedisConfig {
         ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
         objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        // Never crash on unknown fields from Redis — schema may evolve between deployments
+        objectMapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
         return objectMapper;
     }
     
@@ -92,7 +114,9 @@ public class RedisConfig {
      * @return a configured RedisTemplate instance
      */
     private <T> RedisTemplate<String, T> createRedisTemplate(RedisConnectionFactory connectionFactory, Class<T> targetClass) {
-        RedisTemplate<String, T> template = new RedisTemplate<>();
+        RedisTemplate<String, T> template = growthBookService != null 
+            ? new FeatureFlaggedRedisTemplate<>(growthBookService) 
+            : new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
         template.setKeySerializer(new StringRedisSerializer());
         
@@ -100,6 +124,8 @@ public class RedisConfig {
         ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
         objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        // Production safety: don't crash if cached JSON has fields not in the current model
+        objectMapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
         
         // Use the newer constructor that takes the ObjectMapper directly
         Jackson2JsonRedisSerializer<T> serializer = new Jackson2JsonRedisSerializer<>(objectMapper, targetClass);
@@ -132,8 +158,18 @@ public class RedisConfig {
     }
 
     @Bean
+    public RedisTemplate<String, Heatmap> portfolioHeatmapRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, Heatmap.class);
+    }
+
+    @Bean
     public RedisTemplate<String, StockIndicesEventDataCache> stockIndicesRedisTemplate(RedisConnectionFactory connectionFactory) {
         return createRedisTemplate(connectionFactory, StockIndicesEventDataCache.class);
+    }
+
+    @Bean
+    public RedisTemplate<String, com.portfolio.model.portfolio.IntradayDataPoint[]> portfolioIntradayRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, com.portfolio.model.portfolio.IntradayDataPoint[].class);
     }
 
     @Bean
@@ -149,9 +185,17 @@ public class RedisConfig {
      * @return a configured RedisTemplate instance for generic Object values
      */
     @Bean
+    public org.springframework.data.redis.core.StringRedisTemplate stringRedisTemplate(
+            RedisConnectionFactory connectionFactory) {
+        return new org.springframework.data.redis.core.StringRedisTemplate(connectionFactory);
+    }
+
+    @Bean
     @Primary
     public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {
-        RedisTemplate<String, Object> template = new RedisTemplate<>();
+        RedisTemplate<String, Object> template = growthBookService != null 
+            ? new FeatureFlaggedRedisTemplate<>(growthBookService) 
+            : new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
         
         ObjectMapper mapper = new ObjectMapper();
@@ -166,5 +210,39 @@ public class RedisConfig {
         template.setHashValueSerializer(serializer);
         
         return template;
+    }
+
+    @Bean
+    public RedisTemplate<String, com.portfolio.model.market.MarketData> portfolioMarketDataRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, com.portfolio.model.market.MarketData.class);
+    }
+
+    @Bean
+    public RedisTemplate<String, CachedEtfData> basketEtfRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, CachedEtfData.class);
+    }
+
+    @Bean
+    public RedisTemplate<String, CachedSecurityMatch> basketSecurityMatchRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, CachedSecurityMatch.class);
+    }
+
+    @Bean
+    public RedisTemplate<String, com.portfolio.model.basket.cache.CachedBasketCatalog> basketCatalogRedisTemplate(
+            RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, com.portfolio.model.basket.cache.CachedBasketCatalog.class);
+    }
+
+    @Bean
+    public RedisTemplate<String, PortfolioIntelligenceResponse> portfolioIntelligenceRedisTemplate(
+            RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(connectionFactory, PortfolioIntelligenceResponse.class);
+    }
+
+    @Bean
+    public RedisTemplate<String, com.portfolio.model.analytics.intelligence.CachedIntelligenceHistory>
+            portfolioIntelligenceHistoryRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return createRedisTemplate(
+                connectionFactory, com.portfolio.model.analytics.intelligence.CachedIntelligenceHistory.class);
     }
 }

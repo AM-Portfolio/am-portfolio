@@ -1,5 +1,6 @@
 package com.portfolio.model.events;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -25,8 +26,11 @@ import lombok.NoArgsConstructor;
 public class PortfolioUpdateEvent {
     private UUID id;
     private BrokerType brokerType;
+    private String source; // "TRADE" or "DOCUMENT"
     private String userId;
     private String portfolioId;
+    private String name;
+    private String action;
 
     // Core Data
     private List<EquityModel> equities;
@@ -41,4 +45,10 @@ public class PortfolioUpdateEvent {
     private Double todayGainLossPercentage;
 
     private LocalDateTime timestamp;
+
+    /**
+     * Statement / Gmail message calendar day (Asia/Kolkata). When set, holdings
+     * {@code createdAt} and history backfill window start from this date.
+     */
+    private LocalDate asOfDate;
 }

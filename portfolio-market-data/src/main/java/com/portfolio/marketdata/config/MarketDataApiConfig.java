@@ -18,6 +18,12 @@ public class MarketDataApiConfig {
     private String baseUrl;
 
     /**
+     * Optional override for calendar APIs (prefer in-cluster market-data service).
+     * When empty, falls back to {@link #baseUrl}.
+     */
+    private String calendarBaseUrl;
+
+    /**
      * API path for OHLC data.
      */
     private String ohlcEndpoint;
@@ -26,6 +32,11 @@ public class MarketDataApiConfig {
      * API path for historical data.
      */
     private String historicalDataEndpoint;
+
+    /**
+     * API path for historical charts data.
+     */
+    private String historicalChartsEndpoint = "/v1/analysis/historical-charts";
 
     /**
      * API path for securities data.
@@ -38,17 +49,78 @@ public class MarketDataApiConfig {
     private String nseIndicesEndpoint;
 
     /**
+     * Live market open/closed status.
+     */
+    private String statusEndpoint = "/v1/market-calendar/status";
+
+    /**
+     * Session timings for a date.
+     */
+    private String timingsEndpoint = "/v1/market-calendar/timings";
+
+    /**
+     * Calendar HTTP timeout (ms). In-cluster status can exceed 200ms under load.
+     */
+    private int calendarTimeoutMs = 5000;
+
+    /**
      * Connection timeout in milliseconds.
      */
     private int connectionTimeout = 10000;
 
     /**
-     * Read timeout in milliseconds.
+     * Read timeout in milliseconds. Hist START_END often needs 5–15s+ under load;
+     * 10s default caused Merged 0/N and live-as-period fallback on PROD.
      */
-    private int readTimeout = 10000;
+    private int readTimeout = 45000;
 
     /**
      * Maximum number of retry attempts.
      */
     private int maxRetryAttempts = 2;
+
+    /**
+     * Cash-equity instrument segment for hist/OHLC keys (Upstox / am-market).
+     * Override via {@code MARKET_DATA_EQUITY_INSTRUMENT_PREFIX} — do not hardcode in callers.
+     */
+    private String equityInstrumentPrefix = "NSE_EQ";
+
+    /**
+     * Comma-separated segment prefixes that must not be rewritten to cash equity
+     * (e.g. {@code NSE_FO,NSE_INDEX,BSE_EQ}).
+     */
+    private String passthroughInstrumentPrefixes = "NSE_FO,NSE_INDEX,BSE_EQ,BSE_FO,BSE_INDEX,MCX_FO";
+
+    /**
+     * In-process Caffeine TTL for prior-close <em>miss</em> markers (not Redis).
+     * Short so weekend/API blips can retry without poisoning successful prior-close cache.
+     */
+    private int priorCloseMissTtlMinutes = 15;
+
+    /**
+     * Batch fetch configuration.
+     */
+    private BatchConfig batch = new BatchConfig();
+
+    @Data
+    public static class BatchConfig {
+        /**
+         * Maximum symbols per single API batch call.
+         * Default: 20 (parallel batching for fast concurrent queries).
+         */
+        private int chunkSize = 20;
+
+        /**
+         * When true: splits symbols into parallel CHUNK_SIZE batches.
+         * When false: sends all symbols in one single batch.
+         * Default: true (parallel batching).
+         */
+        private boolean parallelBatchingEnabled = true;
+
+        /**
+         * Max OHLC/historical chunks in flight at once.
+         * Keeps Upstox fan-out bounded when a portfolio has 100+ holdings.
+         */
+        private int maxParallelChunks = 2;
+    }
 }

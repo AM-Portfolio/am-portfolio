@@ -11,21 +11,53 @@ import lombok.experimental.SuperBuilder;
  * with timeframe support.
  */
 @Data
-@SuperBuilder
-@NoArgsConstructor
 @AllArgsConstructor
 @EqualsAndHashCode(callSuper = true)
+@SuperBuilder
 public class AdvancedAnalyticsRequest extends TimeFrameRequest {
-    private CoreIdentifiers coreIdentifiers;
+    @lombok.Builder.Default
+    private CoreIdentifiers coreIdentifiers = new CoreIdentifiers();
     
-    private PaginationRequest pagination;
+    @lombok.Builder.Default
+    private PaginationRequest pagination = new PaginationRequest();
     
-    private FeatureToggles featureToggles;
+    @lombok.Builder.Default
+    private FeatureToggles featureToggles = new FeatureToggles();
 
-    private FeatureConfiguration featureConfiguration;
+    @lombok.Builder.Default
+    private FeatureConfiguration featureConfiguration = new FeatureConfiguration();
 
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private transient java.util.Map<String, com.portfolio.model.market.MarketData> prefetchedMarketData;
+
+    /**
+     * Live OHLC/ticks for day movers and summary today%. Separate from period hist prefetch.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private transient java.util.Map<String, com.portfolio.model.market.MarketData> prefetchedLiveMarketData;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private transient java.util.Map<String, com.am.common.amcommondata.model.security.SecurityModel> prefetchedSecurityDetails;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private transient com.am.common.amcommondata.model.PortfolioModelV1 prefetchedPortfolio;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private transient boolean prefetchAttempted = false;
+
+    public AdvancedAnalyticsRequest() {
+        this.coreIdentifiers = new CoreIdentifiers();
+        this.pagination = new PaginationRequest();
+        this.featureToggles = new FeatureToggles();
+        this.featureConfiguration = new FeatureConfiguration();
+    }
+
+    /**
+     * Period analytics when a timeframe is set. Dates may be null; callers resolve via
+     * {@code HistoricalDataRequestFactory.resolveWindow}.
+     */
     public TimeFrameRequest getTimeFrameRequest() {
-        if (this.getFromDate() == null || this.getToDate() == null || this.getTimeFrame () == null) {
+        if (this.getTimeFrame() == null) {
             return null;
         }
         return TimeFrameRequest.builder()

@@ -7,7 +7,17 @@ import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.PortfolioAnalysis;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
+import com.portfolio.service.NewUserPortfolioFallbackService;
 import com.portfolio.service.PortfolioDashboardService;
+import com.portfolio.service.scheduler.PortfolioHistoryJobService;
+import com.portfolio.service.scheduler.PortfolioHistoryScheduler;
+import com.am.common.amcommondata.model.PortfolioSnapshotModel;
+import com.am.common.amcommondata.service.PortfolioSnapshotService;
+import com.portfolio.model.history.HistoryJobMode;
+import com.portfolio.model.history.HistoryStatus;
+import com.portfolio.model.history.PortfolioHistoryResponse;
+import com.portfolio.model.history.PortfolioHistoryStatusResponse;
+import com.portfolio.service.scheduler.SnapshotCatchUpService;
 
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
@@ -24,6 +34,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/v1/portfolios")
@@ -34,8 +45,46 @@ public class PortfolioController {
 
     private final PortfolioDashboardService portfolioDashboardService;
     private final PortfolioService portfolioService;
+    private final PortfolioHistoryScheduler portfolioHistoryScheduler;
+    private final PortfolioSnapshotService portfolioSnapshotService;
+    private final SnapshotCatchUpService snapshotCatchUpService;
+    private final PortfolioHistoryJobService portfolioHistoryJobService;
+    private final com.portfolio.service.portfolio.PortfolioIntradayService portfolioIntradayService;
+    private final com.portfolio.redis.service.ActiveMarketSymbolPublisher activeMarketSymbolPublisher;
+    private final com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer;
+    private final NewUserPortfolioFallbackService newUserPortfolioFallbackService;
+    private final com.portfolio.api.security.PortfolioOwnerAssert portfolioOwnerAssert;
+    private final com.portfolio.redis.service.PortfolioHoldingsRedisService portfolioHoldingsRedisService;
+    private final com.portfolio.redis.service.PortfolioSummaryRedisService portfolioSummaryRedisService;
+    private final com.portfolio.redis.service.PortfolioIntelligenceRedisService portfolioIntelligenceRedisService;
+    private final com.portfolio.analytics.intelligence.AggregatePortfolioLoader aggregatePortfolioLoader;
+    private final com.portfolio.service.portfolio.BrokerPortfolioDeleteService brokerPortfolioDeleteService;
 
-    @Operation(summary = "Get portfolio by ID", description = "Retrieves detailed portfolio information for a specific portfolio ID")
+    @org.springframework.beans.factory.annotation.Value("${app.jwt.internal-secret}")
+    private String internalSecret;
+
+    @Operation(summary = "Get intraday data for all portfolios", operationId = "getAllPortfoliosIntraday")
+    @GetMapping("/intraday")
+    public ResponseEntity<List<com.portfolio.model.portfolio.IntradayDataPoint>> getAllPortfoliosIntraday() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, null);
+        String traceId = org.slf4j.MDC.get("traceId");
+        log.info("[Intraday] Request for all portfolios, user={}, traceId={}", res.userId(), traceId);
+        return ResponseEntity.ok(portfolioIntradayService.getIntraday(res.userId(), res.portfolioId()));
+    }
+
+    @Operation(summary = "Get intraday data for specific portfolio", operationId = "getPortfolioIntraday")
+    @GetMapping("/{portfolioId}/intraday")
+    public ResponseEntity<List<com.portfolio.model.portfolio.IntradayDataPoint>> getPortfolioIntraday(
+            @PathVariable String portfolioId) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
+        String traceId = org.slf4j.MDC.get("traceId");
+        log.info("[Intraday] Request for portfolio={}, user={}, traceId={}", res.portfolioId(), res.userId(), traceId);
+        return ResponseEntity.ok(portfolioIntradayService.getIntraday(res.userId(), res.portfolioId()));
+    }
+
+    @Operation(summary = "Get portfolio by ID", description = "Retrieves detailed portfolio information for a specific portfolio ID", operationId = "getPortfolioById")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Portfolio found", content = @Content(mediaType = "application/json", schema = @Schema(implementation = PortfolioModelV1.class))),
             @ApiResponse(responseCode = "400", description = "Invalid portfolio ID format"),
@@ -49,6 +98,9 @@ public class PortfolioController {
         try {
             PortfolioModelV1 portfolio = portfolioService.getPortfolioById(UUID.fromString(portfolioId));
             log.info("PortfolioController - getPortfolioById - Portfolio found: {}", portfolio != null ? "yes" : "no");
+            if (portfolio == null) {
+                return ResponseEntity.notFound().build();
+            }
             return ResponseEntity.ok(portfolio);
         } catch (IllegalArgumentException e) {
             log.error("PortfolioController - getPortfolioById - Invalid portfolio ID: {}", portfolioId, e);
@@ -56,14 +108,69 @@ public class PortfolioController {
         }
     }
 
-    @Operation(summary = "Get all portfolios for user", description = "Retrieves all portfolios associated with a specific user ID")
+    @Operation(
+            summary = "Replace one asset-class list",
+            description = "Replaces bonds, commodities, or cash holdings on a BROKER portfolio. Equities and other classes are unchanged.",
+            operationId = "replaceAssetClassList")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Class list updated"),
+            @ApiResponse(responseCode = "400", description = "Invalid request"),
+            @ApiResponse(responseCode = "403", description = "Not portfolio owner"),
+            @ApiResponse(responseCode = "404", description = "Portfolio not found")
+    })
+    @PutMapping("/{portfolioId}/asset-classes/{assetClass}")
+    public ResponseEntity<com.portfolio.api.model.AssetClassReplaceResponse> replaceAssetClassList(
+            @PathVariable String portfolioId,
+            @PathVariable String assetClass,
+            @RequestBody(required = false) com.portfolio.api.model.AssetClassReplaceRequest request) {
+        PortfolioModelV1 owned = portfolioOwnerAssert.requireOwner(portfolioId);
+        String userId = owned.getOwner();
+        try {
+            PortfolioModelV1 saved = portfolioService.replaceAssetClassList(
+                    owned.getId(),
+                    userId,
+                    assetClass,
+                    request != null ? request.getItems() : List.of());
+            String pid = saved.getId() != null ? saved.getId().toString() : portfolioId;
+            portfolioHoldingsRedisService.evictPortfolioHoldings(userId, pid);
+            portfolioSummaryRedisService.evictPortfolioSummary(userId, pid);
+            portfolioIntelligenceRedisService.evict(pid);
+            portfolioIntelligenceRedisService.evictAggregateForUser(userId);
+            aggregatePortfolioLoader.evict(userId);
+            activeMarketSymbolPublisher.publishFromPortfolio(saved);
+            int count = switch (assetClass == null ? "" : assetClass.trim().toLowerCase()) {
+                case "bonds" -> saved.getBonds() != null ? saved.getBonds().size() : 0;
+                case "commodities" -> saved.getCommodities() != null ? saved.getCommodities().size() : 0;
+                case "cash" -> saved.getCash() != null ? saved.getCash().size() : 0;
+                default -> 0;
+            };
+            return ResponseEntity.ok(com.portfolio.api.model.AssetClassReplaceResponse.builder()
+                    .portfolioId(saved.getId())
+                    .assetClass(assetClass)
+                    .itemCount(count)
+                    .totalValue(saved.getTotalValue())
+                    .build());
+        } catch (SecurityException e) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            if (e.getMessage() != null && e.getMessage().contains("not found")) {
+                throw new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, e.getMessage());
+            }
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+    }
+
+    @Operation(summary = "Get all portfolios for user", description = "Retrieves all portfolios associated with a specific user ID", operationId = "getPortfolios")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "List of portfolios retrieved successfully"),
             @ApiResponse(responseCode = "404", description = "No portfolios found for user")
     })
     @GetMapping
-    public ResponseEntity<List<PortfolioModelV1>> getPortfolios(
-            @Parameter(description = "User ID to fetch portfolios for") @RequestParam String userId) {
+    public ResponseEntity<List<PortfolioModelV1>> getPortfolios() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
         log.info("PortfolioController - getPortfolios called with userId: {}", userId);
 
         List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
@@ -73,27 +180,22 @@ public class PortfolioController {
         return ResponseEntity.ok(portfolios);
     }
 
-    @Operation(summary = "Get portfolio IDs and names", description = "Retrieves a lightweight list of portfolio IDs and names for all user portfolios")
+    @Operation(summary = "Get portfolio IDs and names", description = "Retrieves a lightweight list of portfolio IDs and names for all user portfolios. Empty list when the user has no portfolios.", operationId = "getPortfolioBasicDetails")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Portfolio list retrieved successfully"),
-            @ApiResponse(responseCode = "404", description = "No portfolios found for user")
+            @ApiResponse(responseCode = "200", description = "Portfolio list retrieved successfully (may be empty)")
     })
     @GetMapping("/list")
-    public ResponseEntity<List<PortfolioBasicInfo>> getPortfolioBasicDetails(
-            @Parameter(description = "User ID to fetch portfolio basic details for") @RequestParam String userId) {
+    public ResponseEntity<List<PortfolioBasicInfo>> getPortfolioBasicDetails() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
         log.info("PortfolioController - getPortfolioBasicDetails called with userId: {}", userId);
 
-        List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
-
-        if (portfolios == null || portfolios.isEmpty()) {
-            log.warn("PortfolioController - getPortfolioBasicDetails - No portfolios found for user: {}", userId);
-            return ResponseEntity.notFound().build();
-        }
-
-        List<PortfolioBasicInfo> basicInfoList = portfolios.stream()
-                .map(portfolio -> new PortfolioBasicInfo(
-                        portfolio.getId() != null ? portfolio.getId().toString() : null,
-                        portfolio.getName()))
+        List<PortfolioBasicInfo> basicInfoList = newUserPortfolioFallbackService.listBasicPortfolios(userId).stream()
+                .map(row -> new PortfolioBasicInfo(
+                        row.portfolioId(),
+                        row.portfolioName(),
+                        row.kind(),
+                        row.gapMissingCount(),
+                        row.dummy()))
                 .collect(java.util.stream.Collectors.toList());
 
         log.info("PortfolioController - getPortfolioBasicDetails - Found {} portfolio basic details for user: {}",
@@ -102,32 +204,215 @@ public class PortfolioController {
         return ResponseEntity.ok(basicInfoList);
     }
 
+    @Operation(summary = "Restore demo portfolio eligibility", description = "Clears any legacy per-user demo dismiss flag. The demo is shown whenever the user has zero real portfolios; uploading a real portfolio hides it automatically.", operationId = "dismissDemoPortfolio")
+    @DeleteMapping("/demo")
+    public ResponseEntity<Void> dismissDemoPortfolio() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        log.info("PortfolioController - dismissDemoPortfolio (legacy clear) called for userId: {}", userId);
+        newUserPortfolioFallbackService.dismissForUser(userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(
+            summary = "Delete a broker portfolio",
+            description = "Hard-deletes the caller's portfolio from Mongo, evicts caches, and publishes action=DELETE on am-portfolio-update so analysis and trade clear. Path portfolioId + JWT owner only.",
+            operationId = "deletePortfolio")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "204", description = "Portfolio deleted"),
+            @ApiResponse(responseCode = "400", description = "Invalid portfolio ID"),
+            @ApiResponse(responseCode = "403", description = "Not portfolio owner"),
+            @ApiResponse(responseCode = "404", description = "Portfolio not found")
+    })
+    @DeleteMapping("/{portfolioId}")
+    public ResponseEntity<Void> deletePortfolio(
+            @Parameter(description = "Portfolio ID (UUID)") @PathVariable String portfolioId) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        log.info("PortfolioController - deletePortfolio portfolioId={} userId={}", portfolioId, userId);
+        brokerPortfolioDeleteService.deleteOwnedPortfolio(portfolioId, userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Internal live portfolio IDs — called by am-analysis orphan guard / reconcile.
+     * Declared before {@code /internal/{portfolioId}} so {@code ids} is never captured as a path var.
+     */
     @Hidden
-    @Operation(summary = "Get portfolio analysis", description = "Retrieves detailed analysis for a specific portfolio (hidden from API docs)")
+    @Operation(summary = "List portfolio IDs for owner (internal)", operationId = "listPortfolioIdsInternal")
+    @GetMapping("/internal/ids")
+    public ResponseEntity<java.util.List<String>> listPortfolioIdsInternal(
+            @RequestParam String ownerId,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            log.warn("Unauthorized internal ids list attempt rejected ownerId={}", ownerId);
+            return ResponseEntity.status(403).build();
+        }
+        try {
+            return ResponseEntity.ok(brokerPortfolioDeleteService.listPortfolioIdsForOwner(ownerId));
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            return ResponseEntity.status(e.getStatusCode()).build();
+        }
+    }
+
+    /**
+     * Internal ownership check — called by am-trade-management before lazy local stub create.
+     */
+    @Hidden
+    @Operation(summary = "Verify broker portfolio ownership (internal)", operationId = "verifyPortfolioInternal")
+    @GetMapping("/internal/{portfolioId}")
+    public ResponseEntity<Void> verifyPortfolioInternal(
+            @PathVariable String portfolioId,
+            @RequestParam String ownerId,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            log.warn("Unauthorized internal verify attempt rejected portfolioId={}", portfolioId);
+            return ResponseEntity.status(403).build();
+        }
+        if (ownerId == null || ownerId.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        try {
+            brokerPortfolioDeleteService.assertOwnedBrokerPortfolio(portfolioId, ownerId);
+            return ResponseEntity.noContent().build();
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            return ResponseEntity.status(e.getStatusCode()).build();
+        }
+    }
+
+    /**
+     * Internal broker delete — called by am-trade-management so Trade→Portfolio
+     * delete is synchronous Mongo+cache+Kafka instead of fire-and-forget Kafka alone.
+     */
+    @Hidden
+    @Operation(summary = "Delete broker portfolio (internal)", operationId = "deletePortfolioInternal")
+    @DeleteMapping("/internal/{portfolioId}")
+    public ResponseEntity<Void> deletePortfolioInternal(
+            @PathVariable String portfolioId,
+            @RequestParam String ownerId,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            log.warn("Unauthorized internal delete attempt rejected portfolioId={}", portfolioId);
+            return ResponseEntity.status(403).build();
+        }
+        if (ownerId == null || ownerId.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        log.info("PortfolioController - deletePortfolioInternal portfolioId={} ownerId={}", portfolioId, ownerId);
+        brokerPortfolioDeleteService.deleteOwnedPortfolio(portfolioId, ownerId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Internal sync endpoint — called by am-trade-management when a portfolio is created or updated in trade.
+     * This upserts the portfolio into am-portfolio's database so the user can see it in the Portfolio portal.
+     * Uses the internal JWT secret to authenticate (service-to-service call).
+     *
+     * <p>This provides a reliable, synchronous alternative to Kafka for the trade → portfolio direction.
+     */
+    @Hidden
+    @Operation(summary = "Sync portfolio from trade management (internal)", description = "Upserts a portfolio received from am-trade-management into the portfolio database. Service-to-service call.", operationId = "syncPortfolioFromTrade")
+    @PostMapping("/sync")
+    public ResponseEntity<PortfolioModelV1> syncPortfolioFromTrade(
+            @RequestBody PortfolioModelV1 portfolioModel,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            log.warn("Unauthorized sync attempt rejected");
+            return ResponseEntity.status(403).build();
+        }
+        if (portfolioModel == null || portfolioModel.getOwner() == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        log.info("PortfolioController - syncPortfolioFromTrade: portfolioId={} name={} owner={}",
+                portfolioModel.getId(), portfolioModel.getName(), portfolioModel.getOwner());
+
+        try {
+            // HTTP sync bypasses Kafka mapper — normalize symbols here before Mongo write.
+            portfolioEquitySymbolNormalizer.normalizePortfolio(portfolioModel);
+            List<PortfolioModelV1> existing = portfolioService.getPortfoliosByUserId(portfolioModel.getOwner());
+            boolean brokerExisted = existing != null && existing.stream()
+                    .filter(p -> p.getPortfolioKind() == null
+                            || com.am.common.amcommondata.model.enums.PortfolioKind.isBroker(p.getPortfolioKind()))
+                    .anyMatch(p -> java.util.Objects.equals(p.getBrokerType(), portfolioModel.getBrokerType()));
+            boolean otherBrokers = existing != null && existing.stream()
+                    .filter(p -> p.getPortfolioKind() == null
+                            || com.am.common.amcommondata.model.enums.PortfolioKind.isBroker(p.getPortfolioKind()))
+                    .anyMatch(p -> portfolioModel.getBrokerType() == null
+                            || !java.util.Objects.equals(p.getBrokerType(), portfolioModel.getBrokerType()));
+
+            PortfolioModelV1 saved = portfolioService.updateTradePortfolio(portfolioModel);
+            if (saved != null) {
+                activeMarketSymbolPublisher.publishFromPortfolio(saved);
+                String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
+                if (portfolioId != null && saved.getOwner() != null) {
+                    portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
+                    portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
+                    portfolioIntelligenceRedisService.evict(portfolioId);
+                    portfolioIntelligenceRedisService.evictAggregateForUser(saved.getOwner());
+                    aggregatePortfolioLoader.evict(saved.getOwner());
+                }
+                HistoryJobMode mode = (!brokerExisted && otherBrokers)
+                        ? HistoryJobMode.MERGE_BROKER
+                        : HistoryJobMode.FULL;
+                if (!brokerExisted || "REPLACE_ALL".equals(portfolioModel.getLastTradeAction())) {
+                    try {
+                        portfolioHistoryJobService.enqueue(saved.getOwner(), mode, portfolioId);
+                    } catch (Exception enqueueEx) {
+                        log.warn("PortfolioController - history enqueue failed after sync portfolioId={}: {}",
+                                portfolioId, enqueueEx.getMessage());
+                    }
+                }
+            }
+            log.info("PortfolioController - syncPortfolioFromTrade: saved portfolioId={}", saved != null ? saved.getId() : "null");
+            return ResponseEntity.ok(saved);
+        } catch (Exception e) {
+            log.error("PortfolioController - syncPortfolioFromTrade failed: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+
+
+
+    @Operation(summary = "Trigger snapshot", description = "Manually triggers the end of day portfolio snapshot generation. Returns immediately — job runs in the background.", operationId = "triggerSnapshot")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "202", description = "Snapshot job accepted and running in background")
+    })
+    @PostMapping("/trigger-snapshot")
+    public ResponseEntity<String> triggerSnapshot() {
+        log.info("PortfolioController - triggerSnapshot called manually via API");
+        portfolioHistoryScheduler.runEndOfDayJobAsync();
+        return ResponseEntity.accepted().body("Snapshot job accepted. Running in background — check server logs for progress.");
+    }
+
+    @Hidden
+    @Operation(summary = "Get portfolio analysis", description = "Retrieves detailed analysis for a specific portfolio (hidden from API docs)", operationId = "getPortfolioAnalysis")
     @GetMapping("/{portfolioId}/analysis")
     public ResponseEntity<PortfolioAnalysis> getPortfolioAnalysis(
             @PathVariable String portfolioId,
-            @RequestParam String userId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+
+        NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
+
+
         log.info(
                 "PortfolioController - getPortfolioAnalysis called - Portfolio: {}, User: {}, Page: {}, Size: {}, Interval: {}",
-                portfolioId, userId, page, size, interval != null ? interval : "null");
+                res.portfolioId(), res.userId(), page, size, interval != null ? interval : "null");
 
         try {
             TimeInterval timeInterval = TimeInterval.fromCode(interval);
             PortfolioAnalysis analysis = portfolioDashboardService.analyzePortfolio(
-                    portfolioId, userId, page, size, timeInterval);
+                    res.portfolioId(), res.userId(), page, size, timeInterval);
 
             if (analysis == null) {
                 log.warn("PortfolioController - getPortfolioAnalysis - No analysis found for portfolio: {}",
-                        portfolioId);
+                        res.portfolioId());
                 return ResponseEntity.notFound().build();
             }
 
             log.info("PortfolioController - getPortfolioAnalysis - Successfully retrieved analysis for portfolio: {}",
-                    portfolioId);
+                    res.portfolioId());
             return ResponseEntity.ok(analysis);
         } catch (IllegalArgumentException e) {
             log.error("PortfolioController - getPortfolioAnalysis - Invalid interval: {}", interval, e);
@@ -135,44 +420,48 @@ public class PortfolioController {
         }
     }
 
-    @Operation(summary = "Get portfolio summary", description = "Retrieves a summary of all portfolios for a user with performance metrics. Optionally filter by specific portfolio ID.")
+    @Operation(summary = "Get portfolio summary", description = "Retrieves a summary of all portfolios for a user with performance metrics. Optionally filter by specific portfolio ID.", operationId = "getPortfolioSummary")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Portfolio summary retrieved successfully"),
             @ApiResponse(responseCode = "404", description = "No portfolio summary found for user")
     })
     @GetMapping("/summary")
     public ResponseEntity<PortfolioSummaryV1> getPortfolioSummary(
-            @Parameter(description = "User ID to fetch portfolio summary for") @RequestParam String userId,
             @Parameter(description = "Optional portfolio ID to filter results for specific portfolio") @RequestParam(required = false) String portfolioId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+
+        NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
+
+
         log.info(
                 "PortfolioController - getPortfolioSummary called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}",
-                userId, portfolioId != null ? portfolioId : "all", page, size, interval != null ? interval : "null");
+                res.userId(), res.portfolioId() != null ? res.portfolioId() : "all", page, size, interval != null ? interval : "null");
 
         try {
             TimeInterval timeInterval = TimeInterval.fromCode(interval);
             PortfolioSummaryV1 portfolioSummary;
 
-            if (portfolioId != null && !portfolioId.trim().isEmpty() && !portfolioId.equals(userId)) {
+            if (res.portfolioId() != null && !res.portfolioId().trim().isEmpty() && !res.portfolioId().equals(res.userId())) {
                 // Filter by specific portfolio
-                log.info("PortfolioController - getPortfolioSummary - Filtering by portfolio: {}", portfolioId);
-                portfolioSummary = portfolioDashboardService.overviewPortfolio(userId, portfolioId, timeInterval);
+                log.info("PortfolioController - getPortfolioSummary - Filtering by portfolio: {}", res.portfolioId());
+                portfolioSummary = portfolioDashboardService.overviewPortfolio(res.userId(), res.portfolioId(), timeInterval);
             } else {
                 // Get summary for all portfolios
-                portfolioSummary = portfolioDashboardService.overviewPortfolio(userId, timeInterval);
+                portfolioSummary = portfolioDashboardService.overviewPortfolio(res.userId(), timeInterval);
             }
 
             if (portfolioSummary == null) {
-                log.warn("PortfolioController - getPortfolioSummary - No summary found for user: {} and portfolio: {}",
-                        userId, portfolioId != null ? portfolioId : "all");
-                return ResponseEntity.notFound().build();
+                log.info("PortfolioController - getPortfolioSummary - No summary found for user: {} and portfolio: {}. Returning empty state.",
+                        res.userId(), res.portfolioId() != null ? res.portfolioId() : "all");
+                return ResponseEntity.ok(PortfolioSummaryV1.empty());
             }
 
             log.info(
                     "PortfolioController - getPortfolioSummary - Successfully retrieved summary for user: {} and portfolio: {}",
-                    userId, portfolioId != null ? portfolioId : "all");
+                    res.userId(), res.portfolioId() != null ? res.portfolioId() : "all");
             return ResponseEntity.ok(portfolioSummary);
         } catch (IllegalArgumentException e) {
             log.error("PortfolioController - getPortfolioSummary - Invalid interval: {}", interval, e);
@@ -180,49 +469,324 @@ public class PortfolioController {
         }
     }
 
-    @Operation(summary = "Get portfolio holdings", description = "Retrieves all holdings across portfolios for a user with current values. Optionally filter by specific portfolio ID.")
+    @Operation(summary = "Get portfolio holdings", description = "Retrieves all holdings across portfolios for a user with current values. Optionally filter by specific portfolio ID.", operationId = "getPortfolioHoldings")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Portfolio holdings retrieved successfully"),
             @ApiResponse(responseCode = "404", description = "No holdings found for user")
     })
     @GetMapping("/holdings")
     public ResponseEntity<PortfolioHoldings> getPortfolioHoldings(
-            @Parameter(description = "User ID to fetch portfolio holdings for") @RequestParam String userId,
             @Parameter(description = "Optional portfolio ID to filter results for specific portfolio") @RequestParam(required = false) String portfolioId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String interval) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+
+        NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
+
+
         log.info(
                 "PortfolioController - getPortfolioHoldings called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}",
-                userId, portfolioId != null ? portfolioId : "all", page, size, interval != null ? interval : "null");
+                res.userId(), res.portfolioId() != null ? res.portfolioId() : "all", page, size, interval != null ? interval : "null");
 
         try {
             TimeInterval timeInterval = TimeInterval.fromCode(interval);
             PortfolioHoldings portfolioHoldings;
 
-            if (portfolioId != null && !portfolioId.trim().isEmpty() && !portfolioId.equals(userId)) {
+            if (res.portfolioId() != null && !res.portfolioId().trim().isEmpty() && !res.portfolioId().equals(res.userId())) {
                 // Filter by specific portfolio
-                log.info("PortfolioController - getPortfolioHoldings - Filtering by portfolio: {}", portfolioId);
-                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(userId, portfolioId, timeInterval);
+                log.info("PortfolioController - getPortfolioHoldings - Filtering by portfolio: {}", res.portfolioId());
+                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(res.userId(), res.portfolioId(), timeInterval);
             } else {
                 // Get holdings for all portfolios
-                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(userId, timeInterval);
+                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(res.userId(), timeInterval);
             }
 
             if (portfolioHoldings == null) {
-                log.warn(
-                        "PortfolioController - getPortfolioHoldings - No holdings found for user: {} and portfolio: {}",
-                        userId, portfolioId != null ? portfolioId : "all");
-                return ResponseEntity.notFound().build();
+                log.info(
+                        "PortfolioController - getPortfolioHoldings - No holdings found for user: {} and portfolio: {}. Returning empty state.",
+                        res.userId(), res.portfolioId() != null ? res.portfolioId() : "all");
+                return ResponseEntity.ok(PortfolioHoldings.empty());
             }
 
             log.info(
                     "PortfolioController - getPortfolioHoldings - Successfully retrieved holdings for user: {} and portfolio: {}",
-                    userId, portfolioId != null ? portfolioId : "all");
+                    res.userId(), res.portfolioId() != null ? res.portfolioId() : "all");
             return ResponseEntity.ok(portfolioHoldings);
         } catch (IllegalArgumentException e) {
             log.error("PortfolioController - getPortfolioHoldings - Invalid interval: {}", interval, e);
             return ResponseEntity.badRequest().build();
         }
+    }
+
+    @Operation(summary = "Get portfolio history", description = "Retrieves the snapshot history of all portfolios for a user with the specified timeframe.", operationId = "getPortfolioHistory")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Portfolio history retrieved successfully"),
+            @ApiResponse(responseCode = "404", description = "No history found for user")
+    })
+    @GetMapping("/history")
+    public ResponseEntity<PortfolioHistoryResponse> getPortfolioHistory(
+            @RequestParam(required = false, defaultValue = "1M") String timeFrame) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, null);
+        log.info("PortfolioController - getPortfolioHistory called - User: {}, TimeFrame: {}", res.userId(), timeFrame);
+
+        List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(res.userId(), res.portfolioId(), timeFrame);
+        if (history == null) {
+            history = java.util.Collections.emptyList();
+        }
+        return ResponseEntity.ok(toHistoryResponse(res.userId(), history));
+    }
+
+    @Operation(summary = "Get specific portfolio history", description = "Retrieves the snapshot history of a specific portfolio for a user with the specified timeframe.", operationId = "getSpecificPortfolioHistory")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Portfolio history retrieved successfully"),
+            @ApiResponse(responseCode = "404", description = "No history found for portfolio")
+    })
+    @GetMapping("/{portfolioId}/history")
+    public ResponseEntity<PortfolioHistoryResponse> getSpecificPortfolioHistory(
+            @PathVariable String portfolioId,
+            @RequestParam(required = false, defaultValue = "1M") String timeFrame) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
+        log.info("PortfolioController - getSpecificPortfolioHistory called - User: {}, Portfolio: {}, TimeFrame: {}", res.userId(), res.portfolioId(), timeFrame);
+
+        List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(res.userId(), res.portfolioId(), timeFrame);
+        if (history == null) {
+            history = java.util.Collections.emptyList();
+        }
+        return ResponseEntity.ok(toHistoryResponse(res.userId(), history));
+    }
+
+    @Operation(summary = "Get portfolio history build status", description = "Lightweight poll for chart sync UI while history is building.", operationId = "getPortfolioHistoryStatus")
+    @GetMapping("/history/status")
+    public ResponseEntity<PortfolioHistoryStatusResponse> getPortfolioHistoryStatus() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, null);
+        return ResponseEntity.ok(portfolioHistoryJobService.getStatus(res.userId()));
+    }
+
+    private PortfolioHistoryResponse toHistoryResponse(String userId, List<PortfolioSnapshotModel> points) {
+        PortfolioHistoryStatusResponse status;
+        try {
+            status = portfolioHistoryJobService.getStatus(userId);
+        } catch (Exception e) {
+            log.warn("PortfolioController - history status lookup failed userId={}: {}", userId, e.getMessage());
+            status = PortfolioHistoryStatusResponse.builder()
+                    .historyStatus(points.isEmpty() ? HistoryStatus.EMPTY : HistoryStatus.READY)
+                    .phase(com.portfolio.model.history.HistoryJobPhase.READY)
+                    .coverageDays(points.size())
+                    .build();
+        }
+        HistoryStatus hs = status.getHistoryStatus();
+        if (hs == null || hs == HistoryStatus.EMPTY) {
+            hs = points.isEmpty() ? HistoryStatus.EMPTY : HistoryStatus.READY;
+        }
+        if (status.getPhase() != null
+                && status.getPhase() != com.portfolio.model.history.HistoryJobPhase.READY
+                && status.getPhase() != com.portfolio.model.history.HistoryJobPhase.FAILED) {
+            hs = HistoryStatus.BUILDING;
+        }
+        return PortfolioHistoryResponse.builder()
+                .points(points)
+                .historyStatus(hs)
+                .phase(status.getPhase())
+                .startedAt(status.getStartedAt())
+                .historyFrom(status.getHistoryFrom())
+                .historyTo(status.getHistoryTo())
+                .coverageDays(status.getCoverageDays())
+                .build();
+    }
+
+    /**
+     * DEV/ADMIN ONLY — Directly triggers historical snapshot catch-up for any given userId.
+     * Usage: POST /v1/portfolios/dev/trigger-catchup?userId=…&mode=FULL&targetPortfolioId=…
+     * mode defaults to FULL (rebuild); GAP only fills missing calendar days.
+     */
+    @Hidden
+    @PostMapping("/dev/trigger-catchup")
+    public ResponseEntity<String> triggerCatchUpForUser(
+            @RequestParam String userId,
+            @RequestParam(required = false, defaultValue = "FULL") String mode,
+            @RequestParam(required = false) String targetPortfolioId,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            return ResponseEntity.status(403).body("Forbidden");
+        }
+        HistoryJobMode jobMode;
+        try {
+            jobMode = HistoryJobMode.valueOf(mode.trim().toUpperCase());
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body("Invalid mode; use FULL, GAP, or MERGE_BROKER");
+        }
+        log.info("[DEV] Manual catch-up trigger for userId={} mode={} target={}", userId, jobMode, targetPortfolioId);
+        portfolioHistoryJobService.enqueue(userId, jobMode, targetPortfolioId);
+        return ResponseEntity.ok("HistoryJob enqueued userId=" + userId + " mode=" + jobMode
+                + (targetPortfolioId != null ? " target=" + targetPortfolioId : ""));
+    }
+
+    /**
+     * DEV/ADMIN ONLY — Hidden from Swagger.
+     * Triggers manual EOD snapshot for today or a specific date.
+     * Usage: POST /v1/portfolios/dev/trigger-snapshot?userId=sahim99&date=2026-07-28
+     */
+    @Hidden
+    @PostMapping("/dev/trigger-snapshot")
+    public ResponseEntity<String> triggerSnapshotForUser(
+            @RequestParam String userId,
+            @RequestParam(required = false) String date,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            return ResponseEntity.status(403).body("Forbidden");
+        }
+        LocalDate targetDate = date != null ? LocalDate.parse(date) : LocalDate.now();
+        log.info("[DEV] Manual snapshot trigger for userId={} date={}", userId, targetDate);
+        portfolioHistoryScheduler.runEndOfDayJobForUserAndDateAsync(userId, targetDate);
+        return ResponseEntity.ok("Snapshot generation triggered for userId=" + userId + " date=" + targetDate);
+    }
+
+    /**
+     * DEV/ADMIN ONLY — Hidden from Swagger.
+     * Triggers snapshot backfilling for a range of past dates.
+     * Usage: POST /v1/portfolios/dev/backfill-snapshots?userId=sahim99&days=30
+     */
+    @Hidden
+    @PostMapping("/dev/backfill-snapshots")
+    public ResponseEntity<String> backfillSnapshots(
+            @RequestParam String userId,
+            @RequestParam(defaultValue = "30") int days,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            return ResponseEntity.status(403).body("Forbidden");
+        }
+        log.info("[DEV] Backfill trigger for userId={} days={}", userId, days);
+        portfolioHistoryScheduler.backfillSnapshotsAsync(userId, days);
+        return ResponseEntity.ok("Backfill triggered for userId=" + userId + " for last " + days + " days.");
+    }
+
+    /**
+     * DEV/ADMIN ONLY — Hidden from Swagger.
+     * Safely deletes a snapshot for a specific user and date.
+     * Usage: DELETE /v1/portfolios/dev/snapshot?userId=sahim99&date=2026-07-30
+     */
+    @Hidden
+    @DeleteMapping("/dev/snapshot")
+    public ResponseEntity<String> deleteSnapshot(
+            @RequestParam String userId,
+            @RequestParam @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            return ResponseEntity.status(403).body("Forbidden");
+        }
+        log.info("[DEV] Delete snapshot trigger for userId={} date={}", userId, date);
+        portfolioSnapshotService.deleteSnapshot(userId, date);
+        return ResponseEntity.ok("Snapshot for userId=" + userId + " on date=" + date + " has been successfully deleted. You can now use the trigger-catchup endpoint to rebuild it.");
+    }
+
+
+    /**
+     * DEV/ADMIN ONLY — Hidden from Swagger.
+     * Fixes broken "Grow" or "Auto-created GROW" portfolio names in MongoDB.
+     */
+    @Hidden
+    @PostMapping("/dev/migrate-groww")
+    public ResponseEntity<String> migrateGrowwNames(
+            @org.springframework.beans.factory.annotation.Autowired com.am.common.amcommondata.repository.portfolio.PortfolioDocumentRepository repo,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            return ResponseEntity.status(403).body("Forbidden");
+        }
+        log.info("[DEV] Running Groww name migration...");
+        java.util.List<com.am.common.amcommondata.document.portfolio.PortfolioDocument> allDocs = repo.findAll();
+        int updated = 0;
+        for (com.am.common.amcommondata.document.portfolio.PortfolioDocument doc : allDocs) {
+            if ("Grow".equals(doc.getName()) || "Auto-created GROW".equals(doc.getName())) {
+                doc.setName("Groww");
+                repo.save(doc);
+                updated++;
+                log.info("Migrated portfolio ID {} to name 'Groww'", doc.getId());
+            }
+        }
+        return ResponseEntity.ok("Migration complete. Updated " + updated + " portfolios.");
+    }
+
+    /**
+     * DEV/ADMIN ONLY — Re-normalize equity symbols (ISIN → ticker) for stored portfolios.
+     * Usage: POST /v1/portfolios/dev/normalize-symbols?userId=optional-user-id
+     */
+    @Hidden
+    @PostMapping("/dev/normalize-symbols")
+    public ResponseEntity<java.util.Map<String, Object>> normalizeStoredSymbols(
+            @RequestParam(required = false) String userId,
+            @RequestHeader(value = "X-Internal-Secret", required = false) String secret) {
+        if (secret == null || !internalSecret.equals(secret)) {
+            return ResponseEntity.status(403).body(java.util.Map.of("error", "Forbidden"));
+        }
+
+        java.util.List<PortfolioModelV1> portfolios;
+        if (userId != null && !userId.isBlank()) {
+            portfolios = portfolioService.getPortfoliosByUserId(userId);
+        } else {
+            portfolios = new java.util.ArrayList<>();
+            for (String uid : portfolioService.getAllUserIds()) {
+                portfolios.addAll(portfolioService.getPortfoliosByUserId(uid));
+            }
+        }
+
+        int updatedPortfolios = 0;
+        int normalizedEquities = 0;
+        int cachesEvicted = 0;
+        java.util.Set<String> ownersToRebuild = new java.util.LinkedHashSet<>();
+        java.util.Map<String, String> ownerTargetPortfolio = new java.util.HashMap<>();
+        for (PortfolioModelV1 portfolio : portfolios) {
+            if (portfolio == null || portfolio.getEquityModels() == null) {
+                continue;
+            }
+            // Detect any ticker change (IDEA→VODAFONEIDEA), not only ISIN-as-symbol rows.
+            boolean changed = portfolioEquitySymbolNormalizer.normalizePortfolioAndDetectChange(portfolio);
+            if (changed) {
+                portfolioService.upsertDocumentPortfolio(portfolio);
+                updatedPortfolios++;
+                normalizedEquities += portfolio.getEquityModels().size();
+                if (portfolio.getOwner() != null && !portfolio.getOwner().isBlank()) {
+                    ownersToRebuild.add(portfolio.getOwner());
+                    if (portfolio.getId() != null) {
+                        ownerTargetPortfolio.putIfAbsent(portfolio.getOwner(), portfolio.getId().toString());
+                    }
+                }
+            }
+            // Always evict caches so UI cannot keep serving ISIN-as-symbol holdings
+            // even when Mongo had no delta (e.g. prior normalize without eviction).
+            String owner = portfolio.getOwner();
+            if (owner != null && !owner.isBlank()) {
+                String portfolioId = portfolio.getId() != null ? portfolio.getId().toString() : null;
+                String portfolioName = portfolio.getName();
+                portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioId);
+                portfolioSummaryRedisService.evictPortfolioSummary(owner, portfolioId);
+                if (portfolioName != null && !portfolioName.isBlank()
+                        && (portfolioId == null || !portfolioName.equals(portfolioId))) {
+                    portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioName);
+                    portfolioSummaryRedisService.evictPortfolioSummary(owner, portfolioName);
+                }
+                if (portfolioId != null) {
+                    portfolioIntelligenceRedisService.evict(portfolioId);
+                }
+                portfolioIntelligenceRedisService.evictAggregateForUser(owner);
+                cachesEvicted++;
+            }
+        }
+
+        for (String owner : ownersToRebuild) {
+            String target = ownerTargetPortfolio.get(owner);
+            portfolioHistoryJobService.enqueue(owner, HistoryJobMode.FULL, target);
+        }
+
+        log.info("[DEV] Symbol normalization complete: portfoliosUpdated={}, equitiesNormalized={}, cachesEvicted={}, historyEnqueued={}",
+                updatedPortfolios, normalizedEquities, cachesEvicted, ownersToRebuild.size());
+        return ResponseEntity.ok(java.util.Map.of(
+                "portfoliosUpdated", updatedPortfolios,
+                "equitiesNormalized", normalizedEquities,
+                "cachesEvicted", cachesEvicted,
+                "historyEnqueued", ownersToRebuild.size()));
     }
 }

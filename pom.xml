@@ -13,10 +13,11 @@
 
     <groupId>com.portfolio</groupId>
     <artifactId>am-portfolio</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>1.0.2-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <modules>
+        <module>am-common-data</module>
         <module>portfolio-model</module>
         <module>portfolio-market-data</module>
         <module>portfolio-basket</module>
@@ -27,7 +28,6 @@
         <module>portfolio-app</module>
         <module>portfolio-analytics</module>
         <module>portfolio-sdk</module>
-        <module>am-common-data</module>
     </modules>
 
     <properties>
@@ -38,10 +38,11 @@
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
         <am.investment.version>1.6.24-SNAPSHOT</am.investment.version>
-        <am.common.version>1.4.1-SNAPSHOT</am.common.version>
+        <!-- Must match am-common-data/pom.xml module version so reactor (not stale GitHub Packages) is used. -->
+        <am.common.version>1.5.7-SNAPSHOT</am.common.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <am-common-investment.version>1.6.24-SNAPSHOT</am-common-investment.version>
-        <am-common-data-parent.version>1.4.1-SNAPSHOT</am-common-data-parent.version>
+        <am-common-data-parent.version>1.5.7-SNAPSHOT</am-common-data-parent.version>
         <!--
           Observability - pinned to Spring Boot 3.2.3's OTel line.
           Spring Boot 3.2.3 ships opentelemetry-exporter-common 1.31.0; if we let the
@@ -129,6 +130,12 @@
             <name>GitHub AM Common Data Model Apache Maven Packages</name>
             <url>https://maven.pkg.github.com/AM-Portfolio/am-portfolio</url>
         </repository>
+
+        <repository>
+            <id>github-core</id>
+            <name>GitHub AM Core Services Apache Maven Packages</name>
+            <url>https://maven.pkg.github.com/AM-Portfolio/am-core-services</url>
+        </repository>
     </repositories>
 
     <build>
@@ -150,6 +157,25 @@
             </plugins>
         </pluginManagement>
         <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>properties-maven-plugin</artifactId>
+                <version>1.2.1</version>
+                <executions>
+                    <execution>
+                        <phase>initialize</phase>
+                        <goals>
+                            <goal>read-project-properties</goal>
+                        </goals>
+                        <configuration>
+                            <files>
+                                <file>${maven.multiModuleProjectDirectory}/.env</file>
+                            </files>
+                            <quiet>true</quiet>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
@@ -184,6 +210,22 @@
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>${java.version}</source>
+                    <target>${java.version}</target>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
             </plugin>
         </plugins>
     </build>

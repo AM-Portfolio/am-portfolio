@@ -1,0 +1,221 @@
+{
+  "info": {
+    "name": "Portfolio Snapshot Engine",
+    "description": "Trigger and verify portfolio EOD snapshots. Local default: http://localhost:8072. Same requests are in Postman workspace collection **AM Portfolio - Complete API** → Portfolio Management.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Trigger EOD Snapshot (all users)",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{access_token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "text/plain"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/portfolios/trigger-snapshot",
+          "host": ["{{base_url}}"],
+          "path": ["v1", "portfolios", "trigger-snapshot"]
+        },
+        "description": "Same job as the 17:00 IST scheduler. Calculates qty × live/avg price per holding, upserts user snapshot (OHLC + nested holdings) in Mongo. Returns 202; job runs async."
+      },
+      "response": []
+    },
+    {
+      "name": "2. Trigger Snapshot for User (dev)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Internal-Secret",
+            "value": "{{internal_secret}}",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "text/plain"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/portfolios/dev/trigger-snapshot?userId={{userId}}&date={{snapshot_date}}",
+          "host": ["{{base_url}}"],
+          "path": ["v1", "portfolios", "dev", "trigger-snapshot"],
+          "query": [
+            {
+              "key": "userId",
+              "value": "{{userId}}"
+            },
+            {
+              "key": "date",
+              "value": "{{snapshot_date}}",
+              "description": "YYYY-MM-DD. Omit for today."
+            }
+          ]
+        },
+        "description": "DEV/ADMIN. Recalculate snapshot for one user on a date. Requires INTERNAL_SECRET_KEY."
+      },
+      "response": []
+    },
+    {
+      "name": "3. Trigger Snapshot Catch-up (dev)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Internal-Secret",
+            "value": "{{internal_secret}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/portfolios/dev/trigger-catchup?userId={{userId}}",
+          "host": ["{{base_url}}"],
+          "path": ["v1", "portfolios", "dev", "trigger-catchup"],
+          "query": [
+            {
+              "key": "userId",
+              "value": "{{userId}}"
+            }
+          ]
+        },
+        "description": "DEV/ADMIN. Reconstruct missing historical snapshots from holdings + price history. Use when 1W/1M charts have no days."
+      },
+      "response": []
+    },
+    {
+      "name": "4. Backfill Snapshots (dev)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Internal-Secret",
+            "value": "{{internal_secret}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/portfolios/dev/backfill-snapshots?userId={{userId}}&days=30",
+          "host": ["{{base_url}}"],
+          "path": ["v1", "portfolios", "dev", "backfill-snapshots"],
+          "query": [
+            {
+              "key": "userId",
+              "value": "{{userId}}"
+            },
+            {
+              "key": "days",
+              "value": "30"
+            }
+          ]
+        },
+        "description": "DEV/ADMIN. Replay current holdings for last N weekdays. Prefer Catch-up for true historical prices."
+      },
+      "response": []
+    },
+    {
+      "name": "5. Get Total User Wealth History",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{access_token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/v1/portfolios/history?timeFrame=1W",
+          "host": ["{{base_url}}"],
+          "path": ["v1", "portfolios", "history"],
+          "query": [
+            {
+              "key": "timeFrame",
+              "value": "1W"
+            }
+          ]
+        },
+        "description": "Verify snapshots. timeFrame: 1W, 1M, 3M, 6M, 1Y, 3Y, 5Y."
+      },
+      "response": []
+    },
+    {
+      "name": "6. Get Specific Portfolio History",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{access_token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/v1/portfolios/{{portfolio_id}}/history?timeFrame=1W",
+          "host": ["{{base_url}}"],
+          "path": ["v1", "portfolios", "{{portfolio_id}}", "history"],
+          "query": [
+            {
+              "key": "timeFrame",
+              "value": "1W"
+            }
+          ]
+        },
+        "description": "History for one portfolio id."
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8072",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "internal_secret",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "portfolio_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "snapshot_date",
+      "value": "2026-08-24",
+      "type": "string"
+    }
+  ]
+}

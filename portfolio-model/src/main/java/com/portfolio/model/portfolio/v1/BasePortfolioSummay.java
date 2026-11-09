@@ -2,6 +2,7 @@ package com.portfolio.model.portfolio.v1;
 
 import java.time.LocalDateTime;
 
+import com.portfolio.model.portfolio.DataStatus;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
 
@@ -36,4 +37,14 @@ public class BasePortfolioSummay {
     private Integer todayLosersCount;
     
     private LocalDateTime lastUpdated;
+    private DataStatus dataStatus;
+
+    /** Newest price timestamp used when serving (overlay or cold). */
+    private LocalDateTime asOf;
+    /** LIVE when open and tick age ≤60s; else AS_OF. */
+    private String priceFreshness;
+    /** TICK | OHLC | CACHE */
+    private String priceSource;
+    /** NSE session date for prices shown. */
+    private java.time.LocalDate sessionDate;
 }

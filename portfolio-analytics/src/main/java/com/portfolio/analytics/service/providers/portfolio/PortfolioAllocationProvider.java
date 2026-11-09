@@ -44,21 +44,22 @@ public class PortfolioAllocationProvider extends AbstractPortfolioAnalyticsProvi
     /**
      * Common method to generate sector allocation with or without time frame
      */
-    private SectorAllocation generateSectorAllocation(String portfolioId, TimeFrameRequest timeFrameRequest) {
-        log.info("Calculating sector allocations for portfolio: {} with timeFrame: {}", portfolioId, timeFrameRequest);
+    private SectorAllocation generateSectorAllocation(String portfolioId, AdvancedAnalyticsRequest request) {
+        log.info("Calculating sector allocations for portfolio: {} with fast current market data", portfolioId);
         
         return processPortfolioData(
             portfolioId,
-            timeFrameRequest,
+            request,
             this::createEmptyResult,
             (portfolio, portfolioSymbols, marketData) -> {
         
                 // Create a map of symbol to holding quantity
                 Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
                 
-                // Group stocks by sector and industry
-                Map<String, List<String>> sectorToStocks = securityDetailsService.groupSymbolsBySector(portfolioSymbols);
-                Map<String, List<String>> industryToStocks = securityDetailsService.groupSymbolsByIndustry(portfolioSymbols);
+                // Group stocks by sector and industry using central SecurityDetailsService
+                Map<String, com.am.common.amcommondata.model.security.SecurityModel> prefetchedSecurities = getSecurityDetails(portfolioSymbols, request);
+                Map<String, List<String>> sectorToStocks = securityDetailsService.groupSymbolsBySector(portfolioSymbols, prefetchedSecurities);
+                Map<String, List<String>> industryToStocks = securityDetailsService.groupSymbolsByIndustry(portfolioSymbols, prefetchedSecurities);
                 
                 log.debug("Sector groups for portfolio {}: {}", portfolioId, sectorToStocks.keySet());
                 log.debug("Industry groups for portfolio {}: {}", portfolioId, industryToStocks.keySet());

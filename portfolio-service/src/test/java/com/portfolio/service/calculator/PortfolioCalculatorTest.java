@@ -7,13 +7,14 @@ import com.portfolio.model.market.OhlcData;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.model.cache.StockPriceCache;
-import com.portfolio.redis.service.StockIndicesRedisService;
+import com.am.common.amcommondata.service.marketcap.MarketCapMongoService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import com.am.common.amcommondata.service.price.StockPriceMongoService;
 
 import java.util.Collections;
 import java.util.List;
@@ -22,6 +23,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -31,7 +33,13 @@ class PortfolioCalculatorTest {
     private MarketDataService marketDataService;
 
     @Mock
-    private StockIndicesRedisService stockPriceRedisService;
+    private MarketCapMongoService marketCapMongoService;
+
+    @Mock
+    private StockPriceMongoService stockPriceMongoService;
+
+    @Mock
+    private com.portfolio.basket.client.EtfApiClient etfApiClient;
 
     private PortfolioCalculator portfolioCalculator;
 
@@ -40,7 +48,7 @@ class PortfolioCalculatorTest {
 
     @BeforeEach
     void setUp() {
-        portfolioCalculator = new PortfolioCalculator(marketDataService, stockPriceRedisService, Runnable::run);
+        portfolioCalculator = new PortfolioCalculator(marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run, null);
         holding = new EquityHoldings();
         holding.setSymbol("TCS");
         holding.setQuantity(10.0);
@@ -76,14 +84,15 @@ class PortfolioCalculatorTest {
     }
 
     @Test
-    void enrichHoldings_FallbackToRedis() {
-        when(marketDataService.getMarketData(anyList())).thenReturn(Collections.emptyMap());
-        when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+    void enrichHoldings_FallbackToMongo() {
+        // Mock marketDataService to return the fallback price, simulating MarketDataService's internal MongoDB fallback
+        com.portfolio.model.market.MarketData apiData = new com.portfolio.model.market.MarketData();
+        apiData.setSymbol("TCS");
+        apiData.setLastPrice(3100.0);
         
-        StockPriceCache redisPrice = StockPriceCache.builder()
-                .closePrice(3100.0)
-                .build();
-        when(stockPriceRedisService.getLatestPrices(anyList())).thenReturn(Map.of("TCS", redisPrice));
+        lenient().when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", apiData));
+        lenient().when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Collections.emptyMap());
 
         List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
 
@@ -91,15 +100,107 @@ class PortfolioCalculatorTest {
     }
 
     @Test
-    void enrichHoldings_LocalDevFallback() {
+    void enrichHoldings_CostBasisFallback() {
         when(marketDataService.getMarketData(anyList())).thenReturn(Collections.emptyMap());
         when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
-        when(stockPriceRedisService.getLatestPrices(anyList())).thenReturn(Map.of());
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
 
         List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
 
-        // Fallback is 5% gain: 3000 * 1.05 = 3150
-        assertEquals(3150.0, results.get(0).getCurrentPrice());
+        // 3-Tier fallback: falls back to averageBuyingPrice (3000.0) to prevent -100% dip
+        assertEquals(3000.0, results.get(0).getCurrentPrice());
+        assertEquals(30000.0, results.get(0).getCurrentValue());
+        assertEquals(0.0, results.get(0).getGainLoss());
+        assertEquals(com.portfolio.model.portfolio.HoldingInstrumentClassifier.PRICE_COST, results.get(0).getPriceSource());
+    }
+
+    @Test
+    void enrichHoldings_infSchemeGetsEtfSector() {
+        EquityHoldings gold = new EquityHoldings();
+        gold.setSymbol("INF277KA1976");
+        gold.setIsin("INF277KA1976");
+        gold.setQuantity(7.0);
+        gold.setAverageBuyingPrice(14.68);
+        gold.setInvestmentCost(102.76);
+        MarketData md = MarketData.builder().symbol("INF277KA1976").lastPrice(13.3).previousClose(13.5).build();
+        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("INF277KA1976", md));
+        when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+
+        EquityHoldings enriched = portfolioCalculator.enrichHoldings(List.of(gold)).get(0);
+        assertEquals("Exchange Traded Funds (ETFs)", enriched.getSector());
+        assertEquals("ETF", enriched.getProductClass());
+        assertEquals("LIVE", enriched.getPriceSource());
+        assertEquals(13.3, enriched.getCurrentPrice());
+    }
+
+    @Test
+    void enrichHoldings_platformsIsinStaysCostNotJiofin() {
+        EquityHoldings platforms = new EquityHoldings();
+        platforms.setSymbol("INE0BJO01010");
+        platforms.setIsin("INE0BJO01010");
+        platforms.setName("JIO PLATFORMS LIMITED");
+        platforms.setQuantity(1.0);
+        platforms.setAverageBuyingPrice(1119.0);
+        platforms.setInvestmentCost(1119.0);
+        when(marketDataService.getMarketData(anyList())).thenReturn(Collections.emptyMap());
+        when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+
+        EquityHoldings enriched = portfolioCalculator.enrichHoldings(List.of(platforms)).get(0);
+        assertEquals(1119.0, enriched.getCurrentPrice());
+        assertEquals("COST_BASIS", enriched.getPriceSource());
+        assertEquals("Private / Unlisted", enriched.getSector());
+        assertEquals("UNLISTED", enriched.getProductClass());
+        assertNotEquals(213.0, enriched.getCurrentPrice(), 1.0);
+    }
+
+    @Test
+    void enrichHolding_shouldNotUseOhlcOpenAsPreviousCloseProxy() {
+        MarketData data = MarketData.builder()
+            .symbol("TCS")
+            .lastPrice(3300.0)
+            .ohlc(OhlcData.builder().open(3200.0).close(3250.0).build())
+            // NO previousClose — open must NOT be used as day baseline
+            .build();
+        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", data));
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+
+        holding.setTodayGainLoss(500.0);
+        holding.setTodayGainLossPercentage(5.0);
+        holding.setPercentageChange(1.5);
+
+        List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
+
+        assertNull(results.get(0).getTodayGainLoss());
+        assertNull(results.get(0).getTodayGainLossPercentage());
+        assertNull(results.get(0).getPercentageChange());
+        assertEquals(3300.0, results.get(0).getCurrentPrice());
+    }
+
+    @Test
+    void enrichHolding_shouldNotCalculateDailyPnL_whenPreviousCloseIsMissing() {
+        // Given: Market data with no previousClose and no open price
+        MarketData data = MarketData.builder()
+            .symbol("TCS")
+            .lastPrice(3300.0)
+            .ohlc(OhlcData.builder().close(3250.0).build())
+            // NO previousClose or open set
+            .build();
+        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", data));
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+        
+        // Seed holding with stale P&L metrics
+        holding.setTodayGainLoss(500.0);
+        holding.setTodayGainLossPercentage(5.0);
+        holding.setPercentageChange(1.5);
+
+        List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
+        
+        // Then: P&L fields must be cleared (not retained and not calculated)
+        assertNull(results.get(0).getTodayGainLoss());
+        assertNull(results.get(0).getTodayGainLossPercentage());
+        assertNull(results.get(0).getPercentageChange());
     }
 
     @Test
@@ -117,12 +218,68 @@ class PortfolioCalculatorTest {
         assertEquals(3000.0, summary.getTotalGainLoss());
         assertEquals(10.0, summary.getTotalGainLossPercentage());
         assertEquals(1000.0, summary.getTodayGainLoss());
-        assertEquals(3.03, summary.getTodayGainLossPercentage()); // (1000/33000)*100
+        assertEquals(3.13, summary.getTodayGainLossPercentage()); // (1000/32000)*100
         assertEquals(1, summary.getTotalAssets());
         assertEquals(1, summary.getGainersCount());
         assertEquals(1, summary.getTodayGainersCount());
         assertNotNull(summary.getMarketCapHoldings());
         assertNotNull(summary.getSectorialHoldings());
+    }
+
+    @Test
+    void calculateSummary_nullTodayGainLoss_whenNoHoldingBaselines() {
+        holding.setCurrentValue(33000.0);
+        holding.setTodayGainLoss(null);
+        holding.setGainLoss(3000.0);
+
+        PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(List.of(holding), 30000.0);
+
+        assertNull(summary.getTodayGainLoss());
+        assertNull(summary.getTodayGainLossPercentage());
+        assertEquals(3000.0, summary.getTotalGainLoss());
+    }
+
+    @Test
+    void enrichHolding_omitsDayPnL_whenCashClosedAndLastEqualsPrev() {
+        com.portfolio.redis.session.CashSessionClock clock =
+                org.mockito.Mockito.mock(com.portfolio.redis.session.CashSessionClock.class);
+        when(clock.isCashOpen()).thenReturn(false);
+        portfolioCalculator = new PortfolioCalculator(
+                marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run, clock);
+
+        MarketData data = MarketData.builder()
+                .symbol("TCS")
+                .lastPrice(3300.0)
+                .previousClose(3300.0)
+                .build();
+        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", data));
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+
+        List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
+
+        assertNull(results.get(0).getTodayGainLoss());
+        assertEquals(3300.0, results.get(0).getCurrentPrice());
+    }
+
+    @Test
+    void enrichHolding_keepsDayPnL_whenCashOpenAndLastEqualsPrev() {
+        com.portfolio.redis.session.CashSessionClock clock =
+                org.mockito.Mockito.mock(com.portfolio.redis.session.CashSessionClock.class);
+        when(clock.isCashOpen()).thenReturn(true);
+        portfolioCalculator = new PortfolioCalculator(
+                marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run, clock);
+
+        MarketData data = MarketData.builder()
+                .symbol("TCS")
+                .lastPrice(3300.0)
+                .previousClose(3300.0)
+                .build();
+        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("TCS", data));
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+
+        List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(holding));
+
+        assertEquals(0.0, results.get(0).getTodayGainLoss());
     }
 
     @Test

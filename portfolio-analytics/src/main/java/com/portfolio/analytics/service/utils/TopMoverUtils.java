@@ -15,42 +15,59 @@ import java.util.stream.Collectors;
 /**
  * Utility class for top movers (gainers and losers) operations shared between
  * IndexTopMoversProvider and PortfolioTopMoversProvider
+ * // Trigger CI/CD pipeline build
  */
 @Slf4j
 public class TopMoverUtils {
 
     /**
      * Calculate performance metrics for each stock
+     * @param portfolioSymbols List of raw symbols from the portfolio
      * @param marketData Map of market data by symbol
      * @param symbolToPerformance Map to store performance metrics
      * @param symbolToChangePercent Map to store change percentages
      */
     public static void calculatePerformanceMetrics(
+            List<String> portfolioSymbols,
             Map<String, MarketData> marketData,
             Map<String, Double> symbolToPerformance,
             Map<String, Double> symbolToChangePercent) {
         
-        log.debug("Calculating performance metrics for {} stocks", marketData.size());
+        log.debug("Calculating performance metrics for {} stocks", portfolioSymbols.size());
         
-        marketData.forEach((symbol, data) -> {
-            if (data.getOhlc() != null) {
-                double closePrice = data.getOhlc().getClose();
-                double openPrice = data.getOhlc().getOpen();
-                
-                if (openPrice > 0 && closePrice > 0) {
-                    // Calculate change from open to current price
-                    double changePercent = ((data.getLastPrice() - openPrice) / openPrice) * 100;
-                    symbolToChangePercent.put(symbol, changePercent);
-                    
-                    // Performance score based on price movement relative to previous close
-                    double performanceScore = ((data.getLastPrice() - closePrice) / closePrice) * 100;
-                    symbolToPerformance.put(symbol, performanceScore);
-                    
-                    log.trace("Symbol: {}, Performance: {}, Change: {}%", 
-                            symbol, performanceScore, changePercent);
+        for (String symbol : portfolioSymbols) {
+            MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
+            if (data != null) {
+                // Resolve lastPrice with fallback to ohlc.close to prevent NPE on unboxing
+                Double rawLastPrice = data.getLastPrice();
+                double lastPrice;
+                if (rawLastPrice != null && rawLastPrice > 0) {
+                    lastPrice = rawLastPrice;
+                } else if (data.getOhlc() != null && data.getOhlc().getClose() > 0) {
+                    lastPrice = data.getOhlc().getClose();
+                } else {
+                    log.trace("Symbol {} has no resolvable lastPrice for performance calculation, skipping", symbol);
+                    continue;
                 }
+                
+                double refPrice = 0;
+                if (data.getPreviousClose() != null && data.getPreviousClose() > 0) {
+                    refPrice = data.getPreviousClose();
+                } else {
+                    // Day % must use previousClose only (never OHLC open as a proxy).
+                    log.trace("No previousClose for {}. Skipping from movers.", symbol);
+                    continue;
+                }
+                
+                double changePercent = ((lastPrice - refPrice) / refPrice) * 100;
+                symbolToChangePercent.put(symbol, changePercent);
+                symbolToPerformance.put(symbol, changePercent);
+                
+                log.trace("Symbol: {}, Performance: {}, Change: {}%", 
+                        symbol, changePercent, changePercent);
             }
-        });
+        }
+
         
         log.debug("Calculated performance metrics for {} stocks", symbolToPerformance.size());
     }
@@ -71,17 +88,14 @@ public class TopMoverUtils {
         
         log.debug("Finding top {} gainers", limit);
         
-        // Get symbols with positive performance, sorted by performance (descending)
         List<String> topGainerSymbols = symbolToPerformance.entrySet().stream()
-                .filter(entry -> entry.getValue() > 0) // Only positive performers
-                .sorted(Map.Entry.<String, Double>comparingByValue().reversed()) // Sort by performance (descending)
-                .limit(limit) // Take top N
-                .map(Map.Entry::getKey) // Get symbols
+                .filter(entry -> entry.getValue() > 0)
+                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                .limit(limit)
+                .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
-        
+
         log.debug("Found {} gainers", topGainerSymbols.size());
-        
-        // Create stock movement objects for top gainers
         return createStockMovements(topGainerSymbols, marketData, symbolToChangePercent);
     }
 
@@ -101,17 +115,14 @@ public class TopMoverUtils {
         
         log.debug("Finding top {} losers", limit);
         
-        // Get symbols with negative performance, sorted by performance (ascending)
         List<String> topLoserSymbols = symbolToPerformance.entrySet().stream()
-                .filter(entry -> entry.getValue() < 0) // Only negative performers
-                .sorted(Map.Entry.comparingByValue()) // Sort by performance (ascending)
-                .limit(limit) // Take top N
-                .map(Map.Entry::getKey) // Get symbols
+                .filter(entry -> entry.getValue() < 0)
+                .sorted(Map.Entry.comparingByValue())
+                .limit(limit)
+                .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
-        
+
         log.debug("Found {} losers", topLoserSymbols.size());
-        
-        // Create stock movement objects for top losers
         return createStockMovements(topLoserSymbols, marketData, symbolToChangePercent);
     }
 
@@ -129,14 +140,31 @@ public class TopMoverUtils {
         
         return symbols.stream()
                 .<GainerLoser.StockMovement>map(symbol -> {
-                    MarketData data = marketData.get(symbol);
+                    MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
                     if (data == null) {
                         return null;
                     }
                     
-                    double lastPrice = data.getLastPrice();
-                    double openPrice = data.getOhlc().getOpen();
-                    double changeAmount = lastPrice - openPrice;
+                    // Resolve lastPrice with null-safe fallback
+                    Double rawLastPrice = data.getLastPrice();
+                    double lastPrice;
+                    if (rawLastPrice != null && rawLastPrice > 0) {
+                        lastPrice = rawLastPrice;
+                    } else if (data.getOhlc() != null && data.getOhlc().getClose() > 0) {
+                        lastPrice = data.getOhlc().getClose();
+                    } else {
+                        lastPrice = 0.0;
+                    }
+                    
+                    double refPrice = 0;
+                    if (data.getPreviousClose() != null && data.getPreviousClose() > 0) {
+                        refPrice = data.getPreviousClose();
+                    }
+                    
+                    double changeAmount = 0.0;
+                    if (refPrice > 0) {
+                        changeAmount = lastPrice - refPrice;
+                    }
                     double changePercent = symbolToChangePercent.getOrDefault(symbol, 0.0);
                     
                     // Round values to 2 decimal places
@@ -151,7 +179,8 @@ public class TopMoverUtils {
                             .symbol(symbol)
                             .companyName(companyName)
                             .lastPrice(lastPrice)
-                            .ohlcData(data.getOhlc())
+                            .previousClose(refPrice > 0 ? refPrice : null)
+                            .ohlcData(data != null ? data.getOhlc() : null)
                             .changeAmount(changeAmount)
                             .changePercent(changePercent)
                             .build();
@@ -213,8 +242,12 @@ public class TopMoverUtils {
                             .limit(3) // Top 3 losers per sector
                             .collect(Collectors.toList());
                     
-                    // Create stock performance map with values rounded to 2 decimal places
-                    Map<String, Double> stockPerformance = sectorSymbols.stream()
+                    // Create stock performance map only for top gainers and losers to prevent massive JSON payload
+                    java.util.Set<String> topMovers = new java.util.HashSet<>();
+                    topMovers.addAll(topGainerSymbols);
+                    topMovers.addAll(topLoserSymbols);
+                    
+                    Map<String, Double> stockPerformance = topMovers.stream()
                             .filter(symbol -> symbolToPerformance.containsKey(symbol))
                             .collect(Collectors.toMap(
                                     Function.identity(),
@@ -265,9 +298,9 @@ public class TopMoverUtils {
         
         // Calculate total portfolio value
         double totalPortfolioValue = symbols.stream()
-                .filter(symbol -> marketData.containsKey(symbol) && symbolToQuantity.containsKey(symbol))
+                .filter(symbol -> AnalyticsUtils.resolveMarketData(marketData, symbol) != null && symbolToQuantity.containsKey(symbol))
                 .mapToDouble(symbol -> {
-                    MarketData data = marketData.get(symbol);
+                    MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
                     double quantity = symbolToQuantity.getOrDefault(symbol, 0.0);
                     return data.getLastPrice() * quantity;
                 })
@@ -284,10 +317,10 @@ public class TopMoverUtils {
                     double weightedChangeSum = 0.0;
                     
                     for (String symbol : sectorSymbols) {
-                        if (marketData.containsKey(symbol) && symbolToQuantity.containsKey(symbol)) {
-                            MarketData data = marketData.get(symbol);
+                        MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
+                        if (data != null && symbolToQuantity.containsKey(symbol)) {
                             double quantity = symbolToQuantity.get(symbol);
-                            double value = data.getLastPrice() * quantity;
+                            double value = AllocationUtils.resolvePrice(data) * quantity;
                             sectorValue += value;
                             
                             if (symbolToChangePercent.containsKey(symbol)) {
@@ -318,8 +351,12 @@ public class TopMoverUtils {
                             .limit(3) // Top 3 losers per sector
                             .collect(Collectors.toList());
                     
-                    // Create stock performance map with values rounded to 2 decimal places
-                    Map<String, Double> stockPerformance = sectorSymbols.stream()
+                    // Create stock performance map only for top gainers and losers to prevent massive JSON payload
+                    java.util.Set<String> topMovers = new java.util.HashSet<>();
+                    topMovers.addAll(topGainerSymbols);
+                    topMovers.addAll(topLoserSymbols);
+                    
+                    Map<String, Double> stockPerformance = topMovers.stream()
                             .filter(symbol -> symbolToPerformance.containsKey(symbol))
                             .collect(Collectors.toMap(
                                     Function.identity(),
@@ -363,7 +400,7 @@ public class TopMoverUtils {
      * @param isPortfolio True if this is for a portfolio, false for an index
      * @return GainerLoser response with top gainers and losers
      */
-    public static GainerLoser buildTopMoversResponse(Map<String, MarketData> marketData, int limit, String id, boolean isPortfolio, Map<String, String> symbolSectors) {
+    public static GainerLoser buildTopMoversResponse(List<String> symbols, Map<String, MarketData> marketData, int limit, String id, boolean isPortfolio, Map<String, String> symbolSectors) {
 
         log.debug("Building top movers response for {} {}", isPortfolio ? "portfolio" : "index", id);
         
@@ -372,7 +409,7 @@ public class TopMoverUtils {
         Map<String, Double> symbolToChangePercent = new HashMap<>();
         
         // Calculate performance metrics
-        calculatePerformanceMetrics(marketData, symbolToPerformance, symbolToChangePercent);
+        calculatePerformanceMetrics(symbols, marketData, symbolToPerformance, symbolToChangePercent);
         
         // Get top gainers and losers
         List<GainerLoser.StockMovement> gainers = getTopGainers(marketData, symbolToPerformance, symbolToChangePercent, limit);
@@ -392,10 +429,37 @@ public class TopMoverUtils {
         }
         
         // Build and return the response
-        return GainerLoser.builder()
+        java.time.ZoneId ist = java.time.ZoneId.of("Asia/Kolkata");
+        java.time.ZonedDateTime now = java.time.ZonedDateTime.now(ist);
+        boolean cashOpen = now.getDayOfWeek().getValue() <= 5
+                && !now.toLocalTime().isBefore(java.time.LocalTime.of(9, 15))
+                && now.toLocalTime().isBefore(java.time.LocalTime.of(15, 30));
+        java.time.LocalDate session = now.toLocalDate();
+        if (!cashOpen) {
+            session = now.toLocalDate();
+            while (session.getDayOfWeek().getValue() >= 6) {
+                session = session.minusDays(1);
+            }
+            if (now.getDayOfWeek().getValue() <= 5
+                    && now.toLocalTime().isBefore(java.time.LocalTime.of(9, 15))) {
+                session = session.minusDays(1);
+                while (session.getDayOfWeek().getValue() >= 6) {
+                    session = session.minusDays(1);
+                }
+            }
+        }
+
+        GainerLoser.GainerLoserBuilder builder = GainerLoser.builder()
             .topGainers(gainers)
             .topLosers(losers)
             .timestamp(Instant.now())
-            .build();
+            .sessionDate(session.toString())
+            .priceFreshness(cashOpen ? "LIVE" : "AS_OF");
+        if (isPortfolio) {
+            builder.portfolioId(id);
+        } else {
+            builder.indexSymbol(id);
+        }
+        return builder.build();
     }
 }

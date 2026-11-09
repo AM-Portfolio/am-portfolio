@@ -1,5 +1,6 @@
 package com.portfolio.redis.service;
 
+import java.util.Collections;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -21,7 +22,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @RequiredArgsConstructor
 public class PortfolioSummaryRedisService {
-    private final RedisTemplate<String, PortfolioSummaryV1> portfolioSummaryRedisTemplate;
+    
+    @org.springframework.beans.factory.annotation.Value("${cache.redis.enabled:true}")
+    private boolean isRedisEnabled;
+private final RedisTemplate<String, PortfolioSummaryV1> portfolioSummaryRedisTemplate;
 
     @Value("${spring.data.redis.portfolio-summary.ttl}")
     private Integer portfolioSummaryTtl;
@@ -31,10 +35,17 @@ public class PortfolioSummaryRedisService {
 
     @Async("taskExecutor")
     public CompletableFuture<Void> cachePortfolioSummary(PortfolioSummaryV1 summary, String userId, TimeInterval interval) {
+        if (!isRedisEnabled) return java.util.concurrent.CompletableFuture.completedFuture(null);
+        return cachePortfolioSummary(summary, userId, interval, null);
+    }
+
+    @Async("taskExecutor")
+    public CompletableFuture<Void> cachePortfolioSummary(PortfolioSummaryV1 summary, String userId, TimeInterval interval, String portfolioId) {
+        if (!isRedisEnabled) return java.util.concurrent.CompletableFuture.completedFuture(null);
         log.info("Starting async caching of portfolio summary - User: {}, Interval: {}", 
             userId, interval != null ? interval.getCode() : "null");
         
-        String key = buildKey(userId, interval);
+        String key = buildKey(userId, interval, portfolioId);
         log.debug("Generated cache key: {} for user: {}", key, userId);
         
         try {
@@ -56,10 +67,16 @@ public class PortfolioSummaryRedisService {
     }
 
     public Optional<PortfolioSummaryV1> getLatestSummary(String userId, TimeInterval interval) {
-        log.info("Retrieving latest portfolio summary - User: {}, Interval: {}", 
+        if (!isRedisEnabled) return java.util.Optional.empty();
+        return getLatestSummary(userId, interval, null);
+    }
+
+    public Optional<PortfolioSummaryV1> getLatestSummary(String userId, TimeInterval interval, String portfolioId) {
+        if (!isRedisEnabled) return java.util.Optional.empty();
+        log.debug("Retrieving latest portfolio summary - User: {}, Interval: {}", 
             userId, interval != null ? interval.getCode() : "null");
             
-        String key = buildKey(userId, interval);
+        String key = buildKey(userId, interval, portfolioId);
         log.debug("Generated cache key: {} for user: {}", key, userId);
         
         try {
@@ -73,16 +90,16 @@ public class PortfolioSummaryRedisService {
                     Instant cutoff = Instant.now().minus(interval.getDuration());
                     
                     if (summary.getLastUpdated().toInstant(ZoneOffset.UTC).isAfter(cutoff)) {
-                        log.info("Found fresh portfolio summary in cache - User: {}, Key: {}, LastUpdated: {}", 
+                        log.debug("Found fresh portfolio summary in cache - User: {}, Key: {}, LastUpdated: {}", 
                             userId, key, summary.getLastUpdated());
                         return Optional.of(summary);
                     } else {
-                        log.info("Found stale portfolio summary in cache - User: {}, Key: {}, LastUpdated: {}, deleting", 
+                        log.debug("Found stale portfolio summary in cache - User: {}, Key: {}, LastUpdated: {}, deleting", 
                             userId, key, summary.getLastUpdated());
                         portfolioSummaryRedisTemplate.delete(key);
                     }
                 } else {
-                    log.info("Found portfolio summary in cache with no interval constraint - User: {}, Key: {}", 
+                    log.debug("Found portfolio summary in cache with no interval constraint - User: {}, Key: {}", 
                         userId, key);
                     return Optional.of(summary);
                 }
@@ -97,10 +114,31 @@ public class PortfolioSummaryRedisService {
         return Optional.empty();
     }
 
-    private String buildKey(String userId, TimeInterval interval) {
+    private String buildKey(String userId, TimeInterval interval, String portfolioId) {
         String intervalCode = interval != null ? interval.getCode() : "all";
-        String key = portfolioSummaryKeyPrefix + userId + ":" + intervalCode;
+        String portPart = (portfolioId != null && !portfolioId.trim().isEmpty()) ? portfolioId : "all";
+        String key = portfolioSummaryKeyPrefix + userId + ":" + portPart + ":" + intervalCode;
         log.trace("Built cache key: {} for user: {}, interval: {}", key, userId, intervalCode);
         return key;
     }
+
+    public void evictPortfolioSummary(String userId, String portfolioId) {
+        if (!isRedisEnabled) return;
+        try {
+            // Need to clear all intervals for this portfolio
+            for (TimeInterval interval : TimeInterval.values()) {
+                String key = buildKey(userId, interval, portfolioId);
+                portfolioSummaryRedisTemplate.delete(key);
+                log.debug("Evicted portfolio summary cache for key: {}", key);
+                
+                // Also clear the "all" portfolios cache since it includes this one
+                String allKey = buildKey(userId, interval, null);
+                portfolioSummaryRedisTemplate.delete(allKey);
+                log.debug("Evicted 'all' portfolio summary cache for key: {}", allKey);
+            }
+        } catch (Exception e) {
+            log.error("Error evicting portfolio summary cache for user {} portfolio {}: {}", userId, portfolioId, e.getMessage());
+        }
+    }
 }
+

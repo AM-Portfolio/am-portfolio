@@ -2,33 +2,36 @@ name: Portfolio Publish
 
 on:
   push:
-    branches: ["main", "develop", "fix/**", "hotfix/**", "feature/**"]
+    branches: ["main", "develop", "fix/**", "hotfix/**", "feature/**", "feat/**"]
     paths:
       - "portfolio-**"
-      - "pom.xml"
+      - "am-common-data/**"
+      - "helm/**"
       - "Dockerfile"
+      - "pom.xml"
       - ".github/workflows/portfolio-publish.yml"
   pull_request:
-    branches:
-      ["main", "develop", "test/**", "feature/**", "hotfix/**", "fix/**"]
+    branches: ["main", "develop"]
     paths:
       - "portfolio-**"
-      - "pom.xml"
+      - "am-common-data/**"
+      - "helm/**"
       - "Dockerfile"
+      - "pom.xml"
       - ".github/workflows/portfolio-publish.yml"
   workflow_dispatch:
 
 jobs:
   publish:
-    name: Publish Portfolio Service
+    name: Publish AM Portfolio
     permissions:
-      contents: read
+      contents: write
       packages: write
-    uses: AM-Portfolio/am-pipelines/.github/workflows/central-build-publish.yml@main
+    uses: AM-Portfolio/am-pipelines/.github/workflows/central-build-publish-contabo.yml@main
     with:
       language: "java"
       working_directory: "."
       image_name: "am-portfolio"
       build_context: "."
-      deploy_prod: true
     secrets: inherit
+# Trigger new push

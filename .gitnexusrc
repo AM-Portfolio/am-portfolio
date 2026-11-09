@@ -1,0 +1,5 @@
+{
+    "defaultBranch": "feature/mongo-live-price",
+    "skipAgentsMd": true,
+    "skipSkills": true
+}

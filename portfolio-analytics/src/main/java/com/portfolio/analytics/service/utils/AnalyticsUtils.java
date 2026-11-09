@@ -136,15 +136,14 @@ public class AnalyticsUtils {
             return Collections.emptyMap();
         }
         
-        log.info("Fetching current market data for {} symbols", symbols.size());
-        Map<String, MarketData>  marketData = provider.getMarketData(symbols);
-        // if (timeFrameRequest != null) {
-        //     log.info("Fetching historical data for {} symbols with time frame", symbols.size());
-        //     marketData = provider.getHistoricalData(symbols, timeFrameRequest);
-        // } else {
-        //     log.info("Fetching current market data for {} symbols", symbols.size());
-        //     marketData = provider.getMarketData(symbols);
-        // }
+        Map<String, MarketData> marketData;
+        if (timeFrameRequest != null) {
+            log.info("Fetching historical data for {} symbols with time frame", symbols.size());
+            marketData = provider.getHistoricalData(symbols, timeFrameRequest);
+        } else {
+            log.info("Fetching current market data for {} symbols", symbols.size());
+            marketData = provider.getMarketData(symbols);
+        }
         
         if (marketData == null || marketData.isEmpty()) {
             log.warn("No market data available for the provided symbols");
@@ -152,5 +151,36 @@ public class AnalyticsUtils {
         }
         
         return marketData;
+    }
+
+    /**
+     * Resolves market data for a symbol by handling potential prefix/suffix mismatches
+     * between the portfolio holding symbol (e.g. NSE:RELIANCE-EQ) and the
+     * market data map key (e.g. RELIANCE).
+     *
+     * @param marketData Map of market data
+     * @param rawSymbol The raw symbol from the portfolio
+     * @return MarketData object if found, null otherwise
+     */
+    public static MarketData resolveMarketData(Map<String, MarketData> marketData, String rawSymbol) {
+        if (marketData == null || rawSymbol == null) {
+            return null;
+        }
+        
+        // 1. Try exact match first
+        MarketData data = marketData.get(rawSymbol);
+        if (data != null) {
+            return data;
+        }
+        
+        // 2. Try fully normalized match (stripping NSE: and any suffixes)
+        String cleaned = rawSymbol;
+        int colonIndex = cleaned.indexOf(':');
+        if (colonIndex > 0 && colonIndex < cleaned.length() - 1) {
+            cleaned = cleaned.substring(colonIndex + 1);
+        }
+        cleaned = com.portfolio.model.util.SymbolResolver.normalize(cleaned);
+        
+        return marketData.get(cleaned);
     }
 }

@@ -7,7 +7,7 @@
     <parent>
         <groupId>com.portfolio</groupId>
         <artifactId>am-portfolio</artifactId>
-        <version>1.0-SNAPSHOT</version>
+        <version>1.0.2-SNAPSHOT</version>
     </parent>
 
     <artifactId>portfolio-analytics</artifactId>
@@ -34,6 +34,15 @@
         <dependency>
             <groupId>com.portfolio</groupId>
             <artifactId>portfolio-redis</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.portfolio</groupId>
+            <artifactId>portfolio-basket</artifactId>
             <version>${project.version}</version>
         </dependency>
 

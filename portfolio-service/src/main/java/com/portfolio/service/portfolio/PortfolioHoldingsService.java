@@ -1,34 +1,78 @@
 package com.portfolio.service.portfolio;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.asset.equity.EquityModel;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.mapper.holdings.PortfolioHoldingsMapper;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.PortfolioHoldings;
+import com.portfolio.model.resolver.TradingSymbolResolver;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
+import com.portfolio.redis.session.CashSessionClock;
 import com.portfolio.service.calculator.PortfolioCalculator;
+import com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer;
 
-import lombok.RequiredArgsConstructor;
+import io.micrometer.observation.annotation.Observed;
 import lombok.extern.slf4j.Slf4j;
 
-import java.time.LocalDateTime;
-
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class PortfolioHoldingsService {
 
+    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+    private static final long LIVE_MAX_AGE_SECONDS = 60;
+
     private final PortfolioService portfolioService;
     private final PortfolioHoldingsMapper portfolioHoldingsMapper;
+    @Nullable
     private final PortfolioHoldingsRedisService portfolioHoldingsRedisService;
     private final PortfolioCalculator portfolioCalculator;
+    private final PortfolioHoldingsMongoService portfolioHoldingsMongoService;
+    private final java.util.concurrent.Executor taskExecutor;
+    @Nullable
+    private final CashSessionClock cashSessionClock;
+    @Nullable
+    private final PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer;
 
+    public PortfolioHoldingsService(
+            PortfolioService portfolioService,
+            PortfolioHoldingsMapper portfolioHoldingsMapper,
+            @Nullable PortfolioHoldingsRedisService portfolioHoldingsRedisService,
+            PortfolioCalculator portfolioCalculator,
+            PortfolioHoldingsMongoService portfolioHoldingsMongoService,
+            @Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
+            @Nullable CashSessionClock cashSessionClock,
+            @Nullable PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer) {
+        this.portfolioService = portfolioService;
+        this.portfolioHoldingsMapper = portfolioHoldingsMapper;
+        this.portfolioHoldingsRedisService = portfolioHoldingsRedisService;
+        this.portfolioCalculator = portfolioCalculator;
+        this.portfolioHoldingsMongoService = portfolioHoldingsMongoService;
+        this.taskExecutor = taskExecutor;
+        this.cashSessionClock = cashSessionClock;
+        this.portfolioEquitySymbolNormalizer = portfolioEquitySymbolNormalizer;
+    }
+
+    @Value("${portfolio.redis.enabled:true}")
+    private boolean isRedisEnabled;
+
+    @Observed(name = "portfolio.get.holdings", contextualName = "get-portfolio-holdings")
     public PortfolioHoldings getPortfolioHoldings(String userId, TimeInterval interval) {
         return getPortfolioHoldings(userId, interval, true);
     }
@@ -37,151 +81,335 @@ public class PortfolioHoldingsService {
         log.info("Starting getPortfolioHoldings - User: {}, Interval: {}, Enrich: {}", userId,
                 interval != null ? interval.getCode() : "null", enrich);
 
-        // If enrichment is disabled, we skip cache as cache usually stores
-        // enriched/full data
         if (enrich) {
-            Optional<PortfolioHoldings> cachedHoldings = getCachedHoldings(userId, interval);
+            Optional<PortfolioHoldings> cachedHoldings = getCachedHoldings(userId, interval, null);
             if (cachedHoldings.isPresent()) {
-                log.info("Returning cached portfolio holdings for user: {}", userId);
-                return cachedHoldings.get();
+                return overlayAndReturn(cachedHoldings.get());
             }
         }
 
         log.info("Cache miss or skip for portfolio holdings - User: {}, fetching from source", userId);
         var portfolios = portfolioService.getPortfoliosByUserId(userId);
         if (portfolios == null || portfolios.isEmpty()) {
-            log.warn("No portfolios found for user: {}", userId);
-            return null;
+            log.info("No portfolios found for user: {} - Returning empty holdings", userId);
+            return PortfolioHoldings.empty();
         }
-        log.info("Found {} portfolios for user: {}", portfolios.size(), userId);
+        portfolios = portfolios.stream()
+                .filter(p -> PortfolioKind.isBroker(p.getPortfolioKind()))
+                .collect(Collectors.toList());
+        log.info("Found {} BROKER portfolios for user All-view: {}", portfolios.size(), userId);
 
-        var portfolioHoldings = buildPortfolioHoldings(portfolios, userId, null, interval, enrich);
-
-        log.info("Completed getPortfolioHoldings for user: {}", userId);
-        return portfolioHoldings;
+        return buildPortfolioHoldings(portfolios, userId, null, interval, enrich);
     }
 
-    /**
-     * Retrieves the portfolio holdings for a specific portfolio of the given user
-     * and time interval.
-     * 
-     * @param userId      the ID of the user
-     * @param portfolioId the ID of the specific portfolio to filter by
-     * @param interval    the time interval
-     * @return the portfolio holdings for the specific portfolio
-     */
     public PortfolioHoldings getPortfolioHoldings(String userId, String portfolioId, TimeInterval interval) {
         return getPortfolioHoldings(userId, portfolioId, interval, true);
     }
 
-    /**
-     * Retrieves the portfolio holdings for a specific portfolio of the given user
-     * and time interval, with optional enrichment.
-     * 
-     * @param userId      the ID of the user
-     * @param portfolioId the ID of the specific portfolio to filter by
-     * @param interval    the time interval
-     * @param enrich      whether to enrich holdings with market data
-     * @return the portfolio holdings for the specific portfolio
-     */
     public PortfolioHoldings getPortfolioHoldings(String userId, String portfolioId, TimeInterval interval,
             boolean enrich) {
-        log.info("Starting getPortfolioHoldings for specific portfolio - User: {}, Portfolio: {}, Interval: {}",
-                userId, portfolioId, interval != null ? interval.getCode() : "null");
+        log.info("Starting getPortfolioHoldings for specific portfolio - User: {}, Portfolio: {}, Interval: {}, Enrich: {}",
+                userId, portfolioId, interval != null ? interval.getCode() : "null", enrich);
 
-        // For specific portfolio, we don't use cache as it's more targeted
-        var portfolios = portfolioService.getPortfoliosByUserId(userId);
-        if (portfolios == null || portfolios.isEmpty()) {
-            log.warn("No portfolios found for user: {}", userId);
-            return null;
-        }
-        log.info("Found {} portfolios for user: {}", portfolios.size(), userId);
-
-        // Filter for the specific portfolio
-        var filteredPortfolios = portfolios.stream()
-                .filter(portfolio -> portfolio.getId() != null && portfolio.getId().toString().equals(portfolioId))
-                .collect(java.util.stream.Collectors.toList());
-
-        if (filteredPortfolios.isEmpty()) {
-            log.warn("No portfolio found with ID: {} for user: {}", portfolioId, userId);
-            return null;
+        if (portfolioId == null || portfolioId.trim().isEmpty()) {
+            throw new IllegalArgumentException("portfolioId cannot be blank");
         }
 
-        log.info("Found {} matching portfolio(s) for ID: {} and user: {}",
-                filteredPortfolios.size(), portfolioId, userId);
+        // Always prefer cache. Discover/basket (enrich=false) needs structure + ISINs only —
+        // skip price overlay so the request path stays sub-second.
+        Optional<PortfolioHoldings> cachedHoldings = getCachedHoldings(userId, interval, portfolioId);
+        if (cachedHoldings.isPresent()) {
+            if (enrich) {
+                return overlayAndReturn(cachedHoldings.get());
+            }
+            log.info("Serving cached holdings structure (no price overlay) for portfolio {}", portfolioId);
+            return cachedHoldings.get();
+        }
 
-        var portfolioHoldings = buildPortfolioHoldings(filteredPortfolios, userId, portfolioId, interval, enrich);
+        log.info("Cache miss for specific portfolio holdings - User: {}, Portfolio: {}", userId, portfolioId);
+        UUID id;
+        try {
+            id = UUID.fromString(portfolioId);
+        } catch (IllegalArgumentException ex) {
+            log.warn("Invalid portfolioId: {}", portfolioId);
+            return null;
+        }
+        PortfolioModelV1 portfolio = portfolioService.getPortfolioById(id);
+        if (portfolio == null) {
+            log.warn("No portfolio found with ID: {}", portfolioId);
+            return null;
+        }
+        if (portfolio.getOwner() == null || !portfolio.getOwner().equals(userId)) {
+            log.warn("Portfolio {} owner mismatch for user {}", portfolioId, userId);
+            return null;
+        }
+        if (PortfolioKind.DELETED.equals(portfolio.getPortfolioKind())) {
+            log.warn("Portfolio {} is DELETED", portfolioId);
+            return null;
+        }
 
-        // Note: We do not cache specific portfolio holdings to avoid stale data issues
-
-        log.info("Completed getPortfolioHoldings for user: {} and portfolio: {}", userId, portfolioId);
-        return portfolioHoldings;
+        return buildPortfolioHoldings(List.of(portfolio), userId, portfolioId, interval, enrich);
     }
 
-    /**
-     * Builds portfolio holdings from filtered portfolios with enrichment
-     * 
-     * @param portfolios  the list of portfolios to process
-     * @param userId      the user ID for logging
-     * @param portfolioId the portfolio ID for logging (null if processing all
-     *                    portfolios)
-     * @return the complete portfolio holdings with enriched data
-     */
+    private PortfolioHoldings overlayAndReturn(PortfolioHoldings cached) {
+        List<EquityHoldings> list = cached.getEquityHoldings();
+        if (list != null && !list.isEmpty()) {
+            try {
+                // Re-run full enrich when any sector is missing so X-Ray/holdings
+                // don't stay on "—" after a cold MD miss was cached.
+                boolean needsSectorEnrich = list.stream().anyMatch(h ->
+                        h.getSector() == null
+                                || h.getSector().isBlank()
+                                || "-".equals(h.getSector())
+                                || "Unknown".equalsIgnoreCase(h.getSector()));
+                if (needsSectorEnrich) {
+                    list = portfolioCalculator.enrichHoldings(list);
+                } else {
+                    list = portfolioCalculator.repriceHoldings(list);
+                }
+                portfolioCalculator.calculateWeights(list);
+                cached.setEquityHoldings(list);
+            } catch (Exception e) {
+                log.warn("Price overlay failed; serving structure with cached prices: {}", e.getMessage());
+            }
+        }
+        stampFreshness(cached, "TICK");
+        log.info("Serving holdings with price overlay asOf={} freshness={}",
+                cached.getAsOf(), cached.getPriceFreshness());
+        return cached;
+    }
+
+    private void stampFreshness(PortfolioHoldings holdings, String priceSource) {
+        LocalDateTime now = LocalDateTime.now(IST);
+        holdings.setLastUpdated(now);
+        holdings.setPriceSource(priceSource != null ? priceSource : "CACHE");
+
+        LocalDateTime maxTick = null;
+        if (holdings.getEquityHoldings() != null) {
+            for (EquityHoldings h : holdings.getEquityHoldings()) {
+                if (h.getPriceAsOf() != null && (maxTick == null || h.getPriceAsOf().isAfter(maxTick))) {
+                    maxTick = h.getPriceAsOf();
+                }
+            }
+        }
+        holdings.setAsOf(maxTick != null ? maxTick : now);
+
+        boolean cashOpen = cashSessionClock != null ? cashSessionClock.isCashOpen() : isCashOpenIst(now);
+        boolean freshEnough = maxTick != null
+                && java.time.Duration.between(maxTick, now).getSeconds() <= LIVE_MAX_AGE_SECONDS;
+        holdings.setPriceFreshness(cashOpen && freshEnough ? "LIVE" : "AS_OF");
+
+        if (cashSessionClock != null) {
+            holdings.setSessionDate(cashSessionClock.sessionDate());
+        } else if (!cashOpen) {
+            holdings.setSessionDate(now.toLocalDate().minusDays(now.getDayOfWeek().getValue() >= 6 ? 2 : 0));
+        } else {
+            holdings.setSessionDate(now.toLocalDate());
+        }
+    }
+
+    public static boolean isCashOpenIst(LocalDateTime nowIst) {
+        var t = nowIst.toLocalTime();
+        var day = nowIst.getDayOfWeek();
+        if (day.getValue() >= 6) {
+            return false;
+        }
+        return !t.isBefore(java.time.LocalTime.of(9, 15)) && t.isBefore(java.time.LocalTime.of(15, 30));
+    }
+
     private PortfolioHoldings buildPortfolioHoldings(List<PortfolioModelV1> portfolios, String userId,
             String portfolioId, TimeInterval interval, boolean enrich) {
         String context = portfolioId != null ? "portfolio: " + portfolioId : "all portfolios";
         log.debug("Building portfolio holdings for user: {} and {}", userId, context);
 
+        // Symbol heal hits market-data; skip on lean Discover/basket reads (ISINs already on book).
+        if (enrich) {
+            healShortOrIsinSymbols(portfolios);
+        }
+
         var portfolioHoldings = portfolioHoldingsMapper.toPortfolioHoldingsV1(portfolios);
+        // Allocation availableQuantity is set in PortfolioHoldingsMapper — do not re-query ledger here
 
         if (enrich) {
-            log.info("Enriching stock prices and performance data for {} equity holdings for {}",
+            log.info("Enriching stock prices for {} equity holdings for {}",
                     portfolioHoldings.getEquityHoldings() != null ? portfolioHoldings.getEquityHoldings().size() : 0,
                     context);
-
-            var enrichedHoldings = portfolioCalculator.enrichHoldings(portfolioHoldings.getEquityHoldings());
-            portfolioCalculator.calculateWeights(enrichedHoldings);
-            portfolioHoldings.setEquityHoldings(enrichedHoldings);
+            List<EquityHoldings> all = portfolioHoldings.getEquityHoldings() != null
+                    ? portfolioHoldings.getEquityHoldings()
+                    : List.of();
+            List<EquityHoldings> equities = new ArrayList<>();
+            List<EquityHoldings> classRows = new ArrayList<>();
+            for (EquityHoldings h : all) {
+                String cls = h.getAssetClass();
+                if (cls == null
+                        || cls.isBlank()
+                        || PortfolioHoldingsMapper.ASSET_EQUITY.equalsIgnoreCase(cls)) {
+                    equities.add(h);
+                } else {
+                    classRows.add(h);
+                }
+            }
+            equities = portfolioCalculator.enrichHoldings(equities);
+            List<EquityHoldings> merged = new ArrayList<>(equities.size() + classRows.size());
+            merged.addAll(equities);
+            merged.addAll(classRows);
+            portfolioCalculator.calculateWeights(merged);
+            portfolioHoldings.setEquityHoldings(merged);
+            stampFreshness(portfolioHoldings, "OHLC");
         } else {
-            log.info("Skipping enrichment for user: {} and {}", userId, context);
+            stampFreshness(portfolioHoldings, "CACHE");
         }
 
-        portfolioHoldings.setLastUpdated(LocalDateTime.now());
-
-        log.debug("Completed building portfolio holdings for user: {} and {}", userId, context);
-
-        // Store in cache only for all portfolios (not for specific portfolio) AND if
-        // enriched
         if (enrich) {
-            log.info("Caching portfolio holdings for user: {}", userId);
-            portfolioHoldingsRedisService.cachePortfolioHoldings(portfolioHoldings, userId, interval);
+            List<EquityHoldings> eh = portfolioHoldings.getEquityHoldings();
+            long priced = eh == null ? 0 : eh.stream()
+                    .filter(h -> h.getCurrentPrice() != null && h.getCurrentPrice() > 0)
+                    .count();
+            int total = eh == null ? 0 : eh.size();
+            boolean cacheOk = total == 0 || priced * 2 >= total; // ≥50% priced
+            if (cacheOk) {
+                log.info("Caching portfolio holdings for user: {} priced={}/{}", userId, priced, total);
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        if (isRedisEnabled && portfolioHoldingsRedisService != null) {
+                            portfolioHoldingsRedisService.cachePortfolioHoldings(
+                                    portfolioHoldings, userId, interval, portfolioId);
+                        }
+                        portfolioHoldingsMongoService.cachePortfolioHoldings(
+                                portfolioHoldings, userId, interval, portfolioId);
+                    } catch (Exception e) {
+                        log.error("Failed to update persistent cache", e);
+                    }
+                }, taskExecutor);
+            } else {
+                log.warn("Skipping cache update for user {} — only {}/{} priced", userId, priced, total);
+            }
         }
 
-        log.info("Completed getPortfolioHoldings for user: {}", userId);
         return portfolioHoldings;
     }
 
-    protected List<EquityHoldings> getHoldings(List<PortfolioModelV1> portfolios) {
-
-        var equityHoldings = portfolioHoldingsMapper.toEquityHoldings(portfolios);
-
-        log.info("Enriching stock prices and performance data for {} equity holdings",
-                equityHoldings != null ? equityHoldings.size() : 0);
-
-        equityHoldings = portfolioCalculator.enrichHoldings(equityHoldings);
-        portfolioCalculator.calculateWeights(equityHoldings);
-        return equityHoldings;
+    /**
+     * Read-path heal: blank / ISIN-as-symbol / scheme ISIN (INF…) / ISIN present with
+     * scheme-prefix symbol — re-run normalizer and persist only on change.
+     * Never length≤4 tickers alone (valid NSE: ITC, SBIN).
+     */
+    private void healShortOrIsinSymbols(List<PortfolioModelV1> portfolios) {
+        if (portfolioEquitySymbolNormalizer == null || portfolios == null || portfolios.isEmpty()) {
+            return;
+        }
+        for (PortfolioModelV1 portfolio : portfolios) {
+            if (portfolio == null || portfolio.getEquityModels() == null) {
+                continue;
+            }
+            boolean needsHeal = false;
+            for (EquityModel e : portfolio.getEquityModels()) {
+                if (e == null) {
+                    continue;
+                }
+                String isin = e.getIsin();
+                String sym = e.getSymbol();
+                boolean hasIsin = isin != null && !isin.isBlank();
+                boolean isinAsSymbol = TradingSymbolResolver.looksLikeIsin(sym);
+                boolean schemeIsin = hasIsin && isin.trim().toUpperCase().startsWith("INF");
+                boolean schemeSymbol = sym != null && sym.trim().toUpperCase().startsWith("INF");
+                if (sym == null || sym.isBlank() || isinAsSymbol || schemeIsin || schemeSymbol) {
+                    if (!hasIsin && !isinAsSymbol && !schemeSymbol) {
+                        continue;
+                    }
+                    needsHeal = true;
+                    break;
+                }
+            }
+            if (!needsHeal) {
+                continue;
+            }
+            try {
+                if (portfolioEquitySymbolNormalizer.normalizePortfolioAndDetectChange(portfolio)) {
+                    // savePortfolioDocument updates this id only — does NOT run broker twin dedupe.
+                    portfolioService.savePortfolioDocument(portfolio);
+                    log.info("Healed short/ISIN equity symbols for portfolio {}", portfolio.getId());
+                }
+            } catch (Exception ex) {
+                log.warn("Symbol heal skipped for portfolio {}: {}", portfolio.getId(), ex.getMessage());
+            }
+        }
     }
 
-    private Optional<PortfolioHoldings> getCachedHoldings(String userId, TimeInterval interval) {
-        log.debug("Checking cache for portfolio holdings - User: {}, Interval: {}",
-                userId, interval != null ? interval.getCode() : "null");
-
-        Optional<PortfolioHoldings> cachedHoldings = portfolioHoldingsRedisService.getLatestHoldings(userId, interval);
-        if (cachedHoldings.isPresent()) {
-            log.info("Serving portfolio holdings from cache - User: {}, Interval: {}",
-                    userId, interval != null ? interval.getCode() : "null");
+    protected List<EquityHoldings> getHoldings(List<PortfolioModelV1> portfolios) {
+        healShortOrIsinSymbols(portfolios);
+        var allHoldings = portfolioHoldingsMapper.toEquityHoldings(portfolios);
+        List<EquityHoldings> equities = new ArrayList<>();
+        List<EquityHoldings> classRows = new ArrayList<>();
+        for (EquityHoldings h : allHoldings) {
+            String cls = h.getAssetClass();
+            if (cls == null
+                    || cls.isBlank()
+                    || PortfolioHoldingsMapper.ASSET_EQUITY.equalsIgnoreCase(cls)) {
+                equities.add(h);
+            } else {
+                classRows.add(h);
+            }
         }
-        return cachedHoldings;
+        equities = portfolioCalculator.enrichHoldings(equities);
+        List<EquityHoldings> merged = new ArrayList<>(equities.size() + classRows.size());
+        merged.addAll(equities);
+        merged.addAll(classRows);
+        portfolioCalculator.calculateWeights(merged);
+        return merged;
+    }
+
+    private Optional<PortfolioHoldings> getCachedHoldings(String userId, TimeInterval interval, String portfolioId) {
+        Optional<PortfolioHoldings> cachedHoldings = Optional.empty();
+
+        if (isRedisEnabled && portfolioHoldingsRedisService != null) {
+            cachedHoldings = portfolioId == null
+                    ? portfolioHoldingsRedisService.getLatestHoldings(userId, interval)
+                    : portfolioHoldingsRedisService.getLatestHoldings(userId, interval, portfolioId);
+            if (cachedHoldings.isPresent()) {
+                log.info("Holdings structure from Redis — will overlay live prices - User: {}", userId);
+                return cachedHoldings;
+            }
+        }
+
+        cachedHoldings = portfolioHoldingsMongoService.getLatestHoldings(userId, interval, portfolioId);
+        if (cachedHoldings.isPresent()) {
+            log.info("Holdings structure from Mongo — will overlay live prices - User: {}", userId);
+            // Async SWR rebuild of structure when older than 15m
+            LocalDateTime last = cachedHoldings.get().getLastUpdated();
+            if (last == null || last.isBefore(LocalDateTime.now().minusMinutes(15))) {
+                triggerAsyncStructureRebuild(userId, interval, portfolioId);
+            }
+            return cachedHoldings;
+        }
+
+        return Optional.empty();
+    }
+
+    private void triggerAsyncStructureRebuild(String userId, TimeInterval interval, String portfolioId) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                log.info("Async holdings cold rebuild for user: {}", userId);
+                if (portfolioId != null && !portfolioId.isBlank()) {
+                    UUID id = UUID.fromString(portfolioId);
+                    PortfolioModelV1 p = portfolioService.getPortfolioById(id);
+                    if (p != null && userId.equals(p.getOwner())) {
+                        buildPortfolioHoldings(List.of(p), userId, portfolioId, interval, true);
+                    }
+                } else {
+                    var portfolios = portfolioService.getPortfoliosByUserId(userId);
+                    if (portfolios != null && !portfolios.isEmpty()) {
+                        portfolios = portfolios.stream()
+                                .filter(x -> PortfolioKind.isBroker(x.getPortfolioKind()))
+                                .collect(Collectors.toList());
+                        if (!portfolios.isEmpty()) {
+                            buildPortfolioHoldings(portfolios, userId, null, interval, true);
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                log.error("Async rebuild failed for user: {}", userId, ex);
+            }
+        }, taskExecutor);
     }
 }

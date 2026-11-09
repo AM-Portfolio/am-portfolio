@@ -3,49 +3,411 @@ package com.portfolio.kafka.consumer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
 
 import com.portfolio.model.events.PortfolioUpdateEvent;
+import com.portfolio.model.history.HistoryJobMode;
 import com.portfolio.model.mapper.PortfolioMapperv1;
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.service.PortfolioService;
+import com.am.common.amcommondata.service.PortfolioSnapshotService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.portfolio.kafka.publisher.PortfolioEventPublisher;
+import org.springframework.context.annotation.Lazy;
+import com.portfolio.redis.service.PortfolioHoldingsRedisService;
+import com.portfolio.service.intraday.IntradayCandleWarmService;
+import com.portfolio.service.portfolio.PortfolioIntradayService;
+import com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer;
+import com.portfolio.service.scheduler.PortfolioHistoryJobService;
 
+import java.time.Duration;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
+
+/**
+ * Consumes messages from the am-portfolio Kafka topic.
+ *
+ * <p>Messages can originate from two sources:
+ * <ul>
+ *   <li><b>Document Parser</b>  — serialised as {@link PortfolioUpdateEvent} (contains a {@code portfolioId} field)</li>
+ *   <li><b>Trade Management</b> — serialised as {@link com.portfolio.model.events.trade.TradePortfolioSyncEvent}
+ *       (no {@code portfolioId} field; the portfolio is identified via the top-level {@code id} field)</li>
+ * </ul>
+ *
+ * <h3>Idempotency / de-duplication</h3>
+ * <p>Kafka provides <em>at-least-once</em> delivery guarantees. This means the same message can be
+ * delivered more than once (e.g. after a consumer restart before the offset was committed, or after a
+ * network blip). Without protection this would cause duplicate equity holdings in MongoDB.
+ *
+ * <p>To guard against this, every consumed message is fingerprinted with a Redis key that encodes
+ * the source, the portfolio-id and the Kafka offset.  The key is set <b>after</b> successful
+ * processing with a TTL of {@value #DEDUP_TTL_HOURS} hours.  A second delivery of the same message
+ * hits the Redis key, is recognised as a duplicate and is acknowledged-and-skipped without touching
+ * MongoDB.
+ */
 @Slf4j
 @Service
+@Lazy(false)
+@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = false)
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "app.kafka.portfolio.consumer.enabled", havingValue = "true", matchIfMissing = false)
 public class PortfolioUpdateConsumerService {
 
-    private final ObjectMapper objectMapper;
-    private final PortfolioMapperv1 portfolioMapper;
-    private final PortfolioService portfolioService;
+    // ── De-duplication constants ─────────────────────────────────────────────
+    private static final String DEDUP_KEY_PREFIX = "kafka:dedup:portfolio-update:";
+    private static final int    DEDUP_TTL_HOURS  = 24;
 
-    @KafkaListener(topics = "${app.kafka.portfolio.topic}", groupId = "${app.kafka.portfolio.consumer.id}", containerFactory = "kafkaListenerContainerFactory")
-    public void consume(String message, Acknowledgment acknowledgment) {
+    // ── Dependencies ─────────────────────────────────────────────────────────
+    private final ObjectMapper                  objectMapper;
+    private final PortfolioMapperv1             portfolioMapper;
+    private final PortfolioService              portfolioService;
+    private final PortfolioEventPublisher       portfolioEventPublisher;
+    private final PortfolioHoldingsRedisService portfolioHoldingsRedisService;
+    private final com.portfolio.redis.service.PortfolioSummaryRedisService portfolioSummaryRedisService;
+    private final com.portfolio.redis.service.ActiveMarketSymbolPublisher activeMarketSymbolPublisher;
+    private final com.portfolio.redis.service.PortfolioIntelligenceRedisService portfolioIntelligenceRedisService;
+    private final PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer;
+    private final StringRedisTemplate           stringRedisTemplate;
+    private final PortfolioHistoryJobService    portfolioHistoryJobService;
+    private final PortfolioIntradayService      portfolioIntradayService;
+    private final IntradayCandleWarmService     intradayCandleWarmService;
+    private final PortfolioSnapshotService      portfolioSnapshotService;
+
+    @Value("${app.kafka.portfolio.consumer.id:am-portfolio-consumer-group}")
+    private String consumerGroupId;
+
+    // ── Kafka listener ───────────────────────────────────────────────────────
+
+    @jakarta.annotation.PostConstruct
+    public void init() {
+        objectMapper.registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
+        objectMapper.configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    }
+
+    @KafkaListener(
+            topics          = "${app.kafka.portfolio.topic:${app.kafka.portfolio.consumer.topic:am-portfolio}}",
+            groupId         = "${app.kafka.portfolio.consumer.id:am-portfolio-group-1}",
+            containerFactory = "kafkaListenerContainerFactory")
+    public void consume(
+            org.apache.kafka.clients.consumer.ConsumerRecord<String, String> record,
+            Acknowledgment acknowledgment) {
+
+        String message = record.value();
+        long   offset  = record.offset();
+        int    partition = record.partition();
+        String topic   = record.topic();
+
+        log.info("Received message from topic={} partition={} offset={}", topic, partition, offset);
+
         try {
-            log.info("Received message: {}", message);
+            com.fasterxml.jackson.databind.JsonNode rootNode = objectMapper.readTree(message);
 
-            // Convert JSON string to PortfolioUpdateEvent
-            PortfolioUpdateEvent event = objectMapper.readValue(message, PortfolioUpdateEvent.class);
-            log.info("Converted to event: {}", event);
+            // ── Determine message type ────────────────────────────────────────
+            // TradePortfolioSyncEvent has eventType="TRADE_SYNC".
+            // PortfolioUpdateEvent (Document Parser) has no eventType field.
+            String eventType = rootNode.has("eventType") ? rootNode.get("eventType").asText() : null;
 
-            // Process the event
-            processMessage(event);
+            if ("TRADE_SYNC".equals(eventType)) {
+                // ── Trade-management path ─────────────────────────────────────
+                com.portfolio.model.events.trade.TradePortfolioSyncEvent event =
+                        objectMapper.treeToValue(rootNode, com.portfolio.model.events.trade.TradePortfolioSyncEvent.class);
+                log.info("Parsed TradePortfolioSyncEvent: eventId={} source={} dataVersion={} id={} portfolioId={} action={}",
+                        event.getEventId(), event.getSource(), event.getDataVersion(),
+                        event.getId(), event.getPortfolioId(), event.getAction());
 
-            // If processing was successful, acknowledge the message
+                // Use the producer-assigned eventId for stable deduplication (CloudEvents standard).
+                // Fall back to offset-based key for older messages that pre-date this field.
+                String dedupKey = (event.getEventId() != null)
+                        ? DEDUP_KEY_PREFIX + "eventId:" + event.getEventId()
+                        : buildDedupKey("TRADE", event.getId(), offset, partition);
+
+                if (isDuplicate(dedupKey)) {
+                    log.warn("[DEDUP] Skipping already-processed Trade message: eventId={} id={} offset={}",
+                            event.getEventId(), event.getId(), offset);
+                    acknowledgment.acknowledge();
+                    return;
+                }
+
+                processTradeMessage(event);
+                markProcessed(dedupKey);
+
+            } else {
+                // ── Document-parser path ──────────────────────────────────────
+                // PortfolioUpdateEvent (Document Parser) carries 'portfolioId' or 'equities'.
+                PortfolioUpdateEvent event = objectMapper.treeToValue(rootNode, PortfolioUpdateEvent.class);
+                String pid = event.getPortfolioId() != null ? event.getPortfolioId()
+                        : (event.getId() != null ? event.getId().toString() : "doc-" + offset);
+                log.info("Parsed PortfolioUpdateEvent for portfolioId={} userId={}", pid, event.getUserId());
+
+                String dedupKey = buildDedupKey("DOC", pid, offset, partition);
+                if (isDuplicate(dedupKey)) {
+                    log.warn("[DEDUP] Skipping already-processed Document message: portfolioId={} offset={}", pid, offset);
+                    acknowledgment.acknowledge();
+                    return;
+                }
+
+                processDocumentMessage(event);
+                markProcessed(dedupKey);
+            }
+
+            // Acknowledge ONLY after successful processing
             acknowledgment.acknowledge();
-            log.info("Message processed and acknowledged successfully");
+            log.info("Message acknowledged — topic={} partition={} offset={}", topic, partition, offset);
+
         } catch (Exception e) {
-            log.error("Failed to process message: {}. Error: {}", message, e.getMessage(), e);
+            // Do NOT acknowledge — let Kafka redeliver for retry.
+            // The de-duplication key is NOT written on failure, so the retry
+            // will be processed normally.
+            log.error("Failed to process message at topic={} partition={} offset={}: {}",
+                    topic, partition, offset, e.getMessage(), e);
         }
     }
 
-    private void processMessage(PortfolioUpdateEvent event) {
+    // ── Message processing ───────────────────────────────────────────────────
+
+    private void processDocumentMessage(PortfolioUpdateEvent event) {
         PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
-        portfolioService.createPortfolio(portfolioModel);
+        // Batch ISIN→ticker normalize (same as HTTP /sync) before persist.
+        // Must not block Mongo upsert + trade fan-out if Market Data is slow/down.
+        try {
+            portfolioEquitySymbolNormalizer.normalizePortfolio(portfolioModel);
+        } catch (Exception e) {
+            log.warn("ISIN normalize failed for portfolioId={} — continuing upsert/fan-out: {}",
+                    event.getPortfolioId(), e.getMessage());
+        }
+        PortfolioModelV1 saved = portfolioService.upsertDocumentPortfolio(portfolioModel);
+        if (saved != null && saved.getOwner() != null) {
+            String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
+            portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
+            portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
+            if (portfolioId != null) {
+                portfolioIntelligenceRedisService.evict(portfolioId);
+            }
+            portfolioIntelligenceRedisService.evictAggregateForUser(saved.getOwner());
+            activeMarketSymbolPublisher.publishFromPortfolio(saved);
+            enqueueDocumentHistoryAndWarmIntraday(saved, portfolioId);
+        }
+        publishUpdate(saved, event.getSource(), event.getPortfolioId());
+    }
+
+    /**
+     * After document/email upsert: kick daily history backfill and warm session intraday
+     * so chart TF 1D / 1Y can load without waiting for EOD.
+     */
+    private void enqueueDocumentHistoryAndWarmIntraday(PortfolioModelV1 saved, String portfolioId) {
+        String owner = saved.getOwner();
+        // Delete+resync mints a new UUID — attach prior chart days so UI is not empty for ~1m+.
+        if (portfolioId != null && saved.getBrokerType() != null) {
+            try {
+                int rebound = portfolioSnapshotService.rebindOrphanedBrokerSnapshots(
+                        owner,
+                        portfolioId,
+                        saved.getBrokerType().name(),
+                        saved.getName() != null ? saved.getName() : saved.getBrokerType().getCode());
+                if (rebound > 0) {
+                    log.info("[DOC] Rebound {} history day(s) onto portfolioId={} broker={}",
+                            rebound, portfolioId, saved.getBrokerType());
+                }
+            } catch (Exception e) {
+                log.warn("[DOC] Snapshot rebind failed userId={}: {}", owner, e.getMessage());
+            }
+        }
+        try {
+            List<PortfolioModelV1> existing = portfolioService.getPortfoliosByUserId(owner);
+            boolean otherBrokers = existing != null && existing.stream()
+                    .filter(p -> p.getPortfolioKind() == null || PortfolioKind.isBroker(p.getPortfolioKind()))
+                    .anyMatch(p -> saved.getBrokerType() == null
+                            || !java.util.Objects.equals(p.getBrokerType(), saved.getBrokerType()));
+            HistoryJobMode mode = otherBrokers ? HistoryJobMode.MERGE_BROKER : HistoryJobMode.FULL;
+            portfolioHistoryJobService.enqueue(owner, mode, portfolioId);
+            log.info("[DOC] Enqueued history job userId={} mode={} portfolioId={} asOfHint={}",
+                    owner, mode, portfolioId, saved.getCreatedAt());
+        } catch (Exception e) {
+            log.warn("[DOC] History enqueue failed userId={}: {}", owner, e.getMessage());
+        }
+        final String warmOwner = owner;
+        final String warmPid = portfolioId;
+        final String candleSymbolsCsv = holdingsSymbolsCsv(saved);
+        CompletableFuture.runAsync(() -> {
+            try {
+                portfolioIntradayService.getIntraday(warmOwner, warmPid);
+                log.info("[DOC] Intraday warm done userId={} portfolioId={}", warmOwner, warmPid);
+            } catch (Exception e) {
+                log.warn("[DOC] Intraday warm failed userId={}: {}", warmOwner, e.getMessage());
+            }
+            if (candleSymbolsCsv == null || candleSymbolsCsv.isBlank()) {
+                return;
+            }
+            try {
+                var status = intradayCandleWarmService.startWarm(null, candleSymbolsCsv);
+                log.info("[DOC] Candle warm started userId={} portfolioId={} jobId={} symbols={}",
+                        warmOwner, warmPid,
+                        status != null ? status.getJobId() : null,
+                        candleSymbolsCsv.split(",").length);
+            } catch (Exception e) {
+                log.warn("[DOC] Candle warm failed userId={}: {}", warmOwner, e.getMessage());
+            }
+        });
+    }
+
+    /** Comma-separated tickers from saved equities (cap 80) for automatic candle warm. */
+    private static String holdingsSymbolsCsv(PortfolioModelV1 saved) {
+        if (saved == null || saved.getEquityModels() == null || saved.getEquityModels().isEmpty()) {
+            return null;
+        }
+        Set<String> symbols = new LinkedHashSet<>();
+        for (var eq : saved.getEquityModels()) {
+            if (eq == null || eq.getSymbol() == null) {
+                continue;
+            }
+            String s = eq.getSymbol().trim().toUpperCase();
+            if (!s.isEmpty()) {
+                symbols.add(s);
+            }
+            if (symbols.size() >= 80) {
+                break;
+            }
+        }
+        if (symbols.isEmpty()) {
+            return null;
+        }
+        return symbols.stream().collect(Collectors.joining(","));
+    }
+
+    private void processTradeMessage(com.portfolio.model.events.trade.TradePortfolioSyncEvent event) {
+        PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
+
+        if ("DELETE_PORTFOLIO".equals(portfolioModel.getLastTradeAction())) {
+            String owner = portfolioModel.getOwner();
+            // Trade payload: id = Mongo UUID, portfolioId field = human name (see PortfolioSyncEvent).
+            String portfolioName = event.getPortfolioId();
+            String portfolioUuid = null;
+            if (event.getId() != null && !event.getId().isBlank()) {
+                try {
+                    portfolioUuid = java.util.UUID.fromString(event.getId().trim()).toString();
+                } catch (IllegalArgumentException ignored) {
+                    log.warn("DELETE_PORTFOLIO event.id is not a UUID: {}", event.getId());
+                }
+            }
+            if (portfolioUuid == null && portfolioModel.getId() != null) {
+                portfolioUuid = portfolioModel.getId().toString();
+            }
+
+            String idToDelete = portfolioUuid != null ? portfolioUuid : portfolioName;
+            if (owner == null || owner.isBlank()) {
+                log.warn("Skipping DELETE_PORTFOLIO: owner is null for name={} uuid={}", portfolioName, portfolioUuid);
+                return;
+            }
+            if (idToDelete == null || idToDelete.isBlank()) {
+                log.warn("Skipping DELETE_PORTFOLIO: no id/name to delete for owner={}", owner);
+                return;
+            }
+
+            log.info("Deleting portfolio name={} uuid={} for user={} based on DELETE_PORTFOLIO action",
+                    portfolioName, portfolioUuid, owner);
+            portfolioService.deletePortfolioByIdAndOwner(idToDelete, owner);
+
+            if (portfolioUuid != null) {
+                portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioUuid);
+                portfolioSummaryRedisService.evictPortfolioSummary(owner, portfolioUuid);
+                portfolioIntelligenceRedisService.evict(portfolioUuid);
+                portfolioIntelligenceRedisService.evictAggregateForUser(owner);
+            }
+            if (portfolioName != null && !portfolioName.isBlank()
+                    && (portfolioUuid == null || !portfolioName.equals(portfolioUuid))) {
+                portfolioHoldingsRedisService.evictPortfolioHoldings(owner, portfolioName);
+                portfolioSummaryRedisService.evictPortfolioSummary(owner, portfolioName);
+            }
+
+            // Always fan-out DELETE when we have a UUID so analysis cannot stay stale after Mongo miss.
+            if (portfolioUuid != null) {
+                portfolioEventPublisher.publishPortfolioDelete(
+                        owner, portfolioUuid, portfolioName, event.getSource());
+            } else {
+                log.warn("DELETE_PORTFOLIO: no UUID — Mongo delete attempted by name={} but outbound DELETE skipped",
+                        portfolioName);
+            }
+            log.info("Portfolio deletion complete for name={} uuid={} owner={}", portfolioName, portfolioUuid, owner);
+            return;
+        }
+
+        // Batch ISIN→ticker normalize (same as HTTP /sync) before persist —
+        // Must not block Mongo upsert if Market Data is slow/down (same as document path).
+        try {
+            portfolioEquitySymbolNormalizer.normalizePortfolio(portfolioModel);
+        } catch (Exception e) {
+            log.warn("ISIN normalize failed for trade portfolioId={} — continuing upsert: {}",
+                    event.getId(), e.getMessage());
+        }
+        PortfolioModelV1 saved = portfolioService.updateTradePortfolio(portfolioModel);
+        if (saved != null && saved.getOwner() != null) {
+            String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
+            portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
+            portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
+            if (portfolioId != null) {
+                portfolioIntelligenceRedisService.evict(portfolioId);
+            }
+            portfolioIntelligenceRedisService.evictAggregateForUser(saved.getOwner());
+            activeMarketSymbolPublisher.publishFromPortfolio(saved);
+        }
+        publishUpdate(saved, "TRADE", event.getId());
+    }
+
+    private void publishUpdate(PortfolioModelV1 saved, String source, String originalId) {
+        if (saved != null) {
+            portfolioEventPublisher.publishPortfolioUpdate(saved, source);
+        } else {
+            log.warn("[Consumer] Portfolio save returned null for source='{}', portfolioId='{}'. " +
+                    "Event will NOT be published downstream.", source, originalId);
+        }
+    }
+
+    // ── De-duplication helpers ────────────────────────────────────────────────
+
+    /**
+     * Builds a unique Redis key for this message.
+     *
+     * <p>The key encodes: consumer-group + source + portfolioId + partition + offset.
+     * Using the Kafka offset makes the key unique per physical message delivery position,
+     * which is the correct granularity for at-least-once deduplication.
+     */
+    private String buildDedupKey(String source, String portfolioId, long offset, int partition) {
+        return DEDUP_KEY_PREFIX + consumerGroupId + ":" + source + ":" + portfolioId
+                + ":p" + partition + ":o" + offset;
+    }
+
+    /**
+     * Returns {@code true} if this message has already been successfully processed.
+     * Fails open (returns {@code false}) if Redis is unavailable to avoid blocking progress.
+     */
+    private boolean isDuplicate(String dedupKey) {
+        try {
+            Boolean exists = stringRedisTemplate.hasKey(dedupKey);
+            return Boolean.TRUE.equals(exists);
+        } catch (Exception e) {
+            log.warn("[DEDUP] Redis check failed for key={} — treating as non-duplicate to avoid blocking: {}", dedupKey, e.getMessage());
+            return false; // Fail open: process the message rather than stalling
+        }
+    }
+
+    /**
+     * Marks a message as successfully processed in Redis with a TTL.
+     * Fails silently if Redis is unavailable — the worst case is a single re-process on restart.
+     */
+    private void markProcessed(String dedupKey) {
+        try {
+            stringRedisTemplate.opsForValue().set(dedupKey, "1", Duration.ofHours(DEDUP_TTL_HOURS));
+            log.debug("[DEDUP] Marked as processed: {}", dedupKey);
+        } catch (Exception e) {
+            log.warn("[DEDUP] Redis write failed for key={}: {}", dedupKey, e.getMessage());
+        }
     }
 }

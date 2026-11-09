@@ -27,6 +27,9 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class MarketIndexIndicesRedisService {
 
+    @Value("${cache.redis.enabled:true}")
+    private boolean isRedisEnabled;
+
     private final RedisTemplate<String, IndexIndices> marketIndexIndicesRedisTemplate;
 
     @Value("${spring.data.redis.market-indices.ttl}")
@@ -45,6 +48,7 @@ public class MarketIndexIndicesRedisService {
 
     @Async("taskExecutor")
     public CompletableFuture<Void> cacheMarketIndexIndicesUpdateBatch(List<MarketIndexIndices> marketIndexIndicesUpdates) {
+        if (!isRedisEnabled) return java.util.concurrent.CompletableFuture.completedFuture(null);
         if (marketIndexIndicesUpdates == null || marketIndexIndicesUpdates.isEmpty()) {
             log.warn("Received empty or null market index indices updates batch");
             return CompletableFuture.completedFuture(null);
@@ -123,6 +127,7 @@ public class MarketIndexIndicesRedisService {
     }
 
     public Optional<IndexIndices> getPrice(String indexSymbol, TimeInterval timeInterval) {
+        if (!isRedisEnabled) return java.util.Optional.empty();
         try {
             log.info("Searching price for indexSymbol: {} with timeInterval: {}", indexSymbol, timeInterval);
             
@@ -173,6 +178,7 @@ public class MarketIndexIndicesRedisService {
         }
     }
     public Optional<IndexIndices> getLatestPrice(String key) {
+        if (!isRedisEnabled) return java.util.Optional.empty();
         try {
             IndexIndices price = marketIndexIndicesRedisTemplate.opsForValue().get(key);
             return Optional.ofNullable(price);
@@ -183,6 +189,7 @@ public class MarketIndexIndicesRedisService {
     }
 
     public List<IndexIndices> getHistoricalPrices(String symbol, LocalDateTime startTime, LocalDateTime endTime) {
+        if (!isRedisEnabled) return java.util.Collections.emptyList();
         try {
             String pattern = marketIndicesHistoricalKeyPrefix + symbol + ":*";
             List<IndexIndices> historicalPrices = new ArrayList<>();
@@ -203,6 +210,7 @@ public class MarketIndexIndicesRedisService {
     }
 
     public void deleteOldPrices(String symbol, LocalDateTime beforeTime) {
+        if (!isRedisEnabled) return;
         try {
             String pattern = marketIndicesHistoricalKeyPrefix + symbol + ":*";
             marketIndexIndicesRedisTemplate.keys(pattern).stream()

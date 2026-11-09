@@ -17,5 +17,6 @@ import lombok.NoArgsConstructor;
 public class StockPriceCache {
     private String symbol;
     private Double closePrice;
+    private Double previousClosePrice;
     private Instant timestamp;
 }

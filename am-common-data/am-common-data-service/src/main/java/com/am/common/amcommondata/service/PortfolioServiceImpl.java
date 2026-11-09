@@ -1,30 +1,190 @@
 package com.am.common.amcommondata.service;
 
+import com.am.common.amcommondata.document.portfolio.HoldingAllocationDocument;
 import com.am.common.amcommondata.document.portfolio.PortfolioDocument;
 import com.am.common.amcommondata.mapper.PortfolioMapper;
+import com.am.common.amcommondata.model.HoldingAllocation;
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.enums.BrokerType;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.repository.portfolio.PortfolioDocumentRepository;
+import com.am.common.amcommondata.repository.ledger.AllocationLedgerRepository;
+import com.am.common.amcommondata.document.ledger.AllocationLedgerEntry;
+import com.am.common.amcommondata.model.ledger.AllocationLedgerStatus;
+import com.am.common.amcommondata.model.ledger.AllocationLedgerEventType;
 
 import lombok.RequiredArgsConstructor;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
+
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
+@Slf4j
 public class PortfolioServiceImpl implements PortfolioService {
     private final PortfolioDocumentRepository portfolioDocumentRepository;
     private final PortfolioMapper portfolioMapper;
+    private final AllocationLedgerRepository allocationLedgerRepository;
 
+    /** Optional in unit tests; when present, kafka module fans out DELETE for cleaned twins. */
+    @Autowired(required = false)
+    private ApplicationEventPublisher applicationEventPublisher;
+
+    /** Shared demo template id — writes are refused (clone targets get new UUIDs). */
+    @Value("${app.demo.portfolio-id:}")
+    private String demoTemplatePortfolioId;
+
+    /**
+     * Lists the owner's portfolios. BROKER twins (GROW + GROWW, or same broker enum)
+     * are collapsed <strong>in memory only</strong> so the dropdown shows one Groww.
+     * <p>
+     * We deliberately do <strong>not</strong> delete Mongo rows or publish Kafka DELETE
+     * on list — that can remove the UUID trade-management still uses and break sync.
+     * Physical merge + DELETE stays on {@link #upsertDocumentPortfolio} (next upload).
+     * Baskets are never collapsed.
+     */
     @Override
     public List<PortfolioModelV1> getPortfoliosByUserId(String userId) {
-        return portfolioDocumentRepository.findByOwner(userId).stream()
+        List<PortfolioModelV1> all = portfolioDocumentRepository.findByOwner(userId).stream()
+                .filter(doc -> doc.getPortfolioKind() != PortfolioKind.DELETED)
                 .map(portfolioMapper::toModel)
                 .collect(Collectors.toList());
+        return collapseBrokerModelsForDisplay(all);
+    }
+
+    /**
+     * One BROKER row per logical identity for API/UI. No Mongo writes.
+     */
+    static List<PortfolioModelV1> collapseBrokerModelsForDisplay(List<PortfolioModelV1> portfolios) {
+        if (portfolios == null || portfolios.size() <= 1) {
+            return portfolios == null ? List.of() : portfolios;
+        }
+        Map<String, PortfolioModelV1> brokersByIdentity = new LinkedHashMap<>();
+        List<PortfolioModelV1> others = new ArrayList<>();
+        for (PortfolioModelV1 p : portfolios) {
+            if (p == null) {
+                continue;
+            }
+            if (!PortfolioKind.isBroker(p.getPortfolioKind())) {
+                others.add(p);
+                continue;
+            }
+            String key = brokerIdentityKey(p);
+            PortfolioModelV1 existing = brokersByIdentity.get(key);
+            if (existing == null || preferModel(p, existing)) {
+                brokersByIdentity.put(key, p);
+            }
+        }
+        List<PortfolioModelV1> out = new ArrayList<>(brokersByIdentity.values());
+        out.addAll(others);
+        return out;
+    }
+
+    private static boolean preferModel(PortfolioModelV1 candidate, PortfolioModelV1 incumbent) {
+        double cVal = candidate.getTotalValue() != null ? candidate.getTotalValue() : 0.0;
+        double iVal = incumbent.getTotalValue() != null ? incumbent.getTotalValue() : 0.0;
+        if (cVal != iVal) {
+            return cVal > iVal;
+        }
+        LocalDateTime cUp = candidate.getUpdatedAt();
+        LocalDateTime iUp = incumbent.getUpdatedAt();
+        if (cUp == null) {
+            return false;
+        }
+        if (iUp == null) {
+            return true;
+        }
+        return cUp.isAfter(iUp);
+    }
+
+    /**
+     * Prefer incoming UUID, then GROWW over GROW, then value/recency.
+     */
+    private PortfolioDocument pickSurvivorBrokerDoc(List<PortfolioDocument> brokerDocs, UUID incomingId) {
+        if (incomingId != null) {
+            String incoming = incomingId.toString();
+            for (PortfolioDocument candidate : brokerDocs) {
+                if (incoming.equals(candidate.getId())) {
+                    return candidate;
+                }
+            }
+        }
+        List<PortfolioDocument> growwPreferred = brokerDocs.stream()
+                .filter(d -> d.getBrokerType() == BrokerType.GROWW)
+                .collect(Collectors.toList());
+        if (!growwPreferred.isEmpty()) {
+            return pickCanonicalBroker(growwPreferred);
+        }
+        return pickCanonicalBroker(brokerDocs);
+    }
+
+    private void notifyDuplicateRemoved(String owner, PortfolioDocument extra) {
+        if (extra == null || extra.getId() == null) {
+            return;
+        }
+        log.info("Duplicate BROKER removed owner={} id={} name={}", owner, extra.getId(), extra.getName());
+        if (applicationEventPublisher == null) {
+            return;
+        }
+        try {
+            applicationEventPublisher.publishEvent(
+                    new DuplicateBrokerRemovedEvent(owner, extra.getId(), extra.getName()));
+        } catch (Exception e) {
+            log.warn("Failed to publish DuplicateBrokerRemovedEvent owner={} id={}: {}",
+                    owner, extra.getId(), e.getMessage());
+        }
+    }
+
+    /** Same logical broker book → one key (GROW/GROWW share Groww). */
+    static String brokerIdentityKey(PortfolioDocument doc) {
+        if (doc == null) {
+            return "unknown";
+        }
+        return brokerIdentityKey(doc.getBrokerType(), doc.getName(), doc.getId());
+    }
+
+    static String brokerIdentityKey(PortfolioModelV1 model) {
+        if (model == null) {
+            return "unknown";
+        }
+        String id = model.getId() != null ? model.getId().toString() : null;
+        return brokerIdentityKey(model.getBrokerType(), model.getName(), id);
+    }
+
+    static String brokerIdentityKey(BrokerType bt, String name, String id) {
+        if (bt == BrokerType.GROW || bt == BrokerType.GROWW) {
+            return "broker:GROWW";
+        }
+        if (bt != null) {
+            return "broker:" + bt.name();
+        }
+        if (name != null && !name.isBlank()) {
+            String n = name.trim().toLowerCase(Locale.ROOT);
+            // Exact Grow aliases only — do not match "Growth", "Outgrow", etc.
+            if ("grow".equals(n) || "groww".equals(n)) {
+                return "broker:GROWW";
+            }
+            return "name:" + n;
+        }
+        return "id:" + id;
     }
 
     @Override
@@ -35,13 +195,706 @@ public class PortfolioServiceImpl implements PortfolioService {
     }
 
     @Transactional
+    public PortfolioModelV1 updateTradePortfolio(PortfolioModelV1 portfolioModel) {
+        String owner = portfolioModel.getOwner();
+        com.am.common.amcommondata.model.enums.BrokerType brokerType = portfolioModel.getBrokerType();
+
+        if (owner == null) return null;
+
+        if (portfolioModel.getId() != null) {
+            refuseDemoTemplateWrite(portfolioModel.getId().toString());
+        }
+
+        PortfolioDocument doc = null;
+        if (portfolioModel.getId() != null) {
+            doc = portfolioDocumentRepository.findById(portfolioModel.getId().toString()).orElse(null);
+        }
+
+        // Removed fallback to findByOwnerAndBrokerType to support multiple portfolios of the same broker type.
+
+        PortfolioKind incomingKind = portfolioModel.getPortfolioKind();
+        if (doc != null) {
+            if (PortfolioKind.isBasket(doc.getPortfolioKind()) || PortfolioKind.isDemo(doc.getPortfolioKind())) {
+                log.warn("Refusing trade update on {} portfolio id={}", doc.getPortfolioKind(), doc.getId());
+                return portfolioMapper.toModel(doc);
+            }
+            // Update name if the incoming model has a valid name that isn't just the ID
+            if (portfolioModel.getName() != null && !portfolioModel.getName().equals(doc.getId())) {
+                doc.setName(portfolioModel.getName());
+            }
+            if (PortfolioKind.isPaper(incomingKind)) {
+                doc.setPortfolioKind(PortfolioKind.PAPER);
+            }
+        } else {
+            // Create new portfolio
+            doc = new PortfolioDocument();
+            if (portfolioModel.getId() != null) {
+                doc.setId(portfolioModel.getId().toString());
+            }
+            doc.setOwner(owner);
+            doc.setBrokerType(brokerType);
+            doc.setPortfolioKind(PortfolioKind.isPaper(incomingKind) ? PortfolioKind.PAPER : PortfolioKind.BROKER);
+            doc.setName(portfolioModel.getName() != null && !portfolioModel.getName().equals(portfolioModel.getId() != null ? portfolioModel.getId().toString() : "") ? portfolioModel.getName() : (brokerType != null ? brokerType.getCode() : "Other"));
+            doc.setStatus(com.am.common.amcommondata.model.enums.DocumentStatus.ACTIVE);
+            com.am.common.amcommondata.document.common.AuditMetadata audit = new com.am.common.amcommondata.document.common.AuditMetadata();
+            audit.setCreatedBy(owner);
+            audit.setCreatedAt(java.time.LocalDateTime.now());
+            audit.setUpdatedAt(java.time.LocalDateTime.now());
+            doc.setAudit(audit);
+            doc.setEquities(new java.util.ArrayList<>());
+        }
+
+        // Apply trade delta
+        applyTradeEquityDelta(doc, portfolioModel);
+
+        // Update audit timestamp
+        if (doc.getAudit() != null) {
+            doc.getAudit().setUpdatedAt(java.time.LocalDateTime.now());
+        }
+
+        return portfolioMapper.toModel(portfolioDocumentRepository.save(doc));
+    }
+
+    private void applyTradeEquityDelta(PortfolioDocument existing, PortfolioModelV1 portfolioModel) {
+        String tradeAction = portfolioModel.getLastTradeAction();
+        PortfolioDocument incomingDoc = portfolioMapper.toDocument(portfolioModel);
+        List<com.am.common.amcommondata.document.asset.equity.EquityDocument> incomingEquities = incomingDoc.getEquities();
+        
+        List<com.am.common.amcommondata.document.asset.equity.EquityDocument> existingEquities = existing.getEquities();
+        if (existingEquities == null) {
+            existingEquities = new java.util.ArrayList<>();
+        }
+
+        if ("REPLACE_ALL".equalsIgnoreCase(tradeAction)) {
+            existingEquities = incomingEquities != null ? new java.util.ArrayList<>(incomingEquities) : new java.util.ArrayList<>();
+            existing.setMutualFunds(copyAssetList(incomingDoc.getMutualFunds()));
+            existing.setBonds(copyAssetList(incomingDoc.getBonds()));
+            existing.setCommodities(copyAssetList(incomingDoc.getCommodities()));
+            existing.setCash(copyAssetList(incomingDoc.getCash()));
+            if (portfolioModel.getName() != null && !portfolioModel.getName().isBlank()) {
+                existing.setName(portfolioModel.getName());
+            }
+        } else if (incomingEquities != null && !incomingEquities.isEmpty()) {
+            for (com.am.common.amcommondata.document.asset.equity.EquityDocument incoming : incomingEquities) {
+                String isin = incoming.getIsin();
+                
+                java.util.Optional<com.am.common.amcommondata.document.asset.equity.EquityDocument> matchOpt = existingEquities.stream()
+                    .filter(e -> (e.getIsin() != null && isin != null && e.getIsin().equals(isin)) 
+                            || (e.getSymbol() != null && incoming.getSymbol() != null && e.getSymbol().equals(incoming.getSymbol())))
+                    .findFirst();
+
+                if ("BUY".equalsIgnoreCase(tradeAction)) {
+                    if (matchOpt.isPresent()) {
+                        com.am.common.amcommondata.document.asset.equity.EquityDocument match = matchOpt.get();
+                        double existingQty = match.getQuantity() != null ? match.getQuantity() : 0.0;
+                        double incomingQty = incoming.getQuantity() != null ? incoming.getQuantity() : 0.0;
+                        double existingAvg = match.getAvgBuyingPrice() != null ? match.getAvgBuyingPrice() : 0.0;
+                        double incomingAvg = incoming.getAvgBuyingPrice() != null ? incoming.getAvgBuyingPrice() : 0.0;
+                        
+                        double newQty = existingQty + incomingQty;
+                        double newAvg = newQty > 0 ? ((existingQty * existingAvg) + (incomingQty * incomingAvg)) / newQty : 0.0;
+                        
+                        match.setQuantity(newQty);
+                        match.setAvgBuyingPrice(newAvg);
+                        if (incoming.getCurrentPrice() != null) {
+                            match.setCurrentPrice(incoming.getCurrentPrice());
+                        }
+                        // Heal ISIN-as-symbol rows when a later sync brings a real ticker (matched by ISIN).
+                        applyIncomingInstrumentMeta(match, incoming);
+                    } else {
+                        existingEquities.add(incoming);
+                    }
+                } else if ("SELL".equalsIgnoreCase(tradeAction) || "DELETE".equalsIgnoreCase(tradeAction)) {
+                    if (matchOpt.isPresent()) {
+                        com.am.common.amcommondata.document.asset.equity.EquityDocument match = matchOpt.get();
+                        double existingQty = match.getQuantity() != null ? match.getQuantity() : 0.0;
+                        double incomingQty = incoming.getQuantity() != null ? incoming.getQuantity() : 0.0;
+                        double newQty = existingQty - incomingQty;
+                        
+                        if (newQty <= 0) {
+                            existingEquities.remove(match);
+                        } else {
+                            match.setQuantity(newQty);
+                            if (incoming.getCurrentPrice() != null) {
+                                match.setCurrentPrice(incoming.getCurrentPrice());
+                            }
+                            applyIncomingInstrumentMeta(match, incoming);
+                        }
+                    }
+                } else if ("UPDATE".equalsIgnoreCase(tradeAction)) {
+                    if (matchOpt.isPresent()) {
+                        com.am.common.amcommondata.document.asset.equity.EquityDocument match = matchOpt.get();
+                        match.setQuantity(incoming.getQuantity());
+                        match.setAvgBuyingPrice(incoming.getAvgBuyingPrice());
+                        if (incoming.getCurrentPrice() != null) {
+                            match.setCurrentPrice(incoming.getCurrentPrice());
+                        }
+                        if (incoming.getInvestmentValue() != null) {
+                            match.setInvestmentValue(incoming.getInvestmentValue());
+                        }
+                        applyIncomingInstrumentMeta(match, incoming);
+                    } else {
+                        existingEquities.add(incoming);
+                    }
+                }
+            }
+        }
+
+        double equityValue = existingEquities.stream()
+            .mapToDouble(e -> assetValue(e.getQuantity(), e.getCurrentPrice(), e.getAvgBuyingPrice(), e.getCurrentValue()))
+            .sum();
+        double otherValue = sumAssetValues(existing.getMutualFunds())
+                + sumAssetValues(existing.getBonds())
+                + sumAssetValues(existing.getCommodities())
+                + sumAssetValues(existing.getCash());
+
+        existing.setEquities(existingEquities);
+        existing.setTotalValue(equityValue + otherValue);
+    }
+
+    /**
+     * When a trade sync matches an existing row by ISIN, refresh ticker/name/isin
+     * so legacy ISIN-as-symbol holdings heal without waiting for REPLACE_ALL.
+     */
+    private static void applyIncomingInstrumentMeta(
+            com.am.common.amcommondata.document.asset.equity.EquityDocument match,
+            com.am.common.amcommondata.document.asset.equity.EquityDocument incoming) {
+        if (match == null || incoming == null) {
+            return;
+        }
+        String incomingSymbol = incoming.getSymbol();
+        if (incomingSymbol != null && !incomingSymbol.isBlank() && !looksLikeIsin(incomingSymbol)) {
+            match.setSymbol(incomingSymbol.trim().toUpperCase());
+        }
+        if (incoming.getIsin() != null && !incoming.getIsin().isBlank()) {
+            match.setIsin(incoming.getIsin().trim().toUpperCase());
+        } else if ((match.getIsin() == null || match.getIsin().isBlank())
+                && looksLikeIsin(match.getSymbol())) {
+            match.setIsin(match.getSymbol().trim().toUpperCase());
+        }
+        if (incoming.getName() != null && !incoming.getName().isBlank()) {
+            match.setName(incoming.getName());
+        }
+        if (incoming.getCompanyName() != null && !incoming.getCompanyName().isBlank()) {
+            match.setCompanyName(incoming.getCompanyName());
+        }
+        if (incoming.getSector() != null && !incoming.getSector().isBlank()) {
+            match.setSector(incoming.getSector());
+        }
+        if (incoming.getIndustry() != null && !incoming.getIndustry().isBlank()) {
+            match.setIndustry(incoming.getIndustry());
+        }
+        if (incoming.getMarketCap() != null && !incoming.getMarketCap().isBlank()) {
+            match.setMarketCap(incoming.getMarketCap());
+        }
+    }
+
+    /** Email Mongo ObjectId / UUID must never become the broker book display name. */
+    private static boolean looksLikeOpaquePortfolioName(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        String v = value.trim();
+        if (v.matches("(?i)[0-9a-f]{24}")) {
+            return true;
+        }
+        return v.matches("(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+    }
+
+    private static boolean looksLikeIsin(String value) {
+        if (value == null) {
+            return false;
+        }
+        String s = value.trim().toUpperCase();
+        return s.matches("^IN[A-Z0-9]{10}$");
+    }
+
+    private static java.util.List<com.am.common.amcommondata.document.asset.AssetDocument> copyAssetList(
+            java.util.List<com.am.common.amcommondata.document.asset.AssetDocument> source) {
+        return source != null ? new java.util.ArrayList<>(source) : new java.util.ArrayList<>();
+    }
+
+    private static double sumAssetValues(
+            java.util.List<com.am.common.amcommondata.document.asset.AssetDocument> assets) {
+        if (assets == null || assets.isEmpty()) {
+            return 0.0;
+        }
+        return assets.stream()
+                .mapToDouble(a -> assetValue(a.getQuantity(), a.getCurrentPrice(), a.getAvgBuyingPrice(), a.getCurrentValue()))
+                .sum();
+    }
+
+    private static double sumEquityDocs(
+            java.util.List<com.am.common.amcommondata.document.asset.equity.EquityDocument> equities) {
+        if (equities == null || equities.isEmpty()) {
+            return 0.0;
+        }
+        return equities.stream()
+                .mapToDouble(e -> assetValue(e.getQuantity(), e.getCurrentPrice(), e.getAvgBuyingPrice(), e.getCurrentValue()))
+                .sum();
+    }
+
+    private static double assetValue(Double quantity, Double currentPrice, Double avgBuyingPrice, Double currentValue) {
+        if (currentValue != null && currentValue > 0) {
+            return currentValue;
+        }
+        double qty = quantity != null ? quantity : 0.0;
+        double price = currentPrice != null ? currentPrice : (avgBuyingPrice != null ? avgBuyingPrice : 0.0);
+        return qty * price;
+    }
+
+    @Transactional
     public PortfolioModelV1 createPortfolio(PortfolioModelV1 portfolioModel) {
+        if (PortfolioKind.isBasket(portfolioModel.getPortfolioKind())) {
+            return createBasketPortfolio(portfolioModel);
+        }
+        if (PortfolioKind.isDemo(portfolioModel.getPortfolioKind())
+                || PortfolioKind.isPaper(portfolioModel.getPortfolioKind())) {
+            if (portfolioModel.getId() != null) {
+                refuseDemoTemplateWrite(portfolioModel.getId().toString());
+            }
+            PortfolioDocument document = portfolioMapper.toDocument(portfolioModel);
+            document.setPortfolioKind(portfolioModel.getPortfolioKind());
+            try {
+                return portfolioMapper.toModel(portfolioDocumentRepository.save(document));
+            } catch (DuplicateKeyException dup) {
+                if (PortfolioKind.isDemo(portfolioModel.getPortfolioKind())
+                        && portfolioModel.getOwner() != null) {
+                    List<PortfolioModelV1> existing =
+                            findByOwnerAndPortfolioKind(portfolioModel.getOwner(), PortfolioKind.DEMO);
+                    if (!existing.isEmpty()) {
+                        return existing.get(0);
+                    }
+                }
+                throw dup;
+            }
+        }
+        // One perfect BROKER portfolio per owner+broker — no V1/V2, no max-5 delete.
+        if (portfolioModel.getBrokerType() != null && portfolioModel.getOwner() != null) {
+            portfolioModel.setPortfolioKind(PortfolioKind.BROKER);
+            if (portfolioModel.getName() == null || portfolioModel.getName().isBlank()) {
+                portfolioModel.setName(portfolioModel.getBrokerType().getCode());
+            }
+            return upsertDocumentPortfolio(portfolioModel);
+        }
+        if (portfolioModel.getPortfolioKind() == null) {
+            portfolioModel.setPortfolioKind(PortfolioKind.BROKER);
+        }
         PortfolioDocument document = portfolioMapper.toDocument(portfolioModel);
         return portfolioMapper.toModel(portfolioDocumentRepository.save(document));
+    }
+
+    @Override
+    @Transactional
+    public PortfolioModelV1 createBasketPortfolio(PortfolioModelV1 portfolioModel) {
+        if (portfolioModel.getName() == null || portfolioModel.getName().isBlank()) {
+            throw new IllegalArgumentException("Basket portfolio name is required");
+        }
+        portfolioModel.setPortfolioKind(PortfolioKind.BASKET);
+        if (portfolioModel.getCreatedFromBasketAt() == null) {
+            portfolioModel.setCreatedFromBasketAt(LocalDateTime.now());
+        }
+        // Resolve name collisions: "Nifty IT · Zerodha", "Nifty IT · Zerodha · 2", ...
+        String baseName = portfolioModel.getName().trim();
+        String owner = portfolioModel.getOwner();
+        if (owner != null) {
+            List<String> existingNames = portfolioDocumentRepository.findByOwner(owner).stream()
+                    .map(PortfolioDocument::getName)
+                    .filter(n -> n != null)
+                    .collect(Collectors.toList());
+            portfolioModel.setName(uniqueBasketName(baseName, existingNames));
+        }
+        PortfolioDocument document = portfolioMapper.toDocument(portfolioModel);
+        document.setPortfolioKind(PortfolioKind.BASKET);
+        return portfolioMapper.toModel(portfolioDocumentRepository.save(document));
+    }
+
+    static String uniqueBasketName(String baseName, List<String> existingNames) {
+        if (existingNames.stream().noneMatch(n -> n.equalsIgnoreCase(baseName))) {
+            return baseName;
+        }
+        int suffix = 2;
+        while (true) {
+            String candidate = baseName + " · " + suffix;
+            final String check = candidate;
+            if (existingNames.stream().noneMatch(n -> n.equalsIgnoreCase(check))) {
+                return candidate;
+            }
+            suffix++;
+        }
+    }
+    
+    @Transactional
+    public PortfolioModelV1 upsertDocumentPortfolio(PortfolioModelV1 portfolioModel) {
+        if (portfolioModel.getOwner() == null || portfolioModel.getBrokerType() == null) {
+            return null;
+        }
+
+        String owner = portfolioModel.getOwner();
+        com.am.common.amcommondata.model.enums.BrokerType brokerType = portfolioModel.getBrokerType();
+        // GROW (legacy) and GROWW share display "Groww" — always upsert as GROWW.
+        if (brokerType == com.am.common.amcommondata.model.enums.BrokerType.GROW) {
+            brokerType = com.am.common.amcommondata.model.enums.BrokerType.GROWW;
+            portfolioModel.setBrokerType(brokerType);
+        }
+
+        java.util.List<PortfolioDocument> existingDocs =
+            portfolioDocumentRepository.findByOwnerAndBrokerType(owner, brokerType);
+        // Legacy rows stored as GROW must merge into the GROWW canonical book.
+        if (brokerType == com.am.common.amcommondata.model.enums.BrokerType.GROWW) {
+            java.util.List<PortfolioDocument> legacyGrow =
+                portfolioDocumentRepository.findByOwnerAndBrokerType(owner,
+                        com.am.common.amcommondata.model.enums.BrokerType.GROW);
+            if (legacyGrow != null && !legacyGrow.isEmpty()) {
+                existingDocs = new java.util.ArrayList<>(existingDocs != null ? existingDocs : List.of());
+                existingDocs.addAll(legacyGrow);
+            }
+        }
+
+        // Only BROKER (or legacy null) docs participate in Kafka upsert. Never touch BASKET.
+        List<PortfolioDocument> brokerDocs = existingDocs == null ? List.of() : existingDocs.stream()
+                .filter(d -> PortfolioKind.isBroker(d.getPortfolioKind()))
+                .collect(Collectors.toList());
+        // Dedupe by Mongo id (GROW + GROWW query can return the same doc once each path).
+        Map<String, PortfolioDocument> uniqueById = new HashMap<>();
+        for (PortfolioDocument d : brokerDocs) {
+            if (d != null && d.getId() != null) {
+                uniqueById.putIfAbsent(d.getId(), d);
+            }
+        }
+        brokerDocs = new ArrayList<>(uniqueById.values());
+
+        for (PortfolioDocument d : brokerDocs) {
+            if (d != null && d.getId() != null) {
+                refuseDemoTemplateWrite(d.getId());
+            }
+        }
+
+        if (!brokerDocs.isEmpty()) {
+            // Survivor pick (stable for trade/analysis):
+            // 1) incoming UUID when it already exists among twins
+            // 2) else prefer GROWW over legacy GROW
+            // 3) else highest totalValue / latest update
+            PortfolioDocument doc = pickSurvivorBrokerDoc(brokerDocs, portfolioModel.getId());
+            // Delete other BROKER duplicates only — never baskets
+            for (PortfolioDocument extra : brokerDocs) {
+                if (!extra.getId().equals(doc.getId())) {
+                    log.info("Cleaning duplicate BROKER portfolio id={} name={} for owner={}",
+                            extra.getId(), extra.getName(), owner);
+                    portfolioDocumentRepository.delete(extra);
+                    notifyDuplicateRemoved(owner, extra);
+                }
+            }
+            // Normalize legacy GROW enum on the kept doc
+            doc.setBrokerType(brokerType);
+
+            PortfolioDocument incoming = portfolioMapper.toDocument(portfolioModel);
+            // Soft-merge: null list on incoming = keep existing (Doc Intel / Kafka partial updates).
+            if (incoming.getEquities() != null) {
+                doc.setEquities(incoming.getEquities());
+            }
+            if (incoming.getMutualFunds() != null) {
+                doc.setMutualFunds(incoming.getMutualFunds());
+            }
+            if (incoming.getBonds() != null) {
+                doc.setBonds(incoming.getBonds());
+            }
+            if (incoming.getCommodities() != null) {
+                doc.setCommodities(incoming.getCommodities());
+            }
+            if (incoming.getCash() != null) {
+                doc.setCash(incoming.getCash());
+            }
+            if (portfolioModel.getName() != null && !portfolioModel.getName().isBlank()
+                    && !looksLikeOpaquePortfolioName(portfolioModel.getName())) {
+                doc.setName(portfolioModel.getName());
+            } else if (doc.getName() == null || doc.getName().isBlank()
+                    || looksLikeOpaquePortfolioName(doc.getName())) {
+                doc.setName(brokerType.getCode());
+            }
+            // Always recompute total from whatever lists are on the doc after merge.
+            doc.setTotalValue(sumEquityDocs(doc.getEquities())
+                    + sumAssetValues(doc.getMutualFunds())
+                    + sumAssetValues(doc.getBonds())
+                    + sumAssetValues(doc.getCommodities())
+                    + sumAssetValues(doc.getCash()));
+            doc.setPortfolioKind(PortfolioKind.BROKER);
+            // Keep stable broker name (no Zerodha-V*)
+            if (doc.getName() == null || doc.getName().isBlank()
+                    || doc.getName().matches("(?i)" + java.util.regex.Pattern.quote(brokerType.getCode()) + "-V\\d+")) {
+                doc.setName(brokerType.getCode());
+            }
+            clampAllocations(doc);
+            if (doc.getAudit() != null) {
+                LocalDateTime asOf = portfolioModel.getUpdatedAt() != null
+                        ? portfolioModel.getUpdatedAt()
+                        : portfolioModel.getCreatedAt();
+                doc.getAudit().setUpdatedAt(asOf != null ? asOf : LocalDateTime.now());
+            }
+            return portfolioMapper.toModel(portfolioDocumentRepository.save(doc));
+        } else {
+            portfolioModel.setName(brokerType.getCode());
+            portfolioModel.setPortfolioKind(PortfolioKind.BROKER);
+            PortfolioDocument document = portfolioMapper.toDocument(portfolioModel);
+            document.setPortfolioKind(PortfolioKind.BROKER);
+            return portfolioMapper.toModel(portfolioDocumentRepository.save(document));
+        }
+    }
+
+    private PortfolioDocument pickCanonicalBroker(List<PortfolioDocument> brokerDocs) {
+        return brokerDocs.stream()
+                .max(Comparator
+                        .comparing((PortfolioDocument p) -> p.getTotalValue() != null ? p.getTotalValue() : 0.0)
+                        .thenComparing(p -> p.getAudit() != null && p.getAudit().getUpdatedAt() != null
+                                ? p.getAudit().getUpdatedAt()
+                                : LocalDateTime.MIN))
+                .orElse(brokerDocs.get(0));
+    }
+
+    /**
+     * Clamp allocation quantities to current broker holding quantities after Kafka refresh.
+     */
+    void clampAllocations(PortfolioDocument doc) {
+        if (allocationLedgerRepository == null) return;
+        
+        Map<String, Double> brokerQtyByIsin = new HashMap<>();
+        if (doc.getEquities() != null) {
+            for (var e : doc.getEquities()) {
+                if (e.getIsin() != null) {
+                    brokerQtyByIsin.merge(e.getIsin(), e.getQuantity() != null ? e.getQuantity() : 0.0, Double::sum);
+                }
+            }
+        }
+        
+        // Find all ACTIVE ledger entries for this broker portfolio
+        // Wait, the repository might not have a method to find ALL active for a portfolio?
+        // Let's add it if needed, or we can just iterate over ISINs.
+        // Actually we don't have a findByBrokerPortfolioIdAndStatus method yet. We will need it.
+        // For now let's just clear allocations in doc since they are no longer used there.
+        doc.setAllocations(null);
+    }
+
+    @Override
+    @Transactional
+    public PortfolioModelV1 savePortfolioDocument(PortfolioModelV1 portfolioModel) {
+        if (portfolioModel.getId() != null) {
+            refuseDemoTemplateWrite(portfolioModel.getId().toString());
+        }
+        PortfolioDocument document = portfolioMapper.toDocument(portfolioModel);
+        // Preserve id when updating
+        if (portfolioModel.getId() != null) {
+            document.setId(portfolioModel.getId().toString());
+            portfolioDocumentRepository.findById(portfolioModel.getId().toString()).ifPresent(existing -> {
+                if (document.getAudit() == null) {
+                    document.setAudit(existing.getAudit());
+                }
+                if (document.getPortfolioKind() == null) {
+                    document.setPortfolioKind(existing.getPortfolioKind());
+                }
+            });
+        }
+        return portfolioMapper.toModel(portfolioDocumentRepository.save(document));
+    }
+
+    @Override
+    public double getAllocatedQuantity(PortfolioModelV1 brokerPortfolio, String isin) {
+        if (brokerPortfolio == null || brokerPortfolio.getAllocations() == null || isin == null) {
+            return 0.0;
+        }
+        return brokerPortfolio.getAllocations().stream()
+                .filter(a -> isin.equals(a.getIsin()))
+                .mapToDouble(a -> a.getQuantity() != null ? a.getQuantity() : 0.0)
+                .sum();
+    }
+
+    @Override
+    public double getAvailableQuantity(PortfolioModelV1 brokerPortfolio, String isin, Double rawQuantity) {
+        if (brokerPortfolio.getId() == null || isin == null) return rawQuantity != null ? rawQuantity : 0.0;
+        double raw = rawQuantity != null ? rawQuantity : 0.0;
+        Double activeSum = allocationLedgerRepository.sumActiveQuantityByBrokerPortfolioIdAndIsin(brokerPortfolio.getId().toString(), isin);
+        double allocated = activeSum != null ? activeSum : 0.0;
+        return Math.max(0.0, raw - allocated);
     }
     
     @Override
     public List<String> getAllUserIds() {
         return portfolioDocumentRepository.findAllDistinctOwners();
+    }
+
+    @Override
+    public List<String> getActiveUserIds(LocalDate cutoffDate) {
+        return portfolioDocumentRepository.findActiveOwnersSince(cutoffDate);
+    }
+
+    @Override
+    @Transactional
+    public void updateLastLoginDate(String userId, LocalDate loginDate) {
+        List<PortfolioDocument> portfolios = portfolioDocumentRepository.findByOwner(userId);
+        if (portfolios != null && !portfolios.isEmpty()) {
+            portfolios.forEach(p -> p.setLastLoginDate(loginDate));
+            portfolioDocumentRepository.saveAll(portfolios);
+            log.info("Updated lastLoginDate={} for {} portfolios of user={}", loginDate, portfolios.size(), userId);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void deletePortfolioByIdAndOwner(String id, String owner) {
+        if (id == null || owner == null) {
+            return;
+        }
+        refuseDemoTemplateWrite(id);
+
+        List<PortfolioDocument> portfolios = portfolioDocumentRepository.findByOwner(owner);
+        for (PortfolioDocument portfolio : portfolios) {
+            if (id.equals(portfolio.getName()) || (portfolio.getId() != null && id.equals(portfolio.getId().toString()))) {
+                portfolioDocumentRepository.delete(portfolio);
+                log.info("Deleted portfolio with name/id: {} and owner: {}", id, owner);
+                return;
+            }
+        }
+        log.warn("Portfolio not found for deletion with name/id: {} and owner: {}", id, owner);
+    }
+
+    @Override
+    public List<PortfolioModelV1> findByOwnerAndPortfolioKind(String owner, PortfolioKind kind) {
+        if (owner == null || kind == null) {
+            return List.of();
+        }
+        return portfolioDocumentRepository.findByOwnerAndPortfolioKind(owner, kind).stream()
+                .filter(doc -> doc.getPortfolioKind() != PortfolioKind.DELETED)
+                .map(portfolioMapper::toModel)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional
+    public void softDeletePortfolio(String id, String owner) {
+        if (id == null || owner == null) {
+            return;
+        }
+        refuseDemoTemplateWrite(id);
+        portfolioDocumentRepository.findById(id).ifPresent(doc -> {
+            if (!owner.equals(doc.getOwner())) {
+                log.warn("softDelete refused: owner mismatch id={} expectedOwner={}", id, owner);
+                return;
+            }
+            if (doc.getPortfolioKind() == PortfolioKind.DELETED) {
+                return;
+            }
+            doc.setPortfolioKind(PortfolioKind.DELETED);
+            portfolioDocumentRepository.save(doc);
+            log.info("Soft-deleted portfolio id={} owner={} priorKind soft-set to DELETED", id, owner);
+        });
+    }
+
+    private void refuseDemoTemplateWrite(String portfolioId) {
+        if (demoTemplatePortfolioId == null || demoTemplatePortfolioId.isBlank() || portfolioId == null) {
+            return;
+        }
+        if (demoTemplatePortfolioId.equals(portfolioId)) {
+            throw new IllegalStateException("Demo template portfolio is read-only: " + portfolioId);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void markBasketLineUnderfunded(String basketId, String isin, double gapQuantity) {
+        portfolioDocumentRepository.findById(basketId).ifPresent(basket -> {
+            if (basket.getEquities() != null) {
+                for (var eq : basket.getEquities()) {
+                    if (isin.equals(eq.getIsin())) {
+                        eq.setHoldingStatus("UNDERFUNDED");
+                        eq.setGapQuantity(gapQuantity);
+                        portfolioDocumentRepository.save(basket);
+                        log.info("Marked basket line UNDERFUNDED: basketId={}, isin={}, gap={}", basketId, isin, gapQuantity);
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    @Override
+    @Transactional
+    public PortfolioModelV1 replaceAssetClassList(
+            UUID portfolioId,
+            String ownerUserId,
+            String assetClass,
+            List<com.am.common.amcommondata.model.asset.AssetModel> items) {
+        if (portfolioId == null || ownerUserId == null || ownerUserId.isBlank()) {
+            throw new IllegalArgumentException("portfolioId and owner are required");
+        }
+        String classKey = assetClass == null ? "" : assetClass.trim().toLowerCase();
+        if (!classKey.equals("bonds") && !classKey.equals("commodities") && !classKey.equals("cash")) {
+            throw new IllegalArgumentException("assetClass must be bonds, commodities, or cash");
+        }
+
+        PortfolioDocument doc = portfolioDocumentRepository.findById(portfolioId.toString())
+                .orElseThrow(() -> new IllegalArgumentException("Portfolio not found"));
+        if (!ownerUserId.equals(doc.getOwner())) {
+            throw new SecurityException("Not owner of portfolio");
+        }
+        if (!PortfolioKind.isBroker(doc.getPortfolioKind())) {
+            throw new IllegalArgumentException("Only BROKER portfolios support asset-class edits");
+        }
+
+        com.am.common.amcommondata.model.enums.AssetType type = switch (classKey) {
+            case "bonds" -> com.am.common.amcommondata.model.enums.AssetType.FIXED_INCOME;
+            case "commodities" -> com.am.common.amcommondata.model.enums.AssetType.COMMODITY;
+            case "cash" -> com.am.common.amcommondata.model.enums.AssetType.CASH;
+            default -> throw new IllegalArgumentException("assetClass must be bonds, commodities, or cash");
+        };
+
+        List<com.am.common.amcommondata.model.asset.AssetModel> normalized = new ArrayList<>();
+        if (items != null) {
+            for (com.am.common.amcommondata.model.asset.AssetModel item : items) {
+                if (item == null) {
+                    continue;
+                }
+                item.setAssetType(type);
+                double value = assetValue(item.getQuantity(), item.getCurrentPrice(), item.getAvgBuyingPrice(),
+                        item.getCurrentValue());
+                if (value <= 0) {
+                    throw new IllegalArgumentException(
+                            "Each item needs currentValue > 0 or quantity × price > 0");
+                }
+                if (item.getCurrentValue() == null || item.getCurrentValue() <= 0) {
+                    item.setCurrentValue(value);
+                }
+                if (item.getName() == null || item.getName().isBlank()) {
+                    throw new IllegalArgumentException("Each item requires a name");
+                }
+                if (item.getSymbol() == null || item.getSymbol().isBlank()) {
+                    item.setSymbol(item.getName().trim().toUpperCase().replaceAll("\\s+", "_"));
+                }
+                normalized.add(item);
+            }
+        }
+
+        List<com.am.common.amcommondata.document.asset.AssetDocument> asDocs =
+                mapNormalizedToDocuments(normalized);
+        switch (classKey) {
+            case "bonds" -> doc.setBonds(asDocs);
+            case "commodities" -> doc.setCommodities(asDocs);
+            case "cash" -> doc.setCash(asDocs);
+            default -> { }
+        }
+        doc.setTotalValue(sumEquityDocs(doc.getEquities())
+                + sumAssetValues(doc.getMutualFunds())
+                + sumAssetValues(doc.getBonds())
+                + sumAssetValues(doc.getCommodities())
+                + sumAssetValues(doc.getCash()));
+        if (doc.getAudit() != null) {
+            doc.getAudit().setUpdatedAt(LocalDateTime.now());
+        }
+        return portfolioMapper.toModel(portfolioDocumentRepository.save(doc));
+    }
+
+    private List<com.am.common.amcommondata.document.asset.AssetDocument> mapNormalizedToDocuments(
+            List<com.am.common.amcommondata.model.asset.AssetModel> normalized) {
+        PortfolioModelV1 tmp = PortfolioModelV1.builder().cash(normalized).build();
+        PortfolioDocument carrier = portfolioMapper.toDocument(tmp);
+        return carrier.getCash() != null ? carrier.getCash() : List.of();
     }
 }

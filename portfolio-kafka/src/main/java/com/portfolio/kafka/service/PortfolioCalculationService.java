@@ -1,5 +1,7 @@
 package com.portfolio.kafka.service;
 
+import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.service.PortfolioService;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.enums.AssetType;
 import com.portfolio.kafka.producer.KafkaProducerService;
@@ -8,12 +10,14 @@ import com.portfolio.model.events.PortfolioUpdateEvent;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
+import com.portfolio.service.NewUserPortfolioFallbackService;
 import com.portfolio.service.calculator.PortfolioCalculator;
 import com.portfolio.service.portfolio.PortfolioHoldingsService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -24,55 +28,114 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = true)
+@Lazy(false)
+@ConditionalOnProperty(name = "app.kafka.enabled", havingValue = "true", matchIfMissing = false)
 public class PortfolioCalculationService {
 
     private final PortfolioHoldingsService portfolioHoldingsService;
     private final PortfolioCalculator portfolioCalculator;
     private final KafkaProducerService kafkaProducerService;
+    private final PortfolioService portfolioService;
+    private final NewUserPortfolioFallbackService newUserPortfolioFallbackService;
 
     public void processCalculation(String userId, String portfolioId, String correlationId) {
         log.info("Processing portfolio calculation in service for UserID: {}, PortfolioID: {}", userId, portfolioId);
 
+        if (portfolioId == null || portfolioId.isEmpty()) {
+            processAllPortfolios(userId, correlationId);
+            return;
+        }
+
+        calculateAndPublish(userId, portfolioId, correlationId);
+    }
+
+    private void processAllPortfolios(String userId, String correlationId) {
+        // Provision / soft-hide personal DEMO before listing so Paper-only users still get Demo calc.
+        newUserPortfolioFallbackService.getDemoPortfolioForNewUser(userId, List.of());
+        List<PortfolioModelV1> portfolios = portfolioService.getPortfoliosByUserId(userId);
+        if (portfolios == null || portfolios.isEmpty()) {
+            log.warn("No portfolios found for user: {}", userId);
+            return;
+        }
+
+        log.info("Bootstrap-all: publishing calculation for {} portfolio(s), userId={}", portfolios.size(), userId);
+        for (PortfolioModelV1 portfolio : portfolios) {
+            if (portfolio.getId() == null) {
+                continue;
+            }
+            calculateAndPublish(userId, portfolio.getId().toString(), correlationId);
+        }
+    }
+
+
+    private void calculateAndPublish(String userId, String portfolioId, String correlationId) {
         try {
-            // 1. Fetch Holdings
-            PortfolioHoldings holdings;
-            if (portfolioId != null && !portfolioId.isEmpty()) {
-                holdings = portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, TimeInterval.ONE_DAY);
-            } else {
-                holdings = portfolioHoldingsService.getPortfolioHoldings(userId, TimeInterval.ONE_DAY);
+            // Personal DEMO: resolve keeps userId as owner; may rewrite legacy template UUID -> clone UUID.
+            NewUserPortfolioFallbackService.DemoResolution resolved =
+                    newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
+            String holdingsUserId = resolved.userId();
+            String holdingsPortfolioId = resolved.portfolioId();
+            if (!holdingsUserId.equals(userId) || !java.util.Objects.equals(holdingsPortfolioId, portfolioId)) {
+                log.info("Demo resolve for calc: authUser={} portfolioId={} -> holdingsUser={} holdingsPortfolioId={}",
+                        userId, portfolioId, holdingsUserId, holdingsPortfolioId);
             }
 
-            if (holdings == null || holdings.getEquityHoldings() == null) {
-                log.warn("No holdings found for user: {}", userId);
+            PortfolioHoldings holdings = portfolioHoldingsService.getPortfolioHoldings(
+                    holdingsUserId, holdingsPortfolioId, TimeInterval.ONE_DAY);
+
+            if (holdings == null || holdings.getEquityHoldings() == null || holdings.getEquityHoldings().isEmpty()) {
+                log.warn("No holdings found for user: {}, portfolioId: {} (holdingsUser={}, holdingsPortfolioId={})",
+                        userId, portfolioId, holdingsUserId, holdingsPortfolioId);
                 return;
             }
 
-            // 2. Perform Calculation (Calculating Total Investment First)
             double totalInvestment = holdings.getEquityHoldings().stream()
                     .filter(h -> h.getInvestmentCost() != null)
                     .mapToDouble(EquityHoldings::getInvestmentCost)
                     .sum();
 
-            // 2.1 Enrich with Market Data
             List<EquityHoldings> enrichedHoldings = portfolioCalculator.enrichHoldings(holdings.getEquityHoldings());
+            PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(enrichedHoldings, totalInvestment);
 
-            PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(enrichedHoldings,
-                    totalInvestment);
+            PortfolioUpdateEvent updateEvent = mapToUpdateEvent(holdings, summary, userId, holdingsPortfolioId);
 
-            // Update the original holdings object with the enriched list so the mapper picks it up
-            holdings.setEquityHoldings(enrichedHoldings);
+            // Never fan DEMO / template calcs into am-portfolio-update (trade upsert path).
+            boolean demoFanout = isDemoCalcTarget(holdingsUserId, userId, holdingsPortfolioId, portfolioId);
 
-            // 3. Map to Event
-            PortfolioUpdateEvent updateEvent = mapToUpdateEvent(holdings, summary, userId, portfolioId);
+            if (demoFanout) {
+                updateEvent.setSource("DEMO");
+                log.info("Publishing DEMO calc to stream only (skip am-portfolio-update) user={} portfolioId={}",
+                        userId, holdingsPortfolioId);
+                kafkaProducerService.sendPortfolioStreamMessage(updateEvent, correlationId);
+                return;
+            }
 
-            // 4. Publish to Kafka
-            log.info("Publishing calculated portfolio update for UserID: {}, PortfolioID: {}", userId, portfolioId);
+            updateEvent.setSource("PORTFOLIO_CALC");
+            log.info("Publishing calculated portfolio update for UserID: {}, PortfolioID: {}", userId, holdingsPortfolioId);
+            kafkaProducerService.sendMessage(updateEvent, correlationId);
             kafkaProducerService.sendPortfolioStreamMessage(updateEvent, correlationId);
-
         } catch (Exception e) {
-            log.error("Error executing calculation logic for user: {} [TraceID: {}]", userId, correlationId, e);
-            throw e; // Re-throw to ensure consumer acknowledges failure if needed
+            log.error("Error executing calculation logic for user: {}, portfolioId: {} [TraceID: {}]",
+                    userId, portfolioId, correlationId, e);
+            throw e;
+        }
+    }
+
+    private boolean isDemoCalcTarget(
+            String holdingsUserId, String userId, String holdingsPortfolioId, String portfolioId) {
+        if (!holdingsUserId.equals(userId)) {
+            return true;
+        }
+        String templateId = newUserPortfolioFallbackService.getDemoPortfolioId();
+        if (templateId != null && !templateId.isBlank()
+                && (templateId.equals(holdingsPortfolioId) || templateId.equals(portfolioId))) {
+            return true;
+        }
+        try {
+            PortfolioModelV1 book = portfolioService.getPortfolioById(UUID.fromString(holdingsPortfolioId));
+            return book != null && com.am.common.amcommondata.model.enums.PortfolioKind.isDemo(book.getPortfolioKind());
+        } catch (IllegalArgumentException ignored) {
+            return false;
         }
     }
 
@@ -84,17 +147,20 @@ public class PortfolioCalculationService {
         event.setPortfolioId(portfolioId);
         event.setTimestamp(LocalDateTime.now());
 
-        // Map Summary Data
         if (summary != null) {
             event.setTotalValue(summary.getCurrentValue());
             event.setTotalInvestment(summary.getInvestmentValue());
             event.setTotalGainLoss(summary.getTotalGainLoss());
             event.setTotalGainLossPercentage(summary.getTotalGainLossPercentage());
-            event.setTodayGainLoss(summary.getTodayGainLoss());
-            event.setTodayGainLossPercentage(summary.getTodayGainLossPercentage());
+            // Suppress only unavailable (null). True flat day (0.0) must still broadcast.
+            if (summary.getTodayGainLoss() != null) {
+                event.setTodayGainLoss(summary.getTodayGainLoss());
+                event.setTodayGainLossPercentage(summary.getTodayGainLossPercentage());
+            } else {
+                log.warn("[Kafka] Suppressing todayGainLoss broadcast (null / unavailable) for portfolioId={}", portfolioId);
+            }
         }
 
-        // Map Holdings
         if (holdings.getEquityHoldings() != null) {
             List<EquityModel> equityModels = holdings.getEquityHoldings().stream()
                     .map(this::mapToEquityModel)
@@ -111,6 +177,7 @@ public class PortfolioCalculationService {
                 .isin(holding.getIsin())
                 .symbol(holding.getSymbol())
                 .name(holding.getName())
+                .companyName(holding.getName())
                 .quantity(holding.getQuantity())
                 .avgBuyingPrice(holding.getAverageBuyingPrice())
                 .currentPrice(holding.getCurrentPrice())

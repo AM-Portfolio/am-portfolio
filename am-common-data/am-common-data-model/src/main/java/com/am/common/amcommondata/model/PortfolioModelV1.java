@@ -8,9 +8,11 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
+import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.FundType;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
 
@@ -30,12 +32,35 @@ public class PortfolioModelV1 {
     private String tags;
     private String notes;
     private List<EquityModel> equityModels;
+    /** Option A multi-asset lists (default empty). */
+    @Builder.Default
+    private List<AssetModel> mutualFunds = List.of();
+    @Builder.Default
+    private List<AssetModel> bonds = List.of();
+    @Builder.Default
+    private List<AssetModel> commodities = List.of();
+    @Builder.Default
+    private List<AssetModel> cash = List.of();
     private Double totalValue;
+    private Double investmentAmount;
     private BrokerType brokerType;
+    private PortfolioKind portfolioKind;
+    private String sourcePortfolioId;
+    private String etfIsin;
+    private String etfName;
+    private LocalDateTime createdFromBasketAt;
+    private Integer gapMissingCount;
+    /** Replica / ETF alignment score captured at basket creation (0–100). */
+    private Double replicaScore;
+    private Double coverageAfterCreation;
+    private List<HoldingAllocation> allocations;
     private Integer assetCount;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private String createdBy;
     private String updatedBy;
     private Long version;
+    private String lastTradeAction;
+    /** True when this portfolio is the shared demo portfolio injected for new users. Never stored. */
+    private Boolean isDummy;
 }

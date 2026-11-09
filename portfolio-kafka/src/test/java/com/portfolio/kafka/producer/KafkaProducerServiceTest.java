@@ -32,6 +32,7 @@ class KafkaProducerServiceTest {
 
     @BeforeEach
     void setUp() {
+        // These values mirror the YAML defaults — no hardcoded defaults remain in Java
         ReflectionTestUtils.setField(service, "topicName", "am-portfolio-update");
         ReflectionTestUtils.setField(service, "portfolioStreamTopicName", "am-portfolio-stream");
         ReflectionTestUtils.setField(service, "holdingTopicName", "am-holding-update");
@@ -60,7 +61,7 @@ class KafkaProducerServiceTest {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<ProducerRecord<String, Object>> cap = ArgumentCaptor.forClass(ProducerRecord.class);
         verify(kafkaTemplate).send(cap.capture());
-        assertEquals("am-portfolio-update", cap.getValue().topic());
+        assertEquals("am-portfolio-update", cap.getValue().topic()); // publish-topic is always the outbound topic
     }
 
     @Test void sendMessage_withoutCorrelationId() {

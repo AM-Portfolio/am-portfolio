@@ -12,6 +12,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -33,10 +34,15 @@ import javax.crypto.spec.SecretKeySpec;
  */
 @Configuration
 @EnableWebSecurity
+@ConditionalOnProperty(prefix = "am.security", name = "enabled", havingValue = "false", matchIfMissing = true)
 public class SecurityConfig {
 
     @Value("${app.jwt.secret}")
     private String jwtSecret;
+
+    /** Local laptop only: set APP_JWT_VERIFY=false to skip signature check. Cluster default is true. */
+    @Value("${app.jwt.verify:true}")
+    private boolean jwtVerify;
 
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -53,17 +59,21 @@ public class SecurityConfig {
             .httpBasic(basic -> basic.disable())
             .formLogin(form -> form.disable());
 
-        // JWT decoder is wired but not activated at service level.
-        // am-gateway is the authentication boundary for this service.
-        // Uncomment below to enable per-service JWT validation if needed:
-        // .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(jwtDecoder())));
+        // Cluster / default: validate HS256 with JWT_SECRET (Traefik can hit this service directly).
+        // Local: APP_JWT_VERIFY=false skips signature so a prod token is accepted; UserContextFilter
+        // still reads userId from the Bearer payload (no mock user).
+        if (jwtVerify) {
+            http.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(jwtDecoder())));
+        }
 
         return http.build();
     }
 
     @Bean
+    @ConditionalOnProperty(prefix = "app.jwt", name = "verify", havingValue = "true", matchIfMissing = true)
     public JwtDecoder jwtDecoder() {
         SecretKey key = new SecretKeySpec(jwtSecret.getBytes(), "HmacSHA256");
         return NimbusJwtDecoder.withSecretKey(key).build();
     }
 }
+

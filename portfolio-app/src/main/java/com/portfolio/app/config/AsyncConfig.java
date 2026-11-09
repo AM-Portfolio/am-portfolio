@@ -25,16 +25,32 @@ import java.util.concurrent.Executor;
 @Configuration
 @EnableAsync
 public class AsyncConfig {
-
     @Bean(name = "taskExecutor")
     public Executor taskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(5);
-        executor.setMaxPoolSize(10);
-        executor.setQueueCapacity(25);
+        executor.setCorePoolSize(50);
+        executor.setMaxPoolSize(100);
+        executor.setQueueCapacity(500);
         executor.setThreadNamePrefix("PortfolioAsync-");
         // Propagate traceId/spanId/correlationId across async thread boundaries
         executor.setTaskDecorator(new MdcTaskDecorator());
+        // If queue is full, run in caller's thread instead of throwing exception
+        executor.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean(name = "externalApiExecutor")
+    public Executor externalApiExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(50);
+        executor.setMaxPoolSize(150);
+        executor.setQueueCapacity(500);
+        executor.setThreadNamePrefix("ExtApiAsync-");
+        // Propagate traceId/spanId/correlationId across async thread boundaries
+        executor.setTaskDecorator(new MdcTaskDecorator());
+        // Backpressure via CallerRunsPolicy is now safe due to shorter timeouts
+        executor.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
         executor.initialize();
         return executor;
     }
@@ -52,25 +68,14 @@ public class AsyncConfig {
 
         @Override
         public Runnable decorate(Runnable runnable) {
-            // Capture the MDC of the submitting thread at scheduling time
-            Map<String, String> contextMap = MDC.getCopyOfContextMap();
+            // Capture all context variables including TraceContext and MDC
+            io.micrometer.context.ContextSnapshot snapshot = 
+                io.micrometer.context.ContextSnapshotFactory.builder().build().captureAll();
+                
             return () -> {
-                // Save whatever the worker thread already has (may be empty)
-                Map<String, String> previous = MDC.getCopyOfContextMap();
-                if (contextMap != null) {
-                    MDC.setContextMap(contextMap);
-                } else {
-                    MDC.clear();
-                }
-                try {
+                // Restore the context in the worker thread
+                try (io.micrometer.context.ContextSnapshot.Scope scope = snapshot.setThreadLocals()) {
                     runnable.run();
-                } finally {
-                    // Restore the worker thread's original MDC
-                    if (previous != null) {
-                        MDC.setContextMap(previous);
-                    } else {
-                        MDC.clear();
-                    }
                 }
             };
         }

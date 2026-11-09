@@ -1,0 +1,66 @@
+package com.portfolio.redis.service;
+
+import org.springframework.beans.factory.annotation.Value;
+import java.time.Duration;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
+
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.stereotype.Service;
+
+import com.portfolio.model.portfolio.IntradayDataPoint;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class PortfolioIntradayRedisService {
+    
+    @org.springframework.beans.factory.annotation.Value("${cache.redis.enabled:true}")
+    private boolean isRedisEnabled;
+private final RedisTemplate<String, IntradayDataPoint[]> portfolioIntradayRedisTemplate;
+
+    private static final String KEY_PREFIX = "portfolio:intraday:v12:";
+    private static final int MARKET_HOURS_TTL_MINUTES = 2;
+    private static final int OFF_MARKET_HOURS_TTL_MINUTES = 30;
+
+    private String buildKey(String userId, String portfolioId) {
+        String safePortfolioId = (portfolioId != null && !portfolioId.trim().isEmpty()) ? portfolioId : "all";
+        return KEY_PREFIX + userId + ":" + safePortfolioId;
+    }
+
+    public void cacheIntradayData(String userId, String portfolioId, List<IntradayDataPoint> data, boolean isMarketOpen) {
+        if (!isRedisEnabled) return;
+        String key = buildKey(userId, portfolioId);
+        try {
+            Duration ttl = isMarketOpen ? Duration.ofMinutes(MARKET_HOURS_TTL_MINUTES) : Duration.ofMinutes(OFF_MARKET_HOURS_TTL_MINUTES);
+            log.debug("Caching intraday data for key: {} with TTL: {} {}", key, 
+                      isMarketOpen ? MARKET_HOURS_TTL_MINUTES : OFF_MARKET_HOURS_TTL_MINUTES, 
+                      "minutes");
+            
+            IntradayDataPoint[] array = data.toArray(new IntradayDataPoint[0]);
+            portfolioIntradayRedisTemplate.opsForValue().set(key, array, ttl);
+        } catch (Exception e) {
+            log.error("Failed to cache intraday data for key: {}", key, e);
+        }
+    }
+
+    public Optional<List<IntradayDataPoint>> getIntradayData(String userId, String portfolioId) {
+        String key = buildKey(userId, portfolioId);
+        try {
+            IntradayDataPoint[] array = portfolioIntradayRedisTemplate.opsForValue().get(key);
+            if (array != null) {
+                log.debug("Cache hit for intraday data key: {}", key);
+                return Optional.of(Arrays.asList(array));
+            }
+        } catch (Exception e) {
+            log.error("Failed to fetch intraday data from cache for key: {}", key, e);
+        }
+        return Optional.empty();
+    }
+}
+

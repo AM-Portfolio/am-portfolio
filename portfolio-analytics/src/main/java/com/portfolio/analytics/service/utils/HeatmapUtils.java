@@ -8,6 +8,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Utility class for heatmap-related operations shared between
@@ -74,17 +75,22 @@ public class HeatmapUtils {
         int validStockCount = 0;
         
         for (MarketData stock : stocks) {
-            if (stock.getOhlc() != null) {
-                double closePrice = stock.getOhlc().getClose();
-                double openPrice = stock.getOhlc().getOpen();
+            if (stock != null) {
+                if (stock.getLastPrice() == null) {
+                    log.debug("Skipping stock - null lastPrice in calculateSectorMetrics");
+                    continue;
+                }
+                // Day/period %: previousClose only (never OHLC open — open is session open, not prior close).
+                double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0)
+                        ? stock.getPreviousClose() : 0.0;
                 
-                if (openPrice > 0 && closePrice > 0) {
-                    // Calculate change from open to current price
-                    double changePercent = ((stock.getLastPrice() - openPrice) / openPrice) * 100;
+                if (previousClose > 0) {
+                    // Calculate change percentage relative to previous close (acts as baseline for timeframe)
+                    double changePercent = ((stock.getLastPrice() - previousClose) / previousClose) * 100;
                     totalChangePercent += changePercent;
                     
                     // Performance score based on price movement relative to previous close
-                    double performanceScore = ((stock.getLastPrice() - closePrice) / closePrice) * 100;
+                    double performanceScore = ((stock.getLastPrice() - previousClose) / previousClose) * 100;
                     totalPerformance += performanceScore;
                     
                     validStockCount++;
@@ -128,6 +134,20 @@ public class HeatmapUtils {
      * @return SectorMetrics containing weighted average performance, change percent, and weightage
      */
     public static SectorMetrics calculateWeightedSectorMetrics(List<MarketData> sectorStocks, List<Double> quantities, Double totalPortfolioValue) {
+        return calculateWeightedSectorMetrics(sectorStocks, quantities, totalPortfolioValue, null, null);
+    }
+    
+    /**
+     * Calculate weighted average metrics for a sector with weightage and overrides
+     * Used by PortfolioHeatmapProvider
+     */
+    public static SectorMetrics calculateWeightedSectorMetrics(
+            List<MarketData> sectorStocks, 
+            List<Double> quantities, 
+            Double totalPortfolioValue,
+            List<String> symbols,
+            Map<String, Double> symbolToChangePercentOverride) {
+
         log.debug("Calculating weighted metrics for sector with {} stocks", sectorStocks.size());
         double totalPerformance = 0.0;
         double totalChangePercent = 0.0;
@@ -136,19 +156,47 @@ public class HeatmapUtils {
         for (int i = 0; i < sectorStocks.size(); i++) {
             MarketData stock = sectorStocks.get(i);
             double quantity = quantities.get(i);
-            double value = stock.getLastPrice() * quantity;
+            if (stock == null) {
+                continue;
+            }
+            
+            // Resolve price with full fallback chain
+            double resolvedLastPrice = 0.0;
+            if (stock.getLastPrice() != null && stock.getLastPrice() > 0) {
+                resolvedLastPrice = stock.getLastPrice();
+            } else if (stock.getOhlc() != null && stock.getOhlc().getClose() > 0) {
+                resolvedLastPrice = stock.getOhlc().getClose();
+            } else if (stock.getPreviousClose() != null && stock.getPreviousClose() > 0) {
+                resolvedLastPrice = stock.getPreviousClose();
+            } else {
+                log.warn("No resolvable price for stock at index {}; excluding from sector weight.", i);
+                continue;
+            }
+            
+            double value = resolvedLastPrice * quantity;
+            
+            // Only add to total value if the stock has valid data
             totalValue += value;
             
-            double closePrice = stock.getOhlc().getClose();
-            double openPrice = stock.getOhlc().getOpen();
+            double previousClose = (stock.getPreviousClose() != null && stock.getPreviousClose() > 0)
+                    ? stock.getPreviousClose() : 0.0;
             
-            if (openPrice > 0) {
-                // Calculate intraday change percentage
-                double changePercent = ((stock.getLastPrice() - openPrice) / openPrice) * 100;
+            if (previousClose > 0) {
+                // Calculate timeframe change percentage based on previous close
+                double changePercent = ((resolvedLastPrice - previousClose) / previousClose) * 100;
+                
+                // Override if provided
+                if (symbolToChangePercentOverride != null && symbols != null && i < symbols.size()) {
+                    String sym = symbols.get(i);
+                    if (sym != null && symbolToChangePercentOverride.containsKey(sym)) {
+                        changePercent = symbolToChangePercentOverride.get(sym);
+                    }
+                }
+                
                 totalChangePercent += changePercent * value; // Weight by value
                 
-                // Performance score based on price movement relative to previous close
-                double performanceScore = ((stock.getLastPrice() - closePrice) / closePrice) * 100;
+                // Performance score is just the change percent
+                double performanceScore = changePercent;
                 totalPerformance += performanceScore * value; // Weight by value
             }
         }
@@ -248,25 +296,53 @@ public class HeatmapUtils {
      * @return A StockDetail object
      */
     public static Heatmap.StockDetail convertToStockDetail(String symbol, MarketData data, double quantity) {
-        if (data == null || data.getOhlc() == null) {
+        return convertToStockDetail(symbol, data, quantity, null);
+    }
+    
+    /**
+     * Convert market data to stock detail object with optional override
+     */
+    public static Heatmap.StockDetail convertToStockDetail(String symbol, MarketData data, double quantity, Double changePercentOverride) {
+        if (data == null) {
             return null;
         }
-        
-        // Create StockDetail with basic information
+
+        double resolvedLastPrice = 0.0;
+        if (data.getLastPrice() != null && data.getLastPrice() > 0) {
+            resolvedLastPrice = data.getLastPrice();
+        } else if (data.getOhlc() != null && data.getOhlc().getClose() > 0) {
+            resolvedLastPrice = data.getOhlc().getClose();
+        } else if (data.getPreviousClose() != null && data.getPreviousClose() > 0) {
+            resolvedLastPrice = data.getPreviousClose();
+        }
+        if (resolvedLastPrice <= 0) {
+            return null;
+        }
+
         Heatmap.StockDetail stockDetail = Heatmap.StockDetail.builder()
             .symbol(symbol)
-            .name(symbol) // Use symbol as name if company name not available
-            .price(BigDecimal.valueOf(data.getLastPrice()))
+            .name(symbol)
+            .price(BigDecimal.valueOf(resolvedLastPrice))
             .quantity(BigDecimal.valueOf(quantity))
             .build();
-        
-        // Use domain methods to calculate values
-        BigDecimal previousPrice = BigDecimal.valueOf(data.getOhlc().getClose());
-        stockDetail.calculateChange(previousPrice)
-                  .calculateChangePercent(previousPrice)
-                  .calculateValue()
-                  .updateColor();
-        
+
+        // previousClose only for day/period % (never OHLC open). Still compute value when LTP exists.
+        double previousCloseVal = (data.getPreviousClose() != null && data.getPreviousClose() > 0)
+                ? data.getPreviousClose()
+                : 0.0;
+        if (previousCloseVal > 0) {
+            BigDecimal previousPrice = BigDecimal.valueOf(previousCloseVal);
+            stockDetail.calculateChange(previousPrice)
+                      .calculateChangePercent(previousPrice);
+        }
+        stockDetail.calculateValue();
+
+        if (changePercentOverride != null) {
+            stockDetail.setChangePercent(changePercentOverride);
+        }
+
+        stockDetail.updateColor();
+
         return stockDetail;
     }
     
@@ -281,6 +357,17 @@ public class HeatmapUtils {
             List<MarketData> sectorStocks, 
             List<Double> quantities,
             List<String> symbols) {
+        return createStockDetails(sectorStocks, quantities, symbols, null);
+    }
+
+    /**
+     * Create stock details for a sector using domain-driven approach with overrides
+     */
+    public static List<Heatmap.StockDetail> createStockDetails(
+            List<MarketData> sectorStocks, 
+            List<Double> quantities,
+            List<String> symbols,
+            Map<String, Double> symbolToChangePercentOverride) {
         
         List<Heatmap.StockDetail> stockDetails = new ArrayList<>();
         
@@ -289,7 +376,8 @@ public class HeatmapUtils {
             double quantity = quantities.get(i);
             String symbol = symbols.get(i);
             
-            Heatmap.StockDetail stockDetail = convertToStockDetail(symbol, data, quantity);
+            Double override = (symbolToChangePercentOverride != null && symbol != null) ? symbolToChangePercentOverride.get(symbol) : null;
+            Heatmap.StockDetail stockDetail = convertToStockDetail(symbol, data, quantity, override);
             if (stockDetail != null) {
                 stockDetails.add(stockDetail);
             }
@@ -315,26 +403,42 @@ public class HeatmapUtils {
             List<Double> quantities,
             List<String> symbols,
             Double totalPortfolioValue) {
+        return createCompleteSectorPerformance(sectorName, sectorCode, sectorStocks, quantities, symbols, totalPortfolioValue, null);
+    }
+    
+    /**
+     * Create a complete sector performance object with stock details and overrides
+     */
+    public static Heatmap.SectorPerformance createCompleteSectorPerformance(
+            String sectorName,
+            String sectorCode,
+            List<MarketData> sectorStocks,
+            List<Double> quantities,
+            List<String> symbols,
+            Double totalPortfolioValue,
+            Map<String, Double> symbolToChangePercentOverride) {
         
         // Calculate metrics
-        SectorMetrics metrics = calculateWeightedSectorMetrics(sectorStocks, quantities, totalPortfolioValue);
+        SectorMetrics metrics = calculateWeightedSectorMetrics(sectorStocks, quantities, totalPortfolioValue, symbols, symbolToChangePercentOverride);
         
         // Create sector performance
         Heatmap.SectorPerformance sectorPerformance = createSectorPerformance(sectorName, sectorCode, metrics);
         
         // Create stock details
-        List<Heatmap.StockDetail> stockDetails = createStockDetails(sectorStocks, quantities, symbols);
+        List<Heatmap.StockDetail> stockDetails = createStockDetails(sectorStocks, quantities, symbols, symbolToChangePercentOverride);
         
         // Set stock details and use domain methods to calculate values
         sectorPerformance.setStocks(stockDetails);
         sectorPerformance.setStockCount(stockDetails.size());
         
-        // Use domain methods to calculate values and sort stocks
+        // Use domain methods to calculate values and sort stocks.
+        // Full stock book is required for sector drill-down (TradingView-style
+        // mosaic); UI density rules hide microscopic labels, not API rows.
         sectorPerformance.calculateTotalValue()
                         .calculateTotalReturnAmount()
                         .calculateStockWeights()
                         .sortStocksByValue();
-        
+
         return sectorPerformance;
     }
 }

@@ -41,7 +41,7 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
     @Override
     public MarketCapAllocation generateAnalytics(AdvancedAnalyticsRequest request) {
         log.info("Calculating market cap allocations for portfolio: {}", request.getCoreIdentifiers().getPortfolioId());
-        return generateMarketCapAllocation(request.getCoreIdentifiers().getPortfolioId(), request.getTimeFrameRequest());
+        return generateMarketCapAllocation(request.getCoreIdentifiers().getPortfolioId(), request);
     }
     
     /**
@@ -51,18 +51,19 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
      * @param timeFrameRequest Optional time frame parameters (can be null)
      * @return Market cap allocation analytics
      */
-    private MarketCapAllocation generateMarketCapAllocation(String portfolioId, TimeFrameRequest timeFrameRequest) {
+    private MarketCapAllocation generateMarketCapAllocation(String portfolioId, AdvancedAnalyticsRequest request) {
         return processPortfolioData(
             portfolioId,
-            timeFrameRequest,
+            request,
             this::createEmptyResult,
             (portfolio, portfolioSymbols, marketData) -> {
         
                 // Create a map of symbol to holding quantity
                 Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
                 
-                // Use SecurityDetailsService to group symbols by market cap type
-                Map<String, List<String>> marketCapGroups = securityDetailsService.groupSymbolsByMarketType(portfolioSymbols);
+                // Use SecurityDetailsService to group symbols by market cap type using prefetched details
+                Map<String, com.am.common.amcommondata.model.security.SecurityModel> prefetchedSecurities = getSecurityDetails(portfolioSymbols, request);
+                Map<String, List<String>> marketCapGroups = securityDetailsService.groupSymbolsByMarketType(portfolioSymbols, prefetchedSecurities);
                 log.info("Market cap groups for portfolio {}: {}", portfolioId, marketCapGroups.keySet());
                 
                 // Create a mapping for market cap type enum to segment name
@@ -145,7 +146,7 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
         double totalPortfolioValue = 0.0;
         
         for (String symbol : portfolioSymbols) {
-            MarketData data = marketData.get(symbol);
+            MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
             if (data == null) {
                 log.warn("No market data for symbol: {}", symbol);
                 continue;
@@ -157,8 +158,15 @@ public class PortfolioMarketCapProvider extends AbstractPortfolioAnalyticsProvid
                 continue;
             }
             
+            // Resolve price using fallback chain: lastPrice → ohlc.close → previousClose
+            double resolvedPrice = com.portfolio.analytics.service.utils.AllocationUtils.resolvePrice(data);
+            if (resolvedPrice <= 0) {
+                log.warn("Symbol {} has no resolvable price, skipping from market cap allocation", symbol);
+                continue;
+            }
+            
             // Calculate market value of this holding
-            double marketValue = data.getLastPrice() * quantity;
+            double marketValue = resolvedPrice * quantity;
             stockMarketValues.put(symbol, marketValue);
             totalPortfolioValue += marketValue;
             

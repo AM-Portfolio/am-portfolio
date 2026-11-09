@@ -1,5 +1,6 @@
 package com.portfolio.basket.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;
 import lombok.Builder;
 import lombok.AllArgsConstructor;
@@ -10,22 +11,55 @@ import java.util.List;
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class BasketOpportunity {
     private String etfIsin;
     private String etfName;
+    private String etfSymbol;
+    private String categoryLabel;
     private double matchScore;
     private double replicaScore; // Score based on weight alignment
-    private boolean readyToReplicate; // true if replicaScore >= 70
+    private boolean readyToReplicate; // true if replicaScore >= 90
     private int totalItems;
     private int heldCount;
     private int missingCount;
     private Double totalPortfolioValue;
+    private Double remainingPortfolioValue;
+    private Double investmentAmount;
+    private Double minimumInvestmentAmount;
+    private Double heldMatchScore;
+    private Double substituteMatchScore;
+    private Double missingMatchScore;
+    private Double return1Y;
+    private Double return3Y;
+    private Double return5Y;
+    private String returnsAsOf;
+    private List<Double> sparklineCloses;
+
+    // --- New fields returned from calculateBasketQuantities ---
+    private List<String> excludedSymbols;   // symbols the user excluded — echoed back so UI stays in sync
+    private Double actualInvestmentCost;    // sum of floor(qty) * lastPrice across all BUY items
+    private Double budgetVariance;          // actualInvestmentCost - investmentAmount (+ve = over budget)
+    private Double freshOrderAmount;        // alias clarity for UI — fresh buy total
+    private Double heldCoverageValue;       // value of held stock applied to basket targets
+    private Double budgetUtilization;       // (held + fresh) / investmentAmount * 100
+
+    // Basket profile for substitute UX
+    private Boolean sectorialBasket;        // true when ETF is sector-concentrated (>75% one sector)
+    private String dominantSector;          // human-readable dominant sector key
+    private List<String> etfConstituentIsins; // ETF index members for broad-basket search filter
+
+    // apply-substitutes feedback
+    private Integer appliedSubstituteCount;
+    private List<String> substituteWarnings;
+    /** Soft warnings from sizing/price paths (e.g. SYMBOL:MISSING_PRICE). */
+    private List<String> priceWarnings;
 
     private List<BasketItem> composition;
     private List<BasketItem> buyList; // Stocks to buy to reach 100% or bridge gap
 
     @Data
-    @Builder
+    @Builder(toBuilder = true)
     @AllArgsConstructor
     @NoArgsConstructor
     public static class BasketItem {
@@ -39,13 +73,20 @@ public class BasketOpportunity {
         private Double etfWeight; // Target Weight in ETF
         private Double userWeight; // Actual Weight in User Portfolio
         private Double replicaWeight; // Weight contributed to the replica
+        private Double rebalancedWeight; // Pro-rata redistributed weight
         private Double buyQuantity; // Suggested if MISSING
         private Double lastPrice; // Current market price
+        /** LIVE | STALE | PREV_CLOSE | COST_BASIS | MISSING */
+        private String priceQuality;
+        private java.time.Instant priceAsOf;
         private String marketCapCategory;
         private Double marketCapValue;
+        private Double targetQuantity; // Ideal total quantity user should hold for this stock in this basket
+        private Boolean targetQuantityLocked; // Whether this quantity was manually adjusted and should be excluded from surplus redistributions
 
         private Double heldQuantity; // Actual quantity held in main portfolio
         private Double heldAveragePrice; // Average buying price of held stock
+        private String userHoldingIsin; // ISIN of held/substitute share moved
 
         private List<Alternative> alternatives; // Possible substitutes
     }
@@ -58,9 +99,25 @@ public class BasketOpportunity {
         private String symbol;
         private String isin;
         private Double userWeight;
+        private Double quantity;
+        private Double lastPrice;
+        private String sector;
+        private boolean isSameSector;
+        private boolean canFullyCover;
+        private String coverageLabel;
+        /** Full physical units in the portfolio (before consumption). */
+        private Double physicalQuantity;
+        /** Units already allocated in this basket composition. */
+        private Double usedInThisBasketQuantity;
+        /** Units reserved by other ACTIVE baskets (quantity − availableQuantity). */
+        private Double usedInActiveBasketsQuantity;
+        /** Units still free for substitution. */
+        private Double remainingQuantity;
+        /** True when this alternative is a held index ETF covering the basket. */
+        private boolean indexEtf;
     }
 
     public enum ItemStatus {
-        HELD, MISSING, SUBSTITUTE
+        HELD, MISSING, SUBSTITUTE, EXCLUDED
     }
 }

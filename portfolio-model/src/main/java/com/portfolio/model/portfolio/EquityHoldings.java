@@ -45,8 +45,33 @@ public class EquityHoldings {
 
    // Stock price metrics
    private Double averageBuyingPrice;
-   private Double currentPrice;
-   private Double percentageChange; // Stock price percentage change
+    /** Durable statement/import LTP when avg cost unknown — not overwritten by live enrich. */
+    private Double importMarkPrice;
+    private Double currentPrice;
+    private Double percentageChange; // Stock price percentage change
+    /** Newest tick/OHLC timestamp used for this holding's current price. */
+    private java.time.LocalDateTime priceAsOf;
+
+    /** Raw broker quantity (Kafka truth). */
+   private Double rawQuantity;
+   /** Sum of qty reserved into baskets. */
+   private Double allocatedQuantity;
+   /** Free qty = raw - allocated (used for basket create availability). */
+   private Double availableQuantity;
+   /** Short note e.g. "40 in Nifty IT · Zerodha". */
+   private String allocationNote;
+
+   /** EQUITY / COMMODITY / FIXED_INCOME / CASH — null/omit treated as EQUITY. */
+   private String assetClass;
+
+   /** LIVE / LAST / COST_BASIS — how {@link #currentPrice} was chosen. */
+   private String priceSource;
+
+   /** EQUITY / ETF / UNLISTED — product class for UI badges. */
+   private String productClass;
+
+   /** Exchange ticker when different from broker/ISIN {@link #symbol}. */
+   private String tradingSymbol;
 
    @Builder.Default
    private List<EquityBrokerHolding> brokerPortfolios = new ArrayList<>();

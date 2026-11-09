@@ -31,6 +31,14 @@ public class GainerLoser {
     private List<StockMovement> topGainers;
     private List<StockMovement> topLosers;
     private List<SectorMovement> sectorMovements; // Sector-wise movement data
+
+    /** Last NSE cash session date for day% (yyyy-MM-dd IST), when AS_OF / weekend. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String sessionDate;
+
+    /** e.g. LIVE, AS_OF — mirrors portfolio summary freshness. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String priceFreshness;
     
     @Data
     @Builder
@@ -53,10 +61,10 @@ public class GainerLoser {
         @JsonInclude(JsonInclude.Include.NON_NULL)
         private Double changePercent = 0.0;
 
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private Double previousClose;
+        
         private String sector;
-        private Double quantity; // Used for portfolio analytics (holding quantity)
-        private Double marketValue; // Used for portfolio analytics (price * quantity)
-        private Double weightPercentage; // Used for portfolio analytics (% of portfolio)
     }
     
     /**

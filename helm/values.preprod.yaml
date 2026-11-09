@@ -1,5 +1,6 @@
-# am-portfolio Preprod Overrides
-
+# Preprod Environment Overrides — am-portfolio
+# Preprod app host only — am.asrax.in reserved for prod
+environment: preprod
 replicaCount: 1
 
 resources:
@@ -10,29 +11,52 @@ resources:
     cpu: 250m
     memory: 256Mi
 
-# Non-secret runtime env (mirrors am-analysis preprod pattern).
-# Secrets are still injected via Vault per vault.secretPaths below.
-env:
-  SPRING_PROFILES_ACTIVE: "preprod"
-  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces"
-  TRACING_SAMPLING_PROBABILITY: "1.0"
-
+# Preprod Vault secret paths — key mappings are in vault-mappings.yaml
 vault:
   secretPaths:
+    otel:
+      path: "apps/data/preprod/infra/observability"
     auth:
       path: apps/data/preprod/services/am-auth
     infra:
       path: apps/data/preprod/infra/postgres
     portfolio:
       path: apps/data/preprod/services/am-portfolio
+    parser:
+      path: apps/data/preprod/services/am-parser
+    market:
+      path: apps/data/preprod/services/am-market-data
+    logging:
+      path: apps/data/preprod/services/logging
+    mongodb:
+      path: apps/data/preprod/infra/mongodb
+    kafka:
+      path: apps/data/preprod/infra/kafka
+    redis:
+      path: apps/data/preprod/infra/redis
+    identity-oidc:
+      path: apps/data/preprod/services/am-identity
+    service-oauth:
+      path: apps/data/preprod/services/am-portfolio
 
 ingress:
+  enabled: true
+  className: "traefik"
+  annotations:
+    kubernetes.io/ingress.class: "traefik"
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.middlewares: >-
+      am-apps-preprod-global-cors@kubernetescrd,
+      am-apps-preprod-strip-prefix-apps@kubernetescrd
   hosts:
-    - host: portfolio.preprod.am-portfolio.com
+    - host: am-preprod.asrax.in
       paths:
-        - path: /
-          pathType: ImplementationSpecific
-  tls:
-    - secretName: portfolio-tls
-      hosts:
-        - portfolio.preprod.am-portfolio.com
+        - path: /portfolio
+          pathType: Prefix
+
+env:
+  SPRING_PROFILES_ACTIVE: "preprod,security"
+  REDIS_CACHE_ENABLED: "true"
+  PORTFOLIO_REDIS_ENABLED: "true"
+  # Diversification A/B/C + always emit Volatility (incl. insufficient-hist placeholder)
+  PORTFOLIO_INTEL_HEALTH_V2: "true"

@@ -19,6 +19,8 @@ import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import org.springframework.cache.annotation.Cacheable;
+
 /**
  * Abstract base class for portfolio analytics providers
  * @param <T> The type of analytics data returned
@@ -47,6 +49,7 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
      * @param portfolioId The portfolio ID to fetch data for
      * @return Portfolio model or null if not found
      */
+    @Cacheable(value = "portfolioCache", key = "#portfolioId")
     protected PortfolioModelV1 getPortfolio(String portfolioId) {
         log.info("Fetching portfolio data for ID: {}", portfolioId);
         try {
@@ -97,10 +100,9 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
     
     @Override
     public T generateAnalytics(String portfolioId, AdvancedAnalyticsRequest request) {
-        log.info("Generating {} analytics for portfolio {} with time frame: {} to {}, interval: {}", 
-                getType(), portfolioId, request.getFromDate(), 
-                request.getToDate(), request.getTimeFrame());
-        return generateAnalytics(portfolioId, request);
+        throw new UnsupportedOperationException(
+            getClass().getSimpleName() + " must override generateAnalytics(String, AdvancedAnalyticsRequest)"
+        );
     }
     
     /**
@@ -116,12 +118,15 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
      */
     protected <R> R processPortfolioData(
             String portfolioId,
-            TimeFrameRequest timeFrameRequest,
+            AdvancedAnalyticsRequest request,
             Supplier<R> emptyResultSupplier,
             PortfolioDataProcessor<R> resultProcessor) {
         
-        // Get portfolio data
-        PortfolioModelV1 portfolio = getPortfolio(portfolioId);
+        // Get portfolio data (use prefetched if available to save DB calls)
+        PortfolioModelV1 portfolio = (request != null && request.getPrefetchedPortfolio() != null)
+            ? request.getPrefetchedPortfolio()
+            : getPortfolio(portfolioId);
+            
         if (portfolio == null || portfolio.getEquityModels() == null || portfolio.getEquityModels().isEmpty()) {
             log.warn("No portfolio or holdings found for ID: {}", portfolioId);
             return emptyResultSupplier.get();
@@ -134,10 +139,24 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
             return emptyResultSupplier.get();
         }
         
-        // Fetch market data for all stocks in the portfolio
-        Map<String, MarketData> marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, timeFrameRequest);
+        // Use prefetched market data if available, otherwise fetch it.
+        // If the facade already attempted prefetch and got nothing, do NOT fan out
+        // another full-symbol OHLC storm (that caused 30–90s advanced latency).
+        Map<String, MarketData> marketData = resolvePrefetchedMarketData(request);
+        if (marketData == null || marketData.isEmpty()) {
+            if (request != null && request.isPrefetchAttempted() && !allowsPrefetchFanOut()) {
+                log.warn("Prefetch already attempted with empty result — skipping individual OHLC fan-out for {}",
+                        this.getClass().getSimpleName());
+                return emptyResultSupplier.get();
+            }
+            log.info("Market data not in prefetch cache. Fetching individually for provider {}", this.getClass().getSimpleName());
+            TimeFrameRequest fanOutTf = preferLiveMarketDataOnFanOut()
+                    ? null
+                    : (request != null ? request.getTimeFrameRequest() : null);
+            marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, fanOutTf);
+        }
         
-        if (marketData.isEmpty()) {
+        if (marketData == null || marketData.isEmpty()) {
             log.warn("No market data available for portfolio: {}", portfolioId);
             return emptyResultSupplier.get();
         }
@@ -146,6 +165,51 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
         return resultProcessor.process(portfolio, portfolioSymbols, marketData);
     }
     
+    /**
+     * Prefetch map used by this provider. Override to prefer live day data (movers).
+     */
+    protected Map<String, MarketData> resolvePrefetchedMarketData(AdvancedAnalyticsRequest request) {
+        return request != null ? request.getPrefetchedMarketData() : null;
+    }
+
+    /**
+     * When false (default), empty successful prefetch skips per-provider fan-out.
+     * Period providers may fan out after a failed hist prefetch (attempted=false).
+     */
+    protected boolean allowsPrefetchFanOut() {
+        return false;
+    }
+
+    /**
+     * When true, empty-prefetch fan-out uses live OHLC (day%) instead of chart timeframe hist.
+     * Movers must return true so period candles are never used as previousClose.
+     */
+    protected boolean preferLiveMarketDataOnFanOut() {
+        return false;
+    }
+
+    /**
+     * Retrieves security details, preferring the prefetched map in the request if available.
+     * @param symbols List of symbols
+     * @param request The advanced analytics request
+     * @return Map of symbol to SecurityModel
+     */
+    protected Map<String, com.am.common.amcommondata.model.security.SecurityModel> getSecurityDetails(List<String> symbols, AdvancedAnalyticsRequest request) {
+        if (request != null && request.getPrefetchedSecurityDetails() != null
+                && !request.getPrefetchedSecurityDetails().isEmpty()) {
+            return request.getPrefetchedSecurityDetails();
+        }
+        // LIVE advanced: facade already spent its security-details budget. Do not start a
+        // per-symbol ETF/parser stampede (111× ~300ms) on the HTTP path — providers fall back
+        // to EquityModel.sector / Unknown for first paint.
+        if (request != null && request.isPrefetchAttempted()) {
+            log.warn("Skipping cold security-details fan-out for {} (prefetchAttempted, empty prefetch)",
+                    this.getClass().getSimpleName());
+            return Collections.emptyMap();
+        }
+        return securityDetailsService.getSecurityDetails(symbols);
+    }
+
     /**
      * Functional interface for processing portfolio data
      * @param <R> The type of result to return
