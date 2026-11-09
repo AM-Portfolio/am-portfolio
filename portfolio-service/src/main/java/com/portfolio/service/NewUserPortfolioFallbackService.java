@@ -56,6 +56,8 @@ public class NewUserPortfolioFallbackService {
             boolean dummy,
             String brokerType,
             Integer assetCount,
+            Double totalValue,
+            boolean hasHoldings,
             String familyMemberId,
             String familyMemberName) {}
 
@@ -105,6 +107,10 @@ public class NewUserPortfolioFallbackService {
         if (assets == null) {
             assets = countAssets(portfolio);
         }
+        Double totalValue = portfolio.getTotalValue();
+        boolean hasHoldings = demo
+                || (assets != null && assets > 0)
+                || (totalValue != null && totalValue > 0);
         String displayName = demo
                 ? DEMO_DISPLAY_NAME
                 : cdslDisplayName(portfolio, broker);
@@ -116,6 +122,8 @@ public class NewUserPortfolioFallbackService {
                 demo,
                 broker,
                 assets,
+                totalValue,
+                hasHoldings,
                 portfolio.getFamilyMemberId(),
                 portfolio.getFamilyMemberName());
     }

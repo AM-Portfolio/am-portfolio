@@ -273,7 +273,8 @@ public class PortfolioIntelligenceSnapshotFactory {
                 }
             });
             long quoteDeadlineMs = snapshotStartedMs + (leanSecurity ? 1_000L : 500L);
-            long sectorDeadlineMs = snapshotStartedMs + (leanSecurity ? 1_000L : 200L);
+            // All-book snapshots need more than 200ms or sector falls to Unknown/Unlisted.
+            long sectorDeadlineMs = snapshotStartedMs + (leanSecurity ? 1_000L : 2_500L);
             securityDetails = awaitMap(sdFut, sectorDeadlineMs, portfolioId, "security");
             marketData = awaitMap(mdFut, quoteDeadlineMs, portfolioId, "market");
         }
@@ -1005,8 +1006,13 @@ public class PortfolioIntelligenceSnapshotFactory {
     }
 
     static String resolveSector(EquityModel eq, SecurityModel sec, String symbol, String priceSource) {
+        String isin = eq != null ? eq.getIsin() : null;
         String fromEq = usableMeta(eq != null ? eq.getSector() : null);
-        if (fromEq != null) {
+        // Sticky Private/Unlisted must not win over listed industry meta.
+        boolean eqIsProductBucket = fromEq != null && (
+                HoldingInstrumentClassifier.SECTOR_UNLISTED.equalsIgnoreCase(fromEq)
+                        || HoldingInstrumentClassifier.SECTOR_ETF.equalsIgnoreCase(fromEq));
+        if (fromEq != null && !eqIsProductBucket) {
             return fromEq;
         }
         if (sec != null && sec.getMetadata() != null) {
@@ -1015,7 +1021,14 @@ public class PortfolioIntelligenceSnapshotFactory {
                 return fromSec;
             }
         }
-        String isin = eq != null ? eq.getIsin() : null;
+        com.portfolio.model.reference.ListedEquitySectorCatalog.Profile catalog =
+                com.portfolio.model.reference.ListedEquitySectorCatalog.find(symbol, isin);
+        if (catalog != null && usableMeta(catalog.sector()) != null) {
+            return catalog.sector();
+        }
+        if (fromEq != null) {
+            return fromEq;
+        }
         String classified = HoldingInstrumentClassifier.resolveSector(null, symbol, isin, priceSource);
         if (classified != null && !HoldingInstrumentClassifier.isMissingSector(classified)) {
             return classified;

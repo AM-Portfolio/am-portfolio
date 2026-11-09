@@ -2,9 +2,11 @@ package com.portfolio.service.accounts;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.springframework.stereotype.Service;
@@ -21,6 +23,7 @@ import com.am.common.amcommondata.model.demat.DematAccountModel;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.model.family.FamilyMember;
+import com.am.common.amcommondata.model.family.HoldingsPersona;
 import com.am.common.amcommondata.model.nps.NpsDocumentMeta;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.service.accounts.OverallXirrCalculator.Cashflow;
@@ -38,6 +41,33 @@ public class AccountsHubService {
     private final NpsImportService npsImportService;
     private final PortfolioService portfolioService;
     private final FamilyMemberService familyMemberService;
+
+    /**
+     * Canonical persona wealth (books + directory residual + NPS).
+     * {@code you} / blank-primary, member id, or household.
+     */
+    public double wealthForPersona(String userId, String persona) {
+        AccountsHubModel hub = hubForUser(userId);
+        AccountsStats stats = hub != null ? hub.getStats() : null;
+        if (stats == null) {
+            return 0.0;
+        }
+        if (HoldingsPersona.isHousehold(persona)) {
+            return stats.getHouseholdTotalValue() != null ? stats.getHouseholdTotalValue() : 0.0;
+        }
+        String trimmed = persona.trim();
+        if (HoldingsPersona.YOU.equalsIgnoreCase(trimmed)) {
+            return stats.getPrimaryTotalValue() != null ? stats.getPrimaryTotalValue() : 0.0;
+        }
+        if (hub.getFamilyMembers() != null) {
+            for (FamilyMemberSummary m : hub.getFamilyMembers()) {
+                if (m != null && trimmed.equals(m.getId()) && m.getTotalValue() != null) {
+                    return m.getTotalValue();
+                }
+            }
+        }
+        return 0.0;
+    }
 
     public AccountsHubModel hubForUser(String userId) {
         // All personas stamped with familyMemberId (null = primary).
@@ -107,8 +137,8 @@ public class AccountsHubService {
                             .name(m.getDisplayName())
                             .email(m.getEmail())
                             .source(m.getSource())
-                            // portfolioCount = non-MF demat accounts for that persona's CAS.
-                            .portfolioCount(countDematBooks(rows, mid))
+                            // portfolioCount = non-MF CAS directory rows for that persona.
+                            .portfolioCount(countDematForMember(demat, mid))
                             .totalValue(round2(sumValueForMemberId(demat, rows, npsAccounts, mid)))
                             .xirrPct(computeOverallXirr(memberBooks))
                             .build();
@@ -152,21 +182,8 @@ public class AccountsHubService {
             List<AccountsPortfolioRow> rows,
             List<NpsDocumentMeta> npsAccounts,
             boolean primaryOnly) {
-        double books = 0.0;
-        if (rows != null) {
-            for (AccountsPortfolioRow r : rows) {
-                if (r == null || isPaperLike(r) || isNpsRow(r)) {
-                    continue;
-                }
-                if (!personaMatches(r.getFamilyMemberId(), primaryOnly)) {
-                    continue;
-                }
-                if (r.getCurrent() != null && r.getCurrent() > 0) {
-                    books += r.getCurrent();
-                }
-            }
-        }
-        double sum = books > 0 ? books : directoryValue(demat, primaryOnly, null);
+        double sum = booksPlusDirectoryResidual(demat, rows, r -> personaMatches(r.getFamilyMemberId(), primaryOnly),
+                a -> personaMatches(a.getFamilyMemberId(), primaryOnly));
         if (npsAccounts != null) {
             for (NpsDocumentMeta m : npsAccounts) {
                 if (m == null || !personaMatches(m.getFamilyMemberId(), primaryOnly)) {
@@ -176,28 +193,6 @@ public class AccountsHubService {
                     sum += m.getTotalValue();
                 }
             }
-        }
-        return sum;
-    }
-
-    /** Directory values fill in only when every book for the persona is stored at 0. */
-    private static double directoryValue(List<DematAccountModel> demat, boolean primaryOnly, String memberId) {
-        if (demat == null) {
-            return 0.0;
-        }
-        double sum = 0.0;
-        for (DematAccountModel a : demat) {
-            if (a == null || a.getHoldingValue() == null || a.getHoldingValue() <= 0) {
-                continue;
-            }
-            if (memberId != null) {
-                if (!memberId.equals(a.getFamilyMemberId())) {
-                    continue;
-                }
-            } else if (!personaMatches(a.getFamilyMemberId(), primaryOnly)) {
-                continue;
-            }
-            sum += a.getHoldingValue();
         }
         return sum;
     }
@@ -251,21 +246,11 @@ public class AccountsHubService {
         if (familyMemberId == null || familyMemberId.isBlank()) {
             return 0.0;
         }
-        double books = 0.0;
-        if (rows != null) {
-            for (AccountsPortfolioRow r : rows) {
-                if (r == null || isPaperLike(r) || isNpsRow(r)) {
-                    continue;
-                }
-                if (!familyMemberId.equals(r.getFamilyMemberId())) {
-                    continue;
-                }
-                if (r.getCurrent() != null && r.getCurrent() > 0) {
-                    books += r.getCurrent();
-                }
-            }
-        }
-        double sum = books > 0 ? books : directoryValue(demat, false, familyMemberId);
+        double sum = booksPlusDirectoryResidual(
+                demat,
+                rows,
+                r -> familyMemberId.equals(r.getFamilyMemberId()),
+                a -> familyMemberId.equals(a.getFamilyMemberId()));
         if (npsAccounts != null) {
             for (NpsDocumentMeta m : npsAccounts) {
                 if (m == null || !familyMemberId.equals(m.getFamilyMemberId())) {
@@ -277,6 +262,150 @@ public class AccountsHubService {
             }
         }
         return sum;
+    }
+
+    /**
+     * Positive books for the persona, lifting each book to max(book, matching CAS directory
+     * line), plus directory residual for valued demats/MF that have no matching book.
+     */
+    static double booksPlusDirectoryResidual(
+            List<DematAccountModel> demat,
+            List<AccountsPortfolioRow> rows,
+            java.util.function.Predicate<AccountsPortfolioRow> rowMatch,
+            java.util.function.Predicate<DematAccountModel> dematMatch) {
+        List<AccountsPortfolioRow> personaRows = new ArrayList<>();
+        if (rows != null) {
+            for (AccountsPortfolioRow r : rows) {
+                if (r == null || isPaperLike(r) || isNpsRow(r) || !rowMatch.test(r)) {
+                    continue;
+                }
+                personaRows.add(r);
+            }
+        }
+        List<DematAccountModel> personaDemat = new ArrayList<>();
+        if (demat != null) {
+            for (DematAccountModel a : demat) {
+                if (a == null || !dematMatch.test(a)) {
+                    continue;
+                }
+                if (a.getHoldingValue() == null || a.getHoldingValue() <= 0) {
+                    continue;
+                }
+                personaDemat.add(a);
+            }
+        }
+
+        Set<Integer> matchedDirIdx = new HashSet<>();
+        double sum = 0.0;
+        for (AccountsPortfolioRow r : personaRows) {
+            double book = r.getCurrent() != null && r.getCurrent() > 0 ? r.getCurrent() : 0.0;
+            double dir = 0.0;
+            for (int i = 0; i < personaDemat.size(); i++) {
+                if (matchedDirIdx.contains(i)) {
+                    continue;
+                }
+                DematAccountModel a = personaDemat.get(i);
+                if (!directoryMatchesBook(a, r)) {
+                    continue;
+                }
+                dir += a.getHoldingValue();
+                matchedDirIdx.add(i);
+            }
+            sum += Math.max(book, dir);
+        }
+        for (int i = 0; i < personaDemat.size(); i++) {
+            if (matchedDirIdx.contains(i)) {
+                continue;
+            }
+            sum += personaDemat.get(i).getHoldingValue();
+        }
+        return sum;
+    }
+
+    /** Match a CAS directory row to a portfolio book (first-class broker or CAS_DEMAT BOID/MF). */
+    static boolean directoryMatchesBook(DematAccountModel a, AccountsPortfolioRow r) {
+        if (a == null || r == null) {
+            return false;
+        }
+        boolean mfDir = "mf".equalsIgnoreCase(nullToEmpty(a.getAccountType()));
+        if (isMfBook(r)) {
+            return mfDir;
+        }
+        if (mfDir) {
+            return false;
+        }
+        String broker = nullToEmpty(r.getBrokerType()).trim().toUpperCase(Locale.ROOT);
+        if ("CAS_DEMAT".equals(broker)) {
+            String bookBoid = blankToNull(r.getDematBoid());
+            String dirBoid = blankToNull(a.getBoid());
+            if (bookBoid != null && bookBoid.equalsIgnoreCase(dirBoid)) {
+                return true;
+            }
+            String bookName = nullToEmpty(r.getDisplayName()).trim();
+            String shortDp = shortDpLabel(a.getDpName());
+            return !bookName.isEmpty() && bookName.equalsIgnoreCase(shortDp);
+        }
+        String mapped = normalizeMappedBroker(a.getMappedBroker());
+        if (!mapped.isEmpty() && mapped.equals(broker)) {
+            return true;
+        }
+        // Fallback: DP legal name contains first-class broker token.
+        String dp = nullToEmpty(a.getDpName()).toUpperCase(Locale.ROOT);
+        return switch (broker) {
+            case "GROWW" -> dp.contains("GROWW");
+            case "ANGEL_ONE" -> dp.contains("ANGEL ONE") || dp.contains("ANGELONE");
+            case "ZERODHA" -> dp.contains("ZERODHA");
+            case "KOTAK" -> dp.contains("KOTAK");
+            case "DHAN" -> dp.contains("RAISE") || dp.contains("DHAN");
+            case "UPSTOX" -> dp.contains("UPSTOX");
+            case "FYERS" -> dp.contains("FYERS");
+            case "HDFC" -> dp.contains("HDFC");
+            case "MSTOCK" -> dp.contains("MSTOCK") || dp.contains("M STOCK");
+            default -> false;
+        };
+    }
+
+    private static String normalizeMappedBroker(String mapped) {
+        String m = nullToEmpty(mapped).trim().toLowerCase(Locale.ROOT);
+        if (m.isEmpty()) {
+            return "";
+        }
+        return switch (m) {
+            case "groww", "grow" -> "GROWW";
+            case "angleone", "angelone", "angel_one" -> "ANGEL_ONE";
+            case "zerodha" -> "ZERODHA";
+            case "kotak" -> "KOTAK";
+            case "dhan" -> "DHAN";
+            case "upstox" -> "UPSTOX";
+            case "fyers" -> "FYERS";
+            case "hdfc", "hdfc_bank" -> "HDFC";
+            case "mstock" -> "MSTOCK";
+            default -> m.toUpperCase(Locale.ROOT);
+        };
+    }
+
+    private static String shortDpLabel(String dpName) {
+        String raw = nullToEmpty(dpName).trim();
+        if (raw.isEmpty()) {
+            return "";
+        }
+        String cleaned = raw.toUpperCase(Locale.ROOT)
+                .replaceAll("\\b(SECURITIES|BROKING|BANK|CAPITAL|INVEST|TECH|ASSET|SHAREKHAN|"
+                        + "SOLUTIONS|PRIVATE|LIMITED|LTD|TRADING)\\b", " ")
+                .replaceAll("[^A-Z0-9\\s]", " ");
+        String[] tokens = cleaned.trim().split("\\s+");
+        if (tokens.length == 0 || tokens[0].isEmpty()) {
+            return "";
+        }
+        String t = tokens[0];
+        return t.charAt(0) + t.substring(1).toLowerCase(Locale.ROOT);
+    }
+
+    private static String blankToNull(String s) {
+        if (s == null || s.isBlank()) {
+            return null;
+        }
+        return s.trim();
     }
 
     private static Double computeOverallXirr(List<PortfolioModelV1> books) {

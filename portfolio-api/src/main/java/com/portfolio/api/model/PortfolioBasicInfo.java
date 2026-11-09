@@ -37,6 +37,12 @@ public class PortfolioBasicInfo {
     @Schema(description = "Holding / asset line count; 0 means empty book")
     private Integer assetCount;
 
+    @Schema(description = "Book market value; used with assetCount for selectability")
+    private Double totalValue;
+
+    @Schema(description = "True when assetCount>0 or totalValue>0 (or demo/paper)")
+    private boolean hasHoldings;
+
     @Schema(description = "Soft family member id when this book is not the primary owner")
     private String familyMemberId;
 

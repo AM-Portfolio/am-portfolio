@@ -202,12 +202,14 @@ public class PortfolioController {
 
     @Operation(summary = "Get intraday data for all portfolios", operationId = "getAllPortfoliosIntraday")
     @GetMapping("/intraday")
-    public ResponseEntity<List<com.portfolio.model.portfolio.IntradayDataPoint>> getAllPortfoliosIntraday() {
+    public ResponseEntity<List<com.portfolio.model.portfolio.IntradayDataPoint>> getAllPortfoliosIntraday(
+            @RequestParam(required = false) String persona) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
         NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, null);
         String traceId = org.slf4j.MDC.get("traceId");
-        log.info("[Intraday] Request for all portfolios, user={}, traceId={}", res.userId(), traceId);
-        return ResponseEntity.ok(portfolioIntradayService.getIntraday(res.userId(), res.portfolioId()));
+        log.info("[Intraday] Request for all portfolios, user={}, persona={}, traceId={}",
+                res.userId(), persona, traceId);
+        return ResponseEntity.ok(portfolioIntradayService.getIntraday(res.userId(), res.portfolioId(), persona));
     }
 
     @Operation(summary = "Get intraday data for specific portfolio", operationId = "getPortfolioIntraday")
@@ -327,16 +329,21 @@ public class PortfolioController {
         log.info("PortfolioController - getPortfolioBasicDetails called with userId: {}", userId);
 
         List<PortfolioBasicInfo> basicInfoList = newUserPortfolioFallbackService.listBasicPortfolios(userId).stream()
-                .map(row -> new PortfolioBasicInfo(
-                        row.portfolioId(),
-                        row.portfolioName(),
-                        row.kind(),
-                        row.gapMissingCount(),
-                        row.dummy(),
-                        row.brokerType(),
-                        row.assetCount(),
-                        row.familyMemberId(),
-                        row.familyMemberName()))
+                .map(row -> {
+                    PortfolioBasicInfo info = new PortfolioBasicInfo();
+                    info.setPortfolioId(row.portfolioId());
+                    info.setPortfolioName(row.portfolioName());
+                    info.setKind(row.kind());
+                    info.setGapMissingCount(row.gapMissingCount());
+                    info.setDummy(row.dummy());
+                    info.setBrokerType(row.brokerType());
+                    info.setAssetCount(row.assetCount());
+                    info.setTotalValue(row.totalValue());
+                    info.setHasHoldings(row.hasHoldings());
+                    info.setFamilyMemberId(row.familyMemberId());
+                    info.setFamilyMemberName(row.familyMemberName());
+                    return info;
+                })
                 .collect(java.util.stream.Collectors.toList());
 
         log.info("PortfolioController - getPortfolioBasicDetails - Found {} portfolio basic details for user: {}",
@@ -684,15 +691,18 @@ public class PortfolioController {
     })
     @GetMapping("/history")
     public ResponseEntity<PortfolioHistoryResponse> getPortfolioHistory(
-            @RequestParam(required = false, defaultValue = "1M") String timeFrame) {
+            @RequestParam(required = false, defaultValue = "1M") String timeFrame,
+            @RequestParam(required = false) String persona) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
         NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, null);
-        log.info("PortfolioController - getPortfolioHistory called - User: {}, TimeFrame: {}", res.userId(), timeFrame);
+        log.info("PortfolioController - getPortfolioHistory called - User: {}, TimeFrame: {}, persona: {}",
+                res.userId(), timeFrame, persona);
 
         List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(res.userId(), res.portfolioId(), timeFrame);
         if (history == null) {
             history = java.util.Collections.emptyList();
         }
+        // persona is accepted for API parity with summary/intraday; aggregate snapshots are household-level today.
         return ResponseEntity.ok(toHistoryResponse(res.userId(), history));
     }
 

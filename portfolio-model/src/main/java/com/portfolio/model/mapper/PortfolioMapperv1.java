@@ -59,6 +59,12 @@ public class PortfolioMapperv1 {
         double equityValue = mappedEquities != null ? calculateTotalValue(mappedEquities) : 0.0;
         double mfValue = mappedFunds != null ? calculateAssetListValue(mappedFunds) : 0.0;
         double npsValue = mappedNps != null ? calculateAssetListValue(mappedNps) : 0.0;
+        double lineSum = equityValue + mfValue + npsValue;
+        // CAS fanout often sends statement totalValue with empty line arrays; keep that total.
+        Double eventTotal = portfolioEvent.getTotalValue();
+        double totalValue = lineSum > 0
+                ? lineSum
+                : (eventTotal != null && eventTotal > 0 ? eventTotal : 0.0);
         int equityCount = mappedEquities != null ? calculateAssetCount(mappedEquities) : 0;
         int mfCount = mappedFunds != null ? mappedFunds.size() : 0;
         int npsCount = mappedNps != null ? mappedNps.size() : 0;
@@ -94,7 +100,7 @@ public class PortfolioMapperv1 {
                 .cash(null)
                 .npsModels(mappedNps)
                 .assetCount(equityCount + mfCount + npsCount)
-                .totalValue(equityValue + mfValue + npsValue)
+                .totalValue(totalValue)
                 .createdAt(asOfTs)
                 .updatedAt(asOfTs)
                 .version(0L)

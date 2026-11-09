@@ -28,6 +28,7 @@ import com.portfolio.service.family.FamilyMemberService;
 import com.portfolio.service.nps.NpsImportService;
 import com.portfolio.service.intraday.IntradayCandleWarmService;
 import com.am.common.amcommondata.model.family.FamilyMember;
+import com.portfolio.service.portfolio.PortfolioHoldingsService;
 import com.portfolio.service.portfolio.PortfolioIntradayService;
 import com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer;
 import com.portfolio.service.scheduler.PortfolioHistoryJobService;
@@ -89,6 +90,7 @@ public class PortfolioUpdateConsumerService {
     private final CasImportService              casImportService;
     private final NpsImportService              npsImportService;
     private final FamilyMemberService           familyMemberService;
+    private final PortfolioHoldingsService      portfolioHoldingsService;
 
     @Value("${app.kafka.portfolio.consumer.id:am-portfolio-consumer-group}")
     private String consumerGroupId;
@@ -159,6 +161,9 @@ public class PortfolioUpdateConsumerService {
                     return;
                 }
                 casImportService.upsertFromEvent(event);
+                if (event.getUserId() != null) {
+                    portfolioHoldingsService.evictPaintCacheForUser(event.getUserId());
+                }
                 markProcessed(dedupKey);
 
             } else if ("NPS_DOCUMENT".equals(eventType)) {
@@ -172,6 +177,9 @@ public class PortfolioUpdateConsumerService {
                     return;
                 }
                 npsImportService.upsertFromEvent(event);
+                if (event.getUserId() != null) {
+                    portfolioHoldingsService.evictPaintCacheForUser(event.getUserId());
+                }
                 markProcessed(dedupKey);
 
             } else {
@@ -274,6 +282,7 @@ public class PortfolioUpdateConsumerService {
                 portfolioHoldingsRedisService.evictPortfolioHoldings(
                         saved.getOwner(), "all:" + saved.getFamilyMemberId());
             }
+            portfolioHoldingsService.evictPaintCacheForUser(saved.getOwner());
             portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
             if (portfolioId != null) {
                 portfolioIntelligenceRedisService.evict(portfolioId);

@@ -158,7 +158,9 @@ public class PortfolioServiceImpl implements PortfolioService {
         if (doc == null) {
             return "unknown";
         }
-        return brokerIdentityKey(doc.getBrokerType(), doc.getName(), doc.getId(), doc.getDematBoid());
+        return withFamilyScope(
+                brokerIdentityKey(doc.getBrokerType(), doc.getName(), doc.getId(), doc.getDematBoid()),
+                doc.getFamilyMemberId());
     }
 
     static String brokerIdentityKey(PortfolioModelV1 model) {
@@ -166,7 +168,15 @@ public class PortfolioServiceImpl implements PortfolioService {
             return "unknown";
         }
         String id = model.getId() != null ? model.getId().toString() : null;
-        return brokerIdentityKey(model.getBrokerType(), model.getName(), id, model.getDematBoid());
+        return withFamilyScope(
+                brokerIdentityKey(model.getBrokerType(), model.getName(), id, model.getDematBoid()),
+                model.getFamilyMemberId());
+    }
+
+    /** Primary and family books of the same broker must not collapse into one row. */
+    static String withFamilyScope(String base, String familyMemberId) {
+        String fm = familyMemberId == null || familyMemberId.isBlank() ? "you" : familyMemberId.trim();
+        return base + "|fm:" + fm;
     }
 
     static String brokerIdentityKey(BrokerType bt, String name, String id) {

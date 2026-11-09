@@ -26,6 +26,7 @@ import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.util.InstrumentKeys;
 import com.portfolio.redis.service.PortfolioSummaryRedisService;
 import com.portfolio.redis.session.CashSessionClock;
+import com.portfolio.service.accounts.AccountsHubService;
 import com.portfolio.service.calculator.PortfolioCalculator;
 import com.portfolio.service.NewUserPortfolioFallbackService;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
@@ -68,6 +69,9 @@ public class PortfolioOverviewService {
     @org.springframework.lang.Nullable
     private final MarketDataApiConfig marketDataApiConfig;
 
+    @org.springframework.lang.Nullable
+    private final AccountsHubService accountsHubService;
+
     public PortfolioOverviewService(
             PortfolioService portfolioService,
             PortfolioHoldingsService portfolioHoldingsService,
@@ -80,7 +84,8 @@ public class PortfolioOverviewService {
             @org.springframework.lang.Nullable MarketDataService marketDataService,
             @org.springframework.lang.Nullable CashSessionClock cashSessionClock,
             @org.springframework.lang.Nullable MarketDataApiConfig marketDataApiConfig,
-            @org.springframework.lang.Nullable NewUserPortfolioFallbackService newUserPortfolioFallbackService) {
+            @org.springframework.lang.Nullable NewUserPortfolioFallbackService newUserPortfolioFallbackService,
+            @org.springframework.lang.Nullable AccountsHubService accountsHubService) {
         this.portfolioService = portfolioService;
         this.portfolioHoldingsService = portfolioHoldingsService;
         this.portfolioMapper = portfolioMapper;
@@ -93,6 +98,7 @@ public class PortfolioOverviewService {
         this.cashSessionClock = cashSessionClock;
         this.marketDataApiConfig = marketDataApiConfig;
         this.newUserPortfolioFallbackService = newUserPortfolioFallbackService;
+        this.accountsHubService = accountsHubService;
     }
 
     /** Soft-hide Demo when real broker books exist, then keep BROKER rows only for aggregates. */
@@ -131,7 +137,10 @@ public class PortfolioOverviewService {
         Optional<PortfolioSummaryV1> cachedSummary = getCachedSummary(userId, interval, cacheId);
         if (cachedSummary.isPresent()) {
             log.info("Returning cached portfolio summary for user: {} (with price overlay)", userId);
-            return repriceCachedSummary(cachedSummary.get(), userId, cacheId, interval);
+            return applyHubResidualHeadline(
+                    repriceCachedSummary(cachedSummary.get(), userId, cacheId, interval),
+                    userId,
+                    persona);
         }
 
         log.info("Cache miss for portfolio summary - User: {}, fetching from source", userId);
@@ -141,7 +150,7 @@ public class PortfolioOverviewService {
         log.info("Retrieved {} BROKER portfolios for user: {}", portfolios.size(), userId);
 
         if (portfolios.isEmpty()) {
-            log.info("No portfolios found for user: {} - Returning empty summary", userId);
+            log.info("No portfolios found for user: {} - Returning hub residual summary", userId);
             com.portfolio.model.portfolio.v1.PortfolioSummaryV1 emptySummary = new com.portfolio.model.portfolio.v1.PortfolioSummaryV1();
             emptySummary.setCurrentValue(0.0);
             emptySummary.setInvestmentValue(0.0);
@@ -157,15 +166,32 @@ public class PortfolioOverviewService {
             emptySummary.setBrokerPortfolios(new java.util.HashMap<>());
             emptySummary.setMarketCapHoldings(new java.util.HashMap<>());
             emptySummary.setSectorialHoldings(new java.util.HashMap<>());
-            return emptySummary;
+            return applyHubResidualHeadline(emptySummary, userId, persona);
         }
 
         PortfolioSummaryV1 finalSummary = buildPortfolioSummary(portfolios, userId, cacheId, interval);
-        return finalSummary;
+        return applyHubResidualHeadline(finalSummary, userId, persona);
         } catch (Exception e) {
             log.error("Error in overviewPortfolio", e);
             throw e;
         }
+    }
+
+    /** Headline currentValue = hub residual+NPS; day P&amp;L stays from painted books. */
+    private PortfolioSummaryV1 applyHubResidualHeadline(
+            PortfolioSummaryV1 summary, String userId, String persona) {
+        if (summary == null || accountsHubService == null) {
+            return summary;
+        }
+        try {
+            double hubWealth = accountsHubService.wealthForPersona(userId, persona);
+            if (hubWealth > 0) {
+                summary.setCurrentValue(Math.round(hubWealth * 100.0) / 100.0);
+            }
+        } catch (Exception e) {
+            log.warn("Hub residual headline failed for user={}: {}", userId, e.getMessage());
+        }
+        return summary;
     }
 
     /**

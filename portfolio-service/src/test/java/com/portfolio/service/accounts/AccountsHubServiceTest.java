@@ -192,7 +192,8 @@ class AccountsHubServiceTest {
         AccountsHubModel hub = accountsHubService.hubForUser("u1");
         assertEquals(4, hub.getPortfolios().size());
         assertEquals(1, hub.getFamilyMembers().size());
-        assertEquals(2, hub.getFamilyMembers().get(0).getPortfolioCount());
+        // Directory demat rows for fm1 (D1,D2,D3) — not CAS_DEMAT book count.
+        assertEquals(3, hub.getFamilyMembers().get(0).getPortfolioCount());
     }
 
     @Test
@@ -235,12 +236,13 @@ class AccountsHubServiceTest {
                 FamilyMember.builder().id("fm1").displayName("Priyanshu").build()));
 
         AccountsHubModel hub = accountsHubService.hubForUser("u1");
-        assertEquals(300.0, hub.getStats().getPrimaryTotalValue(), 0.01);
-        assertEquals(300.0, hub.getStats().getFamilyTotalValue(), 0.01);
-        assertEquals(600.0, hub.getStats().getHouseholdTotalValue(), 0.01);
-        assertEquals(50.0, hub.getStats().getFamilySharePct(), 0.01);
+        // Books + unmatched directory residual + NPS (no longer drop directory once books > 0).
+        assertEquals(400.0, hub.getStats().getPrimaryTotalValue(), 0.01);
+        assertEquals(600.0, hub.getStats().getFamilyTotalValue(), 0.01);
+        assertEquals(1000.0, hub.getStats().getHouseholdTotalValue(), 0.01);
+        assertEquals(60.0, hub.getStats().getFamilySharePct(), 0.01);
         assertEquals(1, hub.getFamilyMembers().size());
-        assertEquals(300.0, hub.getFamilyMembers().get(0).getTotalValue(), 0.01);
+        assertEquals(600.0, hub.getFamilyMembers().get(0).getTotalValue(), 0.01);
     }
 
     @Test
@@ -269,8 +271,9 @@ class AccountsHubServiceTest {
                         .totalValue(25.0)
                         .build());
 
+        // Zerodha 200 + unmatched demat residual 100 + NPS 25.
         assertEquals(
-                225.0,
+                325.0,
                 AccountsHubService.sumValueForMemberId(demat, rows, nps, "fm1"),
                 0.01);
         var zeroBooks = List.of(
@@ -287,6 +290,67 @@ class AccountsHubServiceTest {
         assertEquals(
                 0.0,
                 AccountsHubService.sumValueForMemberId(demat, rows, nps, "other"),
+                0.01);
+    }
+
+    @Test
+    void sumValueForMemberId_usesMaxBookAndDirectoryPlusResidual() {
+        var demat = List.of(
+                DematAccountModel.builder()
+                        .accountNo("Z1")
+                        .familyMemberId("fm1")
+                        .accountType("demat")
+                        .mappedBroker("zerodha")
+                        .dpName("ZERODHA BROKING LIMITED")
+                        .holdingValue(942866.0)
+                        .build(),
+                DematAccountModel.builder()
+                        .accountNo("G1")
+                        .familyMemberId("fm1")
+                        .accountType("demat")
+                        .mappedBroker("groww")
+                        .dpName("GROWW INVEST TECH PRIVATE LIMITED")
+                        .holdingValue(106711.0)
+                        .build(),
+                DematAccountModel.builder()
+                        .accountNo("MF1")
+                        .familyMemberId("fm1")
+                        .accountType("mf")
+                        .holdingValue(127188.0)
+                        .build());
+        var rows = List.of(
+                AccountsPortfolioRow.builder()
+                        .displayName("Zerodha")
+                        .familyMemberId("fm1")
+                        .brokerType("ZERODHA")
+                        .current(930972.0)
+                        .build(),
+                AccountsPortfolioRow.builder()
+                        .displayName("Mutual Funds")
+                        .familyMemberId("fm1")
+                        .brokerType("CAS_DEMAT")
+                        .dematBoid("mf:cas")
+                        .current(127188.0)
+                        .build());
+
+        // max(Zerodha book, dir) + Groww residual + MF (matched, not double-counted).
+        assertEquals(
+                942866.0 + 106711.0 + 127188.0,
+                AccountsHubService.sumValueForMemberId(demat, rows, List.of(), "fm1"),
+                0.01);
+
+        var allBooks = List.of(
+                rows.get(0),
+                rows.get(1),
+                AccountsPortfolioRow.builder()
+                        .displayName("Groww")
+                        .familyMemberId("fm1")
+                        .brokerType("GROWW")
+                        .current(106711.0)
+                        .build());
+        assertEquals(
+                942866.0 + 106711.0 + 127188.0,
+                AccountsHubService.sumValueForMemberId(demat, allBooks, List.of(), "fm1"),
                 0.01);
     }
 }

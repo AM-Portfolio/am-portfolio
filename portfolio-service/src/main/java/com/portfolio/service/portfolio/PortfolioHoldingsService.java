@@ -258,6 +258,27 @@ public class PortfolioHoldingsService {
                 new PaintCache(holdings, System.currentTimeMillis() + PAINT_TTL_MS));
     }
 
+    /**
+     * Drop in-process paint entries for a user (household / all:you / member / book keys)
+     * so All holdings is not stuck on a stale 45s paint after document/CAS upsert.
+     */
+    public void evictPaintCacheForUser(String userId) {
+        if (userId == null || userId.isBlank()) {
+            return;
+        }
+        String prefix = userId + "|";
+        int removed = 0;
+        for (String key : paintCache.keySet()) {
+            if (key != null && key.startsWith(prefix)) {
+                paintCache.remove(key);
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            log.info("Evicted {} paint-cache entries for user={}", removed, userId);
+        }
+    }
+
     private static String paintKey(String userId, TimeInterval interval, String portfolioId) {
         String intervalCode = interval != null ? interval.getCode() : "all";
         String book = portfolioId == null || portfolioId.isBlank() ? "all" : portfolioId;

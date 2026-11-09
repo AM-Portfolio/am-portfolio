@@ -19,7 +19,8 @@ public class XRaySummaryBuilder {
             HealthScoreEngine.ASSET_FIXED_INCOME,
             HealthScoreEngine.ASSET_COMMODITY,
             HealthScoreEngine.ASSET_CASH,
-            HealthScoreEngine.ASSET_NPS
+            HealthScoreEngine.ASSET_NPS,
+            HealthScoreEngine.ASSET_MUTUAL_FUND
     );
 
     public XRayDto build(PortfolioIntelligenceSnapshot snapshot) {
