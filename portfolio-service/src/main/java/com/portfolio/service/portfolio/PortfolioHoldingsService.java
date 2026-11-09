@@ -21,6 +21,7 @@ import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.mapper.holdings.PortfolioHoldingsMapper;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.portfolio.EquityHoldings;
+import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
 import com.portfolio.model.portfolio.PortfolioHoldings;
 import com.portfolio.model.resolver.TradingSymbolResolver;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
@@ -83,7 +84,8 @@ public class PortfolioHoldingsService {
 
         if (enrich) {
             Optional<PortfolioHoldings> cachedHoldings = getCachedHoldings(userId, interval, null);
-            if (cachedHoldings.isPresent()) {
+            // ISIN-shaped symbols mean heal never ran (or MD was empty); skip cache so heal can fix.
+            if (cachedHoldings.isPresent() && !hasIsinShapedSymbols(cachedHoldings.get())) {
                 return overlayAndReturn(cachedHoldings.get());
             }
         }
@@ -120,10 +122,14 @@ public class PortfolioHoldingsService {
         Optional<PortfolioHoldings> cachedHoldings = getCachedHoldings(userId, interval, portfolioId);
         if (cachedHoldings.isPresent()) {
             if (enrich) {
-                return overlayAndReturn(cachedHoldings.get());
+                if (!hasIsinShapedSymbols(cachedHoldings.get())) {
+                    return overlayAndReturn(cachedHoldings.get());
+                }
+                log.info("Bypassing holdings cache for portfolio {} — ISIN-shaped symbols need heal", portfolioId);
+            } else {
+                log.info("Serving cached holdings structure (no price overlay) for portfolio {}", portfolioId);
+                return cachedHoldings.get();
             }
-            log.info("Serving cached holdings structure (no price overlay) for portfolio {}", portfolioId);
-            return cachedHoldings.get();
         }
 
         log.info("Cache miss for specific portfolio holdings - User: {}, Portfolio: {}", userId, portfolioId);
@@ -149,6 +155,15 @@ public class PortfolioHoldingsService {
         }
 
         return buildPortfolioHoldings(List.of(portfolio), userId, portfolioId, interval, enrich);
+    }
+
+    /** True when any equity holding still uses an ISIN as its trading symbol. */
+    private static boolean hasIsinShapedSymbols(PortfolioHoldings holdings) {
+        if (holdings == null || holdings.getEquityHoldings() == null) {
+            return false;
+        }
+        return holdings.getEquityHoldings().stream()
+                .anyMatch(h -> h != null && TradingSymbolResolver.looksLikeIsin(h.getSymbol()));
     }
 
     private PortfolioHoldings overlayAndReturn(PortfolioHoldings cached) {
@@ -291,8 +306,9 @@ public class PortfolioHoldingsService {
 
     /**
      * Read-path heal: blank / ISIN-as-symbol / scheme ISIN (INF…) / ISIN present with
-     * scheme-prefix symbol — re-run normalizer and persist only on change.
-     * Never length≤4 tickers alone (valid NSE: ITC, SBIN).
+     * scheme-prefix symbol / previously invented broker-name display tickers —
+     * re-run normalizer (ISIN → real NSE ticker from market-data only) and persist
+     * only on change. Never length≤4 tickers alone (valid NSE: ITC, SBIN).
      */
     private void healShortOrIsinSymbols(List<PortfolioModelV1> portfolios) {
         if (portfolioEquitySymbolNormalizer == null || portfolios == null || portfolios.isEmpty()) {
@@ -309,12 +325,20 @@ public class PortfolioHoldingsService {
                 }
                 String isin = e.getIsin();
                 String sym = e.getSymbol();
+                String name = e.getName();
                 boolean hasIsin = isin != null && !isin.isBlank();
                 boolean isinAsSymbol = TradingSymbolResolver.looksLikeIsin(sym);
                 boolean schemeIsin = hasIsin && isin.trim().toUpperCase().startsWith("INF");
                 boolean schemeSymbol = sym != null && sym.trim().toUpperCase().startsWith("INF");
-                if (sym == null || sym.isBlank() || isinAsSymbol || schemeIsin || schemeSymbol) {
-                    if (!hasIsin && !isinAsSymbol && !schemeSymbol) {
+                // Broker-name display tickers (PR #95) must keep healing so MD can upgrade later (PR #72).
+                boolean brokerDerivedDisplay = false;
+                if (hasIsin && name != null && !name.isBlank() && sym != null && !sym.isBlank()) {
+                    String suggested = HoldingInstrumentClassifier.suggestDisplayTickerFromName(name);
+                    brokerDerivedDisplay = suggested != null && suggested.equalsIgnoreCase(sym.trim());
+                }
+                if (sym == null || sym.isBlank() || isinAsSymbol || schemeIsin || schemeSymbol
+                        || brokerDerivedDisplay) {
+                    if (!hasIsin && !isinAsSymbol && !schemeSymbol && !brokerDerivedDisplay) {
                         continue;
                     }
                     needsHeal = true;

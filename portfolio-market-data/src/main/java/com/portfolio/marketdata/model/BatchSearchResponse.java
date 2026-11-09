@@ -37,6 +37,10 @@ public class BatchSearchResponse {
     @AllArgsConstructor
     public static class SecurityMatch {
         private String symbol;
+        /** Alternate ticker field some MD responses use instead of {@code symbol}. */
+        private String ticker;
+        /** Alternate NSE ticker field some MD responses use instead of {@code symbol}. */
+        private String nseSymbol;
         private String isin;
         private String companyName;
         private String sector;
