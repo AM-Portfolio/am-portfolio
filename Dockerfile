@@ -15,11 +15,14 @@ COPY settings.xml /root/.m2/settings.xml
 # Copy the entire project for unified build
 COPY . .
 
-# Build everything in one go
-# Because am-common-data is now a module in the root POM,
-# Maven will build it and make it available to other modules automatically.
+# Build everything in one go.
+# Secrets are preferred so the package token is not printed as a build-arg.
+# ARG remains the fallback for CI that still passes --build-arg.
 RUN --mount=type=cache,target=/root/.m2 \
-    GITHUB_ACTOR=${GITHUB_PACKAGES_USERNAME} GITHUB_TOKEN=${GITHUB_PACKAGES_TOKEN} \
+    --mount=type=secret,id=github_token,required=false \
+    --mount=type=secret,id=github_actor,required=false \
+    GITHUB_ACTOR="$(if [ -f /run/secrets/github_actor ]; then cat /run/secrets/github_actor; else printf '%s' "$GITHUB_PACKAGES_USERNAME"; fi)" \
+    GITHUB_TOKEN="$(if [ -f /run/secrets/github_token ]; then cat /run/secrets/github_token; else printf '%s' "$GITHUB_PACKAGES_TOKEN"; fi)" \
     mvn clean package -DskipTests -B -s settings.xml -U
 
 # Stage 2: Runtime with JRE 21

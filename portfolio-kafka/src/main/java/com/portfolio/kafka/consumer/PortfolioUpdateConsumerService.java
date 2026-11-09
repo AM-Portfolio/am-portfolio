@@ -10,6 +10,8 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
 
+import com.portfolio.model.events.CasDocumentEvent;
+import com.portfolio.model.events.NpsDocumentEvent;
 import com.portfolio.model.events.PortfolioUpdateEvent;
 import com.portfolio.model.history.HistoryJobMode;
 import com.portfolio.model.mapper.PortfolioMapperv1;
@@ -21,7 +23,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.portfolio.kafka.publisher.PortfolioEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
+import com.portfolio.service.cas.CasImportService;
+import com.portfolio.service.family.FamilyMemberService;
+import com.portfolio.service.nps.NpsImportService;
 import com.portfolio.service.intraday.IntradayCandleWarmService;
+import com.am.common.amcommondata.model.family.FamilyMember;
+import com.portfolio.service.portfolio.PortfolioHoldingsService;
 import com.portfolio.service.portfolio.PortfolioIntradayService;
 import com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer;
 import com.portfolio.service.scheduler.PortfolioHistoryJobService;
@@ -80,6 +87,10 @@ public class PortfolioUpdateConsumerService {
     private final PortfolioIntradayService      portfolioIntradayService;
     private final IntradayCandleWarmService     intradayCandleWarmService;
     private final PortfolioSnapshotService      portfolioSnapshotService;
+    private final CasImportService              casImportService;
+    private final NpsImportService              npsImportService;
+    private final FamilyMemberService           familyMemberService;
+    private final PortfolioHoldingsService      portfolioHoldingsService;
 
     @Value("${app.kafka.portfolio.consumer.id:am-portfolio-consumer-group}")
     private String consumerGroupId;
@@ -139,6 +150,38 @@ public class PortfolioUpdateConsumerService {
                 processTradeMessage(event);
                 markProcessed(dedupKey);
 
+            } else if ("CAS_DOCUMENT".equals(eventType)) {
+                CasDocumentEvent event = objectMapper.treeToValue(rootNode, CasDocumentEvent.class);
+                String pid = event.getUserId() != null ? event.getUserId() : "cas-" + offset;
+                log.info("Parsed CasDocumentEvent for userId={} asOf={}", event.getUserId(), event.getAsOfDate());
+                String dedupKey = buildDedupKey("CAS", pid, offset, partition);
+                if (isDuplicate(dedupKey)) {
+                    log.warn("[DEDUP] Skipping already-processed CAS message: userId={} offset={}", pid, offset);
+                    acknowledgment.acknowledge();
+                    return;
+                }
+                casImportService.upsertFromEvent(event);
+                if (event.getUserId() != null) {
+                    portfolioHoldingsService.evictPaintCacheForUser(event.getUserId());
+                }
+                markProcessed(dedupKey);
+
+            } else if ("NPS_DOCUMENT".equals(eventType)) {
+                NpsDocumentEvent event = objectMapper.treeToValue(rootNode, NpsDocumentEvent.class);
+                String pid = event.getUserId() != null ? event.getUserId() : "nps-" + offset;
+                log.info("Parsed NpsDocumentEvent for userId={} asOf={}", event.getUserId(), event.getAsOfDate());
+                String dedupKey = buildDedupKey("NPS", pid, offset, partition);
+                if (isDuplicate(dedupKey)) {
+                    log.warn("[DEDUP] Skipping already-processed NPS message: userId={} offset={}", pid, offset);
+                    acknowledgment.acknowledge();
+                    return;
+                }
+                npsImportService.upsertFromEvent(event);
+                if (event.getUserId() != null) {
+                    portfolioHoldingsService.evictPaintCacheForUser(event.getUserId());
+                }
+                markProcessed(dedupKey);
+
             } else {
                 // ── Document-parser path ──────────────────────────────────────
                 // PortfolioUpdateEvent (Document Parser) carries 'portfolioId' or 'equities'.
@@ -173,7 +216,55 @@ public class PortfolioUpdateConsumerService {
 
     // ── Message processing ───────────────────────────────────────────────────
 
+    private void attachFamilyMember(PortfolioUpdateEvent event) {
+        if (event == null || event.getUserId() == null) {
+            return;
+        }
+        if (event.getFamilyMemberId() != null && !event.getFamilyMemberId().isBlank()) {
+            log.info("PortfolioUpdate already tagged familyMemberId={} portfolioId={} broker={}",
+                    event.getFamilyMemberId(), event.getPortfolioId(), event.getBrokerType());
+            return;
+        }
+        String source = event.getDocumentSource() != null && event.getDocumentSource().contains("NPS")
+                ? "NPS"
+                : "CAS";
+        FamilyMember member = familyMemberService.resolveForImport(
+                event.getUserId(),
+                event.getIdentityMatch(),
+                event.getHolderName(),
+                event.getHolderEmail(),
+                event.getHolderPan(),
+                source);
+        if (member != null) {
+            event.setFamilyMemberId(member.getId());
+            event.setFamilyMemberName(member.getDisplayName());
+            log.info("Stamped familyMemberId={} name={} on PortfolioUpdate identityMatch={} holderEmail={} portfolioId={} broker={}",
+                    member.getId(), member.getDisplayName(), event.getIdentityMatch(),
+                    event.getHolderEmail(), event.getPortfolioId(), event.getBrokerType());
+        } else if (event.getIdentityMatch() != null
+                && "FAMILY".equalsIgnoreCase(event.getIdentityMatch().trim())) {
+            log.warn("FAMILY identityMatch but no FamilyMember resolved userId={} holderEmail={} holderName={} portfolioId={} broker={}",
+                    event.getUserId(), event.getHolderEmail(), event.getHolderName(),
+                    event.getPortfolioId(), event.getBrokerType());
+        }
+    }
+
+    private static boolean isUnresolvedFamily(PortfolioUpdateEvent event) {
+        if (event == null || event.getIdentityMatch() == null
+                || !"FAMILY".equalsIgnoreCase(event.getIdentityMatch().trim())) {
+            return false;
+        }
+        return event.getFamilyMemberId() == null || event.getFamilyMemberId().isBlank();
+    }
+
     private void processDocumentMessage(PortfolioUpdateEvent event) {
+        attachFamilyMember(event);
+        if (isUnresolvedFamily(event)) {
+            log.warn("Skipping FAMILY upsert with no family member userId={} holderEmail={} holderName={} portfolioId={} broker={}",
+                    event.getUserId(), event.getHolderEmail(), event.getHolderName(),
+                    event.getPortfolioId(), event.getBrokerType());
+            return;
+        }
         PortfolioModelV1 portfolioModel = portfolioMapper.toPortfolioModelV1(event);
         // Batch ISIN→ticker normalize (same as HTTP /sync) before persist.
         // Must not block Mongo upsert + trade fan-out if Market Data is slow/down.
@@ -187,6 +278,11 @@ public class PortfolioUpdateConsumerService {
         if (saved != null && saved.getOwner() != null) {
             String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
             portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
+            if (saved.getFamilyMemberId() != null && !saved.getFamilyMemberId().isBlank()) {
+                portfolioHoldingsRedisService.evictPortfolioHoldings(
+                        saved.getOwner(), "all:" + saved.getFamilyMemberId());
+            }
+            portfolioHoldingsService.evictPaintCacheForUser(saved.getOwner());
             portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
             if (portfolioId != null) {
                 portfolioIntelligenceRedisService.evict(portfolioId);
@@ -351,6 +447,10 @@ public class PortfolioUpdateConsumerService {
         if (saved != null && saved.getOwner() != null) {
             String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
             portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
+            if (saved.getFamilyMemberId() != null && !saved.getFamilyMemberId().isBlank()) {
+                portfolioHoldingsRedisService.evictPortfolioHoldings(
+                        saved.getOwner(), "all:" + saved.getFamilyMemberId());
+            }
             portfolioSummaryRedisService.evictPortfolioSummary(saved.getOwner(), portfolioId);
             if (portfolioId != null) {
                 portfolioIntelligenceRedisService.evict(portfolioId);

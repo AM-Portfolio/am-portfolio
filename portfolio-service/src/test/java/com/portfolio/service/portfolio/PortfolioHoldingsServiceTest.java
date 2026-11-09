@@ -95,6 +95,36 @@ public class PortfolioHoldingsServiceTest {
     }
 
     @Test
+    @DisplayName("ISIN symbol on a cached book is repriced, not rebuilt")
+    public void isinSymbolCacheHit_overlaysWithoutLoadingPortfolio() {
+        String userId = "user123";
+        String portfolioId = UUID.randomUUID().toString();
+        TimeInterval interval = TimeInterval.OVERALL;
+        EquityHoldings unlisted = EquityHoldings.builder()
+                .symbol("INE0BJO01010")
+                .sector("Private / Unlisted")
+                .currentPrice(1400.0)
+                .build();
+        PortfolioHoldings cached = PortfolioHoldings.builder()
+                .userId(userId)
+                .equityHoldings(List.of(unlisted))
+                .lastUpdated(java.time.LocalDateTime.now())
+                .build();
+
+        when(portfolioHoldingsRedisService.getLatestHoldings(userId, interval, portfolioId))
+                .thenReturn(Optional.of(cached));
+        when(portfolioCalculator.repriceHoldings(any())).thenReturn(List.of(unlisted));
+
+        PortfolioHoldings result = portfolioHoldingsService.getPortfolioHoldings(
+                userId, portfolioId, interval, true);
+
+        assertThat(result.getEquityHoldings()).containsExactly(unlisted);
+        verify(portfolioService, never()).getPortfolioById(any());
+        verify(portfolioCalculator, never()).enrichHoldings(any());
+        verify(portfolioCalculator, times(1)).repriceHoldings(any());
+    }
+
+    @Test
     @DisplayName("getPortfolioHoldings specific id should use getPortfolioById")
     public void getPortfolioHoldings_specificId_usesGetById() {
         String userId = "user123";

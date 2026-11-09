@@ -9,15 +9,18 @@ import com.portfolio.model.portfolio.EquityHoldings;
 public class EquityHoldingsMapper {
     public EquityHoldings toEquityHoldings(EquityModel equityModel) {
         String normalizedSymbol = com.portfolio.model.util.SymbolResolver.normalize(equityModel.getSymbol());
-        Double avg = equityModel.getAvgBuyingPrice();
+        boolean inventedCasCost = PortfolioHoldingsMapper.looksLikeInventedCasCost(equityModel);
+        Double avg = inventedCasCost ? null : equityModel.getAvgBuyingPrice();
         Double qty = equityModel.getQuantity();
         Double investmentCost = null;
-        if (avg != null && avg > 0 && qty != null) {
-            investmentCost = avg * qty;
-        } else if (equityModel.getInvestmentValue() != null && equityModel.getInvestmentValue() > 0) {
-            investmentCost = equityModel.getInvestmentValue();
-            if ((avg == null || avg <= 0) && qty != null && qty > 0) {
-                avg = investmentCost / qty;
+        if (!inventedCasCost) {
+            if (avg != null && avg > 0 && qty != null) {
+                investmentCost = avg * qty;
+            } else if (equityModel.getInvestmentValue() != null && equityModel.getInvestmentValue() > 0) {
+                investmentCost = equityModel.getInvestmentValue();
+                if ((avg == null || avg <= 0) && qty != null && qty > 0) {
+                    avg = investmentCost / qty;
+                }
             }
         }
         Double importMark = equityModel.getImportMarkPrice();

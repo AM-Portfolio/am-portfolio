@@ -8,6 +8,7 @@ import com.am.common.amcommondata.service.SecurityService;
 import com.am.common.amcommondata.service.marketcap.MarketCapMongoService;
 import com.am.common.amcommondata.document.marketcap.MarketCapDocument;
 import com.portfolio.marketdata.model.BatchSearchResponse;
+import com.portfolio.model.reference.ListedEquitySectorCatalog;
 import com.portfolio.marketdata.model.indices.IndexConstituent;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.marketdata.service.NseIndicesService;
@@ -167,6 +168,7 @@ public class SecurityDetailsService {
                 log.warn("Could not find security details for symbols: {}", missingSymbols);
             }
 
+            applyListedSectorCatalog(resultMap, symbols);
             return resultMap;
         } catch (Exception e) {
             log.error("Error retrieving security details for symbols: {}", symbols, e);
@@ -244,8 +246,8 @@ public class SecurityDetailsService {
             existing.setMetadata(SecurityMetadataModel.builder().build());
         }
         SecurityMetadataModel meta = existing.getMetadata();
-        if (isMissingSector(meta.getSector()) && match.getSector() != null) {
-            meta.setSector(match.getSector());
+        if (isMissingSector(meta.getSector()) && !isMissingSector(match.getSector())) {
+            meta.setSector(match.getSector().trim());
         }
         if (isMissingSector(meta.getIndustry()) && match.getIndustry() != null) {
             meta.setIndustry(match.getIndustry());
@@ -258,6 +260,35 @@ public class SecurityDetailsService {
         }
         if (meta.getSecurityName() == null && match.getCompanyName() != null) {
             meta.setSecurityName(match.getCompanyName());
+        }
+    }
+
+    private void applyListedSectorCatalog(Map<String, SecurityModel> resultMap, List<String> symbols) {
+        for (String symbol : symbols) {
+            if (!isMissingSectorMeta(resultMap.get(symbol))) {
+                continue;
+            }
+            ListedEquitySectorCatalog.Profile profile = ListedEquitySectorCatalog.find(symbol, null);
+            if (profile == null || isMissingSector(profile.sector())) {
+                continue;
+            }
+            SecurityModel existing = resultMap.get(symbol);
+            if (existing == null || existing.getMetadata() == null) {
+                resultMap.put(symbol, SecurityModel.builder()
+                        .key(SecurityKeyModel.builder().symbol(symbol).build())
+                        .metadata(SecurityMetadataModel.builder()
+                                .sector(profile.sector())
+                                .industry(profile.industry())
+                                .securityName(profile.symbol())
+                                .build())
+                        .build());
+                continue;
+            }
+            SecurityMetadataModel meta = existing.getMetadata();
+            meta.setSector(profile.sector());
+            if (isMissingSector(meta.getIndustry()) && profile.industry() != null) {
+                meta.setIndustry(profile.industry());
+            }
         }
     }
 

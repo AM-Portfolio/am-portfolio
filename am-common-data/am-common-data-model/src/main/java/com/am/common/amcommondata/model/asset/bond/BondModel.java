@@ -27,7 +27,7 @@ public class BondModel extends AssetModel {
     private Boolean isCallable;
     private Double callPrice;
     private String interestPaymentType; // Fixed, Floating
-    private String isin;
+    // isin lives on AssetModel — do not redeclare (Spring Data Mongo uniqueness).
     private String currency;
     private Double minimumInvestment;
     private String taxStatus;

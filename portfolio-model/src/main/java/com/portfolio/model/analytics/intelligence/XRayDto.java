@@ -19,6 +19,8 @@ public class XRayDto {
     private List<WeightSliceDto> marketCapWeights;
     /** EQUITY / FIXED_INCOME / COMMODITY / CASH / MUTUAL_FUND slices (sum ≈ 100%). */
     private List<WeightSliceDto> assetClassWeights;
+    /** Per-broker/book contribution (All Portfolios X-Ray "By Portfolio" tab). */
+    private List<WeightSliceDto> portfolioWeights;
     /** Portfolio book NAV used as X-Ray denominator (INR). */
     private Double totalValue;
 
