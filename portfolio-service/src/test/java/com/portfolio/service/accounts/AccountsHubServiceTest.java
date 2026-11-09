@@ -2,12 +2,16 @@ package com.portfolio.service.accounts;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+
+import com.am.common.amcommondata.model.asset.equity.EquityModel;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -44,6 +48,7 @@ class AccountsHubServiceTest {
 
     @Test
     void hubForUser_composesIdentityStatsAndPortfolios() {
+        AccountsHubService.invalidateXirrCache("u1");
         when(casImportService.accountsForOwnerAllPersonas("u1")).thenReturn(List.of(
                 DematAccountModel.builder()
                         .accountNo("1208")
@@ -94,7 +99,138 @@ class AccountsHubServiceTest {
         assertEquals(2, hub.getDematAccounts().size());
         assertEquals("Spouse", hub.getDematAccounts().get(0).getNominee());
         assertTrue(Boolean.TRUE.equals(hub.getDematAccounts().get(0).getNomineeRegistered()));
-        assertTrue(hub.getStats().getOverallXirrPct() == null);
+        // Portfolio-level investmentAmount + totalValue synthesizes dated cashflows.
+        assertNotNull(hub.getStats().getOverallXirrPct());
+    }
+
+    @Test
+    void computeOverallXirr_usesAssetCostAndCreatedAt() {
+        LocalDateTime bought = LocalDateTime.now().minusDays(30);
+        EquityModel eq = EquityModel.builder()
+                .symbol("RELIANCE")
+                .quantity(10.0)
+                .avgBuyingPrice(100.0)
+                .investmentValue(1000.0)
+                .currentValue(1200.0)
+                .createdAt(bought) 
+                
+                .build();
+        PortfolioModelV1 book = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .name("Zerodha")
+                .brokerType(BrokerType.ZERODHA)
+                .totalValue(1200.0)
+                .investmentAmount(1000.0)
+                .equityModels(List.of(eq))
+                .createdAt(bought)
+                .build();
+        Double xirr = AccountsHubService.computeOverallXirr(List.of(book));
+        assertNotNull(xirr);
+        assertTrue(xirr > 0);
+    }
+
+    @Test
+    void computeOverallXirr_fallsBackWhenCreatedAtMissing() {
+        EquityModel eq = EquityModel.builder()
+                .symbol("INFY")
+                .quantity(5.0)
+                .avgBuyingPrice(200.0)
+                .investmentValue(1000.0)
+                .currentValue(1100.0)
+                .build();
+        PortfolioModelV1 book = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .name("Groww")
+                .brokerType(BrokerType.GROWW)
+                .totalValue(1100.0)
+                .investmentAmount(1000.0)
+                .equityModels(List.of(eq))
+                .build();
+        assertNotNull(AccountsHubService.computeOverallXirr(List.of(book)));
+    }
+
+    @Test
+    void computeOverallXirr_nullWhenNoCapital() {
+        PortfolioModelV1 book = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .name("Empty")
+                .brokerType(BrokerType.ZERODHA)
+                .totalValue(0.0)
+                .build();
+        assertNull(AccountsHubService.computeOverallXirr(List.of(book)));
+    }
+
+    @Test
+    void computeOverallXirr_portfolioLevelWhenAssetsMissingButInvestedSet() {
+        PortfolioModelV1 kotak = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .name("Kotak")
+                .brokerType(BrokerType.KOTAK)
+                .familyMemberId("fm1")
+                .totalValue(42339.65)
+                .investmentAmount(0.0)
+                .assetCount(13)
+                .build();
+        PortfolioModelV1 cdsl = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .name("CDSL")
+                .brokerType(BrokerType.CDSL)
+                .familyMemberId("fm1")
+                .totalValue(127188.22)
+                .investmentAmount(111500.0)
+                .assetCount(27)
+                .build();
+        assertNotNull(AccountsHubService.computeOverallXirr(List.of(cdsl)));
+        assertNotNull(AccountsHubService.computeOverallXirr(List.of(kotak, cdsl)));
+    }
+
+    @Test
+    void hubForUser_computesPersonaXirrForFamilyAndHousehold() {
+        AccountsHubService.invalidateXirrCache("u1");
+        LocalDateTime bought = LocalDateTime.now().minusDays(60);
+        when(casImportService.accountsForOwnerAllPersonas("u1")).thenReturn(List.of());
+        when(casImportService.latestMeta("u1")).thenReturn(Optional.empty());
+        when(npsImportService.listMetasForOwner("u1")).thenReturn(List.of());
+        when(portfolioService.getPortfoliosByUserId("u1")).thenReturn(List.of(
+                PortfolioModelV1.builder()
+                        .id(UUID.randomUUID())
+                        .name("You Groww")
+                        .brokerType(BrokerType.GROWW)
+                        .totalValue(2000.0)
+                        .investmentAmount(1500.0)
+                        .equityModels(List.of(EquityModel.builder()
+                                .symbol("TCS")
+                                .quantity(1.0)
+                                .investmentValue(1500.0)
+                                .currentValue(2000.0)
+                                .createdAt(bought)
+                                .build()))
+                        .createdAt(bought)
+                        .build(),
+                PortfolioModelV1.builder()
+                        .id(UUID.randomUUID())
+                        .name("Priyanshu Zerodha")
+                        .brokerType(BrokerType.ZERODHA)
+                        .familyMemberId("fm1")
+                        .totalValue(10000.0)
+                        .investmentAmount(8000.0)
+                        .equityModels(List.of(EquityModel.builder()
+                                .symbol("HDFCBANK")
+                                .quantity(10.0)
+                                .investmentValue(8000.0)
+                                .currentValue(10000.0)
+                                .createdAt(bought)
+                                .build()))
+                        .createdAt(bought)
+                        .build()));
+        when(familyMemberService.listForOwner("u1")).thenReturn(List.of(
+                FamilyMember.builder().id("fm1").displayName("Priyanshu").build()));
+
+        AccountsHubModel hub = accountsHubService.hubForUser("u1");
+        assertNotNull(hub.getStats().getOverallXirrPct());
+        assertNotNull(hub.getStats().getHouseholdXirrPct());
+        assertEquals(1, hub.getFamilyMembers().size());
+        assertNotNull(hub.getFamilyMembers().get(0).getXirrPct());
     }
 
     @Test

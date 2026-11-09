@@ -76,6 +76,7 @@ public class PortfolioMapper {
                 .cash(cash)
                 .npsModels(npsModels)
                 .totalValue(document.getTotalValue())
+                .investmentAmount(document.getInvestmentAmount())
                 .brokerType(document.getBrokerType())
                 .portfolioKind(PortfolioKind.orBroker(document.getPortfolioKind()))
                 .allocations(document.getAllocations() != null
@@ -124,6 +125,7 @@ public class PortfolioMapper {
                 .cash(mapAssetsToDocument(model.getCash()))
                 .npsModels(mapNpsAssetsToDocument(model.getNpsModels()))
                 .totalValue(model.getTotalValue())
+                .investmentAmount(model.getInvestmentAmount())
                 .brokerType(model.getBrokerType())
                 .portfolioKind(PortfolioKind.orBroker(model.getPortfolioKind()))
                 .allocations(model.getAllocations() != null
