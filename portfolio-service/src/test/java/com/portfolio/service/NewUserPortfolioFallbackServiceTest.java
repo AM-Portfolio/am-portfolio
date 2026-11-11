@@ -186,8 +186,8 @@ class NewUserPortfolioFallbackServiceTest {
                 .name("Dhan")
                 .portfolioKind(PortfolioKind.BROKER)
                 .brokerType(BrokerType.DHAN)
-                .familyMemberId("fm-priyanshu")
-                .familyMemberName("Priyanshu Kumar")
+                .familyMemberId("fm-member")
+                .familyMemberName("Test Holder")
                 .build();
         when(portfolioService.getPortfoliosByUserId(USER)).thenReturn(List.of(primary, family));
 
@@ -199,11 +199,11 @@ class NewUserPortfolioFallbackServiceTest {
                 .findFirst()
                 .orElseThrow();
         NewUserPortfolioFallbackService.BasicPortfolioRow familyRow = rows.stream()
-                .filter(r -> "fm-priyanshu".equals(r.familyMemberId()))
+                .filter(r -> "fm-member".equals(r.familyMemberId()))
                 .findFirst()
                 .orElseThrow();
         assertThat(primaryRow.familyMemberName()).isNull();
-        assertThat(familyRow.familyMemberName()).isEqualTo("Priyanshu Kumar");
+        assertThat(familyRow.familyMemberName()).isEqualTo("Test Holder");
         assertThat(familyRow.brokerType()).isEqualTo("DHAN");
     }
 

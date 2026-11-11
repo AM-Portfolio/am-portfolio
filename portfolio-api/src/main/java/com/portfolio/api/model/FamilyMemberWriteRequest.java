@@ -16,9 +16,9 @@ import lombok.NoArgsConstructor;
 @JsonInclude(Include.NON_NULL)
 @Schema(description = "Create or update a soft family member under the authenticated owner")
 public class FamilyMemberWriteRequest {
-    @Schema(description = "Display name", example = "Priyanshu Kumar")
+    @Schema(description = "Display name", example = "Test Holder")
     private String displayName;
 
-    @Schema(description = "Optional email used for CAS/NPS identity match", example = "priyanshukpd@gmail.com")
+    @Schema(description = "Optional email used for CAS/NPS identity match", example = "user@example.com")
     private String email;
 }

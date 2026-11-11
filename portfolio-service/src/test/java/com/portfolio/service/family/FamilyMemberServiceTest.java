@@ -89,28 +89,28 @@ class FamilyMemberServiceTest {
     @Test
     void familyMatchesByPanWhenEmailMissing() {
         when(familyMemberRepository.consolidateObjectIdStringTwins("u1")).thenReturn(0);
-        when(familyMemberRepository.findFirstByOwnerUserIdAndPanNorm("u1", "JYQPK9320A"))
+        when(familyMemberRepository.findFirstByOwnerUserIdAndPanNorm("u1", "ABCDE1234F"))
                 .thenReturn(Optional.of(FamilyMemberDocument.builder()
                         .id("fm-pan")
                         .ownerUserId("u1")
-                        .displayName("Priyanshu Kumar")
-                        .pan("JYQPK9320A")
-                        .panNorm("JYQPK9320A")
+                        .displayName("Test Holder")
+                        .pan("ABCDE1234F")
+                        .panNorm("ABCDE1234F")
                         .build()));
         when(familyMemberRepository.savePreservingBsonId(any())).thenAnswer(inv -> inv.getArgument(0));
 
         FamilyMember m = familyMemberService.resolveForImport(
-                "u1", "FAMILY", "PRIYANSHU KUMAR", null, "JYQPK9320A", "CAS");
+                "u1", "FAMILY", "Test Holder", null, "ABCDE1234F", "CAS");
         assertEquals("fm-pan", m.getId());
-        assertEquals("JYQPK9320A", m.getPan());
+        assertEquals("ABCDE1234F", m.getPan());
     }
 
     @Test
     void familyCreatesMemberWithPan() {
         when(familyMemberRepository.consolidateObjectIdStringTwins("u1")).thenReturn(0);
-        when(familyMemberRepository.findFirstByOwnerUserIdAndEmailNorm("u1", "priyanshukpd@gmail.com"))
+        when(familyMemberRepository.findFirstByOwnerUserIdAndEmailNorm("u1", "user@example.com"))
                 .thenReturn(Optional.empty());
-        when(familyMemberRepository.findFirstByOwnerUserIdAndPanNorm("u1", "JYQPK9320A"))
+        when(familyMemberRepository.findFirstByOwnerUserIdAndPanNorm("u1", "ABCDE1234F"))
                 .thenReturn(Optional.empty());
         when(familyMemberRepository.countByOwnerUserId("u1")).thenReturn(0L);
         when(familyMemberRepository.savePreservingBsonId(any())).thenAnswer(inv -> {
@@ -120,32 +120,32 @@ class FamilyMemberServiceTest {
         });
 
         FamilyMember m = familyMemberService.resolveForImport(
-                "u1", "FAMILY", "PRIYANSHU KUMAR", "priyanshukpd@gmail.com", "JYQPK9320A", "CAS");
+                "u1", "FAMILY", "Test Holder", "user@example.com", "ABCDE1234F", "CAS");
         assertEquals("fm-new-pan", m.getId());
         ArgumentCaptor<FamilyMemberDocument> cap = ArgumentCaptor.forClass(FamilyMemberDocument.class);
         verify(familyMemberRepository).savePreservingBsonId(cap.capture());
-        assertEquals("JYQPK9320A", cap.getValue().getPanNorm());
+        assertEquals("ABCDE1234F", cap.getValue().getPanNorm());
     }
 
     @Test
     void familyReplacesGenericDisplayNameWhenHolderNameArrives() {
         when(familyMemberRepository.consolidateObjectIdStringTwins("u1")).thenReturn(0);
-        when(familyMemberRepository.findFirstByOwnerUserIdAndEmailNorm("u1", "priyanshukpd@gmail.com"))
+        when(familyMemberRepository.findFirstByOwnerUserIdAndEmailNorm("u1", "user@example.com"))
                 .thenReturn(Optional.of(FamilyMemberDocument.builder()
                         .id("fm1")
                         .ownerUserId("u1")
                         .displayName("Family member")
-                        .email("priyanshukpd@gmail.com")
-                        .emailNorm("priyanshukpd@gmail.com")
+                        .email("user@example.com")
+                        .emailNorm("user@example.com")
                         .build()));
         when(familyMemberRepository.savePreservingBsonId(any())).thenAnswer(inv -> inv.getArgument(0));
 
         FamilyMember m = familyMemberService.resolveForImport(
-                "u1", "FAMILY", "PRIYANSHU KUMAR", "priyanshukpd@gmail.com", "CAS");
-        assertEquals("PRIYANSHU KUMAR", m.getDisplayName());
+                "u1", "FAMILY", "Test Holder", "user@example.com", "CAS");
+        assertEquals("Test Holder", m.getDisplayName());
         ArgumentCaptor<FamilyMemberDocument> cap = ArgumentCaptor.forClass(FamilyMemberDocument.class);
         verify(familyMemberRepository).savePreservingBsonId(cap.capture());
-        assertEquals("priyanshu kumar", cap.getValue().getNameNorm());
+        assertEquals("test holder", cap.getValue().getNameNorm());
     }
 
     @Test

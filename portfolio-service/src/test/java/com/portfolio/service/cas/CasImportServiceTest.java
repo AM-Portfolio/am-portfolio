@@ -71,9 +71,9 @@ class CasImportServiceTest {
         when(familyMemberService.resolveForImport(any(), any(), any(), any(), any(), any()))
                 .thenReturn(com.am.common.amcommondata.model.family.FamilyMember.builder()
                         .id("fm1")
-                        .displayName("Priyanshu Kumar")
-                        .email("priyanshukpd@gmail.com")
-                        .pan("JYQPK9320A")
+                        .displayName("Test Holder")
+                        .email("user@example.com")
+                        .pan("ABCDE1234F")
                         .build());
         when(casImportRepository.findFirstByOwnerAndFamilyMemberIdOrderByAsOfDateDescImportedAtDesc("u1", "fm1"))
                 .thenReturn(Optional.empty());
@@ -85,17 +85,17 @@ class CasImportServiceTest {
                 .eventType("CAS_DOCUMENT")
                 .userId("u1")
                 .identityMatch("FAMILY")
-                .holderName("Priyanshu Kumar")
-                .holderEmail("priyanshukpd@gmail.com")
-                .holderPan("JYQPK9320A")
+                .holderName("Test Holder")
+                .holderEmail("user@example.com")
+                .holderPan("ABCDE1234F")
                 .documentSource("CDSL_CAS")
                 .asOfDate(LocalDate.of(2026, 8, 31))
                 .build();
 
         CasImportDocument saved = casImportService.upsertFromEvent(event);
         assertEquals("fm1", saved.getFamilyMemberId());
-        assertEquals("Priyanshu Kumar", saved.getFamilyMemberName());
-        assertEquals("JYQPK9320A", saved.getHolderPan());
+        assertEquals("Test Holder", saved.getFamilyMemberName());
+        assertEquals("ABCDE1234F", saved.getHolderPan());
         verify(casImportRepository)
                 .findFirstByOwnerAndFamilyMemberIdOrderByAsOfDateDescImportedAtDesc("u1", "fm1");
     }
@@ -105,18 +105,18 @@ class CasImportServiceTest {
         when(familyMemberService.resolveForImport(any(), any(), any(), any(), any(), any()))
                 .thenReturn(com.am.common.amcommondata.model.family.FamilyMember.builder()
                         .id("fm1")
-                        .displayName("Priyanshu Kumar")
-                        .email("priyanshukpd@gmail.com")
-                        .pan("JYQPK9320A")
+                        .displayName("Test Holder")
+                        .email("user@example.com")
+                        .pan("ABCDE1234F")
                         .build());
         when(casImportRepository.findFirstByOwnerAndFamilyMemberIdOrderByAsOfDateDescImportedAtDesc("u1", "fm1"))
                 .thenReturn(Optional.empty());
         CasImportDocument primary = CasImportDocument.builder()
                 .id("cas-primary")
                 .owner("u1")
-                .holderName("PRIYANSHU KUMAR")
-                .holderEmail("priyanshukpd@gmail.com")
-                .holderPan("JYQPK9320A")
+                .holderName("Test Holder")
+                .holderEmail("user@example.com")
+                .holderPan("ABCDE1234F")
                 .build();
         when(casImportRepository.findFirstByOwnerAndFamilyMemberIdIsNullOrderByAsOfDateDescImportedAtDesc("u1"))
                 .thenReturn(Optional.of(primary));
@@ -126,9 +126,9 @@ class CasImportServiceTest {
                 .eventType("CAS_DOCUMENT")
                 .userId("u1")
                 .identityMatch("FAMILY")
-                .holderName("Priyanshu Kumar")
-                .holderEmail("priyanshukpd@gmail.com")
-                .holderPan("JYQPK9320A")
+                .holderName("Test Holder")
+                .holderEmail("user@example.com")
+                .holderPan("ABCDE1234F")
                 .documentSource("CDSL_CAS")
                 .asOfDate(LocalDate.of(2026, 8, 31))
                 .accountDirectory(List.of(

@@ -56,7 +56,7 @@ class NpsImportServiceTest {
                 .documentSource("NPS_STATEMENT")
                 .asOfDate(LocalDate.of(2026, 9, 30))
                 .statementTo(LocalDate.of(2026, 9, 30))
-                .subscriber(Map.of("pran", "110115289881", "name", "Test User"))
+                .subscriber(Map.of("pran", "110000000000", "name", "Test User"))
                 .tiers(List.of(
                         Map.of(
                                 "tier", "I",
@@ -65,7 +65,7 @@ class NpsImportServiceTest {
                 .build();
 
         NpsImportDocument saved = npsImportService.upsertFromEvent(event);
-        assertEquals("110115289881", saved.getPran());
+        assertEquals("110000000000", saved.getPran());
         assertEquals("u1", saved.getOwner());
 
         ArgumentCaptor<NpsImportDocument> cap = ArgumentCaptor.forClass(NpsImportDocument.class);
@@ -79,10 +79,10 @@ class NpsImportServiceTest {
         when(npsImportRepository.findFirstByOwnerOrderByAsOfDateDescImportedAtDesc("u1"))
                 .thenReturn(Optional.of(NpsImportDocument.builder()
                         .owner("u1")
-                        .pran("110115289881")
+                        .pran("110000000000")
                         .asOfDate(LocalDate.of(2026, 9, 30))
                         .subscriber(Map.of(
-                                "pran", "110115289881",
+                                "pran", "110000000000",
                                 "name", "MUNISH",
                                 "registrationDate", "21-Dec-20",
                                 "nominee", Map.of("name", "ABHIMANYU KUMAR", "percentage", 100.0)))

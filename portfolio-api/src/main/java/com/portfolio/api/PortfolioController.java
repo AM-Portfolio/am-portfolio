@@ -72,6 +72,10 @@ public class PortfolioController {
             summary = "Accounts hub",
             description = "Identity + demat/MF directory + NPS meta + per-broker portfolio amounts for dashboard",
             operationId = "getAccountsHub")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Accounts hub payload"),
+            @ApiResponse(responseCode = "401", description = "Unauthenticated")
+    })
     @GetMapping("/accounts-hub")
     public ResponseEntity<com.am.common.amcommondata.model.accounts.AccountsHubModel> getAccountsHub() {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
@@ -79,6 +83,10 @@ public class PortfolioController {
     }
 
     @Operation(summary = "List soft family members", operationId = "listFamilyMembers")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Family members"),
+            @ApiResponse(responseCode = "401", description = "Unauthenticated")
+    })
     @GetMapping("/family-members")
     public ResponseEntity<List<com.am.common.amcommondata.model.family.FamilyMember>> listFamilyMembers() {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
@@ -86,6 +94,10 @@ public class PortfolioController {
     }
 
     @Operation(summary = "Get soft family member", operationId = "getFamilyMember")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Family member"),
+            @ApiResponse(responseCode = "404", description = "Not found or not owned")
+    })
     @GetMapping("/family-members/{familyMemberId}")
     public ResponseEntity<com.am.common.amcommondata.model.family.FamilyMember> getFamilyMember(
             @PathVariable String familyMemberId) {
@@ -111,6 +123,10 @@ public class PortfolioController {
     }
 
     @Operation(summary = "Update soft family member", operationId = "updateFamilyMember")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Updated"),
+            @ApiResponse(responseCode = "404", description = "Not found or not owned")
+    })
     @PutMapping("/family-members/{familyMemberId}")
     public ResponseEntity<com.am.common.amcommondata.model.family.FamilyMember> updateFamilyMember(
             @PathVariable String familyMemberId,
@@ -139,6 +155,10 @@ public class PortfolioController {
     }
 
     @Operation(summary = "CAS account directory", description = "Demat + MF accounts from latest CDSL CAS import", operationId = "listCasAccounts")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "CAS accounts"),
+            @ApiResponse(responseCode = "401", description = "Unauthenticated")
+    })
     @GetMapping("/accounts")
     public ResponseEntity<List<com.am.common.amcommondata.model.demat.DematAccountModel>> listCasAccounts() {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
@@ -146,6 +166,10 @@ public class PortfolioController {
     }
 
     @Operation(summary = "CAS account by number", operationId = "getCasAccount")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "CAS account"),
+            @ApiResponse(responseCode = "404", description = "Account not found")
+    })
     @GetMapping("/accounts/{accountNo}")
     public ResponseEntity<com.am.common.amcommondata.model.demat.DematAccountModel> getCasAccount(
             @PathVariable String accountNo) {
@@ -156,6 +180,10 @@ public class PortfolioController {
     }
 
     @Operation(summary = "Latest CAS import meta", operationId = "getLatestCas")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Latest CAS meta"),
+            @ApiResponse(responseCode = "404", description = "No CAS import yet")
+    })
     @GetMapping("/cas/latest")
     public ResponseEntity<com.am.common.amcommondata.model.cas.CasDocumentMeta> getLatestCas() {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
@@ -165,6 +193,10 @@ public class PortfolioController {
     }
 
     @Operation(summary = "Latest NPS import meta", operationId = "getLatestNps")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Latest NPS meta"),
+            @ApiResponse(responseCode = "404", description = "No NPS import yet")
+    })
     @GetMapping("/nps/latest")
     public ResponseEntity<com.am.common.amcommondata.model.nps.NpsDocumentMeta> getLatestNps() {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
@@ -651,10 +683,12 @@ public class PortfolioController {
             if (res.portfolioId() != null && !res.portfolioId().trim().isEmpty() && !res.portfolioId().equals(res.userId())) {
                 // Filter by specific portfolio
                 log.info("PortfolioController - getPortfolioHoldings - Filtering by portfolio: {}", res.portfolioId());
-                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(res.userId(), res.portfolioId(), timeInterval);
+                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(
+                        res.userId(), res.portfolioId(), timeInterval, assetClass);
             } else {
                 // Get holdings for all portfolios
-                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(res.userId(), timeInterval, persona);
+                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(
+                        res.userId(), timeInterval, persona, assetClass);
             }
 
             if (portfolioHoldings == null) {
@@ -662,16 +696,6 @@ public class PortfolioController {
                         "PortfolioController - getPortfolioHoldings - No holdings found for user: {} and portfolio: {}. Returning empty state.",
                         res.userId(), res.portfolioId() != null ? res.portfolioId() : "all");
                 return ResponseEntity.ok(PortfolioHoldings.empty());
-            }
-
-            if (assetClass != null && !assetClass.isBlank()
-                    && portfolioHoldings.getEquityHoldings() != null) {
-                String want = assetClass.trim().toLowerCase();
-                portfolioHoldings.setEquityHoldings(
-                        portfolioHoldings.getEquityHoldings().stream()
-                                .filter(h -> h.getAssetClass() != null
-                                        && want.equalsIgnoreCase(h.getAssetClass()))
-                                .toList());
             }
 
             log.info(

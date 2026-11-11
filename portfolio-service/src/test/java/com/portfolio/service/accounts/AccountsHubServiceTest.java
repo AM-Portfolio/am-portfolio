@@ -209,7 +209,7 @@ class AccountsHubServiceTest {
                         .build(),
                 PortfolioModelV1.builder()
                         .id(UUID.randomUUID())
-                        .name("Priyanshu Zerodha")
+                        .name("Test Holder Zerodha")
                         .brokerType(BrokerType.ZERODHA)
                         .familyMemberId("fm1")
                         .totalValue(10000.0)
@@ -224,7 +224,7 @@ class AccountsHubServiceTest {
                         .createdAt(bought)
                         .build()));
         when(familyMemberService.listForOwner("u1")).thenReturn(List.of(
-                FamilyMember.builder().id("fm1").displayName("Priyanshu").build()));
+                FamilyMember.builder().id("fm1").displayName("Test Holder").build()));
 
         AccountsHubModel hub = accountsHubService.hubForUser("u1");
         assertNotNull(hub.getStats().getOverallXirrPct());
@@ -320,15 +320,15 @@ class AccountsHubServiceTest {
         when(familyMemberService.listForOwner("u1")).thenReturn(List.of(
                 FamilyMember.builder()
                         .id("fm1")
-                        .displayName("Priyanshu Kumar")
-                        .email("priyanshukpd@gmail.com")
+                        .displayName("Test Holder")
+                        .email("user@example.com")
                         .source("CAS")
                         .build()));
 
         AccountsHubModel hub = accountsHubService.hubForUser("u1");
         assertEquals(4, hub.getPortfolios().size());
         assertEquals(1, hub.getFamilyMembers().size());
-        // Directory demat rows for fm1 (D1,D2,D3) — not CAS_DEMAT book count.
+        // Directory demat rows for fm1 (D1,D2,D3) - not CAS_DEMAT book count.
         assertEquals(3, hub.getFamilyMembers().get(0).getPortfolioCount());
     }
 
@@ -369,7 +369,7 @@ class AccountsHubServiceTest {
                         .totalValue(200.0)
                         .build()));
         when(familyMemberService.listForOwner("u1")).thenReturn(List.of(
-                FamilyMember.builder().id("fm1").displayName("Priyanshu").build()));
+                FamilyMember.builder().id("fm1").displayName("Test Holder").build()));
 
         AccountsHubModel hub = accountsHubService.hubForUser("u1");
         // Books + unmatched directory residual + NPS (no longer drop directory once books > 0).

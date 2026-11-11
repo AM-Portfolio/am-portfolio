@@ -171,14 +171,14 @@ class AggregatePortfolioFactoryTest {
                 .id(UUID.randomUUID())
                 .name("Mirae")
                 .owner("user-1")
-                .familyMemberName("Priyanshu")
+                .familyMemberName("Test Holder")
                 .brokerType(BrokerType.CAS_DEMAT)
                 .portfolioKind(PortfolioKind.BROKER)
                 .totalValue(2_000.0)
                 .build();
         var values = AggregatePortfolioFactory.brokerBookValues(List.of(yours, family));
         assertEquals(1_000.0, values.get("Mirae (You)"), 1e-9);
-        assertEquals(2_000.0, values.get("Mirae (Priyanshu)"), 1e-9);
+        assertEquals(2_000.0, values.get("Mirae (Test Holder)"), 1e-9);
     }
 
     private static PortfolioModelV1 broker(String name, BrokerType type, EquityModel... equities) {

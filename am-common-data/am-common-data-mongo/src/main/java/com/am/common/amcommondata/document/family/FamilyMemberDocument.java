@@ -42,7 +42,7 @@ public class FamilyMemberDocument extends BaseDocument {
     @Field("nameNorm")
     private String nameNorm;
 
-    /** Indian PAN as shown on CAS cover (e.g. JYQPK9320A). */
+    /** Indian PAN as shown on CAS cover (e.g. ABCDE1234F). */
     @Field("pan")
     private String pan;
 

@@ -43,6 +43,7 @@ public class PortfolioIntelligenceService {
     private final HealthScoreEngine healthScoreEngine;
     private final RiskRadarEngine riskRadarEngine;
     private final XRaySummaryBuilder xRaySummaryBuilder;
+    private final AggregatePortfolioLoader aggregatePortfolioLoader;
     private final StressEngine stressEngine;
     private final WhatIfEngine whatIfEngine;
     private final IntelligenceSuggestService intelligenceSuggestService;
@@ -90,6 +91,48 @@ public class PortfolioIntelligenceService {
 
     public PortfolioIntelligenceResponse intelligence(String portfolioId) {
         return intelligence(portfolioId, null);
+    }
+
+    /** Attach By Portfolio weights for the All-books aggregate view. */
+    public PortfolioIntelligenceResponse withAggregatePortfolioWeights(
+            String userId, String persona, PortfolioIntelligenceResponse response) {
+        if (response == null) {
+            return null;
+        }
+        XRayDto xray = response.getXray();
+        if (xray == null) {
+            xray = XRayDto.builder().build();
+            response.setXray(xray);
+        }
+        xray.setPortfolioWeights(
+                xRaySummaryBuilder.portfolioWeightsFromBookValues(
+                        aggregatePortfolioLoader.loadBrokerBookValues(userId, persona)));
+        return response;
+    }
+
+    /** Attach a single 100% weight slice for one owned book. */
+    public PortfolioIntelligenceResponse withSingleBookPortfolioWeights(
+            PortfolioModelV1 portfolio, String portfolioId, PortfolioIntelligenceResponse response) {
+        if (response == null || portfolio == null) {
+            return response;
+        }
+        XRayDto xray = response.getXray();
+        if (xray == null) {
+            xray = XRayDto.builder().build();
+            response.setXray(xray);
+        }
+        String name = portfolio.getName() != null && !portfolio.getName().isBlank()
+                ? portfolio.getName().trim()
+                : (portfolio.getBrokerType() != null
+                        ? portfolio.getBrokerType().name()
+                        : portfolioId);
+        double value = portfolio.getTotalValue() != null ? portfolio.getTotalValue() : 0.0;
+        if (value <= 0 && xray.getTotalValue() != null) {
+            value = xray.getTotalValue();
+        }
+        xray.setPortfolioWeights(
+                xRaySummaryBuilder.portfolioWeightsFromBookValues(Map.of(name, value)));
+        return response;
     }
 
     public PortfolioIntelligenceResponse intelligence(String portfolioId, PortfolioModelV1 ownedPortfolio) {

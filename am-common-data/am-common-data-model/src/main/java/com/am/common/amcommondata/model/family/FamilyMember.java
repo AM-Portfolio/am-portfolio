@@ -21,7 +21,7 @@ public class FamilyMember {
     private String ownerUserId;
     private String displayName;
     private String email;
-    /** Indian PAN when known from CAS (e.g. JYQPK9320A). */
+    /** Indian PAN when known from CAS (e.g. ABCDE1234F). */
     private String pan;
     /** CAS | NPS | MANUAL */
     private String source;
