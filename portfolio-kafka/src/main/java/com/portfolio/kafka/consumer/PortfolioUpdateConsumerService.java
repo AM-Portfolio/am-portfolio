@@ -23,6 +23,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.portfolio.kafka.publisher.PortfolioEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
+import com.portfolio.service.accounts.AccountsHubService;
 import com.portfolio.service.cas.CasImportService;
 import com.portfolio.service.family.FamilyMemberService;
 import com.portfolio.service.nps.NpsImportService;
@@ -163,6 +164,7 @@ public class PortfolioUpdateConsumerService {
                 casImportService.upsertFromEvent(event);
                 if (event.getUserId() != null) {
                     portfolioHoldingsService.evictPaintCacheForUser(event.getUserId());
+                    AccountsHubService.invalidateXirrCache(event.getUserId());
                 }
                 markProcessed(dedupKey);
 
@@ -179,6 +181,7 @@ public class PortfolioUpdateConsumerService {
                 npsImportService.upsertFromEvent(event);
                 if (event.getUserId() != null) {
                     portfolioHoldingsService.evictPaintCacheForUser(event.getUserId());
+                    AccountsHubService.invalidateXirrCache(event.getUserId());
                 }
                 markProcessed(dedupKey);
 

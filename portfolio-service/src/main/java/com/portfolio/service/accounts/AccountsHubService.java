@@ -2,11 +2,15 @@ package com.portfolio.service.accounts;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 import org.springframework.stereotype.Service;
@@ -37,10 +41,27 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AccountsHubService {
 
+    private static final long XIRR_CACHE_TTL_MS = 45_000L;
+    private static final ConcurrentHashMap<String, XirrCacheEntry> XIRR_CACHE =
+            new ConcurrentHashMap<>();
+
     private final CasImportService casImportService;
     private final NpsImportService npsImportService;
     private final PortfolioService portfolioService;
     private final FamilyMemberService familyMemberService;
+
+    /** Drop cached XIRR after CAS/NPS/portfolio mutations. */
+    public static void invalidateXirrCache(String userId) {
+        if (userId != null && !userId.isBlank()) {
+            XIRR_CACHE.remove(userId);
+        }
+    }
+
+    private record XirrCacheEntry(
+            long expiresAtMs,
+            Double overallXirrPct,
+            Double householdXirrPct,
+            Map<String, Double> memberXirrPct) {}
 
     /**
      * Canonical persona wealth (books + directory residual + NPS).
@@ -92,12 +113,16 @@ public class AccountsHubService {
                 continue;
             }
             rows.add(toPortfolioRow(p));
-            if (!isPaperPortfolio(p)
-                    && !Boolean.TRUE.equals(p.getIsDummy())
-                    && p.getBrokerType() != BrokerType.NPS) {
+            // Include NPS books: scheme lines carry cost/NAV for persona XIRR.
+            if (!isPaperPortfolio(p) && !Boolean.TRUE.equals(p.getIsDummy())) {
                 xirrBooks.add(p);
             }
         }
+        LocalDate casAsOf = cas != null
+                ? (cas.getAsOfDate() != null
+                        ? cas.getAsOfDate()
+                        : (cas.getStatementTo() != null ? cas.getStatementTo() : cas.getStatementFrom()))
+                : null;
 
         // Hub-level stats default to primary persona (null familyMemberId).
         List<DematAccountModel> primaryDemat = demat.stream()
@@ -126,12 +151,11 @@ public class AccountsHubService {
                 .toList();
 
         List<FamilyMember> members = familyMemberService.listForOwner(userId);
+        XirrBundle xirr = resolveXirrBundle(userId, xirrBooks, primaryXirrBooks, members, casAsOf);
+
         List<FamilyMemberSummary> familySummaries = members.stream()
                 .map(m -> {
                     String mid = m.getId();
-                    List<PortfolioModelV1> memberBooks = xirrBooks.stream()
-                            .filter(p -> mid != null && mid.equals(p.getFamilyMemberId()))
-                            .toList();
                     return FamilyMemberSummary.builder()
                             .id(mid)
                             .name(m.getDisplayName())
@@ -140,7 +164,7 @@ public class AccountsHubService {
                             // portfolioCount = non-MF CAS directory rows for that persona.
                             .portfolioCount(countDematForMember(demat, mid))
                             .totalValue(round2(sumValueForMemberId(demat, rows, npsAccounts, mid)))
-                            .xirrPct(computeOverallXirr(memberBooks))
+                            .xirrPct(mid != null ? xirr.memberXirrPct().get(mid) : null)
                             .build();
                 })
                 .toList();
@@ -158,8 +182,8 @@ public class AccountsHubService {
                         .mfFolioCount(mfCount)
                         .npsLinked(nps != null && nps.getPran() != null && !nps.getPran().isBlank())
                         .brokerPortfolioCount(brokerCount)
-                        .overallXirrPct(computeOverallXirr(primaryXirrBooks))
-                        .householdXirrPct(computeOverallXirr(xirrBooks))
+                        .overallXirrPct(xirr.overallXirrPct())
+                        .householdXirrPct(xirr.householdXirrPct())
                         .primaryTotalValue(round2(primaryTotal))
                         .familyTotalValue(round2(familyTotal))
                         .householdTotalValue(round2(household))
@@ -172,6 +196,67 @@ public class AccountsHubService {
                 .cas(cas)
                 .familyMembers(familySummaries)
                 .build();
+    }
+
+    private record XirrBundle(
+            Double overallXirrPct,
+            Double householdXirrPct,
+            Map<String, Double> memberXirrPct) {}
+
+    private XirrBundle resolveXirrBundle(
+            String userId,
+            List<PortfolioModelV1> xirrBooks,
+            List<PortfolioModelV1> primaryXirrBooks,
+            List<FamilyMember> members,
+            LocalDate casAsOf) {
+        XirrCacheEntry cached = XIRR_CACHE.get(userId);
+        long now = System.currentTimeMillis();
+        if (cached != null && cached.expiresAtMs() > now) {
+            return new XirrBundle(
+                    cached.overallXirrPct(),
+                    cached.householdXirrPct(),
+                    cached.memberXirrPct());
+        }
+
+        CompletableFuture<Double> overallFut = CompletableFuture.supplyAsync(
+                () -> computeOverallXirr(primaryXirrBooks, casAsOf));
+        CompletableFuture<Double> householdFut = CompletableFuture.supplyAsync(
+                () -> computeOverallXirr(xirrBooks, casAsOf));
+
+        Map<String, CompletableFuture<Double>> memberFuts = new HashMap<>();
+        for (FamilyMember m : members) {
+            if (m == null || m.getId() == null || m.getId().isBlank()) {
+                continue;
+            }
+            String mid = m.getId();
+            List<PortfolioModelV1> memberBooks = xirrBooks.stream()
+                    .filter(p -> mid.equals(p.getFamilyMemberId()))
+                    .toList();
+            memberFuts.put(mid, CompletableFuture.supplyAsync(
+                    () -> computeOverallXirr(memberBooks, casAsOf)));
+        }
+
+        Double overall = overallFut.join();
+        Double household = householdFut.join();
+        Map<String, Double> memberMap = new HashMap<>();
+        for (Map.Entry<String, CompletableFuture<Double>> e : memberFuts.entrySet()) {
+            Double pct = e.getValue().join();
+            // Concurrent/immutable maps reject null values; omit null XIRR.
+            if (pct != null) {
+                memberMap.put(e.getKey(), pct);
+            }
+        }
+
+        Map<String, Double> memberSnapshot = Map.copyOf(memberMap);
+        XirrBundle bundle = new XirrBundle(overall, household, memberSnapshot);
+        XIRR_CACHE.put(
+                userId,
+                new XirrCacheEntry(
+                        now + XIRR_CACHE_TTL_MS,
+                        overall,
+                        household,
+                        memberSnapshot));
+        return bundle;
     }
 
     /**
@@ -204,6 +289,10 @@ public class AccountsHubService {
 
     private static Double round2(double v) {
         return Math.round(v * 100.0) / 100.0;
+    }
+
+    private static Double round2(Double v) {
+        return v == null ? null : round2(v.doubleValue());
     }
 
     static int countDematBooks(List<AccountsPortfolioRow> rows, String familyMemberId) {
@@ -408,29 +497,128 @@ public class AccountsHubService {
         return s.trim();
     }
 
-    private static Double computeOverallXirr(List<PortfolioModelV1> books) {
+    static Double computeOverallXirr(List<PortfolioModelV1> books) {
+        return computeOverallXirr(books, null);
+    }
+
+    static Double computeOverallXirr(List<PortfolioModelV1> books, LocalDate casAsOf) {
+        if (books == null || books.isEmpty()) {
+            return null;
+        }
         List<Cashflow> flows = new ArrayList<>();
         double terminal = 0.0;
         LocalDate today = LocalDate.now();
+        // Unknown buy dates: assume ~1y hold so Newton XIRR stays within calculator bounds.
+        LocalDate fallbackBuy = today.minusDays(365);
         for (PortfolioModelV1 p : books) {
+            if (p == null) {
+                continue;
+            }
+            double bookTerminal = p.getTotalValue() != null ? p.getTotalValue() : sumCurrent(p);
+            terminal += bookTerminal;
+
+            int assetFlows = 0;
             for (AssetModel a : assetStream(p).toList()) {
-                Double cost = a.getInvestmentValue();
-                if (cost == null && a.getAvgBuyingPrice() != null && a.getQuantity() != null) {
-                    cost = a.getAvgBuyingPrice() * a.getQuantity();
-                }
-                LocalDate buyDate = OverallXirrCalculator.toDate(a.getCreatedAt());
+                Double cost = resolveAssetCost(a);
+                LocalDate buyDate = resolveAssetBuyDate(a, p, casAsOf, fallbackBuy);
                 if (cost == null || cost <= 0 || buyDate == null) {
                     continue;
                 }
+                if (!buyDate.isBefore(today)) {
+                    buyDate = fallbackBuy;
+                }
                 flows.add(new Cashflow(buyDate, -cost));
+                assetFlows++;
             }
-            terminal += p.getTotalValue() != null ? p.getTotalValue() : sumCurrent(p);
+
+            // Portfolio-level synthetic outflow when holdings lack per-line cost/dates.
+            if (assetFlows == 0) {
+                Double bookCost = p.getInvestmentAmount();
+                if (bookCost == null || bookCost <= 0) {
+                    bookCost = sumInvested(p);
+                }
+                // Last resort: mark-to-market as cost so persona still gets a 0%~ish XIRR
+                // instead of a blank dash when broker lines have value but no cost basis.
+                if ((bookCost == null || bookCost <= 0) && bookTerminal > 0) {
+                    bookCost = bookTerminal;
+                }
+                if (bookCost != null && bookCost > 0 && bookTerminal > 0) {
+                    LocalDate buyDate = resolvePortfolioBuyDate(p, casAsOf, fallbackBuy);
+                    if (!buyDate.isBefore(today)) {
+                        buyDate = fallbackBuy;
+                    }
+                    flows.add(new Cashflow(buyDate, -bookCost));
+                }
+            }
         }
         if (flows.isEmpty() || terminal <= 0) {
             return null;
         }
         flows.add(new Cashflow(today, terminal));
-        return OverallXirrCalculator.annualizedPct(flows);
+        Double xirr = OverallXirrCalculator.annualizedPct(flows);
+        if (xirr == null) {
+            // Newton can reject extreme short-window rates; retry with a 1y buy span.
+            List<Cashflow> normalized = new ArrayList<>();
+            for (Cashflow cf : flows) {
+                if (cf.amount() < 0) {
+                    normalized.add(new Cashflow(fallbackBuy, cf.amount()));
+                } else {
+                    normalized.add(new Cashflow(today, cf.amount()));
+                }
+            }
+            xirr = OverallXirrCalculator.annualizedPct(normalized);
+        }
+        return round2(xirr);
+    }
+
+    private static Double resolveAssetCost(AssetModel a) {
+        if (a == null) {
+            return null;
+        }
+        if (a.getInvestmentValue() != null && a.getInvestmentValue() > 0) {
+            return a.getInvestmentValue();
+        }
+        if (a.getAvgBuyingPrice() != null && a.getAvgBuyingPrice() > 0
+                && a.getQuantity() != null && a.getQuantity() > 0) {
+            return a.getAvgBuyingPrice() * a.getQuantity();
+        }
+        if (a.getImportMarkPrice() != null && a.getImportMarkPrice() > 0
+                && a.getQuantity() != null && a.getQuantity() > 0) {
+            return a.getImportMarkPrice() * a.getQuantity();
+        }
+        // Match sumInvested: some CAS lines only store avgBuyingPrice as total cost.
+        if (a.getAvgBuyingPrice() != null && a.getAvgBuyingPrice() > 0) {
+            return a.getAvgBuyingPrice();
+        }
+        if (a.getImportMarkPrice() != null && a.getImportMarkPrice() > 0) {
+            return a.getImportMarkPrice();
+        }
+        return null;
+    }
+
+    private static LocalDate resolveAssetBuyDate(
+            AssetModel a, PortfolioModelV1 p, LocalDate casAsOf, LocalDate fallbackBuy) {
+        LocalDate fromAsset = OverallXirrCalculator.toDate(a != null ? a.getCreatedAt() : null);
+        if (fromAsset != null) {
+            return fromAsset;
+        }
+        return resolvePortfolioBuyDate(p, casAsOf, fallbackBuy);
+    }
+
+    private static LocalDate resolvePortfolioBuyDate(
+            PortfolioModelV1 p, LocalDate casAsOf, LocalDate fallbackBuy) {
+        LocalDate fromCreated = OverallXirrCalculator.toDate(p != null ? p.getCreatedAt() : null);
+        if (fromCreated != null) {
+            return fromCreated;
+        }
+        LocalDate fromUpdated = OverallXirrCalculator.toDate(p != null ? p.getUpdatedAt() : null);
+        if (fromUpdated != null) {
+            return fromUpdated;
+        }
+        if (casAsOf != null) {
+            return casAsOf;
+        }
+        return fallbackBuy;
     }
 
     static boolean isCdslAggregator(PortfolioModelV1 p) {
