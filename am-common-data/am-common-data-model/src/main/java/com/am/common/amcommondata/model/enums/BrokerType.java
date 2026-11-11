@@ -8,21 +8,46 @@ public enum BrokerType {
     GROW("Groww"), // Fallback for existing db records
     KOTAK("Kotak"),
     ANGEL_ONE("Angel One"),
-    UPSTOX("Upstox");
+    UPSTOX("Upstox"),
+    FYERS("Fyers"),
+    HDFC("HDFC"),
+    CDSL("CDSL"),
+    // Named CAS demat book; UI label is portfolio.name (Mirae/Finwizard), not this code.
+    CAS_DEMAT("Demat"),
+    NPS("NPS");
 
-    private String brokerName;
+    private final String brokerName;
 
     BrokerType(String brokerName) {
         this.brokerName = brokerName;
     }
 
     public static BrokerType fromCode(String code) {
+        if (code == null || code.isBlank()) {
+            return null;
+        }
+        String trimmed = code.trim();
         for (BrokerType type : values()) {
-            if (type.getCode().equals(code)) {
+            if (type.getCode().equalsIgnoreCase(trimmed)
+                    || type.name().equalsIgnoreCase(trimmed)) {
                 return type;
             }
         }
-        return null;
+        String u = trimmed.toUpperCase().replace('-', '_').replace(' ', '_');
+        if ("GROW".equals(u) || "GROWW".equals(u)) {
+            return GROWW;
+        }
+        if ("ANGLEONE".equals(u) || "ANGELONE".equals(u) || "ANGEL_ONE".equals(u)) {
+            return ANGEL_ONE;
+        }
+        if ("HDFC_BANK".equals(u) || "HDFCSECURITIES".equals(u)) {
+            return HDFC;
+        }
+        try {
+            return BrokerType.valueOf(u);
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
     }
 
     public String getCode() {
@@ -30,30 +55,42 @@ public enum BrokerType {
     }
 
     public boolean isDhan() {
-        return "Dhan".equals(brokerName);
+        return this == DHAN;
     }
 
     public boolean isZerodha() {
-        return "Zerodha".equals(brokerName);
+        return this == ZERODHA;
     }
 
     public boolean isMStock() {
-        return "MStock".equals(brokerName);
+        return this == MSTOCK;
     }
 
     public boolean isGroww() {
-        return "Groww".equals(brokerName);
+        return this == GROW || this == GROWW;
     }
 
     public boolean isKotak() {
-        return "Kotak".equals(brokerName);
+        return this == KOTAK;
     }
 
     public boolean isAngelOne() {
-        return "Angel One".equals(brokerName);
+        return this == ANGEL_ONE;
     }
 
     public boolean isUpstox() {
-        return "Upstox".equals(brokerName);
+        return this == UPSTOX;
+    }
+
+    public boolean isCdsl() {
+        return this == CDSL;
+    }
+
+    public boolean isCasDemat() {
+        return this == CAS_DEMAT;
+    }
+
+    public boolean isNps() {
+        return this == NPS;
     }
 }

@@ -1,6 +1,7 @@
 package com.portfolio.service;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.service.PortfolioService;
 import lombok.RequiredArgsConstructor;
@@ -52,7 +53,13 @@ public class NewUserPortfolioFallbackService {
             String portfolioName,
             String kind,
             Integer gapMissingCount,
-            boolean dummy) {}
+            boolean dummy,
+            String brokerType,
+            Integer assetCount,
+            Double totalValue,
+            boolean hasHoldings,
+            String familyMemberId,
+            String familyMemberName) {}
 
     public DemoResolution resolveRequest(String userId, String portfolioId) {
         if (!isConfigured() || userId == null || userId.isBlank()) {
@@ -81,22 +88,97 @@ public class NewUserPortfolioFallbackService {
             portfolios = Collections.emptyList();
         }
 
+        boolean hideCdsl = hasRealBrokerBook(portfolios);
         return portfolios.stream()
-                .map(portfolio -> {
-                    boolean demo = PortfolioKind.isDemo(portfolio.getPortfolioKind());
-                    String kind = portfolio.getPortfolioKind() != null
-                            ? portfolio.getPortfolioKind().name()
-                            : (portfolio.getSourcePortfolioId() != null && !portfolio.getSourcePortfolioId().isBlank()
-                                    ? "BASKET" : "BROKER");
-                    return new BasicPortfolioRow(
-                            portfolio.getId() != null ? portfolio.getId().toString() : null,
-                            demo ? DEMO_DISPLAY_NAME
-                                    : (portfolio.getName() != null ? portfolio.getName() : null),
-                            kind,
-                            portfolio.getGapMissingCount(),
-                            demo);
-                })
+                .filter(portfolio -> portfolio != null)
+                .filter(portfolio -> !hideCdsl || !isCdslListRow(portfolio))
+                .map(this::toBasicRow)
                 .collect(Collectors.toList());
+    }
+
+    private BasicPortfolioRow toBasicRow(PortfolioModelV1 portfolio) {
+        boolean demo = PortfolioKind.isDemo(portfolio.getPortfolioKind());
+        String kind = portfolio.getPortfolioKind() != null
+                ? portfolio.getPortfolioKind().name()
+                : (portfolio.getSourcePortfolioId() != null && !portfolio.getSourcePortfolioId().isBlank()
+                        ? "BASKET" : "BROKER");
+        String broker = portfolio.getBrokerType() != null ? portfolio.getBrokerType().name() : null;
+        Integer assets = portfolio.getAssetCount();
+        if (assets == null) {
+            assets = countAssets(portfolio);
+        }
+        Double totalValue = portfolio.getTotalValue();
+        boolean hasHoldings = demo
+                || (assets != null && assets > 0)
+                || (totalValue != null && totalValue > 0);
+        String displayName = demo
+                ? DEMO_DISPLAY_NAME
+                : cdslDisplayName(portfolio, broker);
+        return new BasicPortfolioRow(
+                portfolio.getId() != null ? portfolio.getId().toString() : null,
+                displayName,
+                kind,
+                portfolio.getGapMissingCount(),
+                demo,
+                broker,
+                assets,
+                totalValue,
+                hasHoldings,
+                portfolio.getFamilyMemberId(),
+                portfolio.getFamilyMemberName());
+    }
+
+    private static String cdslDisplayName(PortfolioModelV1 portfolio, String broker) {
+        if (isCdslListRow(portfolio)) {
+            String name = portfolio.getName() == null ? "" : portfolio.getName().trim();
+            if (name.isEmpty() || name.equalsIgnoreCase("CDSL") || name.equalsIgnoreCase("CAS")) {
+                return "CDSL CAS";
+            }
+            return name;
+        }
+        if (portfolio.getName() != null && !portfolio.getName().isBlank()) {
+            return portfolio.getName();
+        }
+        return broker;
+    }
+
+    static boolean isCdslListRow(PortfolioModelV1 portfolio) {
+        if (portfolio.getBrokerType() == BrokerType.CAS_DEMAT) {
+            return false;
+        }
+        if (portfolio.getBrokerType() == BrokerType.CDSL) {
+            return true;
+        }
+        String name = portfolio.getName() == null ? "" : portfolio.getName().trim().toLowerCase();
+        // Exact aggregator labels only — do not match "Mutual Funds" or short DP names.
+        return name.equals("cdsl")
+                || name.equals("cas")
+                || name.equals("cdsl cas")
+                || name.equals("cas aggregator")
+                || name.contains("cdsl");
+    }
+
+    private static int countAssets(PortfolioModelV1 p) {
+        int n = 0;
+        if (p.getEquityModels() != null) {
+            n += p.getEquityModels().size();
+        }
+        if (p.getMutualFunds() != null) {
+            n += p.getMutualFunds().size();
+        }
+        if (p.getBonds() != null) {
+            n += p.getBonds().size();
+        }
+        if (p.getCommodities() != null) {
+            n += p.getCommodities().size();
+        }
+        if (p.getCash() != null) {
+            n += p.getCash().size();
+        }
+        if (p.getNpsModels() != null) {
+            n += p.getNpsModels().size();
+        }
+        return n;
     }
 
     /**
@@ -152,7 +234,7 @@ public class NewUserPortfolioFallbackService {
      * Soft-hide personal DEMO when a real broker book exists; otherwise find-or-create.
      * @return active personal DEMO, or null when ineligible / unconfigured / template missing
      */
-    PortfolioModelV1 ensurePersonalDemoLifecycle(String userId) {
+    public PortfolioModelV1 ensurePersonalDemoLifecycle(String userId) {
         if (!isConfigured() || userId == null || userId.isBlank()) {
             return null;
         }

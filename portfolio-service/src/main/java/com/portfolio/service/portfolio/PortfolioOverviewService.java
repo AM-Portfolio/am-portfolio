@@ -26,13 +26,17 @@ import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.util.InstrumentKeys;
 import com.portfolio.redis.service.PortfolioSummaryRedisService;
 import com.portfolio.redis.session.CashSessionClock;
+import com.portfolio.service.accounts.AccountsHubService;
 import com.portfolio.service.calculator.PortfolioCalculator;
+import com.portfolio.service.NewUserPortfolioFallbackService;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.observability.flow.FlowLogger;
 import com.am.common.amcommondata.service.PortfolioSnapshotService;
 import com.am.common.amcommondata.model.PortfolioSnapshotModel;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Comparator;
+import java.util.stream.Collectors;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,6 +48,8 @@ public class PortfolioOverviewService {
     private final PortfolioService portfolioService;
     private final PortfolioHoldingsService portfolioHoldingsService;
     private final PortfolioMapperv1 portfolioMapper;
+    @org.springframework.lang.Nullable
+    private final NewUserPortfolioFallbackService newUserPortfolioFallbackService;
     
     @org.springframework.lang.Nullable
     private final PortfolioSummaryRedisService portfolioSummaryRedisService;
@@ -63,6 +69,9 @@ public class PortfolioOverviewService {
     @org.springframework.lang.Nullable
     private final MarketDataApiConfig marketDataApiConfig;
 
+    @org.springframework.lang.Nullable
+    private final AccountsHubService accountsHubService;
+
     public PortfolioOverviewService(
             PortfolioService portfolioService,
             PortfolioHoldingsService portfolioHoldingsService,
@@ -74,7 +83,9 @@ public class PortfolioOverviewService {
             FlowLogger flowLogger,
             @org.springframework.lang.Nullable MarketDataService marketDataService,
             @org.springframework.lang.Nullable CashSessionClock cashSessionClock,
-            @org.springframework.lang.Nullable MarketDataApiConfig marketDataApiConfig) {
+            @org.springframework.lang.Nullable MarketDataApiConfig marketDataApiConfig,
+            @org.springframework.lang.Nullable NewUserPortfolioFallbackService newUserPortfolioFallbackService,
+            @org.springframework.lang.Nullable AccountsHubService accountsHubService) {
         this.portfolioService = portfolioService;
         this.portfolioHoldingsService = portfolioHoldingsService;
         this.portfolioMapper = portfolioMapper;
@@ -86,23 +97,60 @@ public class PortfolioOverviewService {
         this.marketDataService = marketDataService;
         this.cashSessionClock = cashSessionClock;
         this.marketDataApiConfig = marketDataApiConfig;
+        this.newUserPortfolioFallbackService = newUserPortfolioFallbackService;
+        this.accountsHubService = accountsHubService;
+    }
+
+    /** Soft-hide Demo when real broker books exist, then keep BROKER rows only for aggregates. */
+    private List<PortfolioModelV1> brokerBooksForUser(String userId) {
+        if (newUserPortfolioFallbackService != null) {
+            try {
+                newUserPortfolioFallbackService.ensurePersonalDemoLifecycle(userId);
+            } catch (Exception e) {
+                log.warn("Demo lifecycle before overview failed for {}: {}", userId, e.getMessage());
+            }
+        }
+        var portfolios = portfolioService.getPortfoliosByUserId(userId);
+        if (portfolios == null || portfolios.isEmpty()) {
+            return List.of();
+        }
+        return portfolios.stream()
+                .filter(p -> p != null && PortfolioKind.isBroker(p.getPortfolioKind()))
+                .collect(Collectors.toList());
     }
 
     public PortfolioSummaryV1 overviewPortfolio(String userId, TimeInterval interval) {
-        try (var span = flowLogger.start("overviewPortfolio", "user", userId, "interval", interval != null ? interval.getCode() : "null")) {
-        Optional<PortfolioSummaryV1> cachedSummary = getCachedSummary(userId, interval);
+        return overviewPortfolio(userId, interval, null);
+    }
+
+    public PortfolioSummaryV1 overviewPortfolio(String userId, TimeInterval interval, String persona) {
+        String cacheId = com.am.common.amcommondata.model.family.HoldingsPersona.cacheId(persona);
+        try (var span = flowLogger.start("overviewPortfolio", "user", userId, "interval", interval != null ? interval.getCode() : "null", "persona", persona)) {
+        // Soft-hide Demo even on cache hits so dropdown/list stay consistent with aggregates.
+        if (newUserPortfolioFallbackService != null) {
+            try {
+                newUserPortfolioFallbackService.ensurePersonalDemoLifecycle(userId);
+            } catch (Exception e) {
+                log.warn("Demo lifecycle on overview cache path failed for {}: {}", userId, e.getMessage());
+            }
+        }
+        Optional<PortfolioSummaryV1> cachedSummary = getCachedSummary(userId, interval, cacheId);
         if (cachedSummary.isPresent()) {
             log.info("Returning cached portfolio summary for user: {} (with price overlay)", userId);
-            return repriceCachedSummary(cachedSummary.get(), userId, null, interval);
+            return applyHubResidualHeadline(
+                    repriceCachedSummary(cachedSummary.get(), userId, cacheId, interval),
+                    userId,
+                    persona);
         }
 
         log.info("Cache miss for portfolio summary - User: {}, fetching from source", userId);
-        var portfolios = portfolioService.getPortfoliosByUserId(userId);
-        log.info("Retrieved {} portfolios for user: {}",
-                portfolios != null ? portfolios.size() : 0, userId);
+        var portfolios = brokerBooksForUser(userId).stream()
+                .filter(p -> com.am.common.amcommondata.model.family.HoldingsPersona.matches(p.getFamilyMemberId(), persona))
+                .collect(Collectors.toList());
+        log.info("Retrieved {} BROKER portfolios for user: {}", portfolios.size(), userId);
 
-        if (portfolios == null || portfolios.isEmpty()) {
-            log.info("No portfolios found for user: {} - Returning empty summary", userId);
+        if (portfolios.isEmpty()) {
+            log.info("No portfolios found for user: {} - Returning hub residual summary", userId);
             com.portfolio.model.portfolio.v1.PortfolioSummaryV1 emptySummary = new com.portfolio.model.portfolio.v1.PortfolioSummaryV1();
             emptySummary.setCurrentValue(0.0);
             emptySummary.setInvestmentValue(0.0);
@@ -118,15 +166,32 @@ public class PortfolioOverviewService {
             emptySummary.setBrokerPortfolios(new java.util.HashMap<>());
             emptySummary.setMarketCapHoldings(new java.util.HashMap<>());
             emptySummary.setSectorialHoldings(new java.util.HashMap<>());
-            return emptySummary;
+            return applyHubResidualHeadline(emptySummary, userId, persona);
         }
 
-        PortfolioSummaryV1 finalSummary = buildPortfolioSummary(portfolios, userId, null, interval);
-        return finalSummary;
+        PortfolioSummaryV1 finalSummary = buildPortfolioSummary(portfolios, userId, cacheId, interval);
+        return applyHubResidualHeadline(finalSummary, userId, persona);
         } catch (Exception e) {
             log.error("Error in overviewPortfolio", e);
             throw e;
         }
+    }
+
+    /** Headline currentValue = hub residual+NPS; day P&amp;L stays from painted books. */
+    private PortfolioSummaryV1 applyHubResidualHeadline(
+            PortfolioSummaryV1 summary, String userId, String persona) {
+        if (summary == null || accountsHubService == null) {
+            return summary;
+        }
+        try {
+            double hubWealth = accountsHubService.wealthForPersona(userId, persona);
+            if (hubWealth > 0) {
+                summary.setCurrentValue(Math.round(hubWealth * 100.0) / 100.0);
+            }
+        } catch (Exception e) {
+            log.warn("Hub residual headline failed for user={}: {}", userId, e.getMessage());
+        }
+        return summary;
     }
 
     /**
@@ -184,8 +249,8 @@ public class PortfolioOverviewService {
         log.info("Starting refreshPortfolio (Live Update) - User: {}, Interval: {}",
                 userId, interval != null ? interval.getCode() : "null");
 
-        var portfolios = portfolioService.getPortfoliosByUserId(userId);
-        if (portfolios == null || portfolios.isEmpty()) {
+        var portfolios = brokerBooksForUser(userId);
+        if (portfolios.isEmpty()) {
             return null;
         }
 
@@ -266,9 +331,15 @@ public class PortfolioOverviewService {
         com.portfolio.model.portfolio.PortfolioHoldings pricedHoldings = null;
         if (userId != null) {
             try {
-                pricedHoldings = (portfolioId == null || portfolioId.isBlank())
-                        ? portfolioHoldingsService.getPortfolioHoldings(userId, interval, true)
-                        : portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, interval, true);
+                if (portfolioId != null && portfolioId.startsWith("all:")) {
+                    pricedHoldings = portfolioHoldingsService.getPortfolioHoldings(
+                            userId, interval, true,
+                            com.am.common.amcommondata.model.family.HoldingsPersona.personaFromCacheId(portfolioId));
+                } else if (portfolioId == null || portfolioId.isBlank()) {
+                    pricedHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, interval, true);
+                } else {
+                    pricedHoldings = portfolioHoldingsService.getPortfolioHoldings(userId, portfolioId, interval, true);
+                }
                 if (pricedHoldings != null && pricedHoldings.getEquityHoldings() != null) {
                     equityHoldings = pricedHoldings.getEquityHoldings();
                 }
@@ -279,7 +350,7 @@ public class PortfolioOverviewService {
         if (equityHoldings == null) {
             equityHoldings = portfolioHoldingsService.getHoldings(portfolios);
         }
-        
+
         var investmentValue = equityHoldings.stream()
                 .mapToDouble(h -> h.getInvestmentCost() != null && h.getInvestmentCost() > 0
                         ? h.getInvestmentCost() : 0.0)
@@ -310,13 +381,13 @@ public class PortfolioOverviewService {
                 ensureOverallTotalGainLoss(cached);
                 return cached;
             }
-            double investmentValue = cached.getInvestmentValue() != null
-                    ? cached.getInvestmentValue()
-                    : ph.getEquityHoldings().stream()
-                            .mapToDouble(h -> h.getInvestmentCost() != null ? h.getInvestmentCost() : 0.0)
-                            .sum();
+            // Never keep a stale cached invested figure (old Zerodha / Demo) over live holdings.
+            // When cost is unknown, keep investmentValue null (not 0.0) so UI hides Invested/Return.
+            double investmentValue = PortfolioCalculator.sumInvestmentBasis(ph.getEquityHoldings());
             PortfolioSummaryV1 live = portfolioCalculator.calculateSummary(ph.getEquityHoldings(), investmentValue);
-            cached.setInvestmentValue(investmentValue);
+            cached.setInvestmentValue(live.getInvestmentValue() != null
+                    ? live.getInvestmentValue()
+                    : (investmentValue > 0 ? investmentValue : null));
             cached.setCurrentValue(live.getCurrentValue());
             // Overall Total Return from calculator; session day may still be null when quotes collapse.
             cached.setTotalGainLoss(live.getTotalGainLoss());

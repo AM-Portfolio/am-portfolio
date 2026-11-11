@@ -89,6 +89,46 @@ class XRaySummaryBuilderTest {
     }
 
     @Test
+    void assetClassWeights_includeMutualFundAndNps() {
+        PortfolioIntelligenceSnapshot snapshot = PortfolioIntelligenceSnapshot.builder()
+                .portfolioId("fixture")
+                .holdings(List.of(
+                        holding("EQ1", 500_000, 50, "IT", "Soft", "LARGE_CAP", HealthScoreEngine.ASSET_EQUITY),
+                        holding("MF1", 300_000, 30, null, null, null, HealthScoreEngine.ASSET_MUTUAL_FUND),
+                        holding("NPS1", 200_000, 20, null, null, null, HealthScoreEngine.ASSET_NPS)
+                ))
+                .totalValue(1_000_000)
+                .build();
+
+        XRayDto xray = builder.build(snapshot);
+        Map<String, XRayDto.WeightSliceDto> classes = byName(xray.getAssetClassWeights());
+        assertEquals(3, classes.size());
+        assertEquals(50.0, classes.get(HealthScoreEngine.ASSET_EQUITY).getWeightPct());
+        assertEquals(30.0, classes.get(HealthScoreEngine.ASSET_MUTUAL_FUND).getWeightPct());
+        assertEquals(20.0, classes.get(HealthScoreEngine.ASSET_NPS).getWeightPct());
+
+        // NPS excluded from sector; equity IT remains. MF with null sector may appear as Unknown.
+        Map<String, XRayDto.WeightSliceDto> sectors = byName(xray.getSectorWeights());
+        assertNotNull(sectors.get("IT"));
+        assertEquals(null, sectors.get(HealthScoreEngine.ASSET_NPS));
+    }
+
+    @Test
+    void portfolioWeightsFromBookValues_splitsByContribution() {
+        Map<String, Double> books = Map.of(
+                "Zerodha", 600_000.0,
+                "Groww", 400_000.0
+        );
+        List<XRayDto.WeightSliceDto> slices = builder.portfolioWeightsFromBookValues(books);
+        assertEquals(2, slices.size());
+        Map<String, XRayDto.WeightSliceDto> by = byName(slices);
+        assertEquals(60.0, by.get("Zerodha").getWeightPct());
+        assertEquals(600_000.0, by.get("Zerodha").getValue());
+        assertEquals(40.0, by.get("Groww").getWeightPct());
+        assertEquals(400_000.0, by.get("Groww").getValue());
+    }
+
+    @Test
     void blankKeysBecomeUnknown() {
         PortfolioIntelligenceSnapshot snapshot = PortfolioIntelligenceSnapshot.builder()
                 .portfolioId("fixture")

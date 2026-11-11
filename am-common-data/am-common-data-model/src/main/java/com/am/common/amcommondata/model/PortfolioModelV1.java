@@ -41,6 +41,9 @@ public class PortfolioModelV1 {
     private List<AssetModel> commodities = List.of();
     @Builder.Default
     private List<AssetModel> cash = List.of();
+    /** NPS scheme lines (BrokerType.NPS book). */
+    @Builder.Default
+    private List<AssetModel> npsModels = List.of();
     private Double totalValue;
     private Double investmentAmount;
     private BrokerType brokerType;
@@ -63,4 +66,9 @@ public class PortfolioModelV1 {
     private String lastTradeAction;
     /** True when this portfolio is the shared demo portfolio injected for new users. Never stored. */
     private Boolean isDummy;
+    /** Soft family persona id under {@link #owner}; null = primary user. */
+    private String familyMemberId;
+    private String familyMemberName;
+    /** BOID for CAS_DEMAT books; null for first-class brokers. */
+    private String dematBoid;
 }

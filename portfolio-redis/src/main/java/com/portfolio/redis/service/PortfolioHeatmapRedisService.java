@@ -87,7 +87,7 @@ private final RedisTemplate<String, Heatmap> portfolioHeatmapRedisTemplate;
         String intervalCode = interval != null && interval.getTimeFrame() != null ? interval.getTimeFrame().getValue() : "all";
         String fromDate = interval != null && interval.getFromDate() != null ? interval.getFromDate().toString() : "null";
         String toDate = interval != null && interval.getToDate() != null ? interval.getToDate().toString() : "null";
-        String key = portfolioHeatmapKeyPrefix + portfolioId + ":" + intervalCode + ":" + fromDate + ":" + toDate;
+        String key = portfolioHeatmapKeyPrefix + "sec2:" + portfolioId + ":" + intervalCode + ":" + fromDate + ":" + toDate;
         log.trace("Built cache key: {} for portfolio: {}, interval: {}, from: {}, to: {}", key, portfolioId, intervalCode, fromDate, toDate);
         return key;
     }

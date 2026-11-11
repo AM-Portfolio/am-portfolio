@@ -14,6 +14,7 @@ import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
+import com.portfolio.model.events.DematRef;
 import com.portfolio.model.events.PortfolioUpdateEvent;
 import com.portfolio.model.events.trade.TradePortfolioSyncEvent;
 
@@ -40,6 +41,27 @@ class PortfolioMapperAsOfTest {
         assertNotNull(model.getEquityModels());
         assertEquals(asOf.atStartOfDay(), model.getEquityModels().get(0).getCreatedAt());
         assertEquals(asOf.atStartOfDay(), model.getCreatedAt());
+    }
+
+    @Test
+    void casDemat_mapsShortNameAndDematBoid() {
+        PortfolioUpdateEvent event = PortfolioUpdateEvent.builder()
+                .userId("user-1")
+                .brokerType(BrokerType.CAS_DEMAT)
+                .name("Mirae")
+                .portfolioId("Mirae")
+                .dematRef(DematRef.builder().boid("1208870012345678").dpName("MIRAE ASSET").build())
+                .asOfDate(LocalDate.of(2024, 5, 15))
+                .equities(List.of(EquityModel.builder()
+                        .symbol("IDEA")
+                        .quantity(1.0)
+                        .build()))
+                .build();
+
+        PortfolioModelV1 model = mapper.toPortfolioModelV1(event);
+        assertEquals("Mirae", model.getName());
+        assertEquals(BrokerType.CAS_DEMAT, model.getBrokerType());
+        assertEquals("1208870012345678", model.getDematBoid());
     }
 
     @Test

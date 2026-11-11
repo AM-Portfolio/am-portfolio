@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.asset.mutualfund.MutualFundModel;
+import com.am.common.amcommondata.model.asset.pension.NPSModel;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -35,6 +36,7 @@ public class PortfolioUpdateEvent {
     // Core Data
     private List<EquityModel> equities;
     private List<MutualFundModel> mutualFunds;
+    private List<NPSModel> npsHoldings;
 
     // Summary / Calculation Data
     private Double totalValue;
@@ -51,4 +53,18 @@ public class PortfolioUpdateEvent {
      * {@code createdAt} and history backfill window start from this date.
      */
     private LocalDate asOfDate;
+
+    /** e.g. CDSL_CAS when fan-out from consolidated account statement. */
+    private String documentSource;
+
+    /** Demat BOID / DP refs for CAS-mapped broker books. */
+    private DematRef dematRef;
+
+    /** SELF | FAMILY | UNKNOWN from email-extractor. */
+    private String identityMatch;
+    private String holderName;
+    private String holderEmail;
+    private String holderPan;
+    private String familyMemberId;
+    private String familyMemberName;
 }

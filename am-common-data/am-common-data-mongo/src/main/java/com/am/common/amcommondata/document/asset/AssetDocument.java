@@ -40,4 +40,21 @@ public class AssetDocument extends BaseDocument {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private Boolean isActive;
+    private String assetClass;
+    private String folioNumber;
+    private String schemeCode;
+    private String amcName;
+    private String rtaName;
+    private String advisorName;
+    private String ucc;
+    private String isin;
+    /** NPS-only; stored on portfolio npsModels AssetDocument rows */
+    private String tier;
+    private String schemeClass;
+    private String schemeOption;
+    private Double statementNav;
+    private Double liveNav;
+    private String isinResolveStatus;
+    /** NPS-only; stored on portfolio npsModels AssetDocument rows */
+    private String pran;
 }

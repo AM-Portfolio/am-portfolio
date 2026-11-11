@@ -12,6 +12,8 @@ class PortfolioKindTest {
         assertTrue(PortfolioKind.isRealBrokerBook(PortfolioKind.BROKER, BrokerType.ZERODHA));
         assertTrue(PortfolioKind.isRealBrokerBook(null, BrokerType.GROWW));
         assertFalse(PortfolioKind.isRealBrokerBook(PortfolioKind.BROKER, null));
+        assertFalse(PortfolioKind.isRealBrokerBook(PortfolioKind.BROKER, BrokerType.CDSL));
+        assertFalse(PortfolioKind.isRealBrokerBook(null, BrokerType.CDSL));
         assertFalse(PortfolioKind.isRealBrokerBook(PortfolioKind.PAPER, BrokerType.ZERODHA));
         assertFalse(PortfolioKind.isRealBrokerBook(PortfolioKind.DEMO, BrokerType.ZERODHA));
         assertFalse(PortfolioKind.isRealBrokerBook(PortfolioKind.BASKET, BrokerType.ZERODHA));

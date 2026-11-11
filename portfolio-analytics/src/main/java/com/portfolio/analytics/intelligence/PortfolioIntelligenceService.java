@@ -109,11 +109,8 @@ public class PortfolioIntelligenceService {
                 try {
                     PortfolioIntelligenceSnapshot snapshot = buildSnapshot(portfolioId, ownedPortfolio, true);
                     PortfolioIntelligenceResponse response = toIntelligenceResponse(snapshot);
-                    // Never stick cold Overview (no measured hist) into L1/L2 — hist warm
-                    // would otherwise leave Volatility/β stale until TTL or hard refresh.
-                    if (isWarmEnoughToCache(snapshot, response)) {
-                        intelligenceRedisService.put(portfolioId, response);
-                    }
+                    // Cache the first paint even when beta is still warming. Hist warm evicts it.
+                    intelligenceRedisService.put(portfolioId, response);
                     created.complete(response);
                     return response;
                 } catch (Throwable t) {

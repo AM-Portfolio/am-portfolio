@@ -5,6 +5,8 @@ import com.am.security.context.UserContext;
 import com.portfolio.analytics.intelligence.AggregatePortfolioKeys;
 import com.portfolio.analytics.intelligence.AggregatePortfolioLoader;
 import com.portfolio.analytics.intelligence.PortfolioIntelligenceService;
+import com.portfolio.analytics.intelligence.XRaySummaryBuilder;
+import com.portfolio.model.analytics.intelligence.XRayDto;
 import com.portfolio.analytics.service.providers.portfolio.PortfolioAnalyticsFacade;
 import com.portfolio.api.security.PortfolioOwnerAssert;
 import com.portfolio.model.analytics.intelligence.IntelligenceSuggestResponse;
@@ -53,15 +55,17 @@ public class PortfolioAnalyticsController {
     private final PortfolioIntelligenceService portfolioIntelligenceService;
     private final AggregatePortfolioLoader aggregatePortfolioLoader;
     private final PortfolioIntelligenceRedisService portfolioIntelligenceRedisService;
+    private final XRaySummaryBuilder xRaySummaryBuilder;
 
     // ── All-Portfolios aggregate (literal paths; before /{portfolioId}/**) ──
 
     @Operation(summary = "All-portfolios advanced analytics", operationId = "getAllPortfoliosAdvancedAnalytics")
     @PostMapping("/all/advanced")
     public ResponseEntity<AdvancedAnalyticsResponse> getAllAdvancedAnalytics(
-            @RequestBody(required = false) AdvancedAnalyticsRequest request) {
+            @RequestBody(required = false) AdvancedAnalyticsRequest request,
+            @RequestParam(required = false) String persona) {
         String userId = UserContext.getUserIdOrThrow();
-        PortfolioModelV1 merged = aggregatePortfolioLoader.loadMerged(userId);
+        PortfolioModelV1 merged = aggregatePortfolioLoader.loadMerged(userId, persona);
         request = normalizeAdvancedRequest(request, AggregatePortfolioKeys.RESPONSE_PORTFOLIO_ID);
         request.setPrefetchedPortfolio(merged);
         log.info("REST request for advanced analytics on ALL portfolios user={}", userId);
@@ -73,7 +77,7 @@ public class PortfolioAnalyticsController {
                 if (request.getTimeFrame() != null) {
                     interval = TimeInterval.fromCode(request.getTimeFrame().name());
                 }
-                PortfolioSummaryV1 summary = portfolioDashboardService.overviewPortfolio(userId, interval);
+                PortfolioSummaryV1 summary = portfolioDashboardService.overviewPortfolio(userId, interval, persona);
                 if (summary != null) {
                     summary.setMarketCapHoldings(null);
                     summary.setSectorialHoldings(null);
@@ -106,18 +110,42 @@ public class PortfolioAnalyticsController {
     @Operation(summary = "All-portfolios intelligence", operationId = "getAllPortfoliosIntelligence")
     @PostMapping("/all/intelligence")
     public ResponseEntity<PortfolioIntelligenceResponse> getAllIntelligence(
-            @RequestBody(required = false) Object ignored) {
+            @RequestBody(required = false) Object ignored,
+            @RequestParam(required = false) String persona) {
         String userId = UserContext.getUserIdOrThrow();
-        String cacheKey = AggregatePortfolioKeys.cacheKey(userId);
+        String cacheKey = AggregatePortfolioKeys.cacheKey(userId)
+                + (persona == null || persona.isBlank() ? "" : ":" + persona.trim());
         // Skip Mongo merge when Overview intel is already warm in Redis.
         var cached = portfolioIntelligenceRedisService.get(cacheKey);
         if (cached.isPresent()) {
             log.info("REST request for intelligence on ALL portfolios user={} cache=hit", userId);
-            return ResponseEntity.ok(cached.get());
+            return ResponseEntity.ok(withPortfolioWeights(userId, persona, cached.get()));
         }
-        PortfolioModelV1 merged = aggregatePortfolioLoader.loadMerged(userId);
+        PortfolioModelV1 merged = aggregatePortfolioLoader.loadMerged(userId, persona);
         log.info("REST request for intelligence on ALL portfolios user={} cache=miss", userId);
-        return ResponseEntity.ok(portfolioIntelligenceService.intelligence(cacheKey, merged));
+        return ResponseEntity.ok(
+                withPortfolioWeights(userId, persona, portfolioIntelligenceService.intelligence(cacheKey, merged)));
+    }
+
+    private PortfolioIntelligenceResponse withPortfolioWeights(
+            String userId, PortfolioIntelligenceResponse response) {
+        return withPortfolioWeights(userId, null, response);
+    }
+
+    private PortfolioIntelligenceResponse withPortfolioWeights(
+            String userId, String persona, PortfolioIntelligenceResponse response) {
+        if (response == null) {
+            return null;
+        }
+        XRayDto xray = response.getXray();
+        if (xray == null) {
+            xray = XRayDto.builder().build();
+            response.setXray(xray);
+        }
+        xray.setPortfolioWeights(
+                xRaySummaryBuilder.portfolioWeightsFromBookValues(
+                        aggregatePortfolioLoader.loadBrokerBookValues(userId, persona)));
+        return response;
     }
 
     @Operation(summary = "All-portfolios stress", operationId = "runAllPortfoliosStress")
@@ -208,7 +236,28 @@ public class PortfolioAnalyticsController {
         }
         var portfolio = portfolioOwnerAssert.requireOwner(portfolioId);
         log.info("REST request for intelligence on portfolio: {}", portfolioId);
-        return ResponseEntity.ok(portfolioIntelligenceService.intelligence(portfolioId, portfolio));
+        PortfolioIntelligenceResponse intel =
+                portfolioIntelligenceService.intelligence(portfolioId, portfolio);
+        // Single-book By Portfolio slice (100%).
+        if (intel != null) {
+            XRayDto xray = intel.getXray();
+            if (xray == null) {
+                xray = XRayDto.builder().build();
+                intel.setXray(xray);
+            }
+            String name = portfolio.getName() != null && !portfolio.getName().isBlank()
+                    ? portfolio.getName().trim()
+                    : (portfolio.getBrokerType() != null
+                            ? portfolio.getBrokerType().name()
+                            : portfolioId);
+            double value = portfolio.getTotalValue() != null ? portfolio.getTotalValue() : 0.0;
+            if (value <= 0 && xray.getTotalValue() != null) {
+                value = xray.getTotalValue();
+            }
+            xray.setPortfolioWeights(
+                    xRaySummaryBuilder.portfolioWeightsFromBookValues(java.util.Map.of(name, value)));
+        }
+        return ResponseEntity.ok(intel);
     }
 
     @Operation(

@@ -59,18 +59,157 @@ public class PortfolioController {
     private final com.portfolio.redis.service.PortfolioIntelligenceRedisService portfolioIntelligenceRedisService;
     private final com.portfolio.analytics.intelligence.AggregatePortfolioLoader aggregatePortfolioLoader;
     private final com.portfolio.service.portfolio.BrokerPortfolioDeleteService brokerPortfolioDeleteService;
+    private final com.portfolio.service.cas.CasImportService casImportService;
+    private final com.portfolio.service.nps.NpsImportService npsImportService;
+    private final com.portfolio.service.accounts.AccountsHubService accountsHubService;
+    private final com.portfolio.service.family.FamilyMemberService familyMemberService;
+    private final com.portfolio.service.family.FamilyMemberDeleteService familyMemberDeleteService;
 
     @org.springframework.beans.factory.annotation.Value("${app.jwt.internal-secret}")
     private String internalSecret;
 
+    @Operation(
+            summary = "Accounts hub",
+            description = "Identity + demat/MF directory + NPS meta + per-broker portfolio amounts for dashboard",
+            operationId = "getAccountsHub")
+    @GetMapping("/accounts-hub")
+    public ResponseEntity<com.am.common.amcommondata.model.accounts.AccountsHubModel> getAccountsHub() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        return ResponseEntity.ok(accountsHubService.hubForUser(userId));
+    }
+
+    @Operation(summary = "List soft family members", operationId = "listFamilyMembers")
+    @GetMapping("/family-members")
+    public ResponseEntity<List<com.am.common.amcommondata.model.family.FamilyMember>> listFamilyMembers() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        return ResponseEntity.ok(familyMemberService.listForOwner(userId));
+    }
+
+    @Operation(summary = "Get soft family member", operationId = "getFamilyMember")
+    @GetMapping("/family-members/{familyMemberId}")
+    public ResponseEntity<com.am.common.amcommondata.model.family.FamilyMember> getFamilyMember(
+            @PathVariable String familyMemberId) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        return ResponseEntity.ok(familyMemberService.getOwned(familyMemberId, userId));
+    }
+
+    @Operation(summary = "Create soft family member", operationId = "createFamilyMember")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "201", description = "Created"),
+            @ApiResponse(responseCode = "400", description = "Invalid body"),
+            @ApiResponse(responseCode = "409", description = "Duplicate name or email")
+    })
+    @PostMapping("/family-members")
+    public ResponseEntity<com.am.common.amcommondata.model.family.FamilyMember> createFamilyMember(
+            @RequestBody com.portfolio.api.model.FamilyMemberWriteRequest body) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        com.am.common.amcommondata.model.family.FamilyMember created = familyMemberService.createManual(
+                userId,
+                body != null ? body.getDisplayName() : null,
+                body != null ? body.getEmail() : null);
+        return ResponseEntity.status(201).body(created);
+    }
+
+    @Operation(summary = "Update soft family member", operationId = "updateFamilyMember")
+    @PutMapping("/family-members/{familyMemberId}")
+    public ResponseEntity<com.am.common.amcommondata.model.family.FamilyMember> updateFamilyMember(
+            @PathVariable String familyMemberId,
+            @RequestBody com.portfolio.api.model.FamilyMemberWriteRequest body) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        return ResponseEntity.ok(familyMemberService.updateOwned(
+                familyMemberId,
+                userId,
+                body != null ? body.getDisplayName() : null,
+                body != null ? body.getEmail() : null));
+    }
+
+    @Operation(
+            summary = "Delete soft family member",
+            description = "Cascade-deletes tagged broker portfolios, CAS/NPS imports for that persona, then the member. Primary books untouched.",
+            operationId = "deleteFamilyMember")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "204", description = "Deleted"),
+            @ApiResponse(responseCode = "404", description = "Not found or not owned")
+    })
+    @DeleteMapping("/family-members/{familyMemberId}")
+    public ResponseEntity<Void> deleteFamilyMember(@PathVariable String familyMemberId) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        familyMemberDeleteService.deleteOwnedMember(familyMemberId, userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "CAS account directory", description = "Demat + MF accounts from latest CDSL CAS import", operationId = "listCasAccounts")
+    @GetMapping("/accounts")
+    public ResponseEntity<List<com.am.common.amcommondata.model.demat.DematAccountModel>> listCasAccounts() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        return ResponseEntity.ok(casImportService.accounts(userId));
+    }
+
+    @Operation(summary = "CAS account by number", operationId = "getCasAccount")
+    @GetMapping("/accounts/{accountNo}")
+    public ResponseEntity<com.am.common.amcommondata.model.demat.DematAccountModel> getCasAccount(
+            @PathVariable String accountNo) {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        return casImportService.account(userId, accountNo)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @Operation(summary = "Latest CAS import meta", operationId = "getLatestCas")
+    @GetMapping("/cas/latest")
+    public ResponseEntity<com.am.common.amcommondata.model.cas.CasDocumentMeta> getLatestCas() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        return casImportService.latestMeta(userId)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @Operation(summary = "Latest NPS import meta", operationId = "getLatestNps")
+    @GetMapping("/nps/latest")
+    public ResponseEntity<com.am.common.amcommondata.model.nps.NpsDocumentMeta> getLatestNps() {
+        String userId = com.am.security.context.UserContext.getUserIdOrThrow();
+        return npsImportService.latestMeta(userId)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @Operation(summary = "NPS scheme lines for portfolio", operationId = "listPortfolioNpsSchemes")
+    @GetMapping("/{portfolioId}/nps/schemes")
+    public ResponseEntity<List<com.am.common.amcommondata.model.nps.NpsSchemeLine>> listPortfolioNpsSchemes(
+            @PathVariable String portfolioId) {
+        PortfolioModelV1 owned = portfolioOwnerAssert.requireOwner(portfolioId);
+        return ResponseEntity.ok(npsImportService.schemesForPortfolio(owned.getOwner(), portfolioId));
+    }
+
+    @Operation(summary = "MF folio groups for portfolio (CAS)", operationId = "listPortfolioFolios")
+    @GetMapping("/{portfolioId}/folios")
+    public ResponseEntity<List<com.am.common.amcommondata.model.cas.CasMfFolioGroup>> listPortfolioFolios(
+            @PathVariable String portfolioId) {
+        PortfolioModelV1 owned = portfolioOwnerAssert.requireOwner(portfolioId);
+        return ResponseEntity.ok(casImportService.foliosForPortfolio(owned.getOwner(), portfolioId));
+    }
+
+    @Operation(summary = "MF folio detail (CAS)", operationId = "getPortfolioFolio")
+    @GetMapping("/{portfolioId}/folios/{folio}")
+    public ResponseEntity<com.am.common.amcommondata.model.cas.CasMfFolioGroup> getPortfolioFolio(
+            @PathVariable String portfolioId,
+            @PathVariable String folio) {
+        PortfolioModelV1 owned = portfolioOwnerAssert.requireOwner(portfolioId);
+        return casImportService.folio(owned.getOwner(), folio)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @Operation(summary = "Get intraday data for all portfolios", operationId = "getAllPortfoliosIntraday")
     @GetMapping("/intraday")
-    public ResponseEntity<List<com.portfolio.model.portfolio.IntradayDataPoint>> getAllPortfoliosIntraday() {
+    public ResponseEntity<List<com.portfolio.model.portfolio.IntradayDataPoint>> getAllPortfoliosIntraday(
+            @RequestParam(required = false) String persona) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
         NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, null);
         String traceId = org.slf4j.MDC.get("traceId");
-        log.info("[Intraday] Request for all portfolios, user={}, traceId={}", res.userId(), traceId);
-        return ResponseEntity.ok(portfolioIntradayService.getIntraday(res.userId(), res.portfolioId()));
+        log.info("[Intraday] Request for all portfolios, user={}, persona={}, traceId={}",
+                res.userId(), persona, traceId);
+        return ResponseEntity.ok(portfolioIntradayService.getIntraday(res.userId(), res.portfolioId(), persona));
     }
 
     @Operation(summary = "Get intraday data for specific portfolio", operationId = "getPortfolioIntraday")
@@ -190,12 +329,21 @@ public class PortfolioController {
         log.info("PortfolioController - getPortfolioBasicDetails called with userId: {}", userId);
 
         List<PortfolioBasicInfo> basicInfoList = newUserPortfolioFallbackService.listBasicPortfolios(userId).stream()
-                .map(row -> new PortfolioBasicInfo(
-                        row.portfolioId(),
-                        row.portfolioName(),
-                        row.kind(),
-                        row.gapMissingCount(),
-                        row.dummy()))
+                .map(row -> {
+                    PortfolioBasicInfo info = new PortfolioBasicInfo();
+                    info.setPortfolioId(row.portfolioId());
+                    info.setPortfolioName(row.portfolioName());
+                    info.setKind(row.kind());
+                    info.setGapMissingCount(row.gapMissingCount());
+                    info.setDummy(row.dummy());
+                    info.setBrokerType(row.brokerType());
+                    info.setAssetCount(row.assetCount());
+                    info.setTotalValue(row.totalValue());
+                    info.setHasHoldings(row.hasHoldings());
+                    info.setFamilyMemberId(row.familyMemberId());
+                    info.setFamilyMemberName(row.familyMemberName());
+                    return info;
+                })
                 .collect(java.util.stream.Collectors.toList());
 
         log.info("PortfolioController - getPortfolioBasicDetails - Found {} portfolio basic details for user: {}",
@@ -430,15 +578,17 @@ public class PortfolioController {
             @Parameter(description = "Optional portfolio ID to filter results for specific portfolio") @RequestParam(required = false) String portfolioId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
-            @RequestParam(required = false) String interval) {
+            @RequestParam(required = false) String interval,
+            @Parameter(description = "All-books scope: you, household, or a family member id")
+            @RequestParam(required = false) String persona) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
 
         NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
 
 
         log.info(
-                "PortfolioController - getPortfolioSummary called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}",
-                res.userId(), res.portfolioId() != null ? res.portfolioId() : "all", page, size, interval != null ? interval : "null");
+                "PortfolioController - getPortfolioSummary called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}, Persona: {}",
+                res.userId(), res.portfolioId() != null ? res.portfolioId() : "all", page, size, interval != null ? interval : "null", persona);
 
         try {
             TimeInterval timeInterval = TimeInterval.fromCode(interval);
@@ -450,7 +600,7 @@ public class PortfolioController {
                 portfolioSummary = portfolioDashboardService.overviewPortfolio(res.userId(), res.portfolioId(), timeInterval);
             } else {
                 // Get summary for all portfolios
-                portfolioSummary = portfolioDashboardService.overviewPortfolio(res.userId(), timeInterval);
+                portfolioSummary = portfolioDashboardService.overviewPortfolio(res.userId(), timeInterval, persona);
             }
 
             if (portfolioSummary == null) {
@@ -479,15 +629,20 @@ public class PortfolioController {
             @Parameter(description = "Optional portfolio ID to filter results for specific portfolio") @RequestParam(required = false) String portfolioId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
-            @RequestParam(required = false) String interval) {
+            @RequestParam(required = false) String interval,
+            @Parameter(description = "Optional CAS asset class filter: equity|mutual_fund_demat|debt|mutual_fund_folio")
+            @RequestParam(required = false) String assetClass,
+            @Parameter(description = "All-books scope: you, household, or a family member id")
+            @RequestParam(required = false) String persona) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
 
         NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, portfolioId);
 
 
         log.info(
-                "PortfolioController - getPortfolioHoldings called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}",
-                res.userId(), res.portfolioId() != null ? res.portfolioId() : "all", page, size, interval != null ? interval : "null");
+                "PortfolioController - getPortfolioHoldings called - User: {}, Portfolio: {}, Page: {}, Size: {}, Interval: {}, assetClass: {}",
+                res.userId(), res.portfolioId() != null ? res.portfolioId() : "all", page, size, interval != null ? interval : "null",
+                assetClass);
 
         try {
             TimeInterval timeInterval = TimeInterval.fromCode(interval);
@@ -499,7 +654,7 @@ public class PortfolioController {
                 portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(res.userId(), res.portfolioId(), timeInterval);
             } else {
                 // Get holdings for all portfolios
-                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(res.userId(), timeInterval);
+                portfolioHoldings = portfolioDashboardService.getPortfolioHoldings(res.userId(), timeInterval, persona);
             }
 
             if (portfolioHoldings == null) {
@@ -507,6 +662,16 @@ public class PortfolioController {
                         "PortfolioController - getPortfolioHoldings - No holdings found for user: {} and portfolio: {}. Returning empty state.",
                         res.userId(), res.portfolioId() != null ? res.portfolioId() : "all");
                 return ResponseEntity.ok(PortfolioHoldings.empty());
+            }
+
+            if (assetClass != null && !assetClass.isBlank()
+                    && portfolioHoldings.getEquityHoldings() != null) {
+                String want = assetClass.trim().toLowerCase();
+                portfolioHoldings.setEquityHoldings(
+                        portfolioHoldings.getEquityHoldings().stream()
+                                .filter(h -> h.getAssetClass() != null
+                                        && want.equalsIgnoreCase(h.getAssetClass()))
+                                .toList());
             }
 
             log.info(
@@ -526,15 +691,18 @@ public class PortfolioController {
     })
     @GetMapping("/history")
     public ResponseEntity<PortfolioHistoryResponse> getPortfolioHistory(
-            @RequestParam(required = false, defaultValue = "1M") String timeFrame) {
+            @RequestParam(required = false, defaultValue = "1M") String timeFrame,
+            @RequestParam(required = false) String persona) {
         String userId = com.am.security.context.UserContext.getUserIdOrThrow();
         NewUserPortfolioFallbackService.DemoResolution res = newUserPortfolioFallbackService.resolveRequest(userId, null);
-        log.info("PortfolioController - getPortfolioHistory called - User: {}, TimeFrame: {}", res.userId(), timeFrame);
+        log.info("PortfolioController - getPortfolioHistory called - User: {}, TimeFrame: {}, persona: {}",
+                res.userId(), timeFrame, persona);
 
         List<PortfolioSnapshotModel> history = portfolioSnapshotService.getHistory(res.userId(), res.portfolioId(), timeFrame);
         if (history == null) {
             history = java.util.Collections.emptyList();
         }
+        // persona is accepted for API parity with summary/intraday; aggregate snapshots are household-level today.
         return ResponseEntity.ok(toHistoryResponse(res.userId(), history));
     }
 

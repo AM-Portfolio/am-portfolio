@@ -3,6 +3,7 @@ package com.portfolio.analytics.intelligence;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
+import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.portfolio.model.util.SymbolResolver;
 import org.springframework.stereotype.Component;
@@ -30,13 +31,31 @@ public class AggregatePortfolioFactory {
         List<AssetModel> bonds = new ArrayList<>();
         List<AssetModel> commodities = new ArrayList<>();
         List<AssetModel> cash = new ArrayList<>();
+        List<AssetModel> npsModels = new ArrayList<>();
 
         for (PortfolioModelV1 portfolio : brokers) {
-            mergeEquities(equities, portfolio);
             appendAll(mutualFunds, portfolio.getMutualFunds());
             appendAll(bonds, portfolio.getBonds());
             appendAll(commodities, portfolio.getCommodities());
             appendAll(cash, portfolio.getCash());
+            appendAll(npsModels, portfolio.getNpsModels());
+            // NPS books sometimes store scheme lines only under equityModels — lift once.
+            boolean npsLiftedFromEquities = false;
+            if (portfolio.getBrokerType() == BrokerType.NPS
+                    && (portfolio.getNpsModels() == null || portfolio.getNpsModels().isEmpty())
+                    && portfolio.getEquityModels() != null
+                    && !portfolio.getEquityModels().isEmpty()) {
+                for (EquityModel eq : portfolio.getEquityModels()) {
+                    if (eq == null) {
+                        continue;
+                    }
+                    npsModels.add(copyAsAsset(eq, HealthScoreEngine.ASSET_NPS));
+                }
+                npsLiftedFromEquities = true;
+            }
+            if (!npsLiftedFromEquities) {
+                mergeEquities(equities, portfolio);
+            }
         }
 
         return PortfolioModelV1.builder()
@@ -49,12 +68,94 @@ public class AggregatePortfolioFactory {
                 .bonds(bonds)
                 .commodities(commodities)
                 .cash(cash)
+                .npsModels(npsModels)
                 .build();
+    }
+
+    /**
+     * Display name → current book value for By-Portfolio X-Ray slices.
+     * A saved total above zero wins. A saved zero falls back to the line marks,
+     * so a book such as Zerodha is not dropped while its lines still have value.
+     * Duplicate names are split by owner so two Mirae books stay two bars.
+     */
+    public static Map<String, Double> brokerBookValues(List<PortfolioModelV1> portfolios) {
+        List<PortfolioModelV1> books = filterBrokers(portfolios);
+        Map<String, Integer> nameCounts = new LinkedHashMap<>();
+        for (PortfolioModelV1 p : books) {
+            nameCounts.merge(baseName(p), 1, Integer::sum);
+        }
+        Map<String, Double> out = new LinkedHashMap<>();
+        for (PortfolioModelV1 p : books) {
+            double stored = p.getTotalValue() != null ? p.getTotalValue() : 0.0;
+            double lines = sumBookValue(p);
+            double value = stored > 0 ? stored : lines;
+            if (value <= 0) {
+                continue;
+            }
+            String base = baseName(p);
+            String label = nameCounts.getOrDefault(base, 1) > 1 ? withOwner(p, base) : base;
+            out.merge(label, value, Double::sum);
+        }
+        return out;
+    }
+
+    private static String baseName(PortfolioModelV1 p) {
+        if (p.getName() != null && !p.getName().isBlank()) {
+            return p.getName().trim();
+        }
+        if (p.getBrokerType() != null) {
+            return p.getBrokerType().name();
+        }
+        return "Unknown";
+    }
+
+    private static String withOwner(PortfolioModelV1 p, String base) {
+        String owner = p.getFamilyMemberName();
+        if (owner == null || owner.isBlank()) {
+            owner = "You";
+        }
+        return base + " (" + owner.trim() + ")";
+    }
+
+    private static double sumBookValue(PortfolioModelV1 p) {
+        double sum = 0.0;
+        if (p.getEquityModels() != null) {
+            for (EquityModel e : p.getEquityModels()) {
+                if (e != null && e.getCurrentValue() != null) {
+                    sum += e.getCurrentValue();
+                }
+            }
+        }
+        for (List<AssetModel> list : List.of(
+                p.getMutualFunds(), p.getBonds(), p.getCommodities(), p.getCash(), p.getNpsModels())) {
+            if (list == null) {
+                continue;
+            }
+            for (AssetModel a : list) {
+                if (a != null && a.getCurrentValue() != null) {
+                    sum += a.getCurrentValue();
+                }
+            }
+        }
+        return sum;
     }
 
     static List<PortfolioModelV1> filterBrokers(List<PortfolioModelV1> portfolios) {
         if (portfolios == null || portfolios.isEmpty()) {
             return List.of();
+        }
+        boolean hasNonCdslBroker = false;
+        for (PortfolioModelV1 p : portfolios) {
+            if (p == null || p.getPortfolioKind() == PortfolioKind.DELETED) {
+                continue;
+            }
+            if (!PortfolioKind.isBroker(p.getPortfolioKind())) {
+                continue;
+            }
+            if (p.getBrokerType() != null && !p.getBrokerType().isCdsl()) {
+                hasNonCdslBroker = true;
+                break;
+            }
         }
         List<PortfolioModelV1> out = new ArrayList<>();
         for (PortfolioModelV1 p : portfolios) {
@@ -65,6 +166,10 @@ public class AggregatePortfolioFactory {
                 continue;
             }
             if (!PortfolioKind.isBroker(p.getPortfolioKind())) {
+                continue;
+            }
+            // Defense: when real/named books exist, skip CDSL aggregator to avoid double-count.
+            if (hasNonCdslBroker && p.getBrokerType() != null && p.getBrokerType().isCdsl()) {
                 continue;
             }
             out.add(p);
@@ -94,7 +199,7 @@ public class AggregatePortfolioFactory {
 
             EquityModel existing = bySymbol.get(symbol);
             if (existing == null) {
-                EquityModel copy = copyEquity(equity, symbol, addedQty);
+                EquityModel copy = copyEquity(equity, symbol, addedQty, portfolio.getBrokerType());
                 bySymbol.put(symbol, copy);
                 continue;
             }
@@ -112,10 +217,15 @@ public class AggregatePortfolioFactory {
                 double b = equity.getCurrentValue() != null ? equity.getCurrentValue() : 0.0;
                 existing.setCurrentValue(a + b);
             }
+            // Prefer non-equity Class tags when merging the same symbol across books.
+            existing.setAssetClass(preferAssetClass(
+                    existing.getAssetClass(),
+                    resolveEquityAssetClass(equity, portfolio.getBrokerType())));
         }
     }
 
-    private static EquityModel copyEquity(EquityModel src, String symbol, double qty) {
+    private static EquityModel copyEquity(
+            EquityModel src, String symbol, double qty, BrokerType bookBroker) {
         return EquityModel.builder()
                 .symbol(symbol)
                 .name(src.getName())
@@ -131,8 +241,46 @@ public class AggregatePortfolioFactory {
                 .currentValue(src.getCurrentValue())
                 .investmentValue(src.getInvestmentValue())
                 .assetType(src.getAssetType())
+                .assetClass(resolveEquityAssetClass(src, bookBroker))
                 .brokerType(src.getBrokerType())
                 .status(src.getStatus())
+                .build();
+    }
+
+    /** Preserve CAS / broker Class tags; NPS book defaults blank rows to NPS. */
+    static String resolveEquityAssetClass(EquityModel src, BrokerType bookBroker) {
+        String raw = src != null ? src.getAssetClass() : null;
+        if (raw != null && !raw.isBlank()) {
+            return HealthScoreEngine.normalizeAssetClass(raw);
+        }
+        if (bookBroker == BrokerType.NPS) {
+            return HealthScoreEngine.ASSET_NPS;
+        }
+        return HealthScoreEngine.ASSET_EQUITY;
+    }
+
+    static String preferAssetClass(String a, String b) {
+        String na = HealthScoreEngine.normalizeAssetClass(a);
+        String nb = HealthScoreEngine.normalizeAssetClass(b);
+        if (HealthScoreEngine.ASSET_EQUITY.equals(na) && !HealthScoreEngine.ASSET_EQUITY.equals(nb)) {
+            return nb;
+        }
+        return na;
+    }
+
+    private static AssetModel copyAsAsset(EquityModel src, String assetClass) {
+        return AssetModel.builder()
+                .symbol(src.getSymbol())
+                .name(src.getName() != null ? src.getName() : src.getCompanyName())
+                .isin(src.getIsin())
+                .quantity(src.getQuantity())
+                .avgBuyingPrice(src.getAvgBuyingPrice())
+                .currentPrice(src.getCurrentPrice())
+                .currentValue(src.getCurrentValue())
+                .investmentValue(src.getInvestmentValue())
+                .assetType(src.getAssetType())
+                .assetClass(assetClass)
+                .brokerType(src.getBrokerType() != null ? src.getBrokerType() : BrokerType.NPS)
                 .build();
     }
 

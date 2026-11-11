@@ -16,7 +16,7 @@ import java.time.LocalDate;
 @EqualsAndHashCode(callSuper = true)
 @JsonInclude(Include.NON_NULL)
 public class MutualFundModel extends AssetModel {
-    private String isin;
+    // isin + schemeCode live on AssetModel — do not redeclare (Spring Data Mongo uniqueness).
     private String fundHouse;
     private String category; // Equity, Debt, Hybrid, etc.
     private String subCategory;
@@ -37,4 +37,9 @@ public class MutualFundModel extends AssetModel {
     private Boolean directPlan;
     private String sipFrequency;
     private Double sipMinimumAmount;
+    private String folioNumber;
+    private String amcName;
+    private String rtaName;
+    private String advisorName;
+    private String ucc;
 }

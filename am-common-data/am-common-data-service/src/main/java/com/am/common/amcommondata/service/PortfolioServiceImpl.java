@@ -158,7 +158,9 @@ public class PortfolioServiceImpl implements PortfolioService {
         if (doc == null) {
             return "unknown";
         }
-        return brokerIdentityKey(doc.getBrokerType(), doc.getName(), doc.getId());
+        return withFamilyScope(
+                brokerIdentityKey(doc.getBrokerType(), doc.getName(), doc.getId(), doc.getDematBoid()),
+                doc.getFamilyMemberId());
     }
 
     static String brokerIdentityKey(PortfolioModelV1 model) {
@@ -166,12 +168,34 @@ public class PortfolioServiceImpl implements PortfolioService {
             return "unknown";
         }
         String id = model.getId() != null ? model.getId().toString() : null;
-        return brokerIdentityKey(model.getBrokerType(), model.getName(), id);
+        return withFamilyScope(
+                brokerIdentityKey(model.getBrokerType(), model.getName(), id, model.getDematBoid()),
+                model.getFamilyMemberId());
+    }
+
+    /** Primary and family books of the same broker must not collapse into one row. */
+    static String withFamilyScope(String base, String familyMemberId) {
+        String fm = familyMemberId == null || familyMemberId.isBlank() ? "you" : familyMemberId.trim();
+        return base + "|fm:" + fm;
     }
 
     static String brokerIdentityKey(BrokerType bt, String name, String id) {
+        return brokerIdentityKey(bt, name, id, null);
+    }
+
+    static String brokerIdentityKey(BrokerType bt, String name, String id, String dematBoid) {
         if (bt == BrokerType.GROW || bt == BrokerType.GROWW) {
             return "broker:GROWW";
+        }
+        if (bt == BrokerType.CAS_DEMAT) {
+            String boid = dematBoid != null && !dematBoid.isBlank() ? dematBoid.trim() : null;
+            if (boid != null) {
+                return "broker:CAS_DEMAT:" + boid;
+            }
+            if (name != null && !name.isBlank()) {
+                return "broker:CAS_DEMAT:name:" + name.trim().toLowerCase(Locale.ROOT);
+            }
+            return "broker:CAS_DEMAT:id:" + id;
         }
         if (bt != null) {
             return "broker:" + bt.name();
@@ -390,6 +414,27 @@ public class PortfolioServiceImpl implements PortfolioService {
     }
 
     /** Email Mongo ObjectId / UUID must never become the broker book display name. */
+    /** Same CAS dump within 2% (or both null/zero) — used to retag untagged primary books. */
+    private static boolean totalsNearlyEqual(Double existing, Double incoming) {
+        double a = existing != null ? existing : 0.0;
+        double b = incoming != null ? incoming : 0.0;
+        if (a <= 0 && b <= 0) {
+            return true;
+        }
+        double denom = Math.max(Math.abs(b), Math.abs(a));
+        if (denom <= 0) {
+            return true;
+        }
+        return Math.abs(a - b) / denom <= 0.02;
+    }
+
+    private static String blankToNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
+    }
+
     private static boolean looksLikeOpaquePortfolioName(String value) {
         if (value == null || value.isBlank()) {
             return true;
@@ -538,8 +583,15 @@ public class PortfolioServiceImpl implements PortfolioService {
             portfolioModel.setBrokerType(brokerType);
         }
 
-        java.util.List<PortfolioDocument> existingDocs =
-            portfolioDocumentRepository.findByOwnerAndBrokerType(owner, brokerType);
+        final String targetDematBoid = blankToNull(portfolioModel.getDematBoid());
+        java.util.List<PortfolioDocument> existingDocs;
+        if (brokerType == com.am.common.amcommondata.model.enums.BrokerType.CAS_DEMAT
+                && targetDematBoid != null) {
+            existingDocs = portfolioDocumentRepository.findByOwnerAndBrokerTypeAndDematBoid(
+                    owner, brokerType, targetDematBoid);
+        } else {
+            existingDocs = portfolioDocumentRepository.findByOwnerAndBrokerType(owner, brokerType);
+        }
         // Legacy rows stored as GROW must merge into the GROWW canonical book.
         if (brokerType == com.am.common.amcommondata.model.enums.BrokerType.GROWW) {
             java.util.List<PortfolioDocument> legacyGrow =
@@ -555,6 +607,18 @@ public class PortfolioServiceImpl implements PortfolioService {
         List<PortfolioDocument> brokerDocs = existingDocs == null ? List.of() : existingDocs.stream()
                 .filter(d -> PortfolioKind.isBroker(d.getPortfolioKind()))
                 .collect(Collectors.toList());
+        // Soft family: match primary (null) vs familyMemberId books separately.
+        // A family import never takes over the primary book.
+        final String targetFamilyId = blankToNull(portfolioModel.getFamilyMemberId());
+        brokerDocs = brokerDocs.stream()
+                .filter(d -> java.util.Objects.equals(blankToNull(d.getFamilyMemberId()), targetFamilyId))
+                .collect(Collectors.toList());
+        // CAS_DEMAT: further scope to dematBoid so Mirae/Finwizard stay separate books.
+        if (brokerType == com.am.common.amcommondata.model.enums.BrokerType.CAS_DEMAT) {
+            brokerDocs = brokerDocs.stream()
+                    .filter(d -> java.util.Objects.equals(blankToNull(d.getDematBoid()), targetDematBoid))
+                    .collect(Collectors.toList());
+        }
         // Dedupe by Mongo id (GROW + GROWW query can return the same doc once each path).
         Map<String, PortfolioDocument> uniqueById = new HashMap<>();
         for (PortfolioDocument d : brokerDocs) {
@@ -605,6 +669,9 @@ public class PortfolioServiceImpl implements PortfolioService {
             if (incoming.getCash() != null) {
                 doc.setCash(incoming.getCash());
             }
+            if (incoming.getNpsModels() != null) {
+                doc.setNpsModels(incoming.getNpsModels());
+            }
             if (portfolioModel.getName() != null && !portfolioModel.getName().isBlank()
                     && !looksLikeOpaquePortfolioName(portfolioModel.getName())) {
                 doc.setName(portfolioModel.getName());
@@ -612,16 +679,29 @@ public class PortfolioServiceImpl implements PortfolioService {
                     || looksLikeOpaquePortfolioName(doc.getName())) {
                 doc.setName(brokerType.getCode());
             }
-            // Always recompute total from whatever lists are on the doc after merge.
-            doc.setTotalValue(sumEquityDocs(doc.getEquities())
+            if (targetDematBoid != null) {
+                doc.setDematBoid(targetDematBoid);
+            }
+            // Line values win. When they sum to 0, keep the statement book total
+            // (CDSL Portfolio Value) so a demat book is not stored at 0.
+            double summed = sumEquityDocs(doc.getEquities())
                     + sumAssetValues(doc.getMutualFunds())
                     + sumAssetValues(doc.getBonds())
                     + sumAssetValues(doc.getCommodities())
-                    + sumAssetValues(doc.getCash()));
+                    + sumAssetValues(doc.getCash())
+                    + sumAssetValues(doc.getNpsModels());
+            Double incomingTotal = portfolioModel.getTotalValue();
+            doc.setTotalValue(summed > 0 ? summed
+                    : (incomingTotal != null && incomingTotal > 0 ? incomingTotal : summed));
             doc.setPortfolioKind(PortfolioKind.BROKER);
-            // Keep stable broker name (no Zerodha-V*)
-            if (doc.getName() == null || doc.getName().isBlank()
-                    || doc.getName().matches("(?i)" + java.util.regex.Pattern.quote(brokerType.getCode()) + "-V\\d+")) {
+            doc.setFamilyMemberId(targetFamilyId);
+            if (portfolioModel.getFamilyMemberName() != null) {
+                doc.setFamilyMemberName(portfolioModel.getFamilyMemberName());
+            }
+            // Keep stable broker name (no Zerodha-V*). Never overwrite CAS_DEMAT short DP names with "Demat".
+            if (brokerType != com.am.common.amcommondata.model.enums.BrokerType.CAS_DEMAT
+                    && (doc.getName() == null || doc.getName().isBlank()
+                    || doc.getName().matches("(?i)" + java.util.regex.Pattern.quote(brokerType.getCode()) + "-V\\d+"))) {
                 doc.setName(brokerType.getCode());
             }
             clampAllocations(doc);
@@ -631,14 +711,44 @@ public class PortfolioServiceImpl implements PortfolioService {
                         : portfolioModel.getCreatedAt();
                 doc.getAudit().setUpdatedAt(asOf != null ? asOf : LocalDateTime.now());
             }
+            if (brokerType == com.am.common.amcommondata.model.enums.BrokerType.CDSL
+                    && isEmptyBrokerBook(doc)) {
+                doc.setPortfolioKind(PortfolioKind.DELETED);
+            }
             return portfolioMapper.toModel(portfolioDocumentRepository.save(doc));
         } else {
-            portfolioModel.setName(brokerType.getCode());
+            if (portfolioModel.getName() == null || portfolioModel.getName().isBlank()
+                    || looksLikeOpaquePortfolioName(portfolioModel.getName())) {
+                portfolioModel.setName(brokerType.getCode());
+            }
             portfolioModel.setPortfolioKind(PortfolioKind.BROKER);
             PortfolioDocument document = portfolioMapper.toDocument(portfolioModel);
             document.setPortfolioKind(PortfolioKind.BROKER);
+            if (targetDematBoid != null) {
+                document.setDematBoid(targetDematBoid);
+            }
+            if (brokerType == com.am.common.amcommondata.model.enums.BrokerType.CDSL
+                    && isEmptyBrokerBook(document)) {
+                document.setPortfolioKind(PortfolioKind.DELETED);
+            }
             return portfolioMapper.toModel(portfolioDocumentRepository.save(document));
         }
+    }
+
+    static boolean isEmptyBrokerBook(PortfolioDocument doc) {
+        if (doc == null) {
+            return true;
+        }
+        return isEmptyList(doc.getEquities())
+                && isEmptyList(doc.getMutualFunds())
+                && isEmptyList(doc.getBonds())
+                && isEmptyList(doc.getCommodities())
+                && isEmptyList(doc.getCash())
+                && isEmptyList(doc.getNpsModels());
+    }
+
+    private static boolean isEmptyList(java.util.Collection<?> list) {
+        return list == null || list.isEmpty();
     }
 
     private PortfolioDocument pickCanonicalBroker(List<PortfolioDocument> brokerDocs) {
