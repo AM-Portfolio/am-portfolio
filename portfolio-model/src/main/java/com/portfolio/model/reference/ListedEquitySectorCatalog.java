@@ -4,6 +4,8 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -11,15 +13,19 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * BSE equity master (symbol and ISIN to sector). Used when live market-data
- * stores a blank or "-" sector for a listed name such as IDEA.
+ * Symbol/ISIN → sector fallback when live market-data returns blank or "-".
+ * Prefer an external BSE equity master via {@code listed.equity.sector.csv}
+ * (system property) or {@code LISTED_EQUITY_SECTOR_CSV} (env). Otherwise loads the
+ * small classpath fallback. Full BSE master belongs in market-data ingestion, not the jar.
  */
 public final class ListedEquitySectorCatalog {
 
     public record Profile(String symbol, String isin, String sector, String industry) {
     }
 
-    private static final String RESOURCE = "/bse-equity.csv";
+    private static final String FALLBACK_RESOURCE = "/listed-equity-sector-fallback.csv";
+    private static final String PROP_PATH = "listed.equity.sector.csv";
+    private static final String ENV_PATH = "LISTED_EQUITY_SECTOR_CSV";
 
     private static volatile Map<String, Profile> bySymbol = Map.of();
     private static volatile Map<String, Profile> byIsin = Map.of();
@@ -54,41 +60,8 @@ public final class ListedEquitySectorCatalog {
             }
             Map<String, Profile> symbols = new HashMap<>();
             Map<String, Profile> isins = new HashMap<>();
-            try (InputStream in = ListedEquitySectorCatalog.class.getResourceAsStream(RESOURCE)) {
-                if (in != null) {
-                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-                        String line = reader.readLine();
-                        while ((line = reader.readLine()) != null) {
-                            if (line.isBlank()) {
-                                continue;
-                            }
-                            List<String> cols = splitCsv(line);
-                            if (cols.size() < 11) {
-                                continue;
-                            }
-                            String status = cols.get(4).trim();
-                            if (!status.equalsIgnoreCase("Active")) {
-                                continue;
-                            }
-                            String sector = usable(cols.get(10));
-                            if (sector == null) {
-                                continue;
-                            }
-                            String sym = normalize(cols.get(2));
-                            String id = normalize(cols.get(7));
-                            if (sym == null && id == null) {
-                                continue;
-                            }
-                            Profile profile = new Profile(sym, id, sector, usable(cols.get(8)));
-                            if (sym != null) {
-                                symbols.putIfAbsent(sym, profile);
-                            }
-                            if (id != null) {
-                                isins.putIfAbsent(id, profile);
-                            }
-                        }
-                    }
-                }
+            try {
+                loadInto(symbols, isins);
             } catch (Exception ignored) {
                 symbols.clear();
                 isins.clear();
@@ -96,6 +69,74 @@ public final class ListedEquitySectorCatalog {
             bySymbol = Collections.unmodifiableMap(symbols);
             byIsin = Collections.unmodifiableMap(isins);
             loaded = true;
+        }
+    }
+
+    private static void loadInto(Map<String, Profile> symbols, Map<String, Profile> isins) throws Exception {
+        Path external = externalCsvPath();
+        if (external != null && Files.isRegularFile(external)) {
+            try (BufferedReader reader = Files.newBufferedReader(external, StandardCharsets.UTF_8)) {
+                parseCsv(reader, symbols, isins);
+            }
+            if (!symbols.isEmpty() || !isins.isEmpty()) {
+                return;
+            }
+        }
+        try (InputStream in = ListedEquitySectorCatalog.class.getResourceAsStream(FALLBACK_RESOURCE)) {
+            if (in == null) {
+                return;
+            }
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+                parseCsv(reader, symbols, isins);
+            }
+        }
+    }
+
+    private static Path externalCsvPath() {
+        String fromProp = System.getProperty(PROP_PATH);
+        if (fromProp != null && !fromProp.isBlank()) {
+            return Path.of(fromProp.trim());
+        }
+        String fromEnv = System.getenv(ENV_PATH);
+        if (fromEnv != null && !fromEnv.isBlank()) {
+            return Path.of(fromEnv.trim());
+        }
+        return null;
+    }
+
+    private static void parseCsv(
+            BufferedReader reader,
+            Map<String, Profile> symbols,
+            Map<String, Profile> isins) throws Exception {
+        String line = reader.readLine();
+        while ((line = reader.readLine()) != null) {
+            if (line.isBlank()) {
+                continue;
+            }
+            List<String> cols = splitCsv(line);
+            if (cols.size() < 11) {
+                continue;
+            }
+            String status = cols.get(4).trim();
+            if (!status.equalsIgnoreCase("Active")) {
+                continue;
+            }
+            String sector = usable(cols.get(10));
+            if (sector == null) {
+                continue;
+            }
+            String sym = normalize(cols.get(2));
+            String id = normalize(cols.get(7));
+            if (sym == null && id == null) {
+                continue;
+            }
+            Profile profile = new Profile(sym, id, sector, usable(cols.get(8)));
+            if (sym != null) {
+                symbols.putIfAbsent(sym, profile);
+            }
+            if (id != null) {
+                isins.putIfAbsent(id, profile);
+            }
         }
     }
 

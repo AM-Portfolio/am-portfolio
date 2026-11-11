@@ -45,6 +45,36 @@ public class AccountsHubService {
     private static final ConcurrentHashMap<String, XirrCacheEntry> XIRR_CACHE =
             new ConcurrentHashMap<>();
 
+    private static final Map<String, String> MAPPED_BROKER_ALIASES = Map.ofEntries(
+            Map.entry("groww", "GROWW"),
+            Map.entry("grow", "GROWW"),
+            Map.entry("angleone", "ANGEL_ONE"),
+            Map.entry("angelone", "ANGEL_ONE"),
+            Map.entry("angel_one", "ANGEL_ONE"),
+            Map.entry("zerodha", "ZERODHA"),
+            Map.entry("kotak", "KOTAK"),
+            Map.entry("dhan", "DHAN"),
+            Map.entry("upstox", "UPSTOX"),
+            Map.entry("fyers", "FYERS"),
+            Map.entry("hdfc", "HDFC"),
+            Map.entry("hdfc_bank", "HDFC"),
+            Map.entry("mstock", "MSTOCK"));
+
+    private static final Map<String, String[]> DP_NAME_TOKENS = Map.ofEntries(
+            Map.entry("GROWW", new String[] {"GROWW"}),
+            Map.entry("ANGEL_ONE", new String[] {"ANGEL ONE", "ANGELONE"}),
+            Map.entry("ZERODHA", new String[] {"ZERODHA"}),
+            Map.entry("KOTAK", new String[] {"KOTAK"}),
+            Map.entry("DHAN", new String[] {"RAISE", "DHAN"}),
+            Map.entry("UPSTOX", new String[] {"UPSTOX"}),
+            Map.entry("FYERS", new String[] {"FYERS"}),
+            Map.entry("HDFC", new String[] {"HDFC"}),
+            Map.entry("MSTOCK", new String[] {"MSTOCK", "M STOCK"}));
+
+    private static final String DP_NOISE_WORDS =
+            "\\b(SECURITIES|BROKING|BANK|CAPITAL|INVEST|TECH|ASSET|SHAREKHAN|"
+                    + "SOLUTIONS|PRIVATE|LIMITED|LTD|TRADING)\\b";
+
     private final CasImportService casImportService;
     private final NpsImportService npsImportService;
     private final PortfolioService portfolioService;
@@ -440,18 +470,16 @@ public class AccountsHubService {
         }
         // Fallback: DP legal name contains first-class broker token.
         String dp = nullToEmpty(a.getDpName()).toUpperCase(Locale.ROOT);
-        return switch (broker) {
-            case "GROWW" -> dp.contains("GROWW");
-            case "ANGEL_ONE" -> dp.contains("ANGEL ONE") || dp.contains("ANGELONE");
-            case "ZERODHA" -> dp.contains("ZERODHA");
-            case "KOTAK" -> dp.contains("KOTAK");
-            case "DHAN" -> dp.contains("RAISE") || dp.contains("DHAN");
-            case "UPSTOX" -> dp.contains("UPSTOX");
-            case "FYERS" -> dp.contains("FYERS");
-            case "HDFC" -> dp.contains("HDFC");
-            case "MSTOCK" -> dp.contains("MSTOCK") || dp.contains("M STOCK");
-            default -> false;
-        };
+        String[] tokens = DP_NAME_TOKENS.get(broker);
+        if (tokens == null) {
+            return false;
+        }
+        for (String token : tokens) {
+            if (dp.contains(token)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String normalizeMappedBroker(String mapped) {
@@ -459,18 +487,11 @@ public class AccountsHubService {
         if (m.isEmpty()) {
             return "";
         }
-        return switch (m) {
-            case "groww", "grow" -> "GROWW";
-            case "angleone", "angelone", "angel_one" -> "ANGEL_ONE";
-            case "zerodha" -> "ZERODHA";
-            case "kotak" -> "KOTAK";
-            case "dhan" -> "DHAN";
-            case "upstox" -> "UPSTOX";
-            case "fyers" -> "FYERS";
-            case "hdfc", "hdfc_bank" -> "HDFC";
-            case "mstock" -> "MSTOCK";
-            default -> m.toUpperCase(Locale.ROOT);
-        };
+        String canonical = MAPPED_BROKER_ALIASES.get(m);
+        if (canonical != null) {
+            return canonical;
+        }
+        return m.toUpperCase(Locale.ROOT);
     }
 
     private static String shortDpLabel(String dpName) {
@@ -479,8 +500,7 @@ public class AccountsHubService {
             return "";
         }
         String cleaned = raw.toUpperCase(Locale.ROOT)
-                .replaceAll("\\b(SECURITIES|BROKING|BANK|CAPITAL|INVEST|TECH|ASSET|SHAREKHAN|"
-                        + "SOLUTIONS|PRIVATE|LIMITED|LTD|TRADING)\\b", " ")
+                .replaceAll(DP_NOISE_WORDS, " ")
                 .replaceAll("[^A-Z0-9\\s]", " ");
         String[] tokens = cleaned.trim().split("\\s+");
         if (tokens.length == 0 || tokens[0].isEmpty()) {
