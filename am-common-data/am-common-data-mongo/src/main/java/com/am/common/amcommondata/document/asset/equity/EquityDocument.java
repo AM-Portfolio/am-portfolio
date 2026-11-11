@@ -14,7 +14,8 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @EqualsAndHashCode(callSuper = true)
 public class EquityDocument extends AssetDocument {
-    private String isin;
+    // isin lives on AssetDocument (shared with MF/NPS); do not redeclare here —
+    // Spring Data Mongo rejects duplicate field names across inheritance.
     @Field("equity_symbol")
     private String symbol;
 

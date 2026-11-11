@@ -31,6 +31,24 @@ public class PortfolioBasicInfo {
     @JsonProperty("isDummy")
     private boolean isDummy;
 
+    @Schema(description = "Broker type code when known", example = "ZERODHA")
+    private String brokerType;
+
+    @Schema(description = "Holding / asset line count; 0 means empty book")
+    private Integer assetCount;
+
+    @Schema(description = "Book market value; used with assetCount for selectability")
+    private Double totalValue;
+
+    @Schema(description = "True when assetCount>0 or totalValue>0 (or demo/paper)")
+    private boolean hasHoldings;
+
+    @Schema(description = "Soft family member id when this book is not the primary owner")
+    private String familyMemberId;
+
+    @Schema(description = "Soft family member display name for dropdown labels")
+    private String familyMemberName;
+
     public PortfolioBasicInfo(String portfolioId, String portfolioName) {
         this.portfolioId = portfolioId;
         this.portfolioName = portfolioName;

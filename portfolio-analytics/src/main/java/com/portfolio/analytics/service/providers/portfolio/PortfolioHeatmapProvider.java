@@ -378,7 +378,10 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         return data.getPreviousClose() != null && data.getPreviousClose() > 0;
     }
 
-    private static Double costBasisPrice(EquityModel equity) {
+    /**
+     * Book price when live MD is missing: cost, then import/statement mark, then currentPrice.
+     */
+    static Double costBasisPrice(EquityModel equity) {
         if (equity == null) {
             return null;
         }
@@ -387,8 +390,15 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         }
         if (equity.getInvestmentValue() != null
                 && equity.getQuantity() != null
-                && equity.getQuantity() > 0) {
+                && equity.getQuantity() > 0
+                && equity.getInvestmentValue() > 0) {
             return equity.getInvestmentValue() / equity.getQuantity();
+        }
+        if (equity.getImportMarkPrice() != null && equity.getImportMarkPrice() > 0) {
+            return equity.getImportMarkPrice();
+        }
+        if (equity.getCurrentPrice() != null && equity.getCurrentPrice() > 0) {
+            return equity.getCurrentPrice();
         }
         return null;
     }

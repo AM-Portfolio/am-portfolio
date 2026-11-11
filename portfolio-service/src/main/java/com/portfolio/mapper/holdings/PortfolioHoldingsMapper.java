@@ -26,6 +26,7 @@ public class PortfolioHoldingsMapper {
     public static final String ASSET_FIXED_INCOME = "FIXED_INCOME";
     public static final String ASSET_COMMODITY = "COMMODITY";
     public static final String ASSET_CASH = "CASH";
+    public static final String ASSET_NPS = "nps";
 
     public PortfolioHoldings toPortfolioHoldingsV1(List<PortfolioModelV1> portfolios) {
         List<EquityHoldings> all = toEquityHoldings(portfolios);
@@ -63,6 +64,7 @@ public class PortfolioHoldingsMapper {
             appendAssets(out, portfolio.getBonds(), ASSET_FIXED_INCOME, portfolioId, portfolioName);
             appendAssets(out, portfolio.getCommodities(), ASSET_COMMODITY, portfolioId, portfolioName);
             appendAssets(out, portfolio.getCash(), ASSET_CASH, portfolioId, portfolioName);
+            appendAssets(out, portfolio.getNpsModels(), ASSET_NPS, portfolioId, portfolioName);
         }
         return out;
     }
@@ -185,8 +187,13 @@ public class PortfolioHoldingsMapper {
                     continue; // Skip zero/negative quantity or closed positions
                 }
 
-                double addedCost = (equity.getAvgBuyingPrice() != null)
-                    ? equity.getAvgBuyingPrice() * addedQty : 0.0;
+                Double addedCost = null;
+                if (equity.getInvestmentValue() != null && equity.getInvestmentValue() > 0) {
+                    addedCost = equity.getInvestmentValue();
+                } else if (equity.getAvgBuyingPrice() != null
+                        && !looksLikeInventedCasCost(equity)) {
+                    addedCost = equity.getAvgBuyingPrice() * addedQty;
+                }
 
                 // If this is the first time we're seeing this symbol, create a new holding
                 if (!equityHoldingsMap.containsKey(symbol)) {
@@ -196,7 +203,10 @@ public class PortfolioHoldingsMapper {
                     // Enrich with portfolio context
                     holdings.setPortfolioId(portfolio.getId() != null ? portfolio.getId().toString() : null);
                     holdings.setPortfolioName(portfolio.getName());
-                    holdings.setAssetClass(ASSET_EQUITY);
+                    holdings.setAssetClass(
+                            equity.getAssetClass() != null && !equity.getAssetClass().isBlank()
+                                    ? equity.getAssetClass()
+                                    : ASSET_EQUITY);
                     applyAllocationFields(holdings, portfolio, equity, allocationsByPortfolio);
 
                     equityHoldingsMap.put(symbol, holdings);
@@ -204,14 +214,15 @@ public class PortfolioHoldingsMapper {
                     // Symbol already exists in another broker portfolio - merge quantities and cost
                     EquityHoldings existing = equityHoldingsMap.get(symbol);
                     double mergedQty = (existing.getQuantity() != null ? existing.getQuantity() : 0) + addedQty;
-                    double mergedCost = (existing.getInvestmentCost() != null ? existing.getInvestmentCost() : 0) + addedCost;
-                    
-                    existing.setQuantity(mergedQty);
-                    existing.setInvestmentCost(mergedCost);
-                    
-                    if (mergedQty > 0) {
-                        existing.setAverageBuyingPrice(mergedCost / mergedQty);
+                    if (addedCost != null) {
+                        double prior = existing.getInvestmentCost() != null ? existing.getInvestmentCost() : 0;
+                        double mergedCost = prior + addedCost;
+                        existing.setInvestmentCost(mergedCost);
+                        if (mergedQty > 0) {
+                            existing.setAverageBuyingPrice(mergedCost / mergedQty);
+                        }
                     }
+                    existing.setQuantity(mergedQty);
                     // Re-apply allocation against merged raw for BROKER books
                     if (PortfolioKind.isBroker(portfolio.getPortfolioKind())) {
                         double alloc = allocatedForIsin(portfolio, equity.getIsin(), allocationsByPortfolio);
@@ -250,7 +261,9 @@ public class PortfolioHoldingsMapper {
             double available = Math.max(0.0, raw - alloc);
             holdings.setAvailableQuantity(available);
             holdings.setAllocationNote(buildAllocationNote(alloc));
-            if (available > 0 && equity.getAvgBuyingPrice() != null) {
+            if (available > 0
+                    && equity.getAvgBuyingPrice() != null
+                    && !looksLikeInventedCasCost(equity)) {
                 holdings.setInvestmentCost(equity.getAvgBuyingPrice() * available);
             }
         } else {
@@ -278,5 +291,24 @@ public class PortfolioHoldingsMapper {
             return String.format("%.0f allocated to baskets", total);
         }
         return null;
+    }
+
+    /**
+     * Older CDSL wire wrote {@code avgBuyingPrice = currentPrice} when CAS had no cost.
+     * That is not a real basis — treat as unknown so summary stays balance-centric.
+     */
+    static boolean looksLikeInventedCasCost(com.am.common.amcommondata.model.asset.equity.EquityModel equity) {
+        if (equity == null) {
+            return false;
+        }
+        if (equity.getInvestmentValue() != null && equity.getInvestmentValue() > 0) {
+            return false;
+        }
+        Double avg = equity.getAvgBuyingPrice();
+        Double px = equity.getCurrentPrice();
+        if (avg == null || avg <= 0 || px == null || px <= 0) {
+            return false;
+        }
+        return Math.abs(avg - px) / px < 0.0001;
     }
 }

@@ -25,6 +25,7 @@ public class HealthScoreEngine {
     static final String ASSET_COMMODITY = "COMMODITY";
     static final String ASSET_CASH = "CASH";
     static final String ASSET_MUTUAL_FUND = "MUTUAL_FUND";
+    static final String ASSET_NPS = "NPS";
 
     @Value("${portfolio.intelligence.health-v2:false}")
     private boolean healthV2;
@@ -210,6 +211,9 @@ public class HealthScoreEngine {
             return ASSET_EQUITY;
         }
         String u = assetClass.trim().toUpperCase(Locale.ROOT);
+        if (u.equals(ASSET_NPS) || u.contains("NPS")) {
+            return ASSET_NPS;
+        }
         if (u.contains("BOND") || u.contains("DEBT") || u.equals(ASSET_FIXED_INCOME) || u.equals("FIXED_INCOME")) {
             return ASSET_FIXED_INCOME;
         }

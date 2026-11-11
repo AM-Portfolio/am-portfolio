@@ -15,6 +15,7 @@ import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.analytics.intelligence.CachedIntelligenceHistory;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.market.TimeFrame;
+import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
 import com.portfolio.model.resolver.TradingSymbolResolver;
 import com.portfolio.model.util.SymbolResolver;
 import com.portfolio.redis.service.PortfolioIntelligenceHistoryRedisService;
@@ -58,6 +59,13 @@ public class PortfolioIntelligenceSnapshotFactory {
     public static final long HISTORY_TIMEOUT_STRESS_MS = 20_000L;
     /** Soft fail-open for stress when intel-hist is cold (background fetch continues). */
     public static final long HISTORY_TIMEOUT_STRESS_SOFT_MS = 2_500L;
+    /** Overview wall clock for symbol resolve + quotes + sector, before hist soft-wait. */
+    public static final long OVERVIEW_ENRICH_BUDGET_MS = 700L;
+    /** Whole overview snapshot, including the hist soft-wait, stays inside one second. */
+    public static final long OVERVIEW_SNAPSHOT_BUDGET_MS = 900L;
+    private static final long SYMBOL_RESOLVE_BUDGET_MS = 100L;
+    /** Cold hist stays in the background. A cache hit returns immediately. */
+    private static final long OVERVIEW_HIST_WAIT_MS = 80L;
 
     @Value("${portfolio.intelligence.primary-benchmark-symbol:NIFTY 50}")
     private String primaryBenchmarkSymbol;
@@ -201,12 +209,15 @@ public class PortfolioIntelligenceSnapshotFactory {
                 ? portfolio.getCommodities() : List.of();
         List<AssetModel> cash = portfolio.getCash() != null
                 ? portfolio.getCash() : List.of();
+        List<AssetModel> npsModels = portfolio.getNpsModels() != null
+                ? portfolio.getNpsModels() : List.of();
 
         boolean anyHoldings = !equities.isEmpty()
                 || !mutualFunds.isEmpty()
                 || !bonds.isEmpty()
                 || !commodities.isEmpty()
-                || !cash.isEmpty();
+                || !cash.isEmpty()
+                || !npsModels.isEmpty();
         if (!anyHoldings) {
             return PortfolioIntelligenceSnapshot.builder()
                     .portfolioId(portfolioId)
@@ -218,8 +229,9 @@ public class PortfolioIntelligenceSnapshotFactory {
                     .build();
         }
 
-        // In-memory ISIN→ticker normalize so X-Ray/MD/sector work even before Mongo repair.
-        normalizeEquitySymbolsInPlace(equities);
+        // One batched ISIN resolve. Per-holding lookups were serial HTTP and held Overview for minutes.
+        long snapshotStartedMs = System.currentTimeMillis();
+        normalizeEquitySymbolsInPlace(equities, SYMBOL_RESOLVE_BUDGET_MS);
 
         List<String> symbols = equities.stream()
                 .filter(e -> e != null && e.getSymbol() != null && !e.getSymbol().isBlank())
@@ -260,24 +272,11 @@ public class PortfolioIntelligenceSnapshotFactory {
                     return Map.of();
                 }
             });
-            marketData = mdFut.join();
-            if (marketData == null) {
-                marketData = Map.of();
-            }
-            if (leanSecurity) {
-                // Stress: soft-wait sectors so CRASH/sector presets stay accurate without 20s hangs.
-                try {
-                    securityDetails = sdFut.get(1_000L, TimeUnit.MILLISECONDS);
-                } catch (Exception e) {
-                    log.info("Intel security soft-timeout leanSecurity=true — sector shocks may use equity docs only");
-                    securityDetails = Map.of();
-                }
-            } else {
-                securityDetails = sdFut.join();
-            }
-            if (securityDetails == null) {
-                securityDetails = Map.of();
-            }
+            long quoteDeadlineMs = snapshotStartedMs + (leanSecurity ? 1_000L : 500L);
+            // All-book snapshots need more than 200ms or sector falls to Unknown/Unlisted.
+            long sectorDeadlineMs = snapshotStartedMs + (leanSecurity ? 1_000L : 2_500L);
+            securityDetails = awaitMap(sdFut, sectorDeadlineMs, portfolioId, "security");
+            marketData = awaitMap(mdFut, quoteDeadlineMs, portfolioId, "market");
         }
 
         List<PortfolioIntelligenceSnapshot.Holding> holdings = new ArrayList<>();
@@ -293,8 +292,11 @@ public class PortfolioIntelligenceSnapshotFactory {
             String sym = SymbolResolver.normalize(eq.getSymbol());
             MarketData md = marketData.get(sym);
             double price = AllocationUtils.resolvePrice(md);
-            if (price <= 0 && eq.getAvgBuyingPrice() != null && eq.getAvgBuyingPrice() > 0) {
-                price = eq.getAvgBuyingPrice();
+            String priceSourceHint = price > 0
+                    ? HoldingInstrumentClassifier.PRICE_LIVE
+                    : HoldingInstrumentClassifier.PRICE_COST;
+            if (price <= 0) {
+                price = bookPriceFallback(eq);
             }
             if (price <= 0) {
                 droppedNoPrice++;
@@ -302,10 +304,12 @@ public class PortfolioIntelligenceSnapshotFactory {
             }
             double value = price * eq.getQuantity();
             SecurityModel sec = securityDetails.get(sym);
-            String sector = resolveSector(eq, sec);
-            String industry = resolveIndustry(eq, sec);
+            String sector = resolveSector(eq, sec, sym, priceSourceHint);
+            String industry = resolveIndustry(eq, sec, sym, priceSourceHint);
             String marketCap = resolveMarketCap(eq, sec);
 
+            // Honor CAS assetClass on equity rows (mutual_fund_demat / debt / nps).
+            String equityClass = HealthScoreEngine.normalizeAssetClass(eq.getAssetClass());
             holdings.add(PortfolioIntelligenceSnapshot.Holding.builder()
                     .symbol(sym)
                     .value(value)
@@ -313,7 +317,7 @@ public class PortfolioIntelligenceSnapshotFactory {
                     .sector(sector)
                     .industry(industry)
                     .marketCap(marketCap)
-                    .assetClass(HealthScoreEngine.ASSET_EQUITY)
+                    .assetClass(equityClass)
                     .build());
             quantities.put(sym, eq.getQuantity());
         }
@@ -322,14 +326,20 @@ public class PortfolioIntelligenceSnapshotFactory {
         droppedNoPrice += appendAssetHoldings(holdings, bonds, HealthScoreEngine.ASSET_FIXED_INCOME);
         droppedNoPrice += appendAssetHoldings(holdings, commodities, HealthScoreEngine.ASSET_COMMODITY);
         droppedNoPrice += appendAssetHoldings(holdings, cash, HealthScoreEngine.ASSET_CASH);
+        droppedNoPrice += appendAssetHoldings(holdings, npsModels, HealthScoreEngine.ASSET_NPS);
 
         if (droppedNoPrice > 0) {
             log.warn("Intel snapshot portfolioId={} dropped {} holdings with no usable price",
                     portfolioId, droppedNoPrice);
         }
 
+        long histTimeoutMs = historyTimeoutOverrideMs;
+        if (includeHistory && !leanSecurity) {
+            long remainMs = OVERVIEW_SNAPSHOT_BUDGET_MS - (System.currentTimeMillis() - snapshotStartedMs);
+            histTimeoutMs = Math.max(40L, Math.min(OVERVIEW_HIST_WAIT_MS, remainMs));
+        }
         HistoryFields history = includeHistory
-                ? loadHistoryMetrics(histKey, symbols, quantities, fetchHistoryIfMiss, historyTimeoutOverrideMs)
+                ? loadHistoryMetrics(histKey, symbols, quantities, fetchHistoryIfMiss, histTimeoutMs)
                 : HistoryFields.empty();
         return finalizeSnapshot(
                 portfolioId,
@@ -870,13 +880,26 @@ public class PortfolioIntelligenceSnapshotFactory {
                 .build();
     }
 
-    private void normalizeEquitySymbolsInPlace(List<EquityModel> equities) {
+    /**
+     * A ticker that is already a symbol does not need another securities search.
+     * Point lookups are only for a blank symbol or a raw ISIN the batch missed.
+     */
+    static boolean needsPointSymbolLookup(String symbol) {
+        return symbol == null || symbol.isBlank() || TradingSymbolResolver.looksLikeIsin(symbol);
+    }
+
+    private void normalizeEquitySymbolsInPlace(List<EquityModel> equities, long budgetMs) {
         if (equities == null || equities.isEmpty() || tradingSymbolResolver == null) {
             return;
         }
         List<String> isins = equities.stream()
                 .filter(e -> e != null)
                 .map(e -> {
+                    // A real ticker does not need a securities search. That search was a
+                    // per-overview 250ms miss and never corrected symbols that were already tickers.
+                    if (!needsPointSymbolLookup(e.getSymbol())) {
+                        return null;
+                    }
                     if (e.getIsin() != null && !e.getIsin().isBlank()) {
                         return e.getIsin().trim().toUpperCase();
                     }
@@ -888,9 +911,20 @@ public class PortfolioIntelligenceSnapshotFactory {
                 .filter(s -> s != null && !s.isBlank())
                 .distinct()
                 .collect(Collectors.toList());
-        Map<String, String> byIsin = isins.isEmpty()
-                ? Map.of()
-                : tradingSymbolResolver.resolveTradingSymbols(isins);
+        Map<String, String> byIsin = Map.of();
+        if (!isins.isEmpty()) {
+            try {
+                byIsin = CompletableFuture
+                        .supplyAsync(() -> tradingSymbolResolver.resolveTradingSymbols(isins))
+                        .get(Math.max(1L, budgetMs), TimeUnit.MILLISECONDS);
+            } catch (Exception e) {
+                log.info("Intel symbol resolve soft-timeout count={} budgetMs={} detail={}",
+                        isins.size(), budgetMs, e.getMessage());
+            }
+            if (byIsin == null) {
+                byIsin = Map.of();
+            }
+        }
         for (EquityModel eq : equities) {
             if (eq == null) {
                 continue;
@@ -899,11 +933,10 @@ public class PortfolioIntelligenceSnapshotFactory {
                     ? eq.getIsin().trim().toUpperCase()
                     : (TradingSymbolResolver.looksLikeIsin(eq.getSymbol())
                             ? eq.getSymbol().trim().toUpperCase() : null);
-            String resolved = null;
-            if (isinKey != null && byIsin.containsKey(isinKey)) {
-                resolved = byIsin.get(isinKey);
-            }
-            if (resolved == null) {
+            String resolved = isinKey != null ? byIsin.get(isinKey) : null;
+            if ((resolved == null || resolved.isBlank())
+                    && isins.isEmpty()
+                    && needsPointSymbolLookup(eq.getSymbol())) {
                 resolved = tradingSymbolResolver.resolveTradingSymbol(eq.getSymbol(), eq.getIsin());
             }
             if (resolved != null && !resolved.isBlank() && !TradingSymbolResolver.looksLikeIsin(resolved)) {
@@ -915,6 +948,24 @@ public class PortfolioIntelligenceSnapshotFactory {
         }
     }
 
+    private <T> Map<String, T> awaitMap(
+            CompletableFuture<Map<String, T>> future,
+            long deadlineMs,
+            String portfolioId,
+            String kind) {
+        long waitMs = Math.max(1L, deadlineMs - System.currentTimeMillis());
+        try {
+            Map<String, T> loaded = future.get(waitMs, TimeUnit.MILLISECONDS);
+            return loaded != null ? loaded : Map.of();
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.info("Intel {} soft-timeout portfolioId={} waitMs={}", kind, portfolioId, waitMs);
+            return Map.of();
+        } catch (Exception e) {
+            log.info("Intel {} failed portfolioId={} detail={}", kind, portfolioId, e.getMessage());
+            return Map.of();
+        }
+    }
+
     private static boolean isLiquidCap(String marketCap) {
         if (marketCap == null) {
             return false;
@@ -923,9 +974,45 @@ public class PortfolioIntelligenceSnapshotFactory {
         return u.contains("LARGE") || u.contains("MID");
     }
 
-    private static String resolveSector(EquityModel eq, SecurityModel sec) {
-        String fromEq = usableMeta(eq.getSector());
-        if (fromEq != null) {
+    /**
+     * Live MD miss: avg / investment÷qty / importMark / statement currentPrice.
+     */
+    static double bookPriceFallback(EquityModel eq) {
+        if (eq == null) {
+            return 0.0;
+        }
+        if (eq.getCurrentPrice() != null && eq.getCurrentPrice() > 0) {
+            return eq.getCurrentPrice();
+        }
+        if (eq.getCurrentValue() != null
+                && eq.getQuantity() != null
+                && eq.getQuantity() > 0
+                && eq.getCurrentValue() > 0) {
+            return eq.getCurrentValue() / eq.getQuantity();
+        }
+        if (eq.getAvgBuyingPrice() != null && eq.getAvgBuyingPrice() > 0) {
+            return eq.getAvgBuyingPrice();
+        }
+        if (eq.getInvestmentValue() != null
+                && eq.getQuantity() != null
+                && eq.getQuantity() > 0
+                && eq.getInvestmentValue() > 0) {
+            return eq.getInvestmentValue() / eq.getQuantity();
+        }
+        if (eq.getImportMarkPrice() != null && eq.getImportMarkPrice() > 0) {
+            return eq.getImportMarkPrice();
+        }
+        return 0.0;
+    }
+
+    static String resolveSector(EquityModel eq, SecurityModel sec, String symbol, String priceSource) {
+        String isin = eq != null ? eq.getIsin() : null;
+        String fromEq = usableMeta(eq != null ? eq.getSector() : null);
+        // Sticky Private/Unlisted must not win over listed industry meta.
+        boolean eqIsProductBucket = fromEq != null && (
+                HoldingInstrumentClassifier.SECTOR_UNLISTED.equalsIgnoreCase(fromEq)
+                        || HoldingInstrumentClassifier.SECTOR_ETF.equalsIgnoreCase(fromEq));
+        if (fromEq != null && !eqIsProductBucket) {
             return fromEq;
         }
         if (sec != null && sec.getMetadata() != null) {
@@ -934,11 +1021,23 @@ public class PortfolioIntelligenceSnapshotFactory {
                 return fromSec;
             }
         }
+        com.portfolio.model.reference.ListedEquitySectorCatalog.Profile catalog =
+                com.portfolio.model.reference.ListedEquitySectorCatalog.find(symbol, isin);
+        if (catalog != null && usableMeta(catalog.sector()) != null) {
+            return catalog.sector();
+        }
+        if (fromEq != null) {
+            return fromEq;
+        }
+        String classified = HoldingInstrumentClassifier.resolveSector(null, symbol, isin, priceSource);
+        if (classified != null && !HoldingInstrumentClassifier.isMissingSector(classified)) {
+            return classified;
+        }
         return "Unknown";
     }
 
-    private static String resolveIndustry(EquityModel eq, SecurityModel sec) {
-        String fromEq = usableMeta(eq.getIndustry());
+    private static String resolveIndustry(EquityModel eq, SecurityModel sec, String symbol, String priceSource) {
+        String fromEq = usableMeta(eq != null ? eq.getIndustry() : null);
         if (fromEq != null) {
             return fromEq;
         }
@@ -947,6 +1046,11 @@ public class PortfolioIntelligenceSnapshotFactory {
             if (fromSec != null) {
                 return fromSec;
             }
+        }
+        String isin = eq != null ? eq.getIsin() : null;
+        String classified = HoldingInstrumentClassifier.resolveIndustry(null, symbol, isin, priceSource);
+        if (classified != null && !HoldingInstrumentClassifier.isMissingSector(classified)) {
+            return classified;
         }
         return "Unknown";
     }

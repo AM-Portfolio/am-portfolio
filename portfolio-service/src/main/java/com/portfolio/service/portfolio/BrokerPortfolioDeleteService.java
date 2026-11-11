@@ -134,4 +134,68 @@ public class BrokerPortfolioDeleteService {
 
         log.info("Broker portfolio deleted portfolioId={} ownerId={} name={}", idStr, ownerId, name);
     }
+
+    /**
+     * Same as {@link #deleteOwnedPortfolio} but accepts Mongo string ids (UUID or ObjectId).
+     * Used when cascading soft-family deletes where books were created from document fan-out.
+     */
+    public void deleteOwnedPortfolioByDocumentId(String portfolioId, String ownerId) {
+        if (ownerId == null || ownerId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing user");
+        }
+        if (portfolioId == null || portfolioId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid portfolioId");
+        }
+
+        PortfolioModelV1 portfolio = null;
+        try {
+            portfolio = portfolioService.getPortfolioById(UUID.fromString(portfolioId));
+        } catch (IllegalArgumentException ignored) {
+            // non-UUID Mongo id — resolve via owner scan below
+        }
+        if (portfolio == null) {
+            java.util.List<PortfolioModelV1> owned = portfolioService.getPortfoliosByUserId(ownerId);
+            if (owned != null) {
+                for (PortfolioModelV1 p : owned) {
+                    if (p != null && p.getId() != null && portfolioId.equals(p.getId().toString())) {
+                        portfolio = p;
+                        break;
+                    }
+                }
+            }
+        }
+        if (portfolio == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Portfolio not found");
+        }
+        if (!ownerId.equals(portfolio.getOwner())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not owner of portfolio");
+        }
+        if (PortfolioKind.isBasket(portfolio.getPortfolioKind())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Basket portfolios cannot be deleted via broker delete");
+        }
+
+        String name = portfolio.getName();
+        String idStr = portfolio.getId() != null ? portfolio.getId().toString() : portfolioId;
+
+        portfolioService.deletePortfolioByIdAndOwner(idStr, ownerId);
+
+        holdingsRedisService.evictPortfolioHoldings(ownerId, idStr);
+        summaryRedisService.evictPortfolioSummary(ownerId, idStr);
+        if (name != null && !name.isBlank() && !name.equals(idStr)) {
+            holdingsRedisService.evictPortfolioHoldings(ownerId, name);
+            summaryRedisService.evictPortfolioSummary(ownerId, name);
+        }
+        intelligenceRedisService.evict(idStr);
+        intelligenceRedisService.evictAggregateForUser(ownerId);
+
+        if (deleteNotifier != null) {
+            deleteNotifier.notifyDeleted(ownerId, idStr, name, DELETE_SOURCE);
+        } else {
+            log.warn("PortfolioDeleteNotifier unavailable — Mongo deleted but outbound DELETE not published portfolioId={}",
+                    idStr);
+        }
+
+        log.info("Broker portfolio deleted (document id) portfolioId={} ownerId={} name={}", idStr, ownerId, name);
+    }
 }

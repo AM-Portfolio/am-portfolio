@@ -59,9 +59,10 @@ public class PortfolioAnalyticsController {
     @Operation(summary = "All-portfolios advanced analytics", operationId = "getAllPortfoliosAdvancedAnalytics")
     @PostMapping("/all/advanced")
     public ResponseEntity<AdvancedAnalyticsResponse> getAllAdvancedAnalytics(
-            @RequestBody(required = false) AdvancedAnalyticsRequest request) {
+            @RequestBody(required = false) AdvancedAnalyticsRequest request,
+            @RequestParam(required = false) String persona) {
         String userId = UserContext.getUserIdOrThrow();
-        PortfolioModelV1 merged = aggregatePortfolioLoader.loadMerged(userId);
+        PortfolioModelV1 merged = aggregatePortfolioLoader.loadMerged(userId, persona);
         request = normalizeAdvancedRequest(request, AggregatePortfolioKeys.RESPONSE_PORTFOLIO_ID);
         request.setPrefetchedPortfolio(merged);
         log.info("REST request for advanced analytics on ALL portfolios user={}", userId);
@@ -73,7 +74,7 @@ public class PortfolioAnalyticsController {
                 if (request.getTimeFrame() != null) {
                     interval = TimeInterval.fromCode(request.getTimeFrame().name());
                 }
-                PortfolioSummaryV1 summary = portfolioDashboardService.overviewPortfolio(userId, interval);
+                PortfolioSummaryV1 summary = portfolioDashboardService.overviewPortfolio(userId, interval, persona);
                 if (summary != null) {
                     summary.setMarketCapHoldings(null);
                     summary.setSectorialHoldings(null);
@@ -106,18 +107,22 @@ public class PortfolioAnalyticsController {
     @Operation(summary = "All-portfolios intelligence", operationId = "getAllPortfoliosIntelligence")
     @PostMapping("/all/intelligence")
     public ResponseEntity<PortfolioIntelligenceResponse> getAllIntelligence(
-            @RequestBody(required = false) Object ignored) {
+            @RequestParam(required = false) String persona) {
         String userId = UserContext.getUserIdOrThrow();
-        String cacheKey = AggregatePortfolioKeys.cacheKey(userId);
+        String cacheKey = AggregatePortfolioKeys.cacheKey(userId)
+                + (persona == null || persona.isBlank() ? "" : ":" + persona.trim());
         // Skip Mongo merge when Overview intel is already warm in Redis.
         var cached = portfolioIntelligenceRedisService.get(cacheKey);
         if (cached.isPresent()) {
             log.info("REST request for intelligence on ALL portfolios user={} cache=hit", userId);
-            return ResponseEntity.ok(cached.get());
+            return ResponseEntity.ok(
+                    portfolioIntelligenceService.withAggregatePortfolioWeights(userId, persona, cached.get()));
         }
-        PortfolioModelV1 merged = aggregatePortfolioLoader.loadMerged(userId);
+        PortfolioModelV1 merged = aggregatePortfolioLoader.loadMerged(userId, persona);
         log.info("REST request for intelligence on ALL portfolios user={} cache=miss", userId);
-        return ResponseEntity.ok(portfolioIntelligenceService.intelligence(cacheKey, merged));
+        return ResponseEntity.ok(
+                portfolioIntelligenceService.withAggregatePortfolioWeights(
+                        userId, persona, portfolioIntelligenceService.intelligence(cacheKey, merged)));
     }
 
     @Operation(summary = "All-portfolios stress", operationId = "runAllPortfoliosStress")
@@ -201,14 +206,16 @@ public class PortfolioAnalyticsController {
     })
     @PostMapping("/{portfolioId}/intelligence")
     public ResponseEntity<PortfolioIntelligenceResponse> getIntelligence(
-            @PathVariable String portfolioId,
-            @RequestBody(required = false) Object ignored) {
+            @PathVariable String portfolioId) {
         if (isReservedAll(portfolioId) || invalidPortfolioId(portfolioId)) {
             return ResponseEntity.badRequest().build();
         }
         var portfolio = portfolioOwnerAssert.requireOwner(portfolioId);
         log.info("REST request for intelligence on portfolio: {}", portfolioId);
-        return ResponseEntity.ok(portfolioIntelligenceService.intelligence(portfolioId, portfolio));
+        PortfolioIntelligenceResponse intel =
+                portfolioIntelligenceService.intelligence(portfolioId, portfolio);
+        return ResponseEntity.ok(
+                portfolioIntelligenceService.withSingleBookPortfolioWeights(portfolio, portfolioId, intel));
     }
 
     @Operation(

@@ -172,11 +172,51 @@ class NewUserPortfolioFallbackServiceTest {
     }
 
     @Test
-    void hasRealBrokerBook_ignoresPaperBasketDemo() {
+    void listBasicPortfolios_includesFamilyMemberFields() {
+        PortfolioModelV1 primary = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .owner(USER)
+                .name("Dhan")
+                .portfolioKind(PortfolioKind.BROKER)
+                .brokerType(BrokerType.DHAN)
+                .build();
+        PortfolioModelV1 family = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .owner(USER)
+                .name("Dhan")
+                .portfolioKind(PortfolioKind.BROKER)
+                .brokerType(BrokerType.DHAN)
+                .familyMemberId("fm-member")
+                .familyMemberName("Test Holder")
+                .build();
+        when(portfolioService.getPortfoliosByUserId(USER)).thenReturn(List.of(primary, family));
+
+        List<NewUserPortfolioFallbackService.BasicPortfolioRow> rows = service.listBasicPortfolios(USER);
+
+        assertThat(rows).hasSize(2);
+        NewUserPortfolioFallbackService.BasicPortfolioRow primaryRow = rows.stream()
+                .filter(r -> r.familyMemberId() == null)
+                .findFirst()
+                .orElseThrow();
+        NewUserPortfolioFallbackService.BasicPortfolioRow familyRow = rows.stream()
+                .filter(r -> "fm-member".equals(r.familyMemberId()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(primaryRow.familyMemberName()).isNull();
+        assertThat(familyRow.familyMemberName()).isEqualTo("Test Holder");
+        assertThat(familyRow.brokerType()).isEqualTo("DHAN");
+    }
+
+    @Test
+    void hasRealBrokerBook_ignoresPaperBasketDemoAndCdsl() {
         assertThat(NewUserPortfolioFallbackService.hasRealBrokerBook(List.of(
                 PortfolioModelV1.builder().portfolioKind(PortfolioKind.PAPER).brokerType(BrokerType.ZERODHA).build(),
                 PortfolioModelV1.builder().portfolioKind(PortfolioKind.BASKET).brokerType(BrokerType.ZERODHA).build(),
                 PortfolioModelV1.builder().portfolioKind(PortfolioKind.DEMO).build()
+        ))).isFalse();
+
+        assertThat(NewUserPortfolioFallbackService.hasRealBrokerBook(List.of(
+                PortfolioModelV1.builder().portfolioKind(PortfolioKind.BROKER).brokerType(BrokerType.CDSL).build()
         ))).isFalse();
 
         assertThat(NewUserPortfolioFallbackService.hasRealBrokerBook(List.of(
@@ -190,6 +230,158 @@ class NewUserPortfolioFallbackServiceTest {
         assertThat(NewUserPortfolioFallbackService.hasRealBrokerBook(List.of(
                 PortfolioModelV1.builder().portfolioKind(PortfolioKind.BROKER).brokerType(null).build()
         ))).isFalse();
+    }
+
+    @Test
+    void listBasicPortfolios_cdslOnly_includesCdslAndKeepsDemo() {
+        UUID demoId = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        UUID cdslId = UUID.fromString("11111111-2222-3333-4444-555555555555");
+        PortfolioModelV1 demo = PortfolioModelV1.builder()
+                .id(demoId)
+                .owner(USER)
+                .name("Demo Portfolio")
+                .portfolioKind(PortfolioKind.DEMO)
+                .build();
+        PortfolioModelV1 cdsl = PortfolioModelV1.builder()
+                .id(cdslId)
+                .owner(USER)
+                .name("CDSL")
+                .portfolioKind(PortfolioKind.BROKER)
+                .brokerType(BrokerType.CDSL)
+                .assetCount(2)
+                .build();
+        when(portfolioService.getPortfoliosByUserId(USER)).thenReturn(List.of(demo, cdsl));
+
+        List<NewUserPortfolioFallbackService.BasicPortfolioRow> rows = service.listBasicPortfolios(USER);
+
+        assertThat(rows).hasSize(2);
+        assertThat(rows.stream().anyMatch(r -> r.dummy() && "DEMO".equals(r.kind()))).isTrue();
+        NewUserPortfolioFallbackService.BasicPortfolioRow cdslRow = rows.stream()
+                .filter(r -> "CDSL".equals(r.brokerType()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(cdslRow.portfolioName()).isEqualTo("CDSL CAS");
+        assertThat(cdslRow.portfolioId()).isEqualTo(cdslId.toString());
+        verify(portfolioService, never()).softDeletePortfolio(any(), any());
+    }
+
+    @Test
+    void listBasicPortfolios_showsCasDematShortNames_hidesCdsl() {
+        UUID growwId = UUID.fromString("12121212-3434-5656-7878-909090909091");
+        UUID miraeId = UUID.fromString("22222222-3333-4444-5555-666666666666");
+        UUID finId = UUID.fromString("33333333-4444-5555-6666-777777777777");
+        UUID cdslId = UUID.fromString("99999999-8888-7777-6666-555555555556");
+        PortfolioModelV1 groww = PortfolioModelV1.builder()
+                .id(growwId)
+                .owner(USER)
+                .name("Groww")
+                .portfolioKind(PortfolioKind.BROKER)
+                .brokerType(BrokerType.GROWW)
+                .assetCount(5)
+                .build();
+        PortfolioModelV1 mirae = PortfolioModelV1.builder()
+                .id(miraeId)
+                .owner(USER)
+                .name("Mirae")
+                .portfolioKind(PortfolioKind.BROKER)
+                .brokerType(BrokerType.CAS_DEMAT)
+                .dematBoid("boid-mirae")
+                .assetCount(1)
+                .build();
+        PortfolioModelV1 fin = PortfolioModelV1.builder()
+                .id(finId)
+                .owner(USER)
+                .name("Finwizard")
+                .portfolioKind(PortfolioKind.BROKER)
+                .brokerType(BrokerType.CAS_DEMAT)
+                .dematBoid("boid-fin")
+                .assetCount(1)
+                .build();
+        PortfolioModelV1 cdsl = PortfolioModelV1.builder()
+                .id(cdslId)
+                .owner(USER)
+                .name("CDSL CAS")
+                .portfolioKind(PortfolioKind.BROKER)
+                .brokerType(BrokerType.CDSL)
+                .build();
+        when(portfolioService.getPortfoliosByUserId(USER)).thenReturn(List.of(groww, mirae, fin, cdsl));
+
+        List<NewUserPortfolioFallbackService.BasicPortfolioRow> rows = service.listBasicPortfolios(USER);
+
+        assertThat(rows).extracting(NewUserPortfolioFallbackService.BasicPortfolioRow::portfolioName)
+                .containsExactlyInAnyOrder("Groww", "Mirae", "Finwizard");
+        assertThat(rows).noneMatch(r -> "CDSL".equals(r.brokerType()));
+    }
+
+    @Test
+    void listBasicPortfolios_mutualFundsNotHiddenAsCdsl() {
+        assertThat(NewUserPortfolioFallbackService.isCdslListRow(
+                PortfolioModelV1.builder()
+                        .name("Mutual Funds")
+                        .brokerType(BrokerType.CAS_DEMAT)
+                        .portfolioKind(PortfolioKind.BROKER)
+                        .build())).isFalse();
+    }
+
+    @Test
+    void listBasicPortfolios_cdslPlusGroww_hidesCdslAndSoftHidesDemo() {
+        UUID demoId = UUID.fromString("cccccccc-dddd-eeee-ffff-000000000000");
+        UUID cdslId = UUID.fromString("99999999-8888-7777-6666-555555555555");
+        UUID growwId = UUID.fromString("12121212-3434-5656-7878-909090909090");
+        PortfolioModelV1 demo = PortfolioModelV1.builder()
+                .id(demoId)
+                .owner(USER)
+                .portfolioKind(PortfolioKind.DEMO)
+                .build();
+        PortfolioModelV1 cdsl = PortfolioModelV1.builder()
+                .id(cdslId)
+                .owner(USER)
+                .name("CDSL")
+                .portfolioKind(PortfolioKind.BROKER)
+                .brokerType(BrokerType.CDSL)
+                .build();
+        PortfolioModelV1 groww = PortfolioModelV1.builder()
+                .id(growwId)
+                .owner(USER)
+                .name("Groww")
+                .portfolioKind(PortfolioKind.BROKER)
+                .brokerType(BrokerType.GROWW)
+                .assetCount(3)
+                .build();
+        // Lifecycle sees Demo+CDSL+Groww; after soft-hide, list reload omits DELETED Demo.
+        when(portfolioService.getPortfoliosByUserId(USER))
+                .thenReturn(List.of(demo, cdsl, groww), List.of(cdsl, groww));
+
+        List<NewUserPortfolioFallbackService.BasicPortfolioRow> rows = service.listBasicPortfolios(USER);
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).brokerType()).isEqualTo("GROWW");
+        assertThat(rows.get(0).portfolioId()).isEqualTo(growwId.toString());
+        verify(portfolioService).softDeletePortfolio(demoId.toString(), USER);
+    }
+
+    @Test
+    void cdslOnly_doesNotSoftHideDemo() {
+        UUID demoId = UUID.fromString("abababab-abab-abab-abab-abababababab");
+        PortfolioModelV1 demo = PortfolioModelV1.builder()
+                .id(demoId)
+                .owner(USER)
+                .portfolioKind(PortfolioKind.DEMO)
+                .build();
+        PortfolioModelV1 cdsl = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .owner(USER)
+                .portfolioKind(PortfolioKind.BROKER)
+                .brokerType(BrokerType.CDSL)
+                .build();
+        when(portfolioService.getPortfoliosByUserId(USER)).thenReturn(List.of(demo, cdsl));
+
+        PortfolioModelV1 result = service.ensurePersonalDemoLifecycle(USER);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getId()).isEqualTo(demoId);
+        verify(portfolioService, never()).softDeletePortfolio(any(), any());
+        verify(portfolioService, never()).createPortfolio(any());
     }
 
     @Test

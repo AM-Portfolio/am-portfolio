@@ -15,7 +15,7 @@ import lombok.experimental.SuperBuilder;
 @EqualsAndHashCode(callSuper = true)
 @JsonInclude(Include.NON_NULL)
 public class EquityModel extends AssetModel {
-    private String isin;
+    // isin lives on AssetModel — do not redeclare (Spring Data Mongo uniqueness).
     private String companyName;
     private String sector;
     private String industry;
