@@ -66,26 +66,37 @@ public class PortfolioIntradayService {
     private static final LocalTime MARKET_CLOSE = LocalTime.of(15, 30);
 
     public List<IntradayDataPoint> getIntraday(String userId, String portfolioId) {
+        return getIntraday(userId, portfolioId, null);
+    }
+
+    public List<IntradayDataPoint> getIntraday(String userId, String portfolioId, String persona) {
         LocalDate today = LocalDate.now(IST);
         LocalTime nowIST = LocalTime.now(IST);
         boolean marketOpen = cashSessionClock != null
                 ? cashSessionClock.isCashOpen()
                 : (!nowIST.isBefore(MARKET_OPEN) && !nowIST.isAfter(MARKET_CLOSE));
 
+        String cachePortfolioId = portfolioId;
+        if ((portfolioId == null || portfolioId.isBlank())
+                && persona != null
+                && !persona.isBlank()) {
+            cachePortfolioId = "all:" + persona.trim();
+        }
+
         // ── CACHE CHECK ───────────────────────────────────────────────────────────
         Optional<List<IntradayDataPoint>> cached = Optional.empty();
         if (intradayRedisService != null) {
-            cached = intradayRedisService.getIntradayData(userId, portfolioId);
+            cached = intradayRedisService.getIntradayData(userId, cachePortfolioId);
             if (cached.isPresent()) {
-                log.info("[Intraday] Serving intraday chart from cache for user={}, portfolioId={}", userId, portfolioId);
+                log.info("[Intraday] Serving intraday chart from cache for user={}, portfolioId={}", userId, cachePortfolioId);
                 return cached.get();
             }
         }
 
         // ── STEP 1 & 2: Get LIVE Holdings and compute baseline ──────────────
         // For Intraday (1D), the portfolio is exactly what the user holds right now.
-        PortfolioHoldings liveHoldings = (portfolioId == null || portfolioId.trim().isEmpty()) 
-            ? holdingsService.getPortfolioHoldings(userId, TimeInterval.ONE_DAY, true)
+        PortfolioHoldings liveHoldings = (portfolioId == null || portfolioId.trim().isEmpty())
+            ? holdingsService.getPortfolioHoldings(userId, TimeInterval.ONE_DAY, true, persona)
             : holdingsService.getPortfolioHoldings(userId, portfolioId, TimeInterval.ONE_DAY, true);
 
         double liveTotalValue = 0.0;
@@ -327,15 +338,75 @@ public class PortfolioIntradayService {
             }
         }
 
+        result = guardAbsurdSessionCliff(result);
+
         // Cache only series with real movement — do not pin a flat "one drop" day for 30m.
         if (intradayRedisService != null && !isDegenerateIntradaySeries(result)) {
-            intradayRedisService.cacheIntradayData(userId, portfolioId, result, marketOpen);
+            intradayRedisService.cacheIntradayData(userId, cachePortfolioId, result, marketOpen);
         } else if (intradayRedisService != null) {
             log.warn("[Intraday] Skipping Redis cache for degenerate series (unique wealth values ≤ 1) user={} portfolioId={} points={}",
-                    userId, portfolioId, result.size());
+                    userId, cachePortfolioId, result.size());
         }
 
         return result;
+    }
+
+    /**
+     * If session return exceeds ±25% (bogus open baseline / missing early candles),
+     * re-anchor open to the first wealth tick within 25% of close so Overall does not cliff to −76%.
+     */
+    static List<IntradayDataPoint> guardAbsurdSessionCliff(List<IntradayDataPoint> points) {
+        if (points == null || points.size() < 2) {
+            return points;
+        }
+        IntradayDataPoint first = points.get(0);
+        IntradayDataPoint last = points.get(points.size() - 1);
+        if (first == null || last == null || first.getTotalWealth() <= 0) {
+            return points;
+        }
+        double open = first.getTotalWealth();
+        double close = last.getTotalWealth();
+        double ret = (close - open) / open;
+        if (Math.abs(ret) <= 0.25) {
+            return points;
+        }
+        double baseline = close;
+        for (IntradayDataPoint p : points) {
+            if (p == null || p.getTotalWealth() <= 0) {
+                continue;
+            }
+            if (Math.abs((close - p.getTotalWealth()) / p.getTotalWealth()) <= 0.25) {
+                baseline = p.getTotalWealth();
+                break;
+            }
+        }
+        List<IntradayDataPoint> fixed = new ArrayList<>(points.size());
+        boolean sawAnchor = false;
+        for (IntradayDataPoint p : points) {
+            if (p == null) {
+                continue;
+            }
+            double value = p.getTotalWealth();
+            // Hold inflated pre-cliff ticks at the re-anchor so session % is sane.
+            if (!sawAnchor) {
+                if (Math.abs((value - baseline) / baseline) > 0.25) {
+                    value = baseline;
+                } else {
+                    sawAnchor = true;
+                }
+            }
+            double change = value - baseline;
+            double changePct = baseline > 0 ? (change / baseline) * 100.0 : 0.0;
+            fixed.add(IntradayDataPoint.builder()
+                    .timestamp(p.getTimestamp())
+                    .totalWealth(value)
+                    .changeFromOpen(change)
+                    .changeFromOpenPct(changePct)
+                    .isLive(p.isLive())
+                    .portfolios(p.getPortfolios())
+                    .build());
+        }
+        return fixed.isEmpty() ? points : fixed;
     }
 
     /**

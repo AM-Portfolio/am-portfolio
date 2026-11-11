@@ -31,6 +31,8 @@ class PortfolioIntelligenceServiceStressCacheTest {
     @Mock
     private XRaySummaryBuilder xRaySummaryBuilder;
     @Mock
+    private AggregatePortfolioLoader aggregatePortfolioLoader;
+    @Mock
     private WhatIfEngine whatIfEngine;
     @Mock
     private IntelligenceSuggestService intelligenceSuggestService;
@@ -46,6 +48,7 @@ class PortfolioIntelligenceServiceStressCacheTest {
                 healthScoreEngine,
                 riskRadarEngine,
                 xRaySummaryBuilder,
+                aggregatePortfolioLoader,
                 new StressEngine(),
                 whatIfEngine,
                 intelligenceSuggestService,

@@ -447,13 +447,13 @@ public class MarketDataService {
             return merged;
         }
 
-        int readTimeoutMs = (config != null && config.getReadTimeout() > 0) ? config.getReadTimeout() : 32000;
         int maxParallel = 2;
         if (config != null && config.getBatch() != null && config.getBatch().getMaxParallelChunks() > 0) {
             maxParallel = config.getBatch().getMaxParallelChunks();
         }
-        // Wave timeout = client timeout + small buffer; never the old 60s/90s hang.
-        long waveTimeoutMs = Math.max(readTimeoutMs + 1500L, 5000L);
+        // The HTTP client read timeout is tens of seconds. Using it as the join
+        // budget made every overview wait out a full wave before painting.
+        long waveTimeoutMs = 800L;
 
         for (int i = 0; i < chunks.size(); i += maxParallel) {
             List<List<String>> wave = chunks.subList(i, Math.min(i + maxParallel, chunks.size()));
@@ -969,7 +969,16 @@ public class MarketDataService {
                     .toDate(to.toString())
                     .interval("day")
                     .build();
-            Map<String, MarketData> hist = getHistoricalData(request);
+            Map<String, MarketData> hist;
+            try {
+                hist = CompletableFuture.supplyAsync(() -> getHistoricalData(request), externalApiExecutor)
+                        .completeOnTimeout(Map.of(), 800, java.util.concurrent.TimeUnit.MILLISECONDS)
+                        .exceptionally(ex -> Map.of())
+                        .join();
+            } catch (Exception ex) {
+                log.warn("[MarketData] Prior-close repair skipped: {}", ex.getMessage());
+                hist = Map.of();
+            }
             if (hist == null || hist.isEmpty()) {
                 for (String symbol : needsPrior) {
                     priorClosePrefetchAttempted.put(symbol, Boolean.TRUE);

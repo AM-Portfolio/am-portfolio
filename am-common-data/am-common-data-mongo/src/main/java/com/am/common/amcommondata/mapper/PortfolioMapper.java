@@ -14,6 +14,7 @@ import com.am.common.amcommondata.document.portfolio.HoldingAllocationDocument;
 import com.am.common.amcommondata.document.portfolio.PortfolioDocument;
 import com.am.common.amcommondata.mapper.asset.EquityMapper;
 import com.am.common.amcommondata.mapper.asset.GenericAssetMapper;
+import com.am.common.amcommondata.mapper.asset.NpsAssetMapper;
 import com.am.common.amcommondata.model.HoldingAllocation;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.asset.AssetModel;
@@ -28,6 +29,9 @@ public class PortfolioMapper {
 
     @Autowired
     private GenericAssetMapper assetMapper;
+
+    @Autowired
+    private NpsAssetMapper npsAssetMapper;
 
     private UUID parseOrGenerateUUID(String id) {
         if (id == null) return null;
@@ -47,6 +51,7 @@ public class PortfolioMapper {
         List<AssetModel> bonds = mapAssetsToModel(document.getBonds());
         List<AssetModel> commodities = mapAssetsToModel(document.getCommodities());
         List<AssetModel> cash = mapAssetsToModel(document.getCash());
+        List<AssetModel> npsModels = mapNpsAssetsToModel(document.getNpsModels());
         int equityCount = document.getEquities() != null ? document.getEquities().size() : 0;
 
         PortfolioModelV1 model = PortfolioModelV1.builder()
@@ -54,6 +59,9 @@ public class PortfolioMapper {
                 .name(document.getName())
                 .description(document.getDescription())
                 .owner(document.getOwner())
+                .familyMemberId(document.getFamilyMemberId())
+                .familyMemberName(document.getFamilyMemberName())
+                .dematBoid(document.getDematBoid())
                 .currency(document.getCurrency() != null ? document.getCurrency().name() : null)
                 .fundType(document.getFundType())
                 .notes(document.getNotes())
@@ -66,13 +74,16 @@ public class PortfolioMapper {
                 .bonds(bonds)
                 .commodities(commodities)
                 .cash(cash)
+                .npsModels(npsModels)
                 .totalValue(document.getTotalValue())
+                .investmentAmount(document.getInvestmentAmount())
                 .brokerType(document.getBrokerType())
                 .portfolioKind(PortfolioKind.orBroker(document.getPortfolioKind()))
                 .allocations(document.getAllocations() != null
                         ? document.getAllocations().stream().map(this::toAllocationModel).collect(Collectors.toList())
                         : null)
-                .assetCount(equityCount + mutualFunds.size() + bonds.size() + commodities.size() + cash.size())
+                .assetCount(equityCount + mutualFunds.size() + bonds.size() + commodities.size()
+                        + cash.size() + npsModels.size())
                 .build();
 
         BasketPortfolioMapper.applyBasketFieldsToModel(model, document);
@@ -98,6 +109,9 @@ public class PortfolioMapper {
                 .name(model.getName())
                 .description(model.getDescription())
                 .owner(model.getOwner())
+                .familyMemberId(model.getFamilyMemberId())
+                .familyMemberName(model.getFamilyMemberName())
+                .dematBoid(model.getDematBoid())
                 .fundType(model.getFundType())
                 .notes(model.getNotes())
                 .equities(model.getEquityModels() != null
@@ -109,7 +123,9 @@ public class PortfolioMapper {
                 .bonds(mapAssetsToDocument(model.getBonds()))
                 .commodities(mapAssetsToDocument(model.getCommodities()))
                 .cash(mapAssetsToDocument(model.getCash()))
+                .npsModels(mapNpsAssetsToDocument(model.getNpsModels()))
                 .totalValue(model.getTotalValue())
+                .investmentAmount(model.getInvestmentAmount())
                 .brokerType(model.getBrokerType())
                 .portfolioKind(PortfolioKind.orBroker(model.getPortfolioKind()))
                 .allocations(model.getAllocations() != null
@@ -151,6 +167,59 @@ public class PortfolioMapper {
             return Collections.emptyList();
         }
         return models.stream().map(assetMapper::toDocument).collect(Collectors.toList());
+    }
+
+    private List<AssetModel> mapNpsAssetsToModel(List<AssetDocument> docs) {
+        if (docs == null || docs.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return docs.stream().map(npsAssetMapper::toModel).map(AssetModel.class::cast).collect(Collectors.toList());
+    }
+
+    private List<AssetDocument> mapNpsAssetsToDocument(List<AssetModel> models) {
+        if (models == null) {
+            return null;
+        }
+        if (models.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return models.stream().map(this::toNpsDocument).collect(Collectors.toList());
+    }
+
+    private AssetDocument toNpsDocument(AssetModel model) {
+        if (model instanceof com.am.common.amcommondata.model.asset.pension.NPSModel nps) {
+            return npsAssetMapper.toDocument(nps);
+        }
+        // Flattened AssetModel row — copy into NPSModel so pran/tier round-trip if present on subclass only.
+        com.am.common.amcommondata.model.asset.pension.NPSModel nps =
+                com.am.common.amcommondata.model.asset.pension.NPSModel.builder()
+                        .id(model.getId())
+                        .symbol(model.getSymbol())
+                        .name(model.getName())
+                        .description(model.getDescription())
+                        .assetType(model.getAssetType())
+                        .marketData(model.getMarketData())
+                        .quantity(model.getQuantity())
+                        .avgBuyingPrice(model.getAvgBuyingPrice())
+                        .currentPrice(model.getCurrentPrice())
+                        .currentValue(model.getCurrentValue())
+                        .investmentValue(model.getInvestmentValue())
+                        .brokerType(model.getBrokerType())
+                        .profitLoss(model.getProfitLoss())
+                        .profitLossPercentage(model.getProfitLossPercentage())
+                        .createdAt(model.getCreatedAt())
+                        .updatedAt(model.getUpdatedAt())
+                        .isActive(model.getIsActive())
+                        .assetClass(model.getAssetClass())
+                        .isin(model.getIsin())
+                        .schemeCode(model.getSchemeCode())
+                        .schemeClass(model.getSchemeClass())
+                        .schemeOption(model.getSchemeOption())
+                        .statementNav(model.getStatementNav())
+                        .liveNav(model.getLiveNav())
+                        .isinResolveStatus(model.getIsinResolveStatus())
+                        .build();
+        return npsAssetMapper.toDocument(nps);
     }
 
     private HoldingAllocation toAllocationModel(HoldingAllocationDocument doc) {

@@ -11,6 +11,8 @@ import org.springframework.stereotype.Component;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.portfolio.EquityHoldings;
+import com.portfolio.model.reference.ListedEquitySectorCatalog;
+import com.portfolio.model.resolver.TradingSymbolResolver;
 import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.redis.session.CashSessionClock;
@@ -67,11 +69,7 @@ public class PortfolioCalculator {
         }
 
         // Extract all symbols
-        List<String> symbols = equityHoldings.stream()
-                .map(EquityHoldings::getSymbol)
-                .filter(symbol -> symbol != null)
-                .filter(symbol -> !symbol.endsWith("-F")) // Skip F&O futures from equity symbols
-                .collect(Collectors.toList());
+        List<String> symbols = quoteSymbols(equityHoldings);
 
         // 1. Fetch market cap data (MongoDB Cache first, then API)
         Map<String, MarketCapDocument> cachedMarketCap = marketCapMongoService.getBySymbols(symbols);
@@ -142,11 +140,7 @@ public class PortfolioCalculator {
         if (equityHoldings == null || equityHoldings.isEmpty()) {
             return equityHoldings;
         }
-        List<String> symbols = equityHoldings.stream()
-                .map(EquityHoldings::getSymbol)
-                .filter(symbol -> symbol != null)
-                .filter(symbol -> !symbol.endsWith("-F"))
-                .collect(Collectors.toList());
+        List<String> symbols = quoteSymbols(equityHoldings);
         Map<String, MarketData> apiData = Map.of();
         try {
             apiData = marketDataService.getMarketData(symbols);
@@ -156,6 +150,16 @@ public class PortfolioCalculator {
         final Map<String, MarketData> finalApiData = (apiData == null) ? Map.of() : apiData;
         return equityHoldings.stream()
                 .map(holding -> enrichHolding(holding, finalApiData, Map.of(), Map.of()))
+                .collect(Collectors.toList());
+    }
+
+    /** Listed tickers only. An unresolved ISIN has no OHLC row and stalls the batch. */
+    private static List<String> quoteSymbols(List<EquityHoldings> equityHoldings) {
+        return equityHoldings.stream()
+                .map(EquityHoldings::getSymbol)
+                .filter(symbol -> symbol != null)
+                .filter(symbol -> !symbol.endsWith("-F"))
+                .filter(symbol -> !TradingSymbolResolver.looksLikeIsin(symbol))
                 .collect(Collectors.toList());
     }
 
@@ -183,10 +187,10 @@ public class PortfolioCalculator {
             if (cache.getCompanyName() != null) {
                 holding.setName(cache.getCompanyName());
             }
-            if (cache.getSector() != null) {
+            if (!HoldingInstrumentClassifier.isMissingSector(cache.getSector())) {
                 holding.setSector(cache.getSector());
             }
-            if (cache.getIndustry() != null) {
+            if (!HoldingInstrumentClassifier.isMissingSector(cache.getIndustry())) {
                 holding.setIndustry(cache.getIndustry());
             }
         } else if (marketCapMap != null && marketCapMap.containsKey(symbol)) {
@@ -203,10 +207,10 @@ public class PortfolioCalculator {
             if (match.getCompanyName() != null) {
                 holding.setName(match.getCompanyName());
             }
-            if (match.getSector() != null) {
+            if (!HoldingInstrumentClassifier.isMissingSector(match.getSector())) {
                 holding.setSector(match.getSector());
             }
-            if (match.getIndustry() != null) {
+            if (!HoldingInstrumentClassifier.isMissingSector(match.getIndustry())) {
                 holding.setIndustry(match.getIndustry());
             }
         }
@@ -287,13 +291,19 @@ public class PortfolioCalculator {
             }
         }
 
-        // Fallback Tier 3: Cost basis average buying price (at par / 0% unrealized P&L)
+        // Fallback Tier 3: cost basis, then durable import/statement mark (never invent Invested).
         if (currentPrice == null) {
             if (holding.getAverageBuyingPrice() != null && holding.getAverageBuyingPrice() > 0) {
                 currentPrice = holding.getAverageBuyingPrice();
                 priceSource = HoldingInstrumentClassifier.PRICE_COST;
             } else if (holding.getInvestmentCost() != null && holding.getQuantity() != null && holding.getQuantity() > 0) {
                 currentPrice = holding.getInvestmentCost() / holding.getQuantity();
+                priceSource = HoldingInstrumentClassifier.PRICE_COST;
+            } else if (importMarkPrice != null && importMarkPrice > 0) {
+                currentPrice = importMarkPrice;
+                priceSource = HoldingInstrumentClassifier.PRICE_COST;
+            } else if (holding.getCurrentPrice() != null && holding.getCurrentPrice() > 0) {
+                currentPrice = holding.getCurrentPrice();
                 priceSource = HoldingInstrumentClassifier.PRICE_COST;
             }
         }
@@ -311,21 +321,19 @@ public class PortfolioCalculator {
                 double currentValue = currentPrice * holding.getQuantity();
                 holding.setCurrentValue(round(currentValue));
 
-                // Calculate Overall Gain/Loss
-                if (holding.getInvestmentCost() != null && holding.getInvestmentCost() > 0) {
+                // Real cost only — never invent Invested/Return from mark (mail/CAS).
+                boolean costKnown = (holding.getAverageBuyingPrice() != null && holding.getAverageBuyingPrice() > 0)
+                        || (holding.getInvestmentCost() != null && holding.getInvestmentCost() > 0);
+                if (costKnown && holding.getInvestmentCost() != null && holding.getInvestmentCost() > 0) {
                     double gainLoss = currentValue - holding.getInvestmentCost();
                     double gainLossPct = (gainLoss / holding.getInvestmentCost()) * 100;
                     holding.setGainLoss(round(gainLoss));
                     holding.setGainLossPercentage(round(gainLossPct));
-                } else if (importMarkPrice != null && holding.getQuantity() != null && holding.getQuantity() > 0) {
-                    // No avg cost (email demat): overall vs import/statement mark — never vs ₹0.
-                    double importValue = importMarkPrice * holding.getQuantity();
-                    if (importValue > 0) {
-                        double gainLoss = currentValue - importValue;
-                        double gainLossPct = (gainLoss / importValue) * 100;
-                        holding.setGainLoss(round(gainLoss));
-                        holding.setGainLossPercentage(round(gainLossPct));
-                    }
+                } else {
+                    // Missing cost: leave investmentCost / overall P&L null (UI dashes or hides).
+                    // importMarkPrice is for market value only, not overall P&L vs Invested.
+                    holding.setGainLoss(null);
+                    holding.setGainLossPercentage(null);
                 }
 
                 // Calculate Day's Gain/Loss (if previous close available)
@@ -350,7 +358,36 @@ public class PortfolioCalculator {
             }
         }
 
+        if (HoldingInstrumentClassifier.isMissingSector(holding.getSector())) {
+            ListedEquitySectorCatalog.Profile profile = ListedEquitySectorCatalog.find(
+                    holding.getSymbol(), holding.getIsin());
+            if (profile != null && !HoldingInstrumentClassifier.isMissingSector(profile.sector())) {
+                holding.setSector(profile.sector());
+                if (HoldingInstrumentClassifier.isMissingSector(holding.getIndustry())
+                        && profile.industry() != null) {
+                    holding.setIndustry(profile.industry());
+                }
+            }
+        }
+
         return holding;
+    }
+
+    /**
+     * Sum real cost basis only. Rows without known invested amount contribute 0
+     * (mail/CAS) so overview Invested stays null/0 instead of Balance==Invested.
+     */
+    public static double sumInvestmentBasis(List<EquityHoldings> holdings) {
+        if (holdings == null || holdings.isEmpty()) {
+            return 0.0;
+        }
+        double sum = 0.0;
+        for (EquityHoldings h : holdings) {
+            if (h.getInvestmentCost() != null && h.getInvestmentCost() > 0) {
+                sum += h.getInvestmentCost();
+            }
+        }
+        return sum;
     }
 
     public PortfolioSummaryV1 calculateSummary(List<EquityHoldings> enrichedHoldings, double totalInvestmentValue) {

@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 
 import com.am.common.amcommondata.document.asset.AssetDocument;
 import com.am.common.amcommondata.model.asset.AssetModel;
+import com.am.common.amcommondata.model.asset.pension.NPSModel;
 
 @Component
 public abstract class AssetMapper<M extends AssetModel, D extends AssetDocument> {
@@ -52,6 +53,18 @@ public abstract class AssetMapper<M extends AssetModel, D extends AssetDocument>
         model.setCreatedAt(document.getCreatedAt());
         model.setUpdatedAt(document.getUpdatedAt());
         model.setIsActive(document.getIsActive());
+        model.setAssetClass(document.getAssetClass());
+        model.setIsin(document.getIsin());
+        model.setSchemeCode(document.getSchemeCode());
+        model.setSchemeClass(document.getSchemeClass());
+        model.setSchemeOption(document.getSchemeOption());
+        model.setStatementNav(document.getStatementNav());
+        model.setLiveNav(document.getLiveNav());
+        model.setIsinResolveStatus(document.getIsinResolveStatus());
+        if (model instanceof NPSModel nps) {
+            nps.setTier(document.getTier());
+            nps.setPran(document.getPran());
+        }
     }
 
     protected void populateDocument(D document, M model) {
@@ -73,5 +86,17 @@ public abstract class AssetMapper<M extends AssetModel, D extends AssetDocument>
         document.setCreatedAt(model.getCreatedAt());
         document.setUpdatedAt(model.getUpdatedAt());
         document.setIsActive(model.getIsActive());
+        document.setAssetClass(model.getAssetClass());
+        document.setIsin(model.getIsin());
+        document.setSchemeCode(model.getSchemeCode());
+        document.setSchemeClass(model.getSchemeClass());
+        document.setSchemeOption(model.getSchemeOption());
+        document.setStatementNav(model.getStatementNav());
+        document.setLiveNav(model.getLiveNav());
+        document.setIsinResolveStatus(model.getIsinResolveStatus());
+        if (model instanceof NPSModel nps) {
+            document.setTier(nps.getTier());
+            document.setPran(nps.getPran());
+        }
     }
 }

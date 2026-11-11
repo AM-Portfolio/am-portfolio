@@ -10,8 +10,10 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.asset.mutualfund.MutualFundModel;
+import com.am.common.amcommondata.model.asset.pension.NPSModel;
 import com.am.common.amcommondata.model.enums.AssetType;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.FundType;
@@ -38,7 +40,7 @@ public class PortfolioMapperv1 {
                 ? mapToEquityModels(portfolioEvent, brokerType, asOfTs)
                 : null;
 
-        List<com.am.common.amcommondata.model.asset.AssetModel> mappedFunds = null;
+        List<AssetModel> mappedFunds = null;
         if (portfolioEvent.getMutualFunds() != null) {
             mappedFunds = portfolioEvent.getMutualFunds().stream()
                     .filter(f -> f != null)
@@ -46,22 +48,47 @@ public class PortfolioMapperv1 {
                     .collect(Collectors.toList());
         }
 
+        List<AssetModel> mappedNps = null;
+        if (portfolioEvent.getNpsHoldings() != null) {
+            mappedNps = portfolioEvent.getNpsHoldings().stream()
+                    .filter(n -> n != null)
+                    .map(n -> mapNpsHolding(n, brokerType, asOfTs))
+                    .collect(Collectors.toList());
+        }
+
         double equityValue = mappedEquities != null ? calculateTotalValue(mappedEquities) : 0.0;
         double mfValue = mappedFunds != null ? calculateAssetListValue(mappedFunds) : 0.0;
+        double npsValue = mappedNps != null ? calculateAssetListValue(mappedNps) : 0.0;
+        double lineSum = equityValue + mfValue + npsValue;
+        // CAS fanout often sends statement totalValue with empty line arrays; keep that total.
+        Double eventTotal = portfolioEvent.getTotalValue();
+        double totalValue = lineSum > 0
+                ? lineSum
+                : (eventTotal != null && eventTotal > 0 ? eventTotal : 0.0);
         int equityCount = mappedEquities != null ? calculateAssetCount(mappedEquities) : 0;
         int mfCount = mappedFunds != null ? mappedFunds.size() : 0;
+        int npsCount = mappedNps != null ? mappedNps.size() : 0;
 
-        // Broker books always use broker display name (Dhan/Zerodha…). Never persist
-        // email Mongo doc ObjectIds as the portfolio name — that surfaces in the UI selector.
+        // Prefer explicit event name (short DP / Mutual Funds), then portfolioId, then broker code.
+        // Never persist opaque Mongo ObjectIds as the selector label.
         String brokerName = brokerType != null ? brokerType.getCode() : null;
-        String eventName = portfolioEvent.getPortfolioId();
+        String eventName = firstNonBlank(portfolioEvent.getName(), portfolioEvent.getPortfolioId());
         String name = looksLikeOpaqueId(eventName) ? brokerName
                 : (eventName != null && !eventName.isBlank() ? eventName : brokerName);
+        String dematBoid = null;
+        if (portfolioEvent.getDematRef() != null
+                && portfolioEvent.getDematRef().getBoid() != null
+                && !portfolioEvent.getDematRef().getBoid().isBlank()) {
+            dematBoid = portfolioEvent.getDematRef().getBoid().trim();
+        }
 
         return PortfolioModelV1.builder()
                 .id(portfolioEvent.getId())
                 .name(name)
                 .owner(portfolioEvent.getUserId())
+                .familyMemberId(portfolioEvent.getFamilyMemberId())
+                .familyMemberName(portfolioEvent.getFamilyMemberName())
+                .dematBoid(dematBoid)
                 .brokerType(brokerType)
                 .fundType(FundType.DEFAULT)
                 .status("Active")
@@ -71,11 +98,62 @@ public class PortfolioMapperv1 {
                 .bonds(null)
                 .commodities(null)
                 .cash(null)
-                .assetCount(equityCount + mfCount)
-                .totalValue(equityValue + mfValue)
+                .npsModels(mappedNps)
+                .assetCount(equityCount + mfCount + npsCount)
+                .totalValue(totalValue)
                 .createdAt(asOfTs)
                 .updatedAt(asOfTs)
                 .version(0L)
+                .build();
+    }
+
+    private static String firstNonBlank(String a, String b) {
+        if (a != null && !a.isBlank()) {
+            return a;
+        }
+        if (b != null && !b.isBlank()) {
+            return b;
+        }
+        return null;
+    }
+
+    private AssetModel mapNpsHolding(NPSModel n, BrokerType brokerType, LocalDateTime asOfTs) {
+        String isin = n.getIsin() != null ? n.getIsin() : n.getSchemeCode();
+        Double nav = n.getLiveNav() != null ? n.getLiveNav()
+                : (n.getCurrentPrice() != null ? n.getCurrentPrice() : n.getStatementNav());
+        Double qty = n.getQuantity();
+        Double value = n.getCurrentValue();
+        if (value == null && qty != null && nav != null) {
+            value = qty * nav;
+        }
+        Double stmtNav = n.getStatementNav() != null ? n.getStatementNav() : n.getAvgBuyingPrice();
+        Double investment = n.getInvestmentValue();
+        if (investment == null && qty != null && stmtNav != null) {
+            investment = qty * stmtNav;
+        }
+        return NPSModel.builder()
+                .symbol(n.getSymbol() != null ? n.getSymbol() : isin)
+                .name(n.getName())
+                .isin(isin)
+                .schemeCode(n.getSchemeCode() != null ? n.getSchemeCode() : isin)
+                .assetType(AssetType.NPS)
+                .assetClass("nps")
+                .quantity(qty)
+                .avgBuyingPrice(stmtNav)
+                .currentPrice(nav)
+                .currentValue(value)
+                .investmentValue(investment)
+                .statementNav(stmtNav)
+                .liveNav(n.getLiveNav())
+                .isinResolveStatus(n.getIsinResolveStatus())
+                .pran(n.getPran())
+                .tier(n.getTier())
+                .schemeClass(n.getSchemeClass())
+                .schemeOption(n.getSchemeOption())
+                .brokerType(brokerType != null ? brokerType : BrokerType.NPS)
+                .createdAt(asOfTs)
+                .updatedAt(asOfTs)
+                .isActive(true)
                 .build();
     }
 
@@ -322,6 +400,7 @@ public class PortfolioMapperv1 {
                 .todayProfitLossPercentage(equityModel.getTodayProfitLossPercentage())
                 .profitLoss(equityModel.getProfitLoss())
                 .profitLossPercentage(equityModel.getProfitLossPercentage())
+                .assetClass(equityModel.getAssetClass())
                 .createdAt(asOfTs != null ? asOfTs : equityModel.getCreatedAt())
                 .updatedAt(asOfTs != null ? asOfTs : equityModel.getUpdatedAt())
                 .build();
@@ -354,11 +433,20 @@ public class PortfolioMapperv1 {
                 .brokerType(brokerType)
                 .symbol(fundModel.getSymbol())
                 .name(fundModel.getName())
+                .isin(fundModel.getIsin())
                 .avgBuyingPrice(avg)
                 .quantity(qty)
                 .currentPrice(fundModel.getCurrentPrice() != null ? fundModel.getCurrentPrice() : avg)
+                .nav(fundModel.getNav() != null ? fundModel.getNav() : fundModel.getCurrentPrice())
                 .currentValue(currentValue)
                 .investmentValue(investmentValue)
+                .assetClass(fundModel.getAssetClass() != null ? fundModel.getAssetClass() : "mutual_fund_folio")
+                .folioNumber(fundModel.getFolioNumber())
+                .schemeCode(fundModel.getSchemeCode())
+                .amcName(fundModel.getAmcName())
+                .rtaName(fundModel.getRtaName())
+                .advisorName(fundModel.getAdvisorName())
+                .ucc(fundModel.getUcc())
                 .createdAt(asOfTs != null ? asOfTs : fundModel.getCreatedAt())
                 .updatedAt(asOfTs != null ? asOfTs : fundModel.getUpdatedAt())
                 .build();

@@ -124,7 +124,7 @@ class PortfolioCalculatorTest {
         gold.setInvestmentCost(102.76);
         MarketData md = MarketData.builder().symbol("INF277KA1976").lastPrice(13.3).previousClose(13.5).build();
         when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("INF277KA1976", md));
-        when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+        lenient().when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
         lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
 
         EquityHoldings enriched = portfolioCalculator.enrichHoldings(List.of(gold)).get(0);
@@ -144,7 +144,7 @@ class PortfolioCalculatorTest {
         platforms.setAverageBuyingPrice(1119.0);
         platforms.setInvestmentCost(1119.0);
         when(marketDataService.getMarketData(anyList())).thenReturn(Collections.emptyMap());
-        when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+        lenient().when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
         lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
 
         EquityHoldings enriched = portfolioCalculator.enrichHoldings(List.of(platforms)).get(0);
@@ -294,5 +294,62 @@ class PortfolioCalculatorTest {
 
         assertEquals(25.0, holding.getWeightInPortfolio());
         assertEquals(75.0, h2.getWeightInPortfolio());
+    }
+
+    @Test
+    void enrichHoldings_markOnly_leavesInvestmentCostAndOverallPnLNull() {
+        EquityHoldings mail = new EquityHoldings();
+        mail.setSymbol("JIOFIN");
+        mail.setQuantity(10.0);
+        mail.setImportMarkPrice(250.0);
+        // no avg / investmentCost
+        MarketData md = MarketData.builder()
+                .symbol("JIOFIN")
+                .lastPrice(260.0)
+                .previousClose(255.0)
+                .build();
+        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("JIOFIN", md));
+        when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+
+        EquityHoldings enriched = portfolioCalculator.enrichHoldings(List.of(mail)).get(0);
+
+        assertEquals(260.0, enriched.getCurrentPrice());
+        assertEquals(2600.0, enriched.getCurrentValue());
+        assertNull(enriched.getInvestmentCost());
+        assertNull(enriched.getGainLoss());
+        assertNull(enriched.getGainLossPercentage());
+        assertEquals(50.0, enriched.getTodayGainLoss());
+    }
+
+    @Test
+    void sumInvestmentBasis_sumsOnlyRealCost_notMarket() {
+        EquityHoldings withCost = new EquityHoldings();
+        withCost.setInvestmentCost(1000.0);
+        withCost.setCurrentValue(1200.0);
+        EquityHoldings markOnly = new EquityHoldings();
+        markOnly.setCurrentValue(500.0);
+        markOnly.setImportMarkPrice(50.0);
+
+        assertEquals(1000.0, PortfolioCalculator.sumInvestmentBasis(List.of(withCost, markOnly)));
+        assertEquals(0.0, PortfolioCalculator.sumInvestmentBasis(List.of(markOnly)));
+    }
+
+    @Test
+    void calculateSummary_markOnlyBook_nullInvestedAndOverallReturn() {
+        EquityHoldings mail = new EquityHoldings();
+        mail.setSymbol("RELIANCE");
+        mail.setQuantity(1.0);
+        mail.setCurrentValue(1400.0);
+        mail.setCurrentPrice(1400.0);
+        mail.setTodayGainLoss(10.0);
+
+        PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(List.of(mail), 0.0);
+
+        assertNull(summary.getInvestmentValue());
+        assertEquals(1400.0, summary.getCurrentValue());
+        assertNull(summary.getTotalGainLoss());
+        assertNull(summary.getTotalGainLossPercentage());
+        assertEquals(10.0, summary.getTodayGainLoss());
     }
 }

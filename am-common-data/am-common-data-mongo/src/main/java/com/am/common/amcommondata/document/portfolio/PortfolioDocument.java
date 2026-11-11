@@ -27,12 +27,21 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @EqualsAndHashCode(callSuper = true)
 @Document(collection = "portfolios")
-// Unique one BROKER portfolio per owner+brokerType. Baskets/DEMO/PAPER excluded via partial filter.
+// First-class brokers: one BROKER book per owner+brokerType+family (excludes CAS_DEMAT).
+// Mongo partial indexes cannot use $exists:false / $nin (expands to $not) — use $in of first-class types.
 @org.springframework.data.mongodb.core.index.CompoundIndex(
-        name = "owner_broker_broker_only_idx",
-        def = "{'owner': 1, 'brokerType': 1}",
+        name = "owner_broker_family_broker_only_idx",
+        def = "{'owner': 1, 'brokerType': 1, 'familyMemberId': 1}",
         unique = true,
-        partialFilter = "{'$or':[{'portfolioKind':'BROKER'},{'portfolioKind':{'$exists':false}},{'portfolioKind':null}]}")
+        partialFilter = "{'portfolioKind':'BROKER','brokerType':{'$in':["
+                + "'DHAN','ZERODHA','MSTOCK','GROWW','GROW','KOTAK','ANGEL_ONE','UPSTOX','FYERS','HDFC','CDSL','NPS'"
+                + "]}}")
+// CAS_DEMAT: one book per demat BOID (or mf:cas sentinel).
+@org.springframework.data.mongodb.core.index.CompoundIndex(
+        name = "owner_cas_demat_boid_family_idx",
+        def = "{'owner': 1, 'brokerType': 1, 'dematBoid': 1, 'familyMemberId': 1}",
+        unique = true,
+        partialFilter = "{'portfolioKind':'BROKER','brokerType':'CAS_DEMAT'}")
 // At most one active DEMO sandbox per owner.
 @org.springframework.data.mongodb.core.index.CompoundIndex(
         name = "owner_demo_unique_idx",
@@ -79,6 +88,9 @@ public class PortfolioDocument extends BaseDocument {
 
     @Field("cash")
     private List<AssetDocument> cash;
+
+    @Field("npsModels")
+    private List<AssetDocument> npsModels;
     
     @Field("totalValue")
     private Double totalValue;
@@ -124,6 +136,17 @@ public class PortfolioDocument extends BaseDocument {
 
     @Field("lastLoginDate")
     private LocalDate lastLoginDate; // Updated on each user login — used for active-user filtering
+
+    /** Soft family persona under owner; null = primary. */
+    @Field("familyMemberId")
+    private String familyMemberId;
+
+    @Field("familyMemberName")
+    private String familyMemberName;
+
+    /** BOID for CAS_DEMAT books; null/absent for first-class brokers. */
+    @Field("dematBoid")
+    private String dematBoid;
     
     // Helper methods for enum conversions
     public void setCurrency(Currency currency) {

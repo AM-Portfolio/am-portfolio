@@ -32,10 +32,14 @@ public class PortfolioDashboardService {
      * @return the portfolio summary
      */
     public PortfolioSummaryV1 overviewPortfolio(String userId, TimeInterval interval) {
-        log.info("PortfolioDashboardService - Starting overviewPortfolio for user: {}, interval: {}", 
-            userId, interval != null ? interval.getCode() : "null");
+        return overviewPortfolio(userId, interval, null);
+    }
+
+    public PortfolioSummaryV1 overviewPortfolio(String userId, TimeInterval interval, String persona) {
+        log.info("PortfolioDashboardService - Starting overviewPortfolio for user: {}, interval: {}, persona: {}", 
+            userId, interval != null ? interval.getCode() : "null", persona);
         
-        PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, interval);
+        PortfolioSummaryV1 result = portfolioOverviewService.overviewPortfolio(userId, interval, persona);
         
         log.info("PortfolioDashboardService - Completed overviewPortfolio for user: {}, found summary: {}", 
             userId, result != null ? "yes" : "no");
@@ -90,14 +94,23 @@ public class PortfolioDashboardService {
      * @return the portfolio holdings
      */
     public PortfolioHoldings getPortfolioHoldings(String userId, TimeInterval interval) {
-        log.info("PortfolioDashboardService - Starting getPortfolioHoldings for user: {}, interval: {}", 
-            userId, interval != null ? interval.getCode() : "null");
+        return getPortfolioHoldings(userId, interval, null);
+    }
+
+    public PortfolioHoldings getPortfolioHoldings(String userId, TimeInterval interval, String persona) {
+        return getPortfolioHoldings(userId, interval, persona, null);
+    }
+
+    public PortfolioHoldings getPortfolioHoldings(
+            String userId, TimeInterval interval, String persona, String assetClass) {
+        log.info("PortfolioDashboardService - Starting getPortfolioHoldings for user: {}, interval: {}, persona: {}", 
+            userId, interval != null ? interval.getCode() : "null", persona);
         
-        PortfolioHoldings result = portfolioHoldingsService.getPortfolioHoldings(userId, interval);
+        PortfolioHoldings result = portfolioHoldingsService.getPortfolioHoldings(userId, interval, true, persona);
         
         log.info("PortfolioDashboardService - Completed getPortfolioHoldings for user: {}, found holdings: {}", 
             userId, result != null ? "yes" : "no");
-        return result;
+        return filterByAssetClass(result, assetClass);
     }
     
     /**
@@ -109,6 +122,11 @@ public class PortfolioDashboardService {
      * @return the portfolio holdings for the specific portfolio
      */
     public PortfolioHoldings getPortfolioHoldings(String userId, String portfolioId, TimeInterval interval) {
+        return getPortfolioHoldings(userId, portfolioId, interval, null);
+    }
+
+    public PortfolioHoldings getPortfolioHoldings(
+            String userId, String portfolioId, TimeInterval interval, String assetClass) {
         log.info("PortfolioDashboardService - Starting getPortfolioHoldings for user: {}, portfolio: {}, interval: {}", 
             userId, portfolioId, interval != null ? interval.getCode() : "null");
         
@@ -116,6 +134,20 @@ public class PortfolioDashboardService {
         
         log.info("PortfolioDashboardService - Completed getPortfolioHoldings for user: {}, portfolio: {}, found holdings: {}", 
             userId, portfolioId, result != null ? "yes" : "no");
-        return result;
+        return filterByAssetClass(result, assetClass);
+    }
+
+    private static PortfolioHoldings filterByAssetClass(PortfolioHoldings holdings, String assetClass) {
+        if (holdings == null || assetClass == null || assetClass.isBlank()
+                || holdings.getEquityHoldings() == null) {
+            return holdings;
+        }
+        String want = assetClass.trim().toLowerCase();
+        holdings.setEquityHoldings(
+                holdings.getEquityHoldings().stream()
+                        .filter(h -> h.getAssetClass() != null
+                                && want.equalsIgnoreCase(h.getAssetClass()))
+                        .toList());
+        return holdings;
     }
 }

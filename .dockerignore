@@ -19,3 +19,6 @@ replay_*.log
 !src/
 !**/src/
 !**/pom.xml
+**/src/test/
+scripts/
+plans/
