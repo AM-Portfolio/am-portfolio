@@ -177,7 +177,11 @@ public class PortfolioOverviewService {
         }
     }
 
-    /** Headline currentValue = hub residual+NPS; day P&amp;L stays from painted books. */
+    /**
+     * Headline currentValue = hub residual+NPS. Keep todayGainLossPercentage from painted
+     * books; scale todayGainLoss rupees to the hub NAV so cards do not mix a tiny equity
+     * day abs with a household headline.
+     */
     private PortfolioSummaryV1 applyHubResidualHeadline(
             PortfolioSummaryV1 summary, String userId, String persona) {
         if (summary == null || accountsHubService == null) {
@@ -185,8 +189,16 @@ public class PortfolioOverviewService {
         }
         try {
             double hubWealth = accountsHubService.wealthForPersona(userId, persona);
-            if (hubWealth > 0) {
-                summary.setCurrentValue(Math.round(hubWealth * 100.0) / 100.0);
+            if (hubWealth <= 0) {
+                return summary;
+            }
+            Double painted = summary.getCurrentValue();
+            Double dayAbs = summary.getTodayGainLoss();
+            double hubRounded = Math.round(hubWealth * 100.0) / 100.0;
+            summary.setCurrentValue(hubRounded);
+            if (painted != null && painted > 0 && dayAbs != null) {
+                double scaled = Math.round((dayAbs * (hubRounded / painted)) * 100.0) / 100.0;
+                summary.setTodayGainLoss(scaled);
             }
         } catch (Exception e) {
             log.warn("Hub residual headline failed for user={}: {}", userId, e.getMessage());

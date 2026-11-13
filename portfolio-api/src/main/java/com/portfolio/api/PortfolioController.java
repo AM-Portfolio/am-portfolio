@@ -680,6 +680,13 @@ public class PortfolioController {
             }
 
             if (portfolioSummary == null) {
+                if (res.portfolioId() != null
+                        && !res.portfolioId().isBlank()
+                        && !res.portfolioId().equals(res.userId())) {
+                    log.info("PortfolioController - getPortfolioSummary - No portfolio {} for user {}",
+                            res.portfolioId(), res.userId());
+                    return ResponseEntity.notFound().build();
+                }
                 log.info("PortfolioController - getPortfolioSummary - No summary found for user: {} and portfolio: {}. Returning empty state.",
                         res.userId(), res.portfolioId() != null ? res.portfolioId() : "all");
                 return ResponseEntity.ok(PortfolioSummaryV1.empty());
