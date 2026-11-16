@@ -181,7 +181,23 @@ public class AccountsHubService {
                 .toList();
 
         List<FamilyMember> members = familyMemberService.listForOwner(userId);
-        XirrBundle xirr = resolveXirrBundle(userId, xirrBooks, primaryXirrBooks, members, casAsOf);
+        Set<String> liveMemberIds = new HashSet<>();
+        if (members != null) {
+            for (FamilyMember m : members) {
+                if (m != null && m.getId() != null && !m.getId().isBlank()) {
+                    liveMemberIds.add(m.getId().trim());
+                }
+            }
+        }
+        // Household XIRR ignores orphan familyMemberId stamps (deleted personas).
+        List<PortfolioModelV1> householdXirrBooks = xirrBooks.stream()
+                .filter(p -> p != null && (
+                        p.getFamilyMemberId() == null
+                                || p.getFamilyMemberId().isBlank()
+                                || liveMemberIds.contains(p.getFamilyMemberId().trim())))
+                .toList();
+        XirrBundle xirr = resolveXirrBundle(
+                userId, householdXirrBooks, primaryXirrBooks, members, casAsOf);
 
         List<FamilyMemberSummary> familySummaries = members.stream()
                 .map(m -> {
@@ -199,8 +215,8 @@ public class AccountsHubService {
                 })
                 .toList();
 
-        double primaryTotal = sumPersonaValue(demat, rows, npsAccounts, true);
-        double familyTotal = sumPersonaValue(demat, rows, npsAccounts, false);
+        double primaryTotal = sumPersonaValue(demat, rows, npsAccounts, true, liveMemberIds);
+        double familyTotal = sumPersonaValue(demat, rows, npsAccounts, false, liveMemberIds);
         double household = primaryTotal + familyTotal;
         Double familySharePct = household > 0 ? round2((familyTotal / household) * 100.0) : null;
 
@@ -290,18 +306,23 @@ public class AccountsHubService {
     }
 
     /**
-     * @param primaryOnly true = null familyMemberId only; false = any stamped family id
+     * @param primaryOnly true = null familyMemberId only; false = live family member ids only
+     *                    (orphan stamps with deleted persona ids are excluded)
      */
     static double sumPersonaValue(
             List<DematAccountModel> demat,
             List<AccountsPortfolioRow> rows,
             List<NpsDocumentMeta> npsAccounts,
-            boolean primaryOnly) {
-        double sum = booksPlusDirectoryResidual(demat, rows, r -> personaMatches(r.getFamilyMemberId(), primaryOnly),
-                a -> personaMatches(a.getFamilyMemberId(), primaryOnly));
+            boolean primaryOnly,
+            Set<String> liveMemberIds) {
+        double sum = booksPlusDirectoryResidual(
+                demat,
+                rows,
+                r -> personaMatches(r.getFamilyMemberId(), primaryOnly, liveMemberIds),
+                a -> personaMatches(a.getFamilyMemberId(), primaryOnly, liveMemberIds));
         if (npsAccounts != null) {
             for (NpsDocumentMeta m : npsAccounts) {
-                if (m == null || !personaMatches(m.getFamilyMemberId(), primaryOnly)) {
+                if (m == null || !personaMatches(m.getFamilyMemberId(), primaryOnly, liveMemberIds)) {
                     continue;
                 }
                 if (m.getTotalValue() != null && m.getTotalValue() > 0) {
@@ -312,9 +333,28 @@ public class AccountsHubService {
         return sum;
     }
 
-    private static boolean personaMatches(String familyMemberId, boolean primaryOnly) {
+    /** Backward-compatible overload used by older unit tests. */
+    static double sumPersonaValue(
+            List<DematAccountModel> demat,
+            List<AccountsPortfolioRow> rows,
+            List<NpsDocumentMeta> npsAccounts,
+            boolean primaryOnly) {
+        return sumPersonaValue(demat, rows, npsAccounts, primaryOnly, Set.of());
+    }
+
+    private static boolean personaMatches(
+            String familyMemberId, boolean primaryOnly, Set<String> liveMemberIds) {
         boolean isPrimary = familyMemberId == null || familyMemberId.isBlank();
-        return primaryOnly ? isPrimary : !isPrimary;
+        if (primaryOnly) {
+            return isPrimary;
+        }
+        if (isPrimary) {
+            return false;
+        }
+        if (liveMemberIds == null || liveMemberIds.isEmpty()) {
+            return false;
+        }
+        return liveMemberIds.contains(familyMemberId.trim());
     }
 
     private static Double round2(double v) {

@@ -19,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.am.common.amcommondata.document.family.FamilyMemberDocument;
 import com.am.common.amcommondata.document.portfolio.PortfolioDocument;
+import com.am.common.amcommondata.model.family.FamilyMember;
 import com.am.common.amcommondata.repository.cas.CasImportRepository;
 import com.am.common.amcommondata.repository.family.FamilyMemberRepository;
 import com.am.common.amcommondata.repository.nps.NpsImportRepository;
@@ -38,21 +39,30 @@ class FamilyMemberDeleteServiceTest {
     private NpsImportRepository npsImportRepository;
     @Mock
     private BrokerPortfolioDeleteService brokerPortfolioDeleteService;
+    @Mock
+    private FamilyMemberService familyMemberService;
 
     @InjectMocks
     private FamilyMemberDeleteService familyMemberDeleteService;
 
     @Test
     void cascadeDeletesBooksCasNpsAndMember() {
+        when(familyMemberRepository.consolidateObjectIdStringTwins("u1")).thenReturn(0);
         when(familyMemberRepository.findOwnedById("fm1", "u1")).thenReturn(Optional.of(FamilyMemberDocument.builder()
                 .id("fm1")
                 .ownerUserId("u1")
                 .displayName("Kid")
+                .nameNorm("kid")
                 .build()));
-        when(portfolioDocumentRepository.findByOwnerAndFamilyMemberId("u1", "fm1"))
+        when(familyMemberService.listForOwner("u1")).thenReturn(List.of(
+                FamilyMember.builder().id("fm1").displayName("Kid").build()));
+        when(portfolioDocumentRepository.findByOwner("u1"))
                 .thenReturn(List.of(
-                        PortfolioDocument.builder().id("book-a").build(),
-                        PortfolioDocument.builder().id("book-b").build()));
+                        PortfolioDocument.builder().id("book-a").familyMemberId("fm1").build(),
+                        PortfolioDocument.builder().id("book-b").familyMemberId("fm1").build()))
+                .thenReturn(List.of());
+        when(casImportRepository.findByOwnerOrderByAsOfDateDescImportedAtDesc("u1")).thenReturn(List.of());
+        when(npsImportRepository.findByOwnerOrderByAsOfDateDescImportedAtDesc("u1")).thenReturn(List.of());
         when(casImportRepository.deleteByOwnerAndFamilyMemberId("u1", "fm1")).thenReturn(1L);
         when(npsImportRepository.deleteByOwnerAndFamilyMemberId("u1", "fm1")).thenReturn(0L);
 
@@ -66,7 +76,49 @@ class FamilyMemberDeleteServiceTest {
     }
 
     @Test
+    void cascadeAlsoRemovesOrphanSameNameNormBooks() {
+        when(familyMemberRepository.consolidateObjectIdStringTwins("u1")).thenReturn(0);
+        when(familyMemberRepository.findOwnedById("fm1", "u1")).thenReturn(Optional.of(FamilyMemberDocument.builder()
+                .id("fm1")
+                .ownerUserId("u1")
+                .displayName("PRIYANSHU KUMAR")
+                .nameNorm("priyanshu kumar")
+                .build()));
+        when(familyMemberService.listForOwner("u1")).thenReturn(List.of(
+                FamilyMember.builder().id("fm1").displayName("PRIYANSHU KUMAR").build()));
+        when(portfolioDocumentRepository.findByOwner("u1"))
+                .thenReturn(List.of(
+                        PortfolioDocument.builder()
+                                .id("live-book")
+                                .familyMemberId("fm1")
+                                .familyMemberName("PRIYANSHU KUMAR")
+                                .build(),
+                        PortfolioDocument.builder()
+                                .id("orphan-book")
+                                .familyMemberId("stale-uuid")
+                                .familyMemberName("PRIYANSHU KUMAR")
+                                .build(),
+                        PortfolioDocument.builder()
+                                .id("primary-book")
+                                .familyMemberId(null)
+                                .build()))
+                .thenReturn(List.of(
+                        PortfolioDocument.builder().id("primary-book").familyMemberId(null).build()));
+        when(casImportRepository.findByOwnerOrderByAsOfDateDescImportedAtDesc("u1")).thenReturn(List.of());
+        when(npsImportRepository.findByOwnerOrderByAsOfDateDescImportedAtDesc("u1")).thenReturn(List.of());
+        when(casImportRepository.deleteByOwnerAndFamilyMemberId(eq("u1"), anyString())).thenReturn(0L);
+        when(npsImportRepository.deleteByOwnerAndFamilyMemberId(eq("u1"), anyString())).thenReturn(0L);
+
+        familyMemberDeleteService.deleteOwnedMember("fm1", "u1");
+
+        verify(brokerPortfolioDeleteService).deleteOwnedPortfolioByDocumentId("live-book", "u1");
+        verify(brokerPortfolioDeleteService).deleteOwnedPortfolioByDocumentId("orphan-book", "u1");
+        verify(brokerPortfolioDeleteService, never()).deleteOwnedPortfolioByDocumentId("primary-book", "u1");
+    }
+
+    @Test
     void foreignOwnerIsNotFound() {
+        when(familyMemberRepository.consolidateObjectIdStringTwins("u1")).thenReturn(0);
         when(familyMemberRepository.findOwnedById("fm1", "u1")).thenReturn(Optional.empty());
 
         assertThrows(ResponseStatusException.class,
@@ -77,6 +129,7 @@ class FamilyMemberDeleteServiceTest {
 
     @Test
     void missingMemberIsNotFound() {
+        when(familyMemberRepository.consolidateObjectIdStringTwins("u1")).thenReturn(0);
         when(familyMemberRepository.findOwnedById("missing", "u1")).thenReturn(Optional.empty());
         assertThrows(ResponseStatusException.class,
                 () -> familyMemberDeleteService.deleteOwnedMember("missing", "u1"));
