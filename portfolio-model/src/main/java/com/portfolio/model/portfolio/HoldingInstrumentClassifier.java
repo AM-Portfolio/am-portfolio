@@ -82,17 +82,42 @@ public final class HoldingInstrumentClassifier {
 
     /**
      * Scheme MF demat (and unsafe AMC→equity maps) must never take equity cash LTP.
-     * Listed ETF tickers (NIFTYBEES, ITBEES, …) still use LTP.
-     * Bare INF* book keys without mutual_fund_demat still allow LTP (legacy ETF-as-ISIN rows).
+     * Listed ETF tickers / names (NIFTYBEES, MON100 + "…ETF…") still use LTP.
+     * Do not blanket-quarantine every mutual_fund_demat row — CDSL stores ETFs under that class.
      */
     public static boolean quarantineEquityLtp(String assetClass, String symbol, String isin, String name) {
         if (isUnsafeNameToTickerMap(name, symbol)) {
             return true;
         }
-        if (looksLikeListedEtfTicker(symbol)) {
+        if (looksLikeListedEtfTicker(symbol) || nameSuggestsEtf(name)) {
             return false;
         }
-        return isMutualFundDematClass(assetClass);
+        if (!isMutualFundDematClass(assetClass)) {
+            return false;
+        }
+        if (nameSuggestsSchemeMf(name)) {
+            return true;
+        }
+        String id = firstNonBlank(symbol, isin);
+        return id != null && id.trim().toUpperCase(Locale.ROOT).startsWith("INF");
+    }
+
+    static boolean nameSuggestsEtf(String name) {
+        if (name == null || name.isBlank()) {
+            return false;
+        }
+        String u = name.toUpperCase(Locale.ROOT);
+        return u.contains("ETF") || u.contains("BEES");
+    }
+
+    static boolean nameSuggestsSchemeMf(String name) {
+        if (name == null || name.isBlank() || nameSuggestsEtf(name)) {
+            return false;
+        }
+        String u = name.toUpperCase(Locale.ROOT);
+        return u.contains("BANDHAN")
+                || u.contains("MUTUAL FUND")
+                || u.contains("MUTUALFUND");
     }
 
     /**
@@ -142,13 +167,11 @@ public final class HoldingInstrumentClassifier {
 
     public static String productClass(
             String assetClass, String symbol, String isin, String priceSource, String name) {
-        if (looksLikeListedEtfTicker(symbol)) {
+        if (looksLikeListedEtfTicker(symbol) || nameSuggestsEtf(name)) {
             return PRODUCT_ETF;
         }
-        if (isMutualFundDematClass(assetClass) && !looksLikeListedEtfTicker(symbol)) {
-            return PRODUCT_MUTUAL_FUND;
-        }
-        if (quarantineEquityLtp(assetClass, symbol, isin, name)) {
+        if (quarantineEquityLtp(assetClass, symbol, isin, name)
+                || (isMutualFundDematClass(assetClass) && !nameSuggestsEtf(name))) {
             return PRODUCT_MUTUAL_FUND;
         }
         if (looksLikeEtfOrScheme(symbol, isin)) {
@@ -189,12 +212,13 @@ public final class HoldingInstrumentClassifier {
         if (nameUpper == null || nameUpper.isBlank()) {
             return false;
         }
-        return nameUpper.contains(" AMC")
-                || nameUpper.endsWith("AMC")
+        // ETF product names often include "AMC LTD" — those are not scheme-MF poison.
+        if (nameUpper.contains("ETF") || nameUpper.contains("BEES")) {
+            return false;
+        }
+        return nameUpper.contains("BANDHAN")
                 || nameUpper.contains("MUTUAL FUND")
-                || nameUpper.contains("MUTUALFUND")
-                || nameUpper.contains("BANDHAN")
-                || nameUpper.contains("ASSET MANAGEMENT");
+                || nameUpper.contains("MUTUALFUND");
     }
 
     static boolean nameMentionsTicker(String nameUpper, String tickerUpper) {

@@ -35,6 +35,8 @@ class HoldingInstrumentClassifierTest {
                 "equity", "RECLTD", "INE020B01018", "REC Limited"));
         assertFalse(HoldingInstrumentClassifier.quarantineEquityLtp(
                 "mutual_fund_demat", "ITBEES", "INF204KB15V2", "Nippon India ETF Nifty IT"));
+        assertFalse(HoldingInstrumentClassifier.isUnsafeNameToTickerMap(
+                "MOTILAL OSWAL AMC LTD#MOTILAL OSWAL MF- MOTILAL OSWAL NASDAQ 100 ETF", "MON100"));
     }
 
     @Test
