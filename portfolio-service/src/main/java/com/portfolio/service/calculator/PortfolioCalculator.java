@@ -222,9 +222,11 @@ public class PortfolioCalculator {
         Double importMarkPrice = holding.getImportMarkPrice() != null && holding.getImportMarkPrice() > 0
                 ? holding.getImportMarkPrice()
                 : null;
+        boolean quarantineLtp = HoldingInstrumentClassifier.quarantineEquityLtp(
+                holding.getAssetClass(), symbol, holding.getIsin(), holding.getName());
 
-        // Waterfall Price Assignment
-        if (marketDataMap != null) {
+        // Waterfall Price Assignment — never apply equity cash LTP to scheme MF demat.
+        if (!quarantineLtp && marketDataMap != null) {
             MarketData apiItem = marketDataMap.get(symbol);
             if (apiItem == null) {
                 // Try looking up with cleaned symbol (strips prefix and suffix)
@@ -259,10 +261,16 @@ public class PortfolioCalculator {
                     holding.setPriceAsOf(LocalDateTime.ofInstant(apiItem.getTimestamp(), java.time.ZoneId.of("Asia/Kolkata")));
                 }
             }
+        } else if (quarantineLtp) {
+            log.info("[Holdings] {} quarantined from equity LTP (assetClass={} name={})",
+                    symbol, holding.getAssetClass(), holding.getName());
         }
 
         // Fallback Tier 2: Mongo for last and/or previousClose when live data is incomplete
-        if ((currentPrice == null || previousClosePrice == null) && stockPriceMongoService != null && symbol != null) {
+        if (!quarantineLtp
+                && (currentPrice == null || previousClosePrice == null)
+                && stockPriceMongoService != null
+                && symbol != null) {
             try {
                 Map<String, StockPriceDocument> priceDocs = stockPriceMongoService.getPrices(List.of(symbol, cleanSymbol(symbol)));
                 if (priceDocs != null && !priceDocs.isEmpty()) {
@@ -292,8 +300,24 @@ public class PortfolioCalculator {
         }
 
         // Fallback Tier 3: cost basis, then durable import/statement mark (never invent Invested).
+        // Quarantined MF: prefer import mark / CAS statement price over equity-lookalike cost noise.
         if (currentPrice == null) {
-            if (holding.getAverageBuyingPrice() != null && holding.getAverageBuyingPrice() > 0) {
+            if (quarantineLtp && importMarkPrice != null && importMarkPrice > 0) {
+                currentPrice = importMarkPrice;
+                priceSource = HoldingInstrumentClassifier.PRICE_IMPORT;
+            } else if (quarantineLtp
+                    && holding.getCurrentValue() != null
+                    && holding.getCurrentValue() > 0
+                    && holding.getQuantity() != null
+                    && holding.getQuantity() > 0) {
+                currentPrice = holding.getCurrentValue() / holding.getQuantity();
+                priceSource = HoldingInstrumentClassifier.PRICE_IMPORT;
+            } else if (quarantineLtp
+                    && holding.getCurrentPrice() != null
+                    && holding.getCurrentPrice() > 0) {
+                currentPrice = holding.getCurrentPrice();
+                priceSource = HoldingInstrumentClassifier.PRICE_IMPORT;
+            } else if (holding.getAverageBuyingPrice() != null && holding.getAverageBuyingPrice() > 0) {
                 currentPrice = holding.getAverageBuyingPrice();
                 priceSource = HoldingInstrumentClassifier.PRICE_COST;
             } else if (holding.getInvestmentCost() != null && holding.getQuantity() != null && holding.getQuantity() > 0) {
@@ -312,7 +336,8 @@ public class PortfolioCalculator {
         String isin = holding.getIsin();
         holding.setSector(HoldingInstrumentClassifier.resolveSector(holding.getSector(), symbol, isin, priceSource));
         holding.setIndustry(HoldingInstrumentClassifier.resolveIndustry(holding.getIndustry(), symbol, isin, priceSource));
-        holding.setProductClass(HoldingInstrumentClassifier.productClass(symbol, isin, priceSource));
+        holding.setProductClass(HoldingInstrumentClassifier.productClass(
+                holding.getAssetClass(), symbol, isin, priceSource, holding.getName()));
 
         if (currentPrice != null) {
             holding.setCurrentPrice(round(currentPrice));
@@ -338,7 +363,8 @@ public class PortfolioCalculator {
 
                 // Calculate Day's Gain/Loss (if previous close available)
                 if (previousClosePrice != null && previousClosePrice > 0
-                        && !HoldingInstrumentClassifier.PRICE_COST.equals(priceSource)) {
+                        && !HoldingInstrumentClassifier.PRICE_COST.equals(priceSource)
+                        && !HoldingInstrumentClassifier.PRICE_IMPORT.equals(priceSource)) {
                     double previousValue = previousClosePrice * holding.getQuantity();
                     double dayGainLoss = currentValue - previousValue;
                     double dayGainLossPct = previousValue > 0 ? (dayGainLoss / previousValue) * 100 : 0.0;

@@ -1,24 +1,29 @@
 package com.portfolio.service.family;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.am.common.amcommondata.document.cas.CasImportDocument;
 import com.am.common.amcommondata.document.family.FamilyMemberDocument;
+import com.am.common.amcommondata.document.portfolio.PortfolioDocument;
 import com.am.common.amcommondata.model.demat.DematAccountModel;
 import com.am.common.amcommondata.model.family.FamilyMember;
 import com.am.common.amcommondata.repository.cas.CasImportRepository;
 import com.am.common.amcommondata.repository.family.FamilyMemberRepository;
+import com.am.common.amcommondata.repository.portfolio.PortfolioDocumentRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -31,6 +36,7 @@ public class FamilyMemberService {
 
     private final FamilyMemberRepository familyMemberRepository;
     private final CasImportRepository casImportRepository;
+    private final PortfolioDocumentRepository portfolioDocumentRepository;
 
     public List<FamilyMember> listForOwner(String ownerUserId) {
         if (ownerUserId != null && !ownerUserId.isBlank()) {
@@ -78,6 +84,11 @@ public class FamilyMemberService {
         }
         if (familyMemberRepository.findFirstByOwnerUserIdAndNameNorm(ownerUserId, nameNorm).isPresent()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Family member with this name already exists");
+        }
+        if (hasOrphanStampsForNameNorm(ownerUserId, nameNorm)) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Orphan family portfolios exist for this name — clean up leftovers before re-adding");
         }
         enforceMaxFamilyMembers(ownerUserId);
         FamilyMemberDocument created = FamilyMemberDocument.builder()
@@ -262,7 +273,19 @@ public class FamilyMemberService {
                 .source(source != null ? source : "CAS")
                 .createdAt(LocalDateTime.now())
                 .build();
-        return toModel(familyMemberRepository.savePreservingBsonId(created), null);
+        try {
+            return toModel(familyMemberRepository.savePreservingBsonId(created), null);
+        } catch (DuplicateKeyException dup) {
+            FamilyMemberDocument raced = nameNorm != null
+                    ? familyMemberRepository
+                            .findFirstByOwnerUserIdAndNameNorm(ownerUserId, nameNorm)
+                            .orElse(null)
+                    : null;
+            if (raced != null) {
+                return toModel(raced, null);
+            }
+            throw dup;
+        }
     }
 
     private void enforceMaxFamilyMembers(String ownerUserId) {
@@ -316,7 +339,58 @@ public class FamilyMemberService {
         return p;
     }
 
-    private static String normName(String name) {
+    private boolean hasOrphanStampsForNameNorm(String ownerUserId, String nameNorm) {
+        if (nameNorm == null || nameNorm.isBlank()) {
+            return false;
+        }
+        Set<String> live = liveMemberIdSet(ownerUserId);
+        List<PortfolioDocument> books = portfolioDocumentRepository.findByOwner(ownerUserId);
+        if (books != null) {
+            for (PortfolioDocument doc : books) {
+                if (doc == null) {
+                    continue;
+                }
+                if (FamilyPersonaScope.isOrphanStamp(doc.getFamilyMemberId(), live)
+                        && FamilyPersonaScope.nameNormEquals(doc.getFamilyMemberName(), nameNorm)) {
+                    return true;
+                }
+            }
+        }
+        List<CasImportDocument> cas =
+                casImportRepository.findByOwnerOrderByAsOfDateDescImportedAtDesc(ownerUserId);
+        if (cas != null) {
+            for (CasImportDocument doc : cas) {
+                if (doc == null) {
+                    continue;
+                }
+                if (FamilyPersonaScope.isOrphanStamp(doc.getFamilyMemberId(), live)
+                        && FamilyPersonaScope.nameNormEquals(doc.getFamilyMemberName(), nameNorm)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public Set<String> liveMemberIdsForOwner(String ownerUserId) {
+        return liveMemberIdSet(ownerUserId);
+    }
+
+    private Set<String> liveMemberIdSet(String ownerUserId) {
+        List<FamilyMemberDocument> docs =
+                familyMemberRepository.findByOwnerUserIdOrderByDisplayNameAsc(ownerUserId);
+        List<String> ids = new ArrayList<>();
+        if (docs != null) {
+            for (FamilyMemberDocument doc : docs) {
+                if (doc != null && doc.getId() != null && !doc.getId().isBlank()) {
+                    ids.add(doc.getId().trim());
+                }
+            }
+        }
+        return FamilyPersonaScope.liveIds(ids);
+    }
+
+    static String normName(String name) {
         if (name == null || name.isBlank()) {
             return null;
         }

@@ -14,10 +14,12 @@ public final class HoldingInstrumentClassifier {
     public static final String SECTOR_UNLISTED = "Private / Unlisted";
     public static final String PRODUCT_EQUITY = "EQUITY";
     public static final String PRODUCT_ETF = "ETF";
+    public static final String PRODUCT_MUTUAL_FUND = "MUTUAL_FUND";
     public static final String PRODUCT_UNLISTED = "UNLISTED";
     public static final String PRICE_LIVE = "LIVE";
     public static final String PRICE_LAST = "LAST";
     public static final String PRICE_COST = "COST_BASIS";
+    public static final String PRICE_IMPORT = "IMPORT_MARK";
 
     private HoldingInstrumentClassifier() {
     }
@@ -50,10 +52,47 @@ public final class HoldingInstrumentClassifier {
         if (u.startsWith("INF")) {
             return true;
         }
+        return looksLikeListedEtfTicker(u);
+    }
+
+    /**
+     * Listed ETF cash tickers (BEES / *ETF). Excludes bare INF scheme codes used as book keys
+     * for mutual_fund_demat rows that must not take equity LTP.
+     */
+    public static boolean looksLikeListedEtfTicker(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            return false;
+        }
+        String u = symbol.trim().toUpperCase(Locale.ROOT);
         return u.endsWith("BEES")
                 || u.contains("ETF")
                 || u.endsWith("IETF")
                 || (u.endsWith("GOLD") && u.length() <= 12);
+    }
+
+    public static boolean isMutualFundDematClass(String assetClass) {
+        if (assetClass == null || assetClass.isBlank()) {
+            return false;
+        }
+        String u = assetClass.trim().toUpperCase(Locale.ROOT);
+        return u.contains("MUTUAL_FUND_DEMAT")
+                || (u.contains("MUTUAL") && u.contains("DEMAT"))
+                || u.equals("MUTUAL_FUND");
+    }
+
+    /**
+     * Scheme MF demat (and unsafe AMC→equity maps) must never take equity cash LTP.
+     * Listed ETF tickers (NIFTYBEES, ITBEES, …) still use LTP.
+     * Bare INF* book keys without mutual_fund_demat still allow LTP (legacy ETF-as-ISIN rows).
+     */
+    public static boolean quarantineEquityLtp(String assetClass, String symbol, String isin, String name) {
+        if (isUnsafeNameToTickerMap(name, symbol)) {
+            return true;
+        }
+        if (looksLikeListedEtfTicker(symbol)) {
+            return false;
+        }
+        return isMutualFundDematClass(assetClass);
     }
 
     /**
@@ -98,6 +137,20 @@ public final class HoldingInstrumentClassifier {
     }
 
     public static String productClass(String symbol, String isin, String priceSource) {
+        return productClass(null, symbol, isin, priceSource, null);
+    }
+
+    public static String productClass(
+            String assetClass, String symbol, String isin, String priceSource, String name) {
+        if (looksLikeListedEtfTicker(symbol)) {
+            return PRODUCT_ETF;
+        }
+        if (isMutualFundDematClass(assetClass) && !looksLikeListedEtfTicker(symbol)) {
+            return PRODUCT_MUTUAL_FUND;
+        }
+        if (quarantineEquityLtp(assetClass, symbol, isin, name)) {
+            return PRODUCT_MUTUAL_FUND;
+        }
         if (looksLikeEtfOrScheme(symbol, isin)) {
             return PRODUCT_ETF;
         }
@@ -108,7 +161,8 @@ public final class HoldingInstrumentClassifier {
     }
 
     /**
-     * Reject dangerous name→ticker maps (e.g. Jio Platforms must never become JIOFIN).
+     * Reject dangerous name→ticker maps (e.g. Jio Platforms must never become JIOFIN;
+     * Bandhan AMC / MF scheme must never become RECLTD equity).
      */
     public static boolean isUnsafeNameToTickerMap(String holdingName, String ticker) {
         if (holdingName == null || ticker == null) {
@@ -116,13 +170,39 @@ public final class HoldingInstrumentClassifier {
         }
         String name = holdingName.toUpperCase(Locale.ROOT);
         String t = ticker.trim().toUpperCase(Locale.ROOT);
+        if (t.isBlank() || looksLikeListedEtfTicker(t)) {
+            return false;
+        }
         if (name.contains("PLATFORMS") && "JIOFIN".equals(t)) {
             return true;
         }
         if (name.contains("JIO PLATFORMS") && t.startsWith("JIO") && !"JIOPLATFORMS".equals(t)) {
             return true;
         }
+        if (nameLooksLikeAmcOrMfScheme(name) && !nameMentionsTicker(name, t)) {
+            return true;
+        }
         return false;
+    }
+
+    static boolean nameLooksLikeAmcOrMfScheme(String nameUpper) {
+        if (nameUpper == null || nameUpper.isBlank()) {
+            return false;
+        }
+        return nameUpper.contains(" AMC")
+                || nameUpper.endsWith("AMC")
+                || nameUpper.contains("MUTUAL FUND")
+                || nameUpper.contains("MUTUALFUND")
+                || nameUpper.contains("BANDHAN")
+                || nameUpper.contains("ASSET MANAGEMENT");
+    }
+
+    static boolean nameMentionsTicker(String nameUpper, String tickerUpper) {
+        if (nameUpper == null || tickerUpper == null || tickerUpper.length() < 3) {
+            return false;
+        }
+        String compact = nameUpper.replaceAll("[^A-Z0-9]", "");
+        return compact.contains(tickerUpper) || nameUpper.contains(tickerUpper);
     }
 
     /**

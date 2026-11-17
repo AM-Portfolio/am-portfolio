@@ -59,8 +59,9 @@ public class CasImportService {
             }
         }
 
+        String identityMatch = event.getIdentityMatch();
         FamilyMember member = familyMemberService.resolveForImport(
-                owner, event.getIdentityMatch(), holderName, holderEmail, holderPan, "CAS");
+                owner, identityMatch, holderName, holderEmail, holderPan, "CAS");
 
         // One CAS envelope per owner persona (primary vs familyMemberId).
         CasImportDocument existing;
@@ -78,6 +79,32 @@ public class CasImportService {
                             .findFirstByOwnerOrderByAsOfDateDescImportedAtDesc(owner)
                             .filter(d -> d.getFamilyMemberId() == null || d.getFamilyMemberId().isBlank())
                             .orElse(null));
+            // Guard: a different holder name must never overwrite the primary envelope.
+            if (existing != null) {
+                String existingName = existing.getHolderName();
+                if (holderName == null || holderName.isBlank()) {
+                    holderName = existingName;
+                } else if (existingName != null
+                        && !existingName.isBlank()
+                        && !Objects.equals(normName(existingName), normName(holderName))) {
+                    log.warn(
+                            "SELF CAS holderName={} differs from primary {}; routing to FAMILY owner={}",
+                            holderName,
+                            existingName,
+                            owner);
+                    member = familyMemberService.resolveForImport(
+                            owner, "FAMILY", holderName, holderEmail, holderPan, "CAS");
+                    existing = member != null && member.getId() != null
+                            ? casImportRepository
+                                    .findFirstByOwnerAndFamilyMemberIdOrderByAsOfDateDescImportedAtDesc(
+                                            owner, member.getId())
+                                    .orElse(null)
+                            : null;
+                    existing = retagMatchingPrimary(
+                            owner, member, holderName, holderEmail, holderPan, existing);
+                    identityMatch = "FAMILY";
+                }
+            }
         }
 
         CasImportDocument doc = existing != null ? existing : CasImportDocument.builder().build();
@@ -92,8 +119,13 @@ public class CasImportService {
         doc.setAccountDirectory(event.getAccountDirectory());
         doc.setMfFolios(event.getMfFolios());
         doc.setUnmappedDematHoldings(event.getUnmappedDematHoldings());
-        doc.setIdentityMatch(event.getIdentityMatch());
-        doc.setHolderName(holderName);
+        doc.setIdentityMatch(identityMatch);
+        // Never blank out an existing primary holder name on a no-name re-import.
+        if (holderName != null && !holderName.isBlank()) {
+            doc.setHolderName(holderName);
+        } else if (doc.getHolderName() == null || doc.getHolderName().isBlank()) {
+            doc.setHolderName(holderName);
+        }
         doc.setHolderEmail(holderEmail);
         doc.setHolderPan(FamilyMemberService.normPan(holderPan));
         if (member != null) {
@@ -211,6 +243,15 @@ public class CasImportService {
 
     public Optional<CasImportDocument> latest(String userId) {
         return casImportRepository.findFirstByOwnerOrderByAsOfDateDescImportedAtDesc(userId);
+    }
+
+    /** Latest CAS for the primary persona only (blank familyMemberId). */
+    public Optional<CasImportDocument> latestPrimary(String userId) {
+        if (userId == null || userId.isBlank()) {
+            return Optional.empty();
+        }
+        return casImportRepository
+                .findFirstByOwnerAndFamilyMemberIdIsNullOrderByAsOfDateDescImportedAtDesc(userId);
     }
 
     public List<DematAccountModel> accounts(String userId) {

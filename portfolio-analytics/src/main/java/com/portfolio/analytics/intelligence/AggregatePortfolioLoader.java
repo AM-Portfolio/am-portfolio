@@ -1,12 +1,19 @@
 package com.portfolio.analytics.intelligence;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+
+import com.am.common.amcommondata.document.family.FamilyMemberDocument;
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.family.HoldingsPersona;
+import com.am.common.amcommondata.repository.family.FamilyMemberRepository;
 import com.am.common.amcommondata.service.PortfolioService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -22,6 +29,7 @@ public class AggregatePortfolioLoader {
 
     private final PortfolioService portfolioService;
     private final AggregatePortfolioFactory aggregatePortfolioFactory;
+    private final FamilyMemberRepository familyMemberRepository;
 
     private final ConcurrentHashMap<String, CachedMerge> mergeCache = new ConcurrentHashMap<>();
 
@@ -41,8 +49,9 @@ public class AggregatePortfolioLoader {
             return hit.model();
         }
         List<PortfolioModelV1> books = portfolioService.getPortfoliosByUserId(owner);
+        Set<String> liveMemberIds = HoldingsPersona.isHousehold(persona) ? liveMemberIds(owner) : null;
         List<PortfolioModelV1> scoped = books == null ? List.of() : books.stream()
-                .filter(p -> p != null && HoldingsPersona.matches(p.getFamilyMemberId(), persona))
+                .filter(p -> p != null && HoldingsPersona.matches(p.getFamilyMemberId(), persona, liveMemberIds))
                 .toList();
         PortfolioModelV1 merged = aggregatePortfolioFactory.mergeBrokerBooks(owner, scoped);
         mergeCache.put(key, new CachedMerge(merged, now + MERGE_TTL_MS));
@@ -59,8 +68,9 @@ public class AggregatePortfolioLoader {
             throw new IllegalArgumentException("userId required");
         }
         List<PortfolioModelV1> books = portfolioService.getPortfoliosByUserId(userId.trim());
+        Set<String> liveMemberIds = HoldingsPersona.isHousehold(persona) ? liveMemberIds(userId.trim()) : null;
         List<PortfolioModelV1> scoped = books == null ? List.of() : books.stream()
-                .filter(p -> p != null && HoldingsPersona.matches(p.getFamilyMemberId(), persona))
+                .filter(p -> p != null && HoldingsPersona.matches(p.getFamilyMemberId(), persona, liveMemberIds))
                 .toList();
         return AggregatePortfolioFactory.brokerBookValues(scoped);
     }
@@ -72,6 +82,23 @@ public class AggregatePortfolioLoader {
         }
         String prefix = userId.trim();
         mergeCache.keySet().removeIf(k -> k.equals(prefix) || k.startsWith(prefix + "|"));
+    }
+
+    private Set<String> liveMemberIds(String ownerUserId) {
+        if (familyMemberRepository == null) {
+            return Set.of();
+        }
+        List<FamilyMemberDocument> docs =
+                familyMemberRepository.findByOwnerUserIdOrderByDisplayNameAsc(ownerUserId);
+        List<String> ids = new ArrayList<>();
+        if (docs != null) {
+            for (FamilyMemberDocument doc : docs) {
+                if (doc != null && doc.getId() != null && !doc.getId().isBlank()) {
+                    ids.add(doc.getId().trim());
+                }
+            }
+        }
+        return Collections.unmodifiableSet(new LinkedHashSet<>(ids));
     }
 
     private record CachedMerge(PortfolioModelV1 model, long expiresAtMs) {}

@@ -25,6 +25,7 @@ public class HealthScoreEngine {
     static final String ASSET_COMMODITY = "COMMODITY";
     static final String ASSET_CASH = "CASH";
     static final String ASSET_MUTUAL_FUND = "MUTUAL_FUND";
+    static final String ASSET_ETF = "ETF";
     static final String ASSET_NPS = "NPS";
 
     @Value("${portfolio.intelligence.health-v2:false}")
@@ -223,7 +224,10 @@ public class HealthScoreEngine {
         if (u.contains("CASH")) {
             return ASSET_CASH;
         }
-        if (u.contains("MF") || u.contains("MUTUAL") || u.contains("ETF") || u.equals(ASSET_MUTUAL_FUND)) {
+        if (u.equals(ASSET_ETF) || (u.contains("ETF") && !u.contains("MUTUAL"))) {
+            return ASSET_ETF;
+        }
+        if (u.contains("MF") || u.contains("MUTUAL") || u.equals(ASSET_MUTUAL_FUND)) {
             return ASSET_MUTUAL_FUND;
         }
         return ASSET_EQUITY;
@@ -259,14 +263,15 @@ public class HealthScoreEngine {
     static double withinEquityScore(PortfolioIntelligenceSnapshot s) {
         Map<String, Double> classes = classWeights(s);
         double equityW = classes.getOrDefault(ASSET_EQUITY, 0.0)
-                + classes.getOrDefault(ASSET_MUTUAL_FUND, 0.0);
+                + classes.getOrDefault(ASSET_MUTUAL_FUND, 0.0)
+                + classes.getOrDefault(ASSET_ETF, 0.0);
         if (equityW <= 0) {
             return 70.0;
         }
         List<PortfolioIntelligenceSnapshot.Holding> equityHoldings = new ArrayList<>();
         for (PortfolioIntelligenceSnapshot.Holding h : s.getHoldings()) {
             String cls = normalizeAssetClass(h.getAssetClass());
-            if (ASSET_EQUITY.equals(cls) || ASSET_MUTUAL_FUND.equals(cls)) {
+            if (ASSET_EQUITY.equals(cls) || ASSET_MUTUAL_FUND.equals(cls) || ASSET_ETF.equals(cls)) {
                 equityHoldings.add(h);
             }
         }

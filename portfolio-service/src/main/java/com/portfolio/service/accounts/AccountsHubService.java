@@ -28,6 +28,8 @@ import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.model.family.FamilyMember;
 import com.am.common.amcommondata.model.family.HoldingsPersona;
+import com.am.security.context.UserContext;
+import com.am.security.util.TokenExtractor;
 import com.am.common.amcommondata.model.nps.NpsDocumentMeta;
 import com.am.common.amcommondata.service.PortfolioService;
 import com.portfolio.service.accounts.OverallXirrCalculator.Cashflow;
@@ -181,7 +183,22 @@ public class AccountsHubService {
                 .toList();
 
         List<FamilyMember> members = familyMemberService.listForOwner(userId);
-        XirrBundle xirr = resolveXirrBundle(userId, xirrBooks, primaryXirrBooks, members, casAsOf);
+        Set<String> liveMemberIds = new HashSet<>();
+        if (members != null) {
+            for (FamilyMember m : members) {
+                if (m != null && m.getId() != null && !m.getId().isBlank()) {
+                    liveMemberIds.add(m.getId().trim());
+                }
+            }
+        }
+        List<PortfolioModelV1> householdXirrBooks = xirrBooks.stream()
+                .filter(p -> p != null && (
+                        p.getFamilyMemberId() == null
+                                || p.getFamilyMemberId().isBlank()
+                                || liveMemberIds.contains(p.getFamilyMemberId().trim())))
+                .toList();
+        XirrBundle xirr = resolveXirrBundle(
+                userId, householdXirrBooks, primaryXirrBooks, members, casAsOf);
 
         List<FamilyMemberSummary> familySummaries = members.stream()
                 .map(m -> {
@@ -199,13 +216,19 @@ public class AccountsHubService {
                 })
                 .toList();
 
-        double primaryTotal = sumPersonaValue(demat, rows, npsAccounts, true);
-        double familyTotal = sumPersonaValue(demat, rows, npsAccounts, false);
+        double primaryTotal = sumPersonaValue(demat, rows, npsAccounts, true, liveMemberIds);
+        double familyTotal = sumPersonaValue(demat, rows, npsAccounts, false, liveMemberIds);
         double household = primaryTotal + familyTotal;
         Double familySharePct = household > 0 ? round2((familyTotal / household) * 100.0) : null;
 
+        // Primary identity must never take a family CAS holder name (e.g. Priyanshu
+        // after a later family upload) — that wrongly labels the "You" persona.
+        String casHolderName = casImportService.latestPrimary(userId)
+                .map(doc -> doc.getHolderName())
+                .orElse(null);
+
         return AccountsHubModel.builder()
-                .identity(buildIdentity(userId, nps, primaryDemat))
+                .identity(buildIdentity(userId, nps, primaryDemat, casHolderName, profileDisplayName()))
                 .stats(AccountsStats.builder()
                         .activeDematCount(activeDemat)
                         .dematAccountCount(dematCount)
@@ -290,18 +313,23 @@ public class AccountsHubService {
     }
 
     /**
-     * @param primaryOnly true = null familyMemberId only; false = any stamped family id
+     * @param primaryOnly true = null familyMemberId only; false = live family member ids only
+     *                    (orphan stamps with deleted persona ids are excluded)
      */
     static double sumPersonaValue(
             List<DematAccountModel> demat,
             List<AccountsPortfolioRow> rows,
             List<NpsDocumentMeta> npsAccounts,
-            boolean primaryOnly) {
-        double sum = booksPlusDirectoryResidual(demat, rows, r -> personaMatches(r.getFamilyMemberId(), primaryOnly),
-                a -> personaMatches(a.getFamilyMemberId(), primaryOnly));
+            boolean primaryOnly,
+            Set<String> liveMemberIds) {
+        double sum = booksPlusDirectoryResidual(
+                demat,
+                rows,
+                r -> personaMatches(r.getFamilyMemberId(), primaryOnly, liveMemberIds),
+                a -> personaMatches(a.getFamilyMemberId(), primaryOnly, liveMemberIds));
         if (npsAccounts != null) {
             for (NpsDocumentMeta m : npsAccounts) {
-                if (m == null || !personaMatches(m.getFamilyMemberId(), primaryOnly)) {
+                if (m == null || !personaMatches(m.getFamilyMemberId(), primaryOnly, liveMemberIds)) {
                     continue;
                 }
                 if (m.getTotalValue() != null && m.getTotalValue() > 0) {
@@ -312,9 +340,28 @@ public class AccountsHubService {
         return sum;
     }
 
-    private static boolean personaMatches(String familyMemberId, boolean primaryOnly) {
+    /** Backward-compatible overload used by older unit tests. */
+    static double sumPersonaValue(
+            List<DematAccountModel> demat,
+            List<AccountsPortfolioRow> rows,
+            List<NpsDocumentMeta> npsAccounts,
+            boolean primaryOnly) {
+        return sumPersonaValue(demat, rows, npsAccounts, primaryOnly, Set.of());
+    }
+
+    private static boolean personaMatches(
+            String familyMemberId, boolean primaryOnly, Set<String> liveMemberIds) {
         boolean isPrimary = familyMemberId == null || familyMemberId.isBlank();
-        return primaryOnly ? isPrimary : !isPrimary;
+        if (primaryOnly) {
+            return isPrimary;
+        }
+        if (isPrimary) {
+            return false;
+        }
+        if (liveMemberIds == null || liveMemberIds.isEmpty()) {
+            return false;
+        }
+        return liveMemberIds.contains(familyMemberId.trim());
     }
 
     private static Double round2(double v) {
@@ -671,7 +718,11 @@ public class AccountsHubService {
     }
 
     private static AccountsIdentity buildIdentity(
-            String userId, NpsDocumentMeta nps, List<DematAccountModel> demat) {
+            String userId,
+            NpsDocumentMeta nps,
+            List<DematAccountModel> demat,
+            String casHolderName,
+            String profileDisplayName) {
         String name = nps != null ? nps.getSubscriberName() : null;
         String email = nps != null ? nps.getSubscriberEmail() : null;
         String mobile = nps != null ? nps.getSubscriberMobile() : null;
@@ -701,8 +752,21 @@ public class AccountsHubService {
                     .filter(Objects::nonNull)
                     .map(String::trim)
                     .filter(s -> !s.isEmpty())
+                    .filter(s -> !looksLikeEmail(s))
                     .findFirst()
                     .orElse(null);
+        }
+        if ((name == null || name.isBlank())
+                && casHolderName != null
+                && !casHolderName.isBlank()
+                && !looksLikeEmail(casHolderName)) {
+            name = casHolderName.trim();
+        }
+        if ((name == null || name.isBlank())
+                && profileDisplayName != null
+                && !profileDisplayName.isBlank()
+                && !looksLikeEmail(profileDisplayName)) {
+            name = profileDisplayName.trim();
         }
 
         return AccountsIdentity.builder()
@@ -712,6 +776,57 @@ public class AccountsHubService {
                 .mobile(mobile)
                 .pran(pran)
                 .build();
+    }
+
+    /**
+     * Prefer JWT {@code name} / given+family. Never return an email-shaped
+     * preferred_username — that was showing as the Users "You" header.
+     */
+    private static String profileDisplayName() {
+        var profile = UserContext.getUserProfile();
+        if (profile == null) {
+            return null;
+        }
+        if (profile.getAttributes() != null) {
+            Object attr = profile.getAttributes().get("displayName");
+            if (attr != null) {
+                String dn = String.valueOf(attr).trim();
+                if (!dn.isEmpty() && !looksLikeEmail(dn)) {
+                    return dn;
+                }
+            }
+        }
+        String token = profile.getToken();
+        if (token != null && !token.isBlank()) {
+            try {
+                String claimName = TokenExtractor.extractClaim(token, "name", String.class);
+                if (claimName != null && !claimName.isBlank() && !looksLikeEmail(claimName)) {
+                    return claimName.trim();
+                }
+                String given = TokenExtractor.extractClaim(token, "given_name", String.class);
+                String family = TokenExtractor.extractClaim(token, "family_name", String.class);
+                if (given != null && !given.isBlank()) {
+                    String combined = given.trim();
+                    if (family != null && !family.isBlank()) {
+                        combined = combined + " " + family.trim();
+                    }
+                    if (!looksLikeEmail(combined)) {
+                        return combined;
+                    }
+                }
+            } catch (RuntimeException ignored) {
+                // fall through
+            }
+        }
+        String username = profile.getUsername();
+        if (username != null && !username.isBlank() && !looksLikeEmail(username)) {
+            return username.trim();
+        }
+        return null;
+    }
+
+    private static boolean looksLikeEmail(String value) {
+        return value != null && value.indexOf('@') >= 0;
     }
 
     private static AccountsPortfolioRow toPortfolioRow(PortfolioModelV1 p) {

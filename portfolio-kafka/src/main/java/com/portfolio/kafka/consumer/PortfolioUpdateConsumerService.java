@@ -25,6 +25,7 @@ import org.springframework.context.annotation.Lazy;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
 import com.portfolio.service.accounts.AccountsHubService;
 import com.portfolio.service.cas.CasImportService;
+import com.portfolio.service.family.FamilyMemberConsolidationService;
 import com.portfolio.service.family.FamilyMemberService;
 import com.portfolio.service.nps.NpsImportService;
 import com.portfolio.service.intraday.IntradayCandleWarmService;
@@ -91,6 +92,7 @@ public class PortfolioUpdateConsumerService {
     private final CasImportService              casImportService;
     private final NpsImportService              npsImportService;
     private final FamilyMemberService           familyMemberService;
+    private final FamilyMemberConsolidationService familyMemberConsolidationService;
     private final PortfolioHoldingsService      portfolioHoldingsService;
 
     @Value("${app.kafka.portfolio.consumer.id:am-portfolio-consumer-group}")
@@ -239,6 +241,7 @@ public class PortfolioUpdateConsumerService {
                 event.getHolderPan(),
                 source);
         if (member != null) {
+            familyMemberConsolidationService.consolidateAfterResolve(event.getUserId(), member);
             event.setFamilyMemberId(member.getId());
             event.setFamilyMemberName(member.getDisplayName());
             log.info("Stamped familyMemberId={} name={} on PortfolioUpdate identityMatch={} holderEmail={} portfolioId={} broker={}",

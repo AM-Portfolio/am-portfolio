@@ -56,6 +56,7 @@ class PortfolioUpdateConsumerDeleteTest {
     @Mock private CasImportService casImportService;
     @Mock private NpsImportService npsImportService;
     @Mock private com.portfolio.service.family.FamilyMemberService familyMemberService;
+    @Mock private com.portfolio.service.family.FamilyMemberConsolidationService familyMemberConsolidationService;
     @Mock private PortfolioHoldingsService portfolioHoldingsService;
     @Mock private Acknowledgment acknowledgment;
 
@@ -86,6 +87,7 @@ class PortfolioUpdateConsumerDeleteTest {
                 casImportService,
                 npsImportService,
                 familyMemberService,
+                familyMemberConsolidationService,
                 portfolioHoldingsService);
         c.init();
         return c;

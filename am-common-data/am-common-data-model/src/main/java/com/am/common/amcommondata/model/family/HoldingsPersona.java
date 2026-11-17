@@ -1,5 +1,7 @@
 package com.am.common.amcommondata.model.family;
 
+import java.util.Set;
+
 /**
  * Scope for an all-books read.
  * {@code you} is the primary account (no familyMemberId).
@@ -42,13 +44,27 @@ public final class HoldingsPersona {
     }
 
     public static boolean matches(String familyMemberId, String persona) {
+        return matches(familyMemberId, persona, null);
+    }
+
+    /**
+     * @param liveMemberIds when non-empty and persona is household, orphan stamps are excluded
+     */
+    public static boolean matches(String familyMemberId, String persona, Set<String> liveMemberIds) {
         if (isHousehold(persona)) {
-            return true;
+            boolean primary = familyMemberId == null || familyMemberId.isBlank();
+            if (primary) {
+                return true;
+            }
+            if (liveMemberIds == null || liveMemberIds.isEmpty()) {
+                return true;
+            }
+            return liveMemberIds.contains(familyMemberId.trim());
         }
         boolean primary = familyMemberId == null || familyMemberId.isBlank();
-        if (YOU.equalsIgnoreCase(persona.trim())) {
+        if (YOU.equalsIgnoreCase(persona != null ? persona.trim() : "")) {
             return primary;
         }
-        return !primary && persona.trim().equals(familyMemberId);
+        return !primary && persona != null && persona.trim().equals(familyMemberId);
     }
 }

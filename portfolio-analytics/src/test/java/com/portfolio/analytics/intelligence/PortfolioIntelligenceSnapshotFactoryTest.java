@@ -51,6 +51,19 @@ class PortfolioIntelligenceSnapshotFactoryTest {
     }
 
     @Test
+    void schemeBookPrice_prefersImportMarkOverPoisonedEquityCurrentPrice() {
+        EquityModel bandhan = EquityModel.builder()
+                .symbol("RECLTD")
+                .name("Bandhan AMC")
+                .assetClass("mutual_fund_demat")
+                .quantity(245_468.0)
+                .currentPrice(298.0)
+                .importMarkPrice(52.55)
+                .build();
+        assertEquals(52.55, PortfolioIntelligenceSnapshotFactory.schemeBookPrice(bandhan));
+    }
+
+    @Test
     void resolveSector_infSchemeMapsToEtfNotUnknown() {
         EquityModel gold = EquityModel.builder()
                 .symbol("GOLDBEES")

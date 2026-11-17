@@ -20,9 +20,12 @@ import lombok.experimental.SuperBuilder;
 @org.springframework.data.mongodb.core.index.CompoundIndex(
         name = "family_owner_email_idx",
         def = "{'ownerUserId': 1, 'emailNorm': 1}")
+// Run FamilyMemberConsolidationService per owner before enabling in prod if duplicate nameNorm rows exist.
 @org.springframework.data.mongodb.core.index.CompoundIndex(
-        name = "family_owner_name_idx",
-        def = "{'ownerUserId': 1, 'nameNorm': 1}")
+        name = "family_owner_name_norm_unique_idx",
+        def = "{'ownerUserId': 1, 'nameNorm': 1}",
+        unique = true,
+        partialFilter = "{'nameNorm': {'$type': 'string'}}")
 @org.springframework.data.mongodb.core.index.CompoundIndex(
         name = "family_owner_pan_idx",
         def = "{'ownerUserId': 1, 'panNorm': 1}")

@@ -1,6 +1,7 @@
 package com.portfolio.analytics.intelligence;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.repository.family.FamilyMemberRepository;
 import com.am.common.amcommondata.service.PortfolioService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,11 +28,14 @@ class AggregatePortfolioLoaderTest {
     @Mock
     private AggregatePortfolioFactory aggregatePortfolioFactory;
 
+    @Mock
+    private FamilyMemberRepository familyMemberRepository;
+
     private AggregatePortfolioLoader loader;
 
     @BeforeEach
     void setUp() {
-        loader = new AggregatePortfolioLoader(portfolioService, aggregatePortfolioFactory);
+        loader = new AggregatePortfolioLoader(portfolioService, aggregatePortfolioFactory, familyMemberRepository);
     }
 
     @Test

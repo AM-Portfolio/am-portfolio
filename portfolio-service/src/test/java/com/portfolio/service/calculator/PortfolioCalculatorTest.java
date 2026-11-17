@@ -5,6 +5,7 @@ import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.market.OhlcData;
 import com.portfolio.model.portfolio.EquityHoldings;
+import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.model.cache.StockPriceCache;
 import com.am.common.amcommondata.service.marketcap.MarketCapMongoService;
@@ -294,6 +295,57 @@ class PortfolioCalculatorTest {
 
         assertEquals(25.0, holding.getWeightInPortfolio());
         assertEquals(75.0, h2.getWeightInPortfolio());
+    }
+
+    @Test
+    void enrichHoldings_bandhanMfDemat_ignoresRecltdEquityLtp() {
+        EquityHoldings bandhan = new EquityHoldings();
+        bandhan.setSymbol("RECLTD");
+        bandhan.setName("Bandhan AMC");
+        bandhan.setAssetClass("mutual_fund_demat");
+        bandhan.setIsin("INF109KC1V59");
+        bandhan.setQuantity(245_468.0);
+        bandhan.setImportMarkPrice(52.55);
+        MarketData poison = MarketData.builder()
+                .symbol("RECLTD")
+                .lastPrice(298.0)
+                .previousClose(295.0)
+                .build();
+        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("RECLTD", poison));
+        when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+
+        EquityHoldings enriched = portfolioCalculator.enrichHoldings(List.of(bandhan)).get(0);
+
+        assertEquals(52.55, enriched.getCurrentPrice());
+        assertEquals(52.55 * 245_468.0, enriched.getCurrentValue(), 1.0);
+        assertEquals(HoldingInstrumentClassifier.PRICE_IMPORT, enriched.getPriceSource());
+        assertEquals(HoldingInstrumentClassifier.PRODUCT_MUTUAL_FUND, enriched.getProductClass());
+        assertNull(enriched.getTodayGainLoss());
+    }
+
+    @Test
+    void enrichHoldings_listedEtf_stillUsesLiveLtp() {
+        EquityHoldings bees = new EquityHoldings();
+        bees.setSymbol("NIFTYBEES");
+        bees.setName("Nippon India ETF Nifty BeES");
+        bees.setAssetClass("mutual_fund_demat");
+        bees.setQuantity(10.0);
+        bees.setImportMarkPrice(200.0);
+        MarketData md = MarketData.builder()
+                .symbol("NIFTYBEES")
+                .lastPrice(280.0)
+                .previousClose(275.0)
+                .build();
+        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("NIFTYBEES", md));
+        when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+
+        EquityHoldings enriched = portfolioCalculator.enrichHoldings(List.of(bees)).get(0);
+
+        assertEquals(280.0, enriched.getCurrentPrice());
+        assertEquals(HoldingInstrumentClassifier.PRODUCT_ETF, enriched.getProductClass());
+        assertEquals(HoldingInstrumentClassifier.PRICE_LIVE, enriched.getPriceSource());
     }
 
     @Test

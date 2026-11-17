@@ -19,8 +19,10 @@ import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.FundType;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.portfolio.model.events.PortfolioUpdateEvent;
+import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
 import com.portfolio.model.portfolio.v1.BrokerPortfolioSummary;
 import com.portfolio.model.resolver.TradingSymbolResolver;
+import com.portfolio.model.util.SymbolResolver;
 
 import lombok.RequiredArgsConstructor;
 
@@ -340,7 +342,12 @@ public class PortfolioMapperv1 {
 
     private EquityModel mapEquityModelToAsset(
             EquityModel equityModel, BrokerType brokerType, LocalDateTime asOfTs) {
-        String resolvedSymbol = resolveSymbolForStorage(equityModel.getSymbol(), equityModel.getIsin());
+        String holdingName = equityModel.getName() != null ? equityModel.getName() : equityModel.getCompanyName();
+        String resolvedSymbol = resolveSymbolForStorage(
+                equityModel.getSymbol(),
+                equityModel.getIsin(),
+                equityModel.getAssetClass(),
+                holdingName);
 
         if (resolvedSymbol == null || resolvedSymbol.isBlank()) {
             if (equityModel.getIsin() != null && !equityModel.getIsin().isBlank()) {
@@ -409,8 +416,27 @@ public class PortfolioMapperv1 {
     /**
      * Uses injected {@link TradingSymbolResolver} (works in Kafka threads — no servlet context).
      * Falls back to raw symbol when resolver bean is absent (e.g. unit tests).
+     * Scheme MF demat / unsafe AMC→equity maps skip equity ISIN lookup so Bandhan never becomes RECLTD.
      */
-    private String resolveSymbolForStorage(String symbol, String isin) {
+    private String resolveSymbolForStorage(String symbol, String isin, String assetClass, String name) {
+        if (HoldingInstrumentClassifier.quarantineEquityLtp(assetClass, symbol, isin, name)) {
+            if (HoldingInstrumentClassifier.isUnsafeNameToTickerMap(name, symbol)) {
+                if (isin != null && !isin.isBlank()) {
+                    return isin.trim().toUpperCase();
+                }
+                String fromName = HoldingInstrumentClassifier.suggestDisplayTickerFromName(name);
+                if (fromName != null) {
+                    return fromName;
+                }
+            }
+            if (symbol != null && !symbol.isBlank()) {
+                return SymbolResolver.normalize(symbol);
+            }
+            if (isin != null && !isin.isBlank()) {
+                return isin.trim().toUpperCase();
+            }
+            return symbol;
+        }
         return tradingSymbolResolver
                 .map(resolver -> resolver.resolveTradingSymbol(symbol, isin))
                 .orElse(symbol);

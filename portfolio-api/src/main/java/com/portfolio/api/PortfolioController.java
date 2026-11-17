@@ -39,8 +39,12 @@ import com.portfolio.service.NewUserPortfolioFallbackService;
 import com.portfolio.service.PortfolioDashboardService;
 import com.portfolio.service.accounts.AccountsHubService;
 import com.portfolio.service.cas.CasImportService;
+import com.portfolio.service.family.FamilyMemberConsolidationReport;
+import com.portfolio.service.family.FamilyMemberConsolidationService;
 import com.portfolio.service.family.FamilyMemberDeleteService;
 import com.portfolio.service.family.FamilyMemberService;
+import com.portfolio.service.family.FamilyOrphanCleanupService;
+import com.portfolio.service.family.FamilyOrphanReport;
 import com.portfolio.service.nps.NpsImportService;
 import com.portfolio.service.portfolio.BrokerPortfolioDeleteService;
 import com.portfolio.service.portfolio.PortfolioIntradayService;
@@ -108,6 +112,8 @@ public class PortfolioController {
     private final AccountsHubService accountsHubService;
     private final FamilyMemberService familyMemberService;
     private final FamilyMemberDeleteService familyMemberDeleteService;
+    private final FamilyOrphanCleanupService familyOrphanCleanupService;
+    private final FamilyMemberConsolidationService familyMemberConsolidationService;
 
     @Value("${app.jwt.internal-secret}")
     private String internalSecret;
@@ -196,6 +202,66 @@ public class PortfolioController {
         String userId = UserContext.getUserIdOrThrow();
         familyMemberDeleteService.deleteOwnedMember(familyMemberId, userId);
         return ResponseEntity.noContent().build();
+    }
+
+    @Operation(
+            summary = "List orphan family portfolio stamps",
+            description = "Dry-run: portfolios/CAS/NPS whose familyMemberId is not in live family_members. Primary untouched.",
+            operationId = "listFamilyOrphans")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Orphan inventory"),
+            @ApiResponse(responseCode = "401", description = "Unauthenticated")
+    })
+    @GetMapping("/family-orphans")
+    public ResponseEntity<FamilyOrphanReport> listFamilyOrphans() {
+        String userId = UserContext.getUserIdOrThrow();
+        return ResponseEntity.ok(familyOrphanCleanupService.dryRun(userId));
+    }
+
+    @Operation(
+            summary = "Delete orphan family portfolio stamps",
+            description = "Applies cleanup for orphan familyMemberId stamps under the caller. Primary books untouched.",
+            operationId = "cleanupFamilyOrphans")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Cleanup result"),
+            @ApiResponse(responseCode = "401", description = "Unauthenticated")
+    })
+    @PostMapping("/family-orphans/cleanup")
+    public ResponseEntity<FamilyOrphanReport> cleanupFamilyOrphans() {
+        String userId = UserContext.getUserIdOrThrow();
+        return ResponseEntity.ok(familyOrphanCleanupService.apply(userId));
+    }
+
+    @Operation(
+            summary = "Dry-run consolidate duplicate family personas",
+            description = "Same nameNorm twins under the caller: report retags/merges without applying.",
+            operationId = "dryRunFamilyConsolidate")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Consolidation preview"),
+            @ApiResponse(responseCode = "401", description = "Unauthenticated"),
+            @ApiResponse(responseCode = "404", description = "Canonical member not found")
+    })
+    @GetMapping("/family-members/{familyMemberId}/consolidate")
+    public ResponseEntity<FamilyMemberConsolidationReport> dryRunFamilyConsolidate(
+            @PathVariable String familyMemberId) {
+        String userId = UserContext.getUserIdOrThrow();
+        return ResponseEntity.ok(familyMemberConsolidationService.dryRun(userId, familyMemberId));
+    }
+
+    @Operation(
+            summary = "Consolidate duplicate family personas",
+            description = "Merges same-nameNorm twin members and books into the canonical member. Primary untouched.",
+            operationId = "applyFamilyConsolidate")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Consolidation result"),
+            @ApiResponse(responseCode = "401", description = "Unauthenticated"),
+            @ApiResponse(responseCode = "404", description = "Canonical member not found")
+    })
+    @PostMapping("/family-members/{familyMemberId}/consolidate")
+    public ResponseEntity<FamilyMemberConsolidationReport> applyFamilyConsolidate(
+            @PathVariable String familyMemberId) {
+        String userId = UserContext.getUserIdOrThrow();
+        return ResponseEntity.ok(familyMemberConsolidationService.apply(userId, familyMemberId));
     }
 
     @Operation(summary = "CAS account directory", description = "Demat + MF accounts from latest CDSL CAS import", operationId = "listCasAccounts")

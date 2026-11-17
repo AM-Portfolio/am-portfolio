@@ -26,6 +26,9 @@ import com.am.common.amcommondata.model.demat.DematAccountModel;
 import com.am.common.amcommondata.model.family.FamilyMember;
 import com.am.common.amcommondata.repository.cas.CasImportRepository;
 import com.am.common.amcommondata.repository.family.FamilyMemberRepository;
+import com.am.common.amcommondata.repository.portfolio.PortfolioDocumentRepository;
+
+import org.springframework.dao.DuplicateKeyException;
 
 @ExtendWith(MockitoExtension.class)
 class FamilyMemberServiceTest {
@@ -35,6 +38,9 @@ class FamilyMemberServiceTest {
 
     @Mock
     private CasImportRepository casImportRepository;
+
+    @Mock
+    private PortfolioDocumentRepository portfolioDocumentRepository;
 
     @InjectMocks
     private FamilyMemberService familyMemberService;
@@ -154,6 +160,9 @@ class FamilyMemberServiceTest {
                 .thenReturn(Optional.empty());
         when(familyMemberRepository.findFirstByOwnerUserIdAndNameNorm("u1", "alex"))
                 .thenReturn(Optional.empty());
+        when(familyMemberRepository.findByOwnerUserIdOrderByDisplayNameAsc("u1")).thenReturn(List.of());
+        when(portfolioDocumentRepository.findByOwner("u1")).thenReturn(List.of());
+        when(casImportRepository.findByOwnerOrderByAsOfDateDescImportedAtDesc("u1")).thenReturn(List.of());
         when(familyMemberRepository.countByOwnerUserId("u1")).thenReturn(0L);
         when(familyMemberRepository.savePreservingBsonId(any())).thenAnswer(inv -> {
             FamilyMemberDocument d = inv.getArgument(0);
@@ -182,11 +191,54 @@ class FamilyMemberServiceTest {
                 .thenReturn(Optional.empty());
         when(familyMemberRepository.findFirstByOwnerUserIdAndNameNorm("u1", "alex"))
                 .thenReturn(Optional.empty());
+        when(familyMemberRepository.findByOwnerUserIdOrderByDisplayNameAsc("u1")).thenReturn(List.of());
+        when(portfolioDocumentRepository.findByOwner("u1")).thenReturn(List.of());
+        when(casImportRepository.findByOwnerOrderByAsOfDateDescImportedAtDesc("u1")).thenReturn(List.of());
         when(familyMemberRepository.countByOwnerUserId("u1")).thenReturn(5L);
         ResponseStatusException ex = assertThrows(ResponseStatusException.class,
                 () -> familyMemberService.createManual("u1", "Alex", "a@x.com"));
         assertEquals(409, ex.getStatusCode().value());
         verify(familyMemberRepository, never()).savePreservingBsonId(any());
+    }
+
+    @Test
+    void createManualRejectsWhenOrphanStampsExistForName() {
+        when(familyMemberRepository.findFirstByOwnerUserIdAndEmailNorm("u1", "a@x.com"))
+                .thenReturn(Optional.empty());
+        when(familyMemberRepository.findFirstByOwnerUserIdAndNameNorm("u1", "alex"))
+                .thenReturn(Optional.empty());
+        when(familyMemberRepository.findByOwnerUserIdOrderByDisplayNameAsc("u1")).thenReturn(List.of());
+        when(portfolioDocumentRepository.findByOwner("u1")).thenReturn(List.of(
+                com.am.common.amcommondata.document.portfolio.PortfolioDocument.builder()
+                        .id("orphan")
+                        .familyMemberId("stale")
+                        .familyMemberName("Alex")
+                        .build()));
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> familyMemberService.createManual("u1", "Alex", "a@x.com"));
+        assertEquals(409, ex.getStatusCode().value());
+        verify(familyMemberRepository, never()).savePreservingBsonId(any());
+    }
+
+    @Test
+    void resolveForImportReusesExistingOnDuplicateKeyRace() {
+        when(familyMemberRepository.consolidateObjectIdStringTwins("u1")).thenReturn(0);
+        when(familyMemberRepository.findFirstByOwnerUserIdAndEmailNorm("u1", "spouse@x.com"))
+                .thenReturn(Optional.empty());
+        when(familyMemberRepository.findFirstByOwnerUserIdAndNameNorm("u1", "spouse"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(FamilyMemberDocument.builder()
+                        .id("fm-race")
+                        .ownerUserId("u1")
+                        .displayName("Spouse")
+                        .nameNorm("spouse")
+                        .build()));
+        when(familyMemberRepository.countByOwnerUserId("u1")).thenReturn(0L);
+        when(familyMemberRepository.savePreservingBsonId(any())).thenThrow(new DuplicateKeyException("dup"));
+
+        FamilyMember m = familyMemberService.resolveForImport(
+                "u1", "FAMILY", "Spouse", "spouse@x.com", "CAS");
+        assertEquals("fm-race", m.getId());
     }
 
     @Test

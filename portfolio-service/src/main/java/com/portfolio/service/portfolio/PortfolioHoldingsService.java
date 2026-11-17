@@ -5,6 +5,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,6 +29,7 @@ import com.portfolio.model.resolver.TradingSymbolResolver;
 import com.portfolio.redis.service.PortfolioHoldingsRedisService;
 import com.portfolio.redis.session.CashSessionClock;
 import com.portfolio.service.calculator.PortfolioCalculator;
+import com.portfolio.service.family.FamilyMemberService;
 import com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer;
 
 import io.micrometer.observation.annotation.Observed;
@@ -44,6 +46,8 @@ public class PortfolioHoldingsService {
     private final ConcurrentHashMap<String, PaintCache> paintCache = new ConcurrentHashMap<>();
 
     private final PortfolioService portfolioService;
+    @Nullable
+    private final FamilyMemberService familyMemberService;
     private final PortfolioHoldingsMapper portfolioHoldingsMapper;
     @Nullable
     private final PortfolioHoldingsRedisService portfolioHoldingsRedisService;
@@ -63,7 +67,8 @@ public class PortfolioHoldingsService {
             PortfolioHoldingsMongoService portfolioHoldingsMongoService,
             @Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
             @Nullable CashSessionClock cashSessionClock,
-            @Nullable PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer) {
+            @Nullable PortfolioEquitySymbolNormalizer portfolioEquitySymbolNormalizer,
+            @Nullable FamilyMemberService familyMemberService) {
         this.portfolioService = portfolioService;
         this.portfolioHoldingsMapper = portfolioHoldingsMapper;
         this.portfolioHoldingsRedisService = portfolioHoldingsRedisService;
@@ -72,10 +77,19 @@ public class PortfolioHoldingsService {
         this.taskExecutor = taskExecutor;
         this.cashSessionClock = cashSessionClock;
         this.portfolioEquitySymbolNormalizer = portfolioEquitySymbolNormalizer;
+        this.familyMemberService = familyMemberService;
     }
 
     @Value("${portfolio.redis.enabled:true}")
     private boolean isRedisEnabled;
+
+    private Set<String> liveMemberIdsForPersona(String userId, String persona) {
+        if (familyMemberService == null
+                || !com.am.common.amcommondata.model.family.HoldingsPersona.isHousehold(persona)) {
+            return null;
+        }
+        return familyMemberService.liveMemberIdsForOwner(userId);
+    }
 
     @Observed(name = "portfolio.get.holdings", contextualName = "get-portfolio-holdings")
     public PortfolioHoldings getPortfolioHoldings(String userId, TimeInterval interval) {
@@ -108,9 +122,11 @@ public class PortfolioHoldingsService {
             log.info("No portfolios found for user: {} - Returning empty holdings", userId);
             return PortfolioHoldings.empty();
         }
+        Set<String> liveMemberIds = liveMemberIdsForPersona(userId, persona);
         portfolios = portfolios.stream()
                 .filter(p -> PortfolioKind.isBroker(p.getPortfolioKind()))
-                .filter(p -> com.am.common.amcommondata.model.family.HoldingsPersona.matches(p.getFamilyMemberId(), persona))
+                .filter(p -> com.am.common.amcommondata.model.family.HoldingsPersona.matches(
+                        p.getFamilyMemberId(), persona, liveMemberIds))
                 .collect(Collectors.toList());
         log.info("Found {} BROKER portfolios for user All-view: {} persona={}", portfolios.size(), userId, persona);
 

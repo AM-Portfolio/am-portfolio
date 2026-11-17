@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.HashMap;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 
@@ -27,6 +28,7 @@ import com.portfolio.model.util.InstrumentKeys;
 import com.portfolio.redis.service.PortfolioSummaryRedisService;
 import com.portfolio.redis.session.CashSessionClock;
 import com.portfolio.service.accounts.AccountsHubService;
+import com.portfolio.service.family.FamilyMemberService;
 import com.portfolio.service.calculator.PortfolioCalculator;
 import com.portfolio.service.NewUserPortfolioFallbackService;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
@@ -46,6 +48,7 @@ import lombok.extern.slf4j.Slf4j;
 public class PortfolioOverviewService {
 
     private final PortfolioService portfolioService;
+    private final FamilyMemberService familyMemberService;
     private final PortfolioHoldingsService portfolioHoldingsService;
     private final PortfolioMapperv1 portfolioMapper;
     @org.springframework.lang.Nullable
@@ -74,6 +77,7 @@ public class PortfolioOverviewService {
 
     public PortfolioOverviewService(
             PortfolioService portfolioService,
+            FamilyMemberService familyMemberService,
             PortfolioHoldingsService portfolioHoldingsService,
             PortfolioMapperv1 portfolioMapper,
             @org.springframework.lang.Nullable PortfolioSummaryRedisService portfolioSummaryRedisService,
@@ -87,6 +91,7 @@ public class PortfolioOverviewService {
             @org.springframework.lang.Nullable NewUserPortfolioFallbackService newUserPortfolioFallbackService,
             @org.springframework.lang.Nullable AccountsHubService accountsHubService) {
         this.portfolioService = portfolioService;
+        this.familyMemberService = familyMemberService;
         this.portfolioHoldingsService = portfolioHoldingsService;
         this.portfolioMapper = portfolioMapper;
         this.portfolioSummaryRedisService = portfolioSummaryRedisService;
@@ -144,8 +149,12 @@ public class PortfolioOverviewService {
         }
 
         log.info("Cache miss for portfolio summary - User: {}, fetching from source", userId);
+        Set<String> liveMemberIds = com.am.common.amcommondata.model.family.HoldingsPersona.isHousehold(persona)
+                ? familyMemberService.liveMemberIdsForOwner(userId)
+                : null;
         var portfolios = brokerBooksForUser(userId).stream()
-                .filter(p -> com.am.common.amcommondata.model.family.HoldingsPersona.matches(p.getFamilyMemberId(), persona))
+                .filter(p -> com.am.common.amcommondata.model.family.HoldingsPersona.matches(
+                        p.getFamilyMemberId(), persona, liveMemberIds))
                 .collect(Collectors.toList());
         log.info("Retrieved {} BROKER portfolios for user: {}", portfolios.size(), userId);
 

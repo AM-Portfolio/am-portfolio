@@ -290,26 +290,30 @@ public class PortfolioIntelligenceSnapshotFactory {
                 continue;
             }
             String sym = SymbolResolver.normalize(eq.getSymbol());
-            MarketData md = marketData.get(sym);
-            double price = AllocationUtils.resolvePrice(md);
+            boolean quarantineLtp = HoldingInstrumentClassifier.quarantineEquityLtp(
+                    eq.getAssetClass(), sym, eq.getIsin(), eq.getName() != null ? eq.getName() : eq.getCompanyName());
+            MarketData md = quarantineLtp ? null : marketData.get(sym);
+            double price = quarantineLtp ? 0.0 : AllocationUtils.resolvePrice(md);
             String priceSourceHint = price > 0
                     ? HoldingInstrumentClassifier.PRICE_LIVE
                     : HoldingInstrumentClassifier.PRICE_COST;
             if (price <= 0) {
-                price = bookPriceFallback(eq);
+                price = quarantineLtp ? schemeBookPrice(eq) : bookPriceFallback(eq);
             }
             if (price <= 0) {
                 droppedNoPrice++;
                 continue;
             }
             double value = price * eq.getQuantity();
-            SecurityModel sec = securityDetails.get(sym);
+            SecurityModel sec = quarantineLtp ? null : securityDetails.get(sym);
             String sector = resolveSector(eq, sec, sym, priceSourceHint);
             String industry = resolveIndustry(eq, sec, sym, priceSourceHint);
             String marketCap = resolveMarketCap(eq, sec);
 
-            // Honor CAS assetClass on equity rows (mutual_fund_demat / debt / nps).
-            String equityClass = HealthScoreEngine.normalizeAssetClass(eq.getAssetClass());
+            // Honor CAS assetClass; listed ETF tickers win over mutual_fund_demat label.
+            String equityClass = HoldingInstrumentClassifier.looksLikeListedEtfTicker(sym)
+                    ? HealthScoreEngine.ASSET_ETF
+                    : HealthScoreEngine.normalizeAssetClass(eq.getAssetClass());
             holdings.add(PortfolioIntelligenceSnapshot.Holding.builder()
                     .symbol(sym)
                     .value(value)
@@ -1001,6 +1005,38 @@ public class PortfolioIntelligenceSnapshotFactory {
         }
         if (eq.getImportMarkPrice() != null && eq.getImportMarkPrice() > 0) {
             return eq.getImportMarkPrice();
+        }
+        return 0.0;
+    }
+
+    /**
+     * MF demat / unsafe ticker maps: never prefer a poisoned equity currentPrice.
+     * Prefer import mark and CAS residual value.
+     */
+    static double schemeBookPrice(EquityModel eq) {
+        if (eq == null) {
+            return 0.0;
+        }
+        if (eq.getImportMarkPrice() != null && eq.getImportMarkPrice() > 0) {
+            return eq.getImportMarkPrice();
+        }
+        if (eq.getCurrentValue() != null
+                && eq.getQuantity() != null
+                && eq.getQuantity() > 0
+                && eq.getCurrentValue() > 0) {
+            return eq.getCurrentValue() / eq.getQuantity();
+        }
+        if (eq.getCurrentPrice() != null && eq.getCurrentPrice() > 0) {
+            return eq.getCurrentPrice();
+        }
+        if (eq.getAvgBuyingPrice() != null && eq.getAvgBuyingPrice() > 0) {
+            return eq.getAvgBuyingPrice();
+        }
+        if (eq.getInvestmentValue() != null
+                && eq.getQuantity() != null
+                && eq.getQuantity() > 0
+                && eq.getInvestmentValue() > 0) {
+            return eq.getInvestmentValue() / eq.getQuantity();
         }
         return 0.0;
     }
