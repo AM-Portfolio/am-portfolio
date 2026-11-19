@@ -151,8 +151,11 @@ public final class HoldingInstrumentClassifier {
         if (nameSuggestsSchemeMf(name)) {
             return true;
         }
-        String id = firstNonBlank(symbol, isin);
-        return id != null && id.trim().toUpperCase(Locale.ROOT).startsWith("INF");
+        // Prefer ISIN: poisoned equity tickers (RECLTD) must not hide an INF* scheme ISIN.
+        if (isSchemeMfIsin(isin) || isSchemeMfIsin(symbol)) {
+            return true;
+        }
+        return false;
     }
 
     static boolean nameSuggestsEtf(String name) {

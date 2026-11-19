@@ -40,6 +40,9 @@ class HoldingInstrumentClassifierTest {
                 "BANDHAN AMC LTD#BANDHAN MF-BANDHAN SMALL CAP FUND-DIRECT-GROWTH"));
         assertTrue(HoldingInstrumentClassifier.quarantineEquityLtp(
                 "mutual_fund_demat", "RECLTD", "INF109KC1V59", "Bandhan Mutual Fund"));
+        // Poisoned ticker + INF ISIN must quarantine even when name is blank.
+        assertTrue(HoldingInstrumentClassifier.quarantineEquityLtp(
+                "mutual_fund_demat", "RECLTD", "INF194KB1AL4", null));
         assertTrue(HoldingInstrumentClassifier.isUnsafeNameToTickerMap(
                 "MOTILAL OSWAL AMC LTD#MOTILAL OSWAL MF- MOTILAL OSWAL LARGE CAP FUND-DIRECT-GROWTH",
                 "RECLTD"));
