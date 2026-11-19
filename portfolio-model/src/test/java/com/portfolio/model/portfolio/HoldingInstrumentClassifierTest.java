@@ -97,6 +97,25 @@ class HoldingInstrumentClassifierTest {
     }
 
     @Test
+    void transformersNeverMapsToRecltd_butRecLimitedIsAllowed() {
+        assertTrue(HoldingInstrumentClassifier.isUnsafeNameToTickerMap(
+                "TRANSFORMERS AND RECTIFIERS (INDIA) LTD#NEW EQUITY SHARES", "RECLTD"));
+        assertFalse(HoldingInstrumentClassifier.isUnsafeNameToTickerMap("REC Limited", "RECLTD"));
+        assertFalse(HoldingInstrumentClassifier.isUnsafeNameToTickerMap(
+                "RURAL ELECTRIFICATION CORPORATION LIMITED", "RECLTD"));
+    }
+
+    @Test
+    void schemePlanSuffixNeverBecomesDisplayTicker() {
+        assertNull(HoldingInstrumentClassifier.suggestDisplayTickerFromName(
+                "QUANT MONEY MANAGERS LTD#QUANT MF-QUANT SMALL CAP FUND-DIRECT-GROWTH"));
+        assertNull(HoldingInstrumentClassifier.suggestDisplayTickerFromName(
+                "BANDHAN AMC LTD#BANDHAN MF-BANDHAN SMALL CAP FUND-DIRECT-GROWTH"));
+        assertEquals("TATAGOLD", HoldingInstrumentClassifier.suggestDisplayTickerFromName(
+                "TATAAML-TATAGOLD"));
+    }
+
+    @Test
     void missingSectorTreatsDashAndUnknown() {
         assertTrue(HoldingInstrumentClassifier.isMissingSector("-"));
         assertTrue(HoldingInstrumentClassifier.isMissingSector("Unknown"));

@@ -203,16 +203,17 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
     }
     
     /**
-     * Create a map of symbol to holding quantity
+     * Create a map of symbol to holding quantity.
+     * Duplicate symbols still sum — callers must not invent colliding display tickers for distinct ISINs.
      */
     private Map<String, Double> createSymbolToQuantityMap(PortfolioModelV1 portfolio) {
         log.debug("Creating symbol to quantity map for portfolio: {}", portfolio.getName());
         return portfolio.getEquityModels().stream()
+            .filter(e -> e != null && e.getSymbol() != null && !e.getSymbol().isBlank())
             .collect(Collectors.toMap(
                 EquityModel::getSymbol,
-                EquityModel::getQuantity,
-                (a, b) -> a + b // In case of duplicate symbols, sum the quantities
-            ));
+                e -> e.getQuantity() != null ? e.getQuantity() : 0.0,
+                (a, b) -> a + b));
     }
     
     /**
@@ -324,6 +325,8 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
 
     /**
      * Replace ISIN-shaped equity symbols with broker display tickers (request-scoped; not persisted).
+     * Scheme MF rows that must keep an ISIN book key are left alone — renaming
+     * {@code …-DIRECT-GROWTH} tails to {@code GROWTH} collapses many schemes into one mosaic cell.
      */
     static void applyDisplayTickers(PortfolioModelV1 portfolio) {
         if (portfolio == null || portfolio.getEquityModels() == null) {
@@ -337,15 +340,20 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             if (!TradingSymbolResolver.looksLikeIsin(symbol)) {
                 continue;
             }
+            if (equity.getIsin() == null || equity.getIsin().isBlank()) {
+                equity.setIsin(symbol.trim().toUpperCase(Locale.ROOT));
+            }
+            // Never rename scheme-MF ISIN keys to plan-suffix display tokens (GROWTH, etc.).
+            if (HoldingInstrumentClassifier.mustKeepIsinBookKey(
+                    equity.getAssetClass(), symbol, equity.getIsin(), equity.getName())) {
+                continue;
+            }
             String suggested = HoldingInstrumentClassifier.suggestDisplayTickerFromName(equity.getName());
             if (suggested == null || suggested.isBlank()) {
                 continue;
             }
             if (HoldingInstrumentClassifier.isUnsafeNameToTickerMap(equity.getName(), suggested)) {
                 continue;
-            }
-            if (equity.getIsin() == null || equity.getIsin().isBlank()) {
-                equity.setIsin(symbol.trim().toUpperCase(Locale.ROOT));
             }
             log.info("Heatmap display ticker {} → {} (isin={})", symbol, suggested, equity.getIsin());
             equity.setSymbol(suggested);

@@ -311,6 +311,13 @@ public final class HoldingInstrumentClassifier {
         if (name.contains("JIO PLATFORMS") && t.startsWith("JIO") && !"JIOPLATFORMS".equals(t)) {
             return true;
         }
+        // Poison equity aliases from MD/name search (TARIL/Transformers → RECLTD, etc.).
+        if ("RECLTD".equals(t) && !(name.contains("REC LTD")
+                || name.contains("REC LIMITED")
+                || name.contains("RURAL ELECTRIFICATION")
+                || name.matches(".*\\bREC\\b.*"))) {
+            return true;
+        }
         if (nameLooksLikeAmcOrMfScheme(name) && !nameMentionsTicker(name, t)) {
             return true;
         }
@@ -366,7 +373,10 @@ public final class HoldingInstrumentClassifier {
         int dash = raw.lastIndexOf('-');
         if (dash >= 0 && dash < raw.length() - 1) {
             String tail = raw.substring(dash + 1).trim().toUpperCase(Locale.ROOT);
-            if (isPlausibleDisplayTicker(tail) && !isUnsafeNameToTickerMap(holdingName, tail)) {
+            // Plan / option suffixes are not tickers (…-DIRECT-GROWTH → GROWTH collapses many MFs).
+            if (isGenericPlanSuffix(tail)) {
+                // fall through to compact name
+            } else if (isPlausibleDisplayTicker(tail) && !isUnsafeNameToTickerMap(holdingName, tail)) {
                 return tail;
             }
         }
@@ -402,7 +412,32 @@ public final class HoldingInstrumentClassifier {
         if (TradingSymbolResolver.looksLikeIsin(t)) {
             return false;
         }
+        if (isGenericPlanSuffix(t)) {
+            return false;
+        }
         return t.matches("^[A-Z][A-Z0-9]*$");
+    }
+
+    /** MF plan words that must never become mosaic / book display symbols. */
+    static boolean isGenericPlanSuffix(String token) {
+        if (token == null || token.isBlank()) {
+            return false;
+        }
+        switch (token.trim().toUpperCase(Locale.ROOT)) {
+            case "GROWTH":
+            case "DIVIDEND":
+            case "DIRECT":
+            case "REGULAR":
+            case "PLAN":
+            case "OPTION":
+            case "FUND":
+            case "IDCW":
+            case "PAYOUT":
+            case "REINVESTMENT":
+                return true;
+            default:
+                return false;
+        }
     }
 
     private static String firstNonBlank(String a, String b) {
