@@ -419,21 +419,24 @@ public class PortfolioMapperv1 {
      * Scheme MF demat / unsafe AMC→equity maps skip equity ISIN lookup so Bandhan never becomes RECLTD.
      */
     private String resolveSymbolForStorage(String symbol, String isin, String assetClass, String name) {
-        if (HoldingInstrumentClassifier.quarantineEquityLtp(assetClass, symbol, isin, name)) {
+        // Scheme MF / unsafe AMC→equity: always persist ISIN as book key (never RECLTD).
+        if (HoldingInstrumentClassifier.mustKeepIsinBookKey(assetClass, symbol, isin, name)
+                || HoldingInstrumentClassifier.quarantineEquityLtp(assetClass, symbol, isin, name)) {
+            if (isin != null && !isin.isBlank()) {
+                return isin.trim().toUpperCase();
+            }
             if (HoldingInstrumentClassifier.isUnsafeNameToTickerMap(name, symbol)) {
-                if (isin != null && !isin.isBlank()) {
-                    return isin.trim().toUpperCase();
-                }
                 String fromName = HoldingInstrumentClassifier.suggestDisplayTickerFromName(name);
                 if (fromName != null) {
                     return fromName;
                 }
             }
-            if (symbol != null && !symbol.isBlank()) {
+            if (symbol != null && !symbol.isBlank() && TradingSymbolResolver.looksLikeIsin(symbol)) {
                 return SymbolResolver.normalize(symbol);
             }
-            if (isin != null && !isin.isBlank()) {
-                return isin.trim().toUpperCase();
+            if (symbol != null && !symbol.isBlank()
+                    && !HoldingInstrumentClassifier.isUnsafeNameToTickerMap(name, symbol)) {
+                return SymbolResolver.normalize(symbol);
             }
             return symbol;
         }

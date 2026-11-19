@@ -47,6 +47,7 @@ public class EquityHoldingsMapper {
                     ? equityModel.getCurrentPrice() : null)
             .currentValue(equityModel.getCurrentValue() != null && equityModel.getCurrentValue() > 0
                     ? equityModel.getCurrentValue() : null)
+            .brokerPortfolios(new java.util.ArrayList<>())
             .build();
     }
 }

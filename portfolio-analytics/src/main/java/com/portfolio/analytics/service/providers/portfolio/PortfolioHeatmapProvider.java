@@ -12,6 +12,7 @@ import com.portfolio.model.analytics.Heatmap;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
+import com.portfolio.model.portfolio.HoldingMarkPriceResolver;
 import com.portfolio.model.resolver.TradingSymbolResolver;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -85,15 +86,18 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                         if (symbol == null || symbol.trim().isEmpty()) {
                             continue;
                         }
-                        String equitySector = usableEquitySector(model.getSector());
-                        if (equitySector == null) {
-                            boolean hasMd = AnalyticsUtils.resolveMarketData(displayMarketData, symbol) != null;
-                            String priceSourceHint = hasMd
-                                    ? HoldingInstrumentClassifier.PRICE_LIVE
-                                    : HoldingInstrumentClassifier.PRICE_COST;
-                            equitySector = HoldingInstrumentClassifier.resolveSector(
-                                    null, symbol, model.getIsin(), priceSourceHint);
-                        }
+                        boolean hasMd = AnalyticsUtils.resolveMarketData(displayMarketData, symbol) != null;
+                        String priceSourceHint = hasMd
+                                ? HoldingInstrumentClassifier.PRICE_LIVE
+                                : HoldingInstrumentClassifier.PRICE_COST;
+                        // Force ETF / Mutual Fund buckets even when MD says Financial Services.
+                        String equitySector = HoldingInstrumentClassifier.resolveSector(
+                                usableEquitySector(model.getSector()),
+                                symbol,
+                                model.getIsin(),
+                                priceSourceHint,
+                                model.getAssetClass(),
+                                model.getName());
                         if (equitySector == null || HoldingInstrumentClassifier.isMissingSector(equitySector)) {
                             continue;
                         }
@@ -232,10 +236,33 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         );
         
         for (String symbol : symbolToQuantity.keySet()) {
+            EquityModel equity = equityBySymbol.get(symbol);
             MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
             String priceSource = HoldingInstrumentClassifier.PRICE_LIVE;
-            if (data == null || !hasResolvablePrice(data)) {
-                EquityModel equity = equityBySymbol.get(symbol);
+
+            // Scheme MF / unsafe AMC→equity: never paint with equity cash LTP.
+            HoldingMarkPriceResolver.Mark quarantineMark = equity == null ? null
+                    : HoldingMarkPriceResolver.tryQuarantineMark(
+                            equity.getAssetClass(),
+                            symbol,
+                            equity.getIsin(),
+                            equity.getName(),
+                            equity.getImportMarkPrice(),
+                            equity.getCurrentValue(),
+                            equity.getQuantity(),
+                            equity.getCurrentPrice(),
+                            equity.getAvgBuyingPrice(),
+                            equity.getInvestmentValue());
+            if (quarantineMark != null && quarantineMark.isPresent()) {
+                data = MarketData.builder()
+                        .symbol(symbol)
+                        .lastPrice(quarantineMark.price())
+                        .previousClose(quarantineMark.price())
+                        .build();
+                priceSource = quarantineMark.priceSource();
+                log.info("Heatmap quarantine mark for symbol={} price={} source={}",
+                        symbol, quarantineMark.price(), priceSource);
+            } else if (data == null || !hasResolvablePrice(data)) {
                 Double cost = costBasisPrice(equity);
                 if (cost == null || cost <= 0) {
                     log.warn("Null market data and no cost basis for symbol: {}", symbol);
@@ -251,16 +278,15 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             }
 
             String sector = symbolToSector.getOrDefault(symbol, "Unknown");
-            if (HoldingInstrumentClassifier.isMissingSector(sector)) {
-                EquityModel equity = equityBySymbol.get(symbol);
-                String classified = HoldingInstrumentClassifier.resolveSector(
-                        null,
-                        symbol,
-                        equity != null ? equity.getIsin() : null,
-                        priceSource);
-                if (classified != null && !HoldingInstrumentClassifier.isMissingSector(classified)) {
-                    sector = classified;
-                }
+            String classified = HoldingInstrumentClassifier.resolveSector(
+                    HoldingInstrumentClassifier.isMissingSector(sector) ? null : sector,
+                    symbol,
+                    equity != null ? equity.getIsin() : null,
+                    priceSource,
+                    equity != null ? equity.getAssetClass() : null,
+                    equity != null ? equity.getName() : null);
+            if (classified != null && !HoldingInstrumentClassifier.isMissingSector(classified)) {
+                sector = classified;
             }
             
             sectorMarketDataMap.computeIfAbsent(sector, k -> new ArrayList<>())

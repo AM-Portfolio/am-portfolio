@@ -5,6 +5,7 @@ import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.enums.BrokerType;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
+import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
 import com.portfolio.model.util.SymbolResolver;
 import org.springframework.stereotype.Component;
 
@@ -186,7 +187,9 @@ public class AggregatePortfolioFactory {
                 continue;
             }
             String symbol = SymbolResolver.normalize(equity.getSymbol());
-            if (symbol == null || symbol.isBlank()) {
+            // ISIN-first identity — poisoned shared tickers (Bandhan→RECLTD) must not swallow schemes.
+            String mergeKey = HoldingInstrumentClassifier.holdingIdentityKey(symbol, equity.getIsin());
+            if (mergeKey == null || mergeKey.isBlank()) {
                 continue;
             }
             double addedQty = equity.getQuantity() != null ? equity.getQuantity() : 0.0;
@@ -197,10 +200,10 @@ public class AggregatePortfolioFactory {
                     ? equity.getAvgBuyingPrice() * addedQty
                     : 0.0;
 
-            EquityModel existing = bySymbol.get(symbol);
+            EquityModel existing = bySymbol.get(mergeKey);
             if (existing == null) {
-                EquityModel copy = copyEquity(equity, symbol, addedQty, portfolio.getBrokerType());
-                bySymbol.put(symbol, copy);
+                EquityModel copy = copyEquity(equity, symbol != null ? symbol : mergeKey, addedQty, portfolio.getBrokerType());
+                bySymbol.put(mergeKey, copy);
                 continue;
             }
             double mergedQty = (existing.getQuantity() != null ? existing.getQuantity() : 0.0) + addedQty;

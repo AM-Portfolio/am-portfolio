@@ -334,8 +334,10 @@ public class PortfolioCalculator {
 
         holding.setPriceSource(priceSource);
         String isin = holding.getIsin();
-        holding.setSector(HoldingInstrumentClassifier.resolveSector(holding.getSector(), symbol, isin, priceSource));
-        holding.setIndustry(HoldingInstrumentClassifier.resolveIndustry(holding.getIndustry(), symbol, isin, priceSource));
+        holding.setSector(HoldingInstrumentClassifier.resolveSector(
+                holding.getSector(), symbol, isin, priceSource, holding.getAssetClass(), holding.getName()));
+        holding.setIndustry(HoldingInstrumentClassifier.resolveIndustry(
+                holding.getIndustry(), symbol, isin, priceSource, holding.getAssetClass(), holding.getName()));
         holding.setProductClass(HoldingInstrumentClassifier.productClass(
                 holding.getAssetClass(), symbol, isin, priceSource, holding.getName()));
 

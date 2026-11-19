@@ -154,9 +154,9 @@ public class PortfolioHoldingsMapper {
     }
 
     /**
-     * Common method to process portfolios and create equity holdings map
-     * Uses symbol as the key for identifying unique holdings
-     * Enriches holdings with portfolio context for traceability
+     * Process portfolios into equity holdings.
+     * Identity key is ISIN when present (else symbol) so distinct demat schemes that share a
+     * poisoned ticker (Bandhan→RECLTD) never sum into one mega-row.
      */
     private Map<String, EquityHoldings> processPortfolios(List<PortfolioModelV1> portfolios) {
         Map<String, EquityHoldings> equityHoldingsMap = new HashMap<>();
@@ -174,12 +174,13 @@ public class PortfolioHoldingsMapper {
             if (portfolio.getEquityModels() == null) continue;
 
             for (EquityModel equity : portfolio.getEquityModels()) {
-                // Use normalized symbol instead of ISIN as the key
                 String rawSymbol = equity.getSymbol();
                 String symbol = com.portfolio.model.util.SymbolResolver.normalize(rawSymbol);
+                String mergeKey = com.portfolio.model.portfolio.HoldingInstrumentClassifier.holdingIdentityKey(
+                        symbol, equity.getIsin());
 
-                if (symbol == null) {
-                    continue; // Skip equities without a symbol
+                if (mergeKey == null) {
+                    continue; // Skip equities without ISIN or symbol
                 }
 
                 double addedQty = equity.getQuantity() != null ? equity.getQuantity() : 0;
@@ -195,8 +196,8 @@ public class PortfolioHoldingsMapper {
                     addedCost = equity.getAvgBuyingPrice() * addedQty;
                 }
 
-                // If this is the first time we're seeing this symbol, create a new holding
-                if (!equityHoldingsMap.containsKey(symbol)) {
+                // First time for this ISIN (or symbol fallback): create holding
+                if (!equityHoldingsMap.containsKey(mergeKey)) {
                     // Create a new holding with the correct initial quantity
                     EquityHoldings holdings = equityHoldingsMapper.toEquityHoldings(equity);
 
@@ -209,10 +210,10 @@ public class PortfolioHoldingsMapper {
                                     : ASSET_EQUITY);
                     applyAllocationFields(holdings, portfolio, equity, allocationsByPortfolio);
 
-                    equityHoldingsMap.put(symbol, holdings);
+                    equityHoldingsMap.put(mergeKey, holdings);
                 } else {
-                    // Symbol already exists in another broker portfolio - merge quantities and cost
-                    EquityHoldings existing = equityHoldingsMap.get(symbol);
+                    // Same ISIN across broker books — merge quantities and cost
+                    EquityHoldings existing = equityHoldingsMap.get(mergeKey);
                     double mergedQty = (existing.getQuantity() != null ? existing.getQuantity() : 0) + addedQty;
                     if (addedCost != null) {
                         double prior = existing.getInvestmentCost() != null ? existing.getInvestmentCost() : 0;
@@ -237,8 +238,12 @@ public class PortfolioHoldingsMapper {
                     }
                 }
 
-                // Add broker holding to the aggregated holding object
-                equityHoldingsMap.get(symbol).getBrokerPortfolios().add(EquityBrokerHolding.builder()
+                // Add broker holding to the aggregated holding object (keyed by ISIN-first mergeKey)
+                EquityHoldings aggregated = equityHoldingsMap.get(mergeKey);
+                if (aggregated.getBrokerPortfolios() == null) {
+                    aggregated.setBrokerPortfolios(new ArrayList<>());
+                }
+                aggregated.getBrokerPortfolios().add(EquityBrokerHolding.builder()
                         .brokerType(portfolio.getBrokerType())
                         .quantity(addedQty)
                         .build());

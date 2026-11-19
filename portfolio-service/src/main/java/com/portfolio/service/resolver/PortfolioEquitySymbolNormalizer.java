@@ -83,6 +83,24 @@ public class PortfolioEquitySymbolNormalizer {
             isinKey = equity.getIsin();
         }
 
+        // Scheme MF demat / unsafe AMC maps: keep ISIN as book key forever (never RECLTD etc.).
+        if (HoldingInstrumentClassifier.mustKeepIsinBookKey(
+                equity.getAssetClass(), equity.getSymbol(), isinKey, equity.getName())) {
+            if (isinKey != null) {
+                if (HoldingInstrumentClassifier.isUnsafeNameToTickerMap(equity.getName(), equity.getSymbol())
+                        || (equity.getSymbol() != null
+                                && !TradingSymbolResolver.looksLikeIsin(equity.getSymbol())
+                                && !HoldingInstrumentClassifier.looksLikeListedEtfTicker(equity.getSymbol()))) {
+                    log.warn("Keeping ISIN book key for scheme/unsafe row name={} symbol={} → {}",
+                            equity.getName(), equity.getSymbol(), isinKey);
+                    equity.setSymbol(isinKey);
+                } else if (equity.getSymbol() == null || equity.getSymbol().isBlank()) {
+                    equity.setSymbol(isinKey);
+                }
+            }
+            return;
+        }
+
         // 1) Authoritative: market-data ISIN → NSE ticker (PWL, VIKRAMSOLR, TATAGOLD, …).
         if (isinKey != null && resolvedByIsin.containsKey(isinKey)) {
             if (applyTicker(equity, resolvedByIsin.get(isinKey), isinKey)) {
@@ -90,7 +108,16 @@ public class PortfolioEquitySymbolNormalizer {
             }
         }
 
-        // 2) COMPANY_NAME via market-data only (never invented compact names).
+        // 2) Broker-encoded listed ETF ticker (TATAAML-TATAGOLD → TATAGOLD) before COMPANY_NAME.
+        if (equity.getName() != null && !equity.getName().isBlank()) {
+            String suggested = HoldingInstrumentClassifier.suggestDisplayTickerFromName(equity.getName());
+            if (HoldingInstrumentClassifier.looksLikeListedEtfTicker(suggested)
+                    && applyTicker(equity, suggested, isinKey)) {
+                return;
+            }
+        }
+
+        // 3) COMPANY_NAME via market-data only (never invented compact names / unsafe maps).
         if (equity.getName() != null && !equity.getName().isBlank()) {
             String byName = lookupByName(equity.getName());
             if (byName != null
@@ -98,9 +125,16 @@ public class PortfolioEquitySymbolNormalizer {
                     && applyTicker(equity, byName, isinKey)) {
                 return;
             }
+            // Unlisted / private: compressed name when MD only returns an unsafe equity alias.
+            String compressed = HoldingInstrumentClassifier.suggestDisplayTickerFromName(equity.getName());
+            if (compressed != null
+                    && !HoldingInstrumentClassifier.isUnsafeNameToTickerMap(equity.getName(), compressed)
+                    && applyTicker(equity, compressed, isinKey)) {
+                return;
+            }
         }
 
-        // 3) No ISIN: SYMBOL search for broker aliases (IDEA → canonical ticker).
+        // 4) No ISIN: SYMBOL search for broker aliases (IDEA → canonical ticker).
         if (isinKey == null) {
             String bySymbol = tradingSymbolResolver.resolveTradingSymbol(equity.getSymbol(), null);
             if (bySymbol != null
@@ -111,7 +145,7 @@ public class PortfolioEquitySymbolNormalizer {
             return;
         }
 
-        // 4) ISIN present but MD miss: undo invented display tickers so heal retries.
+        // 5) ISIN present but MD miss: undo invented display tickers so heal retries.
         revertInventedDisplayTickerToIsin(equity, isinKey);
     }
 

@@ -302,9 +302,17 @@ public class PortfolioServiceImpl implements PortfolioService {
             for (com.am.common.amcommondata.document.asset.equity.EquityDocument incoming : incomingEquities) {
                 String isin = incoming.getIsin();
                 
+                // ISIN-only when both sides have ISIN — never collapse distinct schemes onto one ticker.
                 java.util.Optional<com.am.common.amcommondata.document.asset.equity.EquityDocument> matchOpt = existingEquities.stream()
-                    .filter(e -> (e.getIsin() != null && isin != null && e.getIsin().equals(isin)) 
-                            || (e.getSymbol() != null && incoming.getSymbol() != null && e.getSymbol().equals(incoming.getSymbol())))
+                    .filter(e -> {
+                        boolean bothHaveIsin = e.getIsin() != null && !e.getIsin().isBlank()
+                                && isin != null && !isin.isBlank();
+                        if (bothHaveIsin) {
+                            return e.getIsin().equalsIgnoreCase(isin);
+                        }
+                        return e.getSymbol() != null && incoming.getSymbol() != null
+                                && e.getSymbol().equalsIgnoreCase(incoming.getSymbol());
+                    })
                     .findFirst();
 
                 if ("BUY".equalsIgnoreCase(tradeAction)) {

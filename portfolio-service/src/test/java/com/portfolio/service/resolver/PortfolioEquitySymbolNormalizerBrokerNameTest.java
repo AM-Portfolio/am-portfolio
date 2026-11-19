@@ -24,8 +24,6 @@ class PortfolioEquitySymbolNormalizerBrokerNameTest {
     @Test
     void replacesIsinWithBrokerEtfTickerFromName() {
         when(marketDataApiClient.resolveTickersByIsins(anyList())).thenReturn(Mono.just(Map.of()));
-        when(marketDataApiClient.resolveTickerByIsin("INF277KA1976")).thenReturn(Mono.just(Map.of()));
-        when(marketDataApiClient.resolveTickersByQueries(anyList(), anyList())).thenReturn(Mono.just(Map.of()));
 
         PortfolioEquitySymbolNormalizer normalizer =
                 new PortfolioEquitySymbolNormalizer(new MongoTradingSymbolResolver(marketDataApiClient), marketDataApiClient);
@@ -44,9 +42,6 @@ class PortfolioEquitySymbolNormalizerBrokerNameTest {
     @Test
     void replacesUnlistedIsinWithCompressedNameNotJiofin() {
         when(marketDataApiClient.resolveTickersByIsins(anyList())).thenReturn(Mono.just(Map.of()));
-        when(marketDataApiClient.resolveTickerByIsin("INE0BJQ01010")).thenReturn(Mono.just(Map.of()));
-        when(marketDataApiClient.resolveTickersByQueries(anyList(), anyList()))
-                .thenReturn(Mono.just(Map.of("JIO PLATFORMS LIMITED", "JIOFIN")));
 
         PortfolioEquitySymbolNormalizer normalizer =
                 new PortfolioEquitySymbolNormalizer(new MongoTradingSymbolResolver(marketDataApiClient), marketDataApiClient);
@@ -60,5 +55,27 @@ class PortfolioEquitySymbolNormalizerBrokerNameTest {
 
         assertEquals("JIOPLATFORMS", jio.getSymbol());
         assertEquals("INE0BJQ01010", jio.getIsin());
+    }
+
+    @Test
+    void bandhanSchemeKeepsIsinEvenWhenMdReturnsRecltd() {
+        when(marketDataApiClient.resolveTickersByIsins(anyList()))
+                .thenReturn(Mono.just(Map.of("INF194KB1AL4", "RECLTD")));
+
+        PortfolioEquitySymbolNormalizer normalizer =
+                new PortfolioEquitySymbolNormalizer(new MongoTradingSymbolResolver(marketDataApiClient), marketDataApiClient);
+
+        EquityModel bandhan = new EquityModel();
+        bandhan.setSymbol("RECLTD");
+        bandhan.setIsin("INF194KB1AL4");
+        bandhan.setAssetClass("mutual_fund_demat");
+        bandhan.setName("BANDHAN AMC LTD#BANDHAN MF-BANDHAN SMALL CAP FUND-DIRECT-GROWTH");
+        bandhan.setQuantity(15_542.681);
+
+        normalizer.normalizeEquities(List.of(bandhan));
+
+        assertEquals("INF194KB1AL4", bandhan.getSymbol());
+        assertEquals("INF194KB1AL4", bandhan.getIsin());
+        assertEquals(15_542.681, bandhan.getQuantity(), 1e-6);
     }
 }

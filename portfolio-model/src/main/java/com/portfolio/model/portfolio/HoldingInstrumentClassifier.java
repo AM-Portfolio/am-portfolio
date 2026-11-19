@@ -11,6 +11,8 @@ public final class HoldingInstrumentClassifier {
 
     public static final String SECTOR_ETF = "Exchange Traded Funds (ETFs)";
     public static final String INDUSTRY_ETF = "ETFs & Index Funds";
+    public static final String SECTOR_MUTUAL_FUND = "Mutual Funds";
+    public static final String INDUSTRY_MUTUAL_FUND = "Mutual Fund Schemes";
     public static final String SECTOR_UNLISTED = "Private / Unlisted";
     public static final String PRODUCT_EQUITY = "EQUITY";
     public static final String PRODUCT_ETF = "ETF";
@@ -22,6 +24,57 @@ public final class HoldingInstrumentClassifier {
     public static final String PRICE_IMPORT = "IMPORT_MARK";
 
     private HoldingInstrumentClassifier() {
+    }
+
+    /**
+     * Stable holdings / aggregate identity: ISIN when present, else trading symbol.
+     * Prevents distinct demat schemes that share a poisoned ticker from summing into one row.
+     */
+    public static String holdingIdentityKey(String symbol, String isin) {
+        if (isin != null && !isin.isBlank()) {
+            return isin.trim().toUpperCase(Locale.ROOT);
+        }
+        if (symbol != null && !symbol.isBlank()) {
+            return symbol.trim().toUpperCase(Locale.ROOT);
+        }
+        return null;
+    }
+
+    /**
+     * Scheme MF ISIN ({@code INF*}) that is not a listed ETF cash ticker.
+     * These must keep ISIN as the book key and never resolve to equity LTP tickers.
+     */
+    public static boolean isSchemeMfIsin(String isinOrSymbol) {
+        if (isinOrSymbol == null || isinOrSymbol.isBlank()) {
+            return false;
+        }
+        String u = isinOrSymbol.trim().toUpperCase(Locale.ROOT);
+        if (!u.startsWith("INF")) {
+            return false;
+        }
+        return !looksLikeListedEtfTicker(u);
+    }
+
+    /**
+     * True when this row must keep ISIN (or ISIN-shaped symbol) as storage/book key —
+     * never an equity cash ticker from market-data.
+     * Listed ETF demat (NIFTYBEES / TATAGOLD / name contains ETF|BEES) may still resolve.
+     */
+    public static boolean mustKeepIsinBookKey(String assetClass, String symbol, String isin, String name) {
+        if (looksLikeListedEtfTicker(symbol) || nameSuggestsEtf(name)) {
+            return false;
+        }
+        String suggested = suggestDisplayTickerFromName(name);
+        if (looksLikeListedEtfTicker(suggested)) {
+            return false;
+        }
+        if (isUnsafeNameToTickerMap(name, symbol)) {
+            return true;
+        }
+        if (isSchemeMfIsin(isin) || isSchemeMfIsin(symbol)) {
+            return true;
+        }
+        return isMutualFundDematClass(assetClass) && nameSuggestsSchemeMf(name);
     }
 
     public static boolean isMissingSector(String sector) {
@@ -115,9 +168,17 @@ public final class HoldingInstrumentClassifier {
             return false;
         }
         String u = name.toUpperCase(Locale.ROOT);
-        return u.contains("BANDHAN")
+        if (u.contains("BANDHAN")
                 || u.contains("MUTUAL FUND")
-                || u.contains("MUTUALFUND");
+                || u.contains("MUTUALFUND")
+                || u.contains("GROWTH PLAN")
+                || u.contains("DIRECT PLAN")
+                || u.contains("DIRECT-GROWTH")
+                || u.contains("DIRECT GROWTH")) {
+            return true;
+        }
+        // Broker CAS strings: "… MF-MOTILAL …" / "PPFAS MF-" (exclude ETF/BEES above).
+        return u.contains(" MF-") || (u.contains("#") && u.contains(" MF"));
     }
 
     /**
@@ -136,8 +197,33 @@ public final class HoldingInstrumentClassifier {
     }
 
     public static String resolveSector(String currentSector, String symbol, String isin, String priceSource) {
+        return resolveSector(currentSector, symbol, isin, priceSource, null, null);
+    }
+
+    /**
+     * Sector for mosaic / X-Ray. Listed ETF tickers force ETF sector even when MD says
+     * Financial Services. Scheme MF demat uses Mutual Funds — not the ETF bucket.
+     */
+    public static String resolveSector(
+            String currentSector,
+            String symbol,
+            String isin,
+            String priceSource,
+            String assetClass,
+            String name) {
+        if (looksLikeListedEtfTicker(symbol) || nameSuggestsEtf(name)) {
+            return SECTOR_ETF;
+        }
+        if (mustKeepIsinBookKey(assetClass, symbol, isin, name)
+                || (isMutualFundDematClass(assetClass) && !nameSuggestsEtf(name) && isSchemeMfIsin(firstNonBlank(isin, symbol)))) {
+            return SECTOR_MUTUAL_FUND;
+        }
         if (!isMissingSector(currentSector)) {
             return currentSector.trim();
+        }
+        // Bare INF* without MF class still often means scheme — prefer MF over ETF mosaic.
+        if (isSchemeMfIsin(firstNonBlank(isin, symbol)) && !looksLikeListedEtfTicker(symbol)) {
+            return SECTOR_MUTUAL_FUND;
         }
         if (looksLikeEtfOrScheme(symbol, isin)) {
             return SECTOR_ETF;
@@ -149,8 +235,28 @@ public final class HoldingInstrumentClassifier {
     }
 
     public static String resolveIndustry(String currentIndustry, String symbol, String isin, String priceSource) {
+        return resolveIndustry(currentIndustry, symbol, isin, priceSource, null, null);
+    }
+
+    public static String resolveIndustry(
+            String currentIndustry,
+            String symbol,
+            String isin,
+            String priceSource,
+            String assetClass,
+            String name) {
+        if (looksLikeListedEtfTicker(symbol) || nameSuggestsEtf(name)) {
+            return INDUSTRY_ETF;
+        }
+        if (mustKeepIsinBookKey(assetClass, symbol, isin, name)
+                || (isMutualFundDematClass(assetClass) && !nameSuggestsEtf(name) && isSchemeMfIsin(firstNonBlank(isin, symbol)))) {
+            return INDUSTRY_MUTUAL_FUND;
+        }
         if (!isMissingSector(currentIndustry)) {
             return currentIndustry.trim();
+        }
+        if (isSchemeMfIsin(firstNonBlank(isin, symbol)) && !looksLikeListedEtfTicker(symbol)) {
+            return INDUSTRY_MUTUAL_FUND;
         }
         if (looksLikeEtfOrScheme(symbol, isin)) {
             return INDUSTRY_ETF;
@@ -216,9 +322,18 @@ public final class HoldingInstrumentClassifier {
         if (nameUpper.contains("ETF") || nameUpper.contains("BEES")) {
             return false;
         }
-        return nameUpper.contains("BANDHAN")
+        if (nameUpper.contains("BANDHAN")
                 || nameUpper.contains("MUTUAL FUND")
-                || nameUpper.contains("MUTUALFUND");
+                || nameUpper.contains("MUTUALFUND")
+                || nameUpper.contains("GROWTH PLAN")
+                || nameUpper.contains("DIRECT PLAN")
+                || nameUpper.contains("DIRECT-GROWTH")
+                || nameUpper.contains("DIRECT GROWTH")
+                || nameUpper.contains("AMC LTD")
+                || nameUpper.contains("AMC ")) {
+            return true;
+        }
+        return nameUpper.contains(" MF-") || (nameUpper.contains("#") && nameUpper.contains(" MF"));
     }
 
     static boolean nameMentionsTicker(String nameUpper, String tickerUpper) {

@@ -1043,11 +1043,23 @@ public class PortfolioIntelligenceSnapshotFactory {
 
     static String resolveSector(EquityModel eq, SecurityModel sec, String symbol, String priceSource) {
         String isin = eq != null ? eq.getIsin() : null;
+        String assetClass = eq != null ? eq.getAssetClass() : null;
+        String name = eq != null ? eq.getName() : null;
+        // Listed ETF / scheme MF win over MD industry labels (NIFTYBEES must not stay in FS).
+        if (HoldingInstrumentClassifier.looksLikeListedEtfTicker(symbol)
+                || HoldingInstrumentClassifier.mustKeepIsinBookKey(assetClass, symbol, isin, name)) {
+            String forced = HoldingInstrumentClassifier.resolveSector(
+                    null, symbol, isin, priceSource, assetClass, name);
+            if (forced != null && !HoldingInstrumentClassifier.isMissingSector(forced)) {
+                return forced;
+            }
+        }
         String fromEq = usableMeta(eq != null ? eq.getSector() : null);
         // Sticky Private/Unlisted must not win over listed industry meta.
         boolean eqIsProductBucket = fromEq != null && (
                 HoldingInstrumentClassifier.SECTOR_UNLISTED.equalsIgnoreCase(fromEq)
-                        || HoldingInstrumentClassifier.SECTOR_ETF.equalsIgnoreCase(fromEq));
+                        || HoldingInstrumentClassifier.SECTOR_ETF.equalsIgnoreCase(fromEq)
+                        || HoldingInstrumentClassifier.SECTOR_MUTUAL_FUND.equalsIgnoreCase(fromEq));
         if (fromEq != null && !eqIsProductBucket) {
             return fromEq;
         }
@@ -1065,7 +1077,8 @@ public class PortfolioIntelligenceSnapshotFactory {
         if (fromEq != null) {
             return fromEq;
         }
-        String classified = HoldingInstrumentClassifier.resolveSector(null, symbol, isin, priceSource);
+        String classified = HoldingInstrumentClassifier.resolveSector(
+                null, symbol, isin, priceSource, assetClass, name);
         if (classified != null && !HoldingInstrumentClassifier.isMissingSector(classified)) {
             return classified;
         }
