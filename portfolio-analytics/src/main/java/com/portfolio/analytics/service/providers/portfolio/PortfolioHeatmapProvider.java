@@ -8,6 +8,8 @@ import com.portfolio.analytics.service.utils.AnalyticsUtils;
 import com.portfolio.analytics.service.utils.HeatmapUtils;
 import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.marketdata.service.MutualFundNavService;
+import com.portfolio.marketdata.model.MutualFundNavMark;
 import com.portfolio.model.analytics.Heatmap;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.market.MarketData;
@@ -32,10 +34,12 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
 
     @org.springframework.lang.Nullable
     private final PortfolioHeatmapRedisService heatmapRedisService;
+    private final MutualFundNavService mutualFundNavService;
 
-    public PortfolioHeatmapProvider(PortfolioService portfolioService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService, @org.springframework.lang.Nullable PortfolioHeatmapRedisService heatmapRedisService) {
+    public PortfolioHeatmapProvider(PortfolioService portfolioService, MarketDataService marketDataService, SecurityDetailsService securityDetailsService, @org.springframework.lang.Nullable PortfolioHeatmapRedisService heatmapRedisService, MutualFundNavService mutualFundNavService) {
         super(portfolioService, marketDataService, securityDetailsService);
         this.heatmapRedisService = heatmapRedisService;
+        this.mutualFundNavService = mutualFundNavService;
     }
 
     @Override
@@ -79,6 +83,15 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                     .groupSymbolsBySector(displaySymbols, securityDetails);
 
                 Map<String, EquityModel> equityBySymbol = indexEquities(portfolio);
+                List<String> mfIsins = portfolio.getEquityModels() == null ? List.of() : portfolio.getEquityModels().stream()
+                        .filter(Objects::nonNull)
+                        .filter(e -> HoldingInstrumentClassifier.quarantineEquityLtp(
+                                e.getAssetClass(), e.getSymbol(), e.getIsin(), e.getName()))
+                        .map(e -> e.getIsin() != null && !e.getIsin().isBlank() ? e.getIsin() : e.getSymbol())
+                        .filter(HoldingInstrumentClassifier::isSchemeMfIsin)
+                        .distinct()
+                        .toList();
+                Map<String, MutualFundNavMark> mfMarks = mutualFundNavService.getMarks(mfIsins);
                 // Equity holding sector + instrument classifier fills Unknown / blank meta.
                 if (portfolio.getEquityModels() != null) {
                     for (EquityModel model : portfolio.getEquityModels()) {
@@ -132,6 +145,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                         sectorToStocks,
                         symbolToQuantity,
                         equityBySymbol,
+                        mfMarks,
                         sectorMarketDataMap,
                         sectorQuantitiesMap,
                         symbolPriceSource,
@@ -142,7 +156,9 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 Map<String, Double> symbolToChangePercent = new HashMap<>();
                 if (shouldApplyTodayChangeOverride(request) && portfolio.getEquityModels() != null) {
                     for (EquityModel model : portfolio.getEquityModels()) {
-                        if (model.getSymbol() != null && model.getTodayProfitLossPercentage() != null) {
+                        if (model.getSymbol() != null && model.getTodayProfitLossPercentage() != null
+                                && !HoldingInstrumentClassifier.quarantineEquityLtp(
+                                        model.getAssetClass(), model.getSymbol(), model.getIsin(), model.getName())) {
                             symbolToChangePercent.put(model.getSymbol(), model.getTodayProfitLossPercentage());
                         }
                     }
@@ -224,6 +240,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             Map<String, List<String>> sectorToStocks,
             Map<String, Double> symbolToQuantity,
             Map<String, EquityModel> equityBySymbol,
+            Map<String, MutualFundNavMark> mfMarks,
             Map<String, List<MarketData>> sectorMarketDataMap,
             Map<String, List<Double>> sectorQuantitiesMap,
             Map<String, String> symbolPriceSource,
@@ -240,6 +257,9 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             EquityModel equity = equityBySymbol.get(symbol);
             MarketData data = AnalyticsUtils.resolveMarketData(marketData, symbol);
             String priceSource = HoldingInstrumentClassifier.PRICE_LIVE;
+            String mfIsin = equity != null && equity.getIsin() != null && !equity.getIsin().isBlank()
+                    ? equity.getIsin() : symbol;
+            MutualFundNavMark navMark = mfMarks != null ? mfMarks.get(mfIsin.toUpperCase(Locale.ROOT)) : null;
 
             // Scheme MF / unsafe AMC→equity: never paint with equity cash LTP.
             HoldingMarkPriceResolver.Mark quarantineMark = equity == null ? null
@@ -254,7 +274,17 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                             equity.getCurrentPrice(),
                             equity.getAvgBuyingPrice(),
                             equity.getInvestmentValue());
-            if (quarantineMark != null && quarantineMark.isPresent()) {
+            if (navMark != null && navMark.nav() > 0) {
+                data = MarketData.builder()
+                        .symbol(symbol)
+                        .lastPrice(navMark.nav())
+                        .previousClose(navMark.previousNav())
+                        .timestamp(navMark.navDate() == null ? null : navMark.navDate()
+                                .atStartOfDay(java.time.ZoneId.of("Asia/Kolkata")).toInstant())
+                        .build();
+                priceSource = HoldingInstrumentClassifier.PRICE_NAV;
+                log.info("Heatmap EOD NAV for symbol={} nav={} date={}", symbol, navMark.nav(), navMark.navDate());
+            } else if (quarantineMark != null && quarantineMark.isPresent()) {
                 data = MarketData.builder()
                         .symbol(symbol)
                         .lastPrice(quarantineMark.price())
@@ -263,6 +293,14 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 priceSource = quarantineMark.priceSource();
                 log.info("Heatmap quarantine mark for symbol={} price={} source={}",
                         symbol, quarantineMark.price(), priceSource);
+            } else if (quarantineMark != null) {
+                Double cost = costBasisPrice(equity);
+                if (cost == null || cost <= 0) {
+                    log.warn("Quarantined symbol={} has no NAV or safe fallback", symbol);
+                    continue;
+                }
+                data = MarketData.builder().symbol(symbol).lastPrice(cost).previousClose(cost).build();
+                priceSource = HoldingInstrumentClassifier.PRICE_COST;
             } else if (data == null || !hasResolvablePrice(data)) {
                 Double cost = costBasisPrice(equity);
                 if (cost == null || cost <= 0) {

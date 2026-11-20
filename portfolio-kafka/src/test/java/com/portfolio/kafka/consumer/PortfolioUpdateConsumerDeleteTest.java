@@ -58,6 +58,7 @@ class PortfolioUpdateConsumerDeleteTest {
     @Mock private com.portfolio.service.family.FamilyMemberService familyMemberService;
     @Mock private com.portfolio.service.family.FamilyMemberConsolidationService familyMemberConsolidationService;
     @Mock private PortfolioHoldingsService portfolioHoldingsService;
+    @Mock private com.portfolio.service.NewUserPortfolioFallbackService newUserPortfolioFallbackService;
     @Mock private Acknowledgment acknowledgment;
 
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
@@ -88,7 +89,8 @@ class PortfolioUpdateConsumerDeleteTest {
                 npsImportService,
                 familyMemberService,
                 familyMemberConsolidationService,
-                portfolioHoldingsService);
+                portfolioHoldingsService,
+                newUserPortfolioFallbackService);
         c.init();
         return c;
     }

@@ -2,6 +2,9 @@ package com.portfolio.analytics.intelligence;
 
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
+import com.portfolio.analytics.intelligence.PortfolioIntelligenceSnapshot.Holding;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -72,5 +75,28 @@ class PortfolioIntelligenceSnapshotFactoryTest {
         String sector = PortfolioIntelligenceSnapshotFactory.resolveSector(
                 gold, null, "GOLDBEES", HoldingInstrumentClassifier.PRICE_COST);
         assertEquals("Exchange Traded Funds (ETFs)", sector);
+    }
+
+    @Test
+    void reconcileHoldingValues_matchesSavedBookTotalWithoutChangingAllocation() {
+        List<Holding> holdings = new ArrayList<>(List.of(
+                Holding.builder().symbol("AAA").value(900.0).weightPct(0).build(),
+                Holding.builder().symbol("BBB").value(600.0).weightPct(0).build()));
+
+        PortfolioIntelligenceSnapshotFactory.reconcileHoldingValues(holdings, 1_290.0);
+
+        assertEquals(1_290.0, holdings.stream().mapToDouble(Holding::getValue).sum(), 0.01);
+        assertEquals(774.0, holdings.get(0).getValue(), 0.01);
+        assertEquals(516.0, holdings.get(1).getValue(), 0.01);
+    }
+
+    @Test
+    void reconcileHoldingValues_leavesEmptyOrInvalidValuationsAlone() {
+        List<Holding> holdings = new ArrayList<>(List.of(
+                Holding.builder().symbol("AAA").value(0.0).weightPct(0).build()));
+
+        PortfolioIntelligenceSnapshotFactory.reconcileHoldingValues(holdings, 1_000.0);
+
+        assertEquals(0.0, holdings.get(0).getValue());
     }
 }

@@ -3,6 +3,10 @@ package com.portfolio.analytics.intelligence;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
 import com.portfolio.marketdata.model.InstrumentType;
 import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.marketdata.service.MutualFundNavService;
+import com.portfolio.marketdata.model.MutualFundNavMark;
+import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.market.OhlcData;
 import com.portfolio.model.market.TimeFrame;
@@ -31,6 +35,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyIterable;
 
 @ExtendWith(MockitoExtension.class)
 class PortfolioIntelligenceSnapshotFactoryHistoryTest {
@@ -45,6 +50,8 @@ class PortfolioIntelligenceSnapshotFactoryHistoryTest {
     private PortfolioIntelligenceHistoryRedisService historyCache;
     @Mock
     private TradingSymbolResolver tradingSymbolResolver;
+    @Mock
+    private MutualFundNavService mutualFundNavService;
 
     private PortfolioIntelligenceSnapshotFactory factory;
 
@@ -52,7 +59,7 @@ class PortfolioIntelligenceSnapshotFactoryHistoryTest {
     void setUp() {
         factory = new PortfolioIntelligenceSnapshotFactory(
                 portfolioService, marketDataService, securityDetailsService, historyCache,
-                tradingSymbolResolver);
+                tradingSymbolResolver, mutualFundNavService);
         ReflectionTestUtils.setField(factory, "primaryBenchmarkSymbol", "NIFTY 50");
         ReflectionTestUtils.setField(factory, "historyLookbackDays", 60);
         ReflectionTestUtils.setField(factory, "historyTimeoutMs", 800L);
@@ -62,6 +69,33 @@ class PortfolioIntelligenceSnapshotFactoryHistoryTest {
     @Test
     void getHistoryTimeoutStressMs_usesConfiguredValue() {
         assertThat(factory.getHistoryTimeoutStressMs()).isEqualTo(20_000L);
+    }
+
+    @Test
+    void intelligenceSnapshotUsesCatalogNavForQuarantinedScheme() {
+        String isin = "INF000000001";
+        EquityModel mf = EquityModel.builder()
+                .symbol(isin)
+                .isin(isin)
+                .assetClass("mutual_fund_demat")
+                .quantity(4.0)
+                .importMarkPrice(10.0)
+                .currentValue(40.0)
+                .build();
+        PortfolioModelV1 portfolio = PortfolioModelV1.builder()
+                .id(java.util.UUID.randomUUID())
+                .equityModels(List.of(mf))
+                .build();
+        when(mutualFundNavService.getMarks(anyIterable())).thenReturn(Map.of(
+                isin, new MutualFundNavMark(isin, "Example Scheme", 12.5, 11.0, LocalDate.now())));
+
+        PortfolioIntelligenceSnapshot snapshot = factory.buildFromPortfolio(portfolio, false);
+
+        assertThat(snapshot.getTotalValue()).isEqualTo(50.0);
+        assertThat(snapshot.getHoldings()).hasSize(1);
+        assertThat(snapshot.getHoldings().get(0).getValue()).isEqualTo(50.0);
+        assertThat(snapshot.getHoldings().get(0).getSector()).isEqualTo("Mutual Funds");
+        assertThat(snapshot.getHoldings().get(0).getAssetClass()).isEqualTo(HealthScoreEngine.ASSET_MUTUAL_FUND);
     }
 
     @Test

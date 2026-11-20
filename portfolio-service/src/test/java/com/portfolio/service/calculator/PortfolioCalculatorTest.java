@@ -2,6 +2,8 @@ package com.portfolio.service.calculator;
 
 import com.portfolio.marketdata.model.BatchSearchResponse;
 import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.marketdata.model.MutualFundNavMark;
+import com.portfolio.marketdata.service.MutualFundNavService;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.market.OhlcData;
 import com.portfolio.model.portfolio.EquityHoldings;
@@ -24,6 +26,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
@@ -42,6 +45,9 @@ class PortfolioCalculatorTest {
     @Mock
     private com.portfolio.basket.client.EtfApiClient etfApiClient;
 
+    @Mock
+    private MutualFundNavService mutualFundNavService;
+
     private PortfolioCalculator portfolioCalculator;
 
     private EquityHoldings holding;
@@ -49,7 +55,7 @@ class PortfolioCalculatorTest {
 
     @BeforeEach
     void setUp() {
-        portfolioCalculator = new PortfolioCalculator(marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run, null);
+        portfolioCalculator = new PortfolioCalculator(marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run, null, mutualFundNavService);
         holding = new EquityHoldings();
         holding.setSymbol("TCS");
         holding.setQuantity(10.0);
@@ -85,6 +91,30 @@ class PortfolioCalculatorTest {
     }
 
     @Test
+    void schemeMfUsesCatalogNavAndPreviousNavWithoutEquityQuote() {
+        EquityHoldings mf = new EquityHoldings();
+        mf.setSymbol("INF000000001");
+        mf.setIsin("INF000000001");
+        mf.setAssetClass("mutual_fund_demat");
+        mf.setQuantity(3.0);
+        mf.setImportMarkPrice(8.0);
+        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of());
+        when(mutualFundNavService.getMarks(any())).thenReturn(Map.of(
+                "INF000000001", new MutualFundNavMark("INF000000001", "Example Growth", 12.5, 10.0,
+                        java.time.LocalDate.of(2026, 11, 20))));
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+
+        EquityHoldings result = portfolioCalculator.enrichHoldings(List.of(mf)).get(0);
+
+        assertEquals(12.5, result.getCurrentPrice());
+        assertEquals(37.5, result.getCurrentValue());
+        assertEquals(7.5, result.getTodayGainLoss());
+        assertEquals(25.0, result.getTodayGainLossPercentage());
+        assertEquals("EOD_NAV", result.getPriceSource());
+        assertEquals("Example Growth", result.getName());
+    }
+
+    @Test
     void enrichHoldings_FallbackToMongo() {
         // Mock marketDataService to return the fallback price, simulating MarketDataService's internal MongoDB fallback
         com.portfolio.model.market.MarketData apiData = new com.portfolio.model.market.MarketData();
@@ -116,10 +146,11 @@ class PortfolioCalculatorTest {
     }
 
     @Test
-    void enrichHoldings_infSchemeGetsEtfSector() {
+    void enrichHoldings_infIsinWithEtfNameGetsEtfSector() {
         EquityHoldings gold = new EquityHoldings();
         gold.setSymbol("INF277KA1976");
         gold.setIsin("INF277KA1976");
+        gold.setName("Example ETF");
         gold.setQuantity(7.0);
         gold.setAverageBuyingPrice(14.68);
         gold.setInvestmentCost(102.76);
@@ -246,7 +277,7 @@ class PortfolioCalculatorTest {
                 org.mockito.Mockito.mock(com.portfolio.redis.session.CashSessionClock.class);
         when(clock.isCashOpen()).thenReturn(false);
         portfolioCalculator = new PortfolioCalculator(
-                marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run, clock);
+                marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run, clock, mutualFundNavService);
 
         MarketData data = MarketData.builder()
                 .symbol("TCS")
@@ -268,7 +299,7 @@ class PortfolioCalculatorTest {
                 org.mockito.Mockito.mock(com.portfolio.redis.session.CashSessionClock.class);
         when(clock.isCashOpen()).thenReturn(true);
         portfolioCalculator = new PortfolioCalculator(
-                marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run, clock);
+                marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient, Runnable::run, clock, mutualFundNavService);
 
         MarketData data = MarketData.builder()
                 .symbol("TCS")

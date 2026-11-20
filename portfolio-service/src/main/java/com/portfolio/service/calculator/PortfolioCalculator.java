@@ -9,6 +9,8 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
 import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.marketdata.service.MutualFundNavService;
+import com.portfolio.marketdata.model.MutualFundNavMark;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.reference.ListedEquitySectorCatalog;
@@ -39,20 +41,36 @@ public class PortfolioCalculator {
     private final com.portfolio.basket.client.EtfApiClient etfApiClient;
     private final java.util.concurrent.Executor taskExecutor;
     private final CashSessionClock cashSessionClock;
+    @Nullable
+    private final MutualFundNavService mutualFundNavService;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public PortfolioCalculator(
             MarketDataService marketDataService,
             MarketCapMongoService marketCapMongoService,
             StockPriceMongoService stockPriceMongoService,
             com.portfolio.basket.client.EtfApiClient etfApiClient,
             @org.springframework.beans.factory.annotation.Qualifier("taskExecutor") java.util.concurrent.Executor taskExecutor,
-            @Nullable CashSessionClock cashSessionClock) {
+            @Nullable CashSessionClock cashSessionClock,
+            @Nullable MutualFundNavService mutualFundNavService) {
         this.marketDataService = marketDataService;
         this.marketCapMongoService = marketCapMongoService;
         this.stockPriceMongoService = stockPriceMongoService;
         this.etfApiClient = etfApiClient;
         this.taskExecutor = taskExecutor;
         this.cashSessionClock = cashSessionClock;
+        this.mutualFundNavService = mutualFundNavService;
+    }
+
+    public PortfolioCalculator(
+            MarketDataService marketDataService,
+            MarketCapMongoService marketCapMongoService,
+            StockPriceMongoService stockPriceMongoService,
+            com.portfolio.basket.client.EtfApiClient etfApiClient,
+            java.util.concurrent.Executor taskExecutor,
+            @Nullable CashSessionClock cashSessionClock) {
+        this(marketDataService, marketCapMongoService, stockPriceMongoService, etfApiClient,
+                taskExecutor, cashSessionClock, null);
     }
 
     /**
@@ -127,8 +145,9 @@ public class PortfolioCalculator {
         }
         final Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> finalMarketCapMap = finalMarketCapMapTemp;
 
+        Map<String, MutualFundNavMark> mfMarks = loadMutualFundMarks(equityHoldings);
         return equityHoldings.stream()
-                .map(holding -> enrichHolding(holding, finalApiDataForEnrich, finalMarketCapMap, cachedMarketCap))
+                .map(holding -> enrichHolding(holding, finalApiDataForEnrich, finalMarketCapMap, cachedMarketCap, mfMarks))
                 .collect(Collectors.toList());
     }
 
@@ -148,9 +167,22 @@ public class PortfolioCalculator {
             log.error("MarketDataService reprice failed: {}", e.getMessage());
         }
         final Map<String, MarketData> finalApiData = (apiData == null) ? Map.of() : apiData;
+        Map<String, MutualFundNavMark> mfMarks = loadMutualFundMarks(equityHoldings);
         return equityHoldings.stream()
-                .map(holding -> enrichHolding(holding, finalApiData, Map.of(), Map.of()))
+                .map(holding -> enrichHolding(holding, finalApiData, Map.of(), Map.of(), mfMarks))
                 .collect(Collectors.toList());
+    }
+
+    private Map<String, MutualFundNavMark> loadMutualFundMarks(List<EquityHoldings> holdings) {
+        if (mutualFundNavService == null || holdings == null) return Map.of();
+        List<String> isins = holdings.stream()
+                .filter(h -> h != null && HoldingInstrumentClassifier.quarantineEquityLtp(
+                        h.getAssetClass(), h.getSymbol(), h.getIsin(), h.getName()))
+                .map(h -> h.getIsin() != null && !h.getIsin().isBlank() ? h.getIsin() : h.getSymbol())
+                .filter(HoldingInstrumentClassifier::isSchemeMfIsin)
+                .distinct()
+                .toList();
+        return mutualFundNavService.getMarks(isins);
     }
 
     /** Listed tickers only. An unresolved ISIN has no OHLC row and stalls the batch. */
@@ -166,7 +198,8 @@ public class PortfolioCalculator {
     private EquityHoldings enrichHolding(EquityHoldings holding, 
             Map<String, MarketData> marketDataMap,
             Map<String, com.portfolio.marketdata.model.BatchSearchResponse.SecurityMatch> marketCapMap,
-            Map<String, MarketCapDocument> cachedMarketCap) {
+            Map<String, MarketCapDocument> cachedMarketCap,
+            Map<String, MutualFundNavMark> mfMarks) {
             
         String symbol = holding.getSymbol();
         if (symbol == null)
@@ -224,6 +257,10 @@ public class PortfolioCalculator {
                 : null;
         boolean quarantineLtp = HoldingInstrumentClassifier.quarantineEquityLtp(
                 holding.getAssetClass(), symbol, holding.getIsin(), holding.getName());
+        String mfKey = holding.getIsin() != null && !holding.getIsin().isBlank()
+                ? holding.getIsin().trim().toUpperCase(java.util.Locale.ROOT)
+                : (symbol != null ? symbol.trim().toUpperCase(java.util.Locale.ROOT) : null);
+        MutualFundNavMark mfMark = mfKey != null && mfMarks != null ? mfMarks.get(mfKey) : null;
 
         // Waterfall Price Assignment — never apply equity cash LTP to scheme MF demat.
         if (!quarantineLtp && marketDataMap != null) {
@@ -264,6 +301,20 @@ public class PortfolioCalculator {
         } else if (quarantineLtp) {
             log.info("[Holdings] {} quarantined from equity LTP (assetClass={} name={})",
                     symbol, holding.getAssetClass(), holding.getName());
+        }
+
+        // EOD NAV is the authoritative scheme mark. It takes precedence over CAS marks,
+        // but never over a listed equity/ETF quote because only quarantined scheme MFs reach here.
+        if (quarantineLtp && mfMark != null && mfMark.nav() > 0) {
+            currentPrice = mfMark.nav();
+            previousClosePrice = mfMark.previousNav();
+            priceSource = HoldingInstrumentClassifier.PRICE_NAV;
+            if (mfMark.schemeName() != null && !mfMark.schemeName().isBlank()) {
+                holding.setName(mfMark.schemeName());
+            }
+            if (mfMark.navDate() != null) {
+                holding.setPriceAsOf(mfMark.navDate().atStartOfDay(java.time.ZoneId.of("Asia/Kolkata")).toLocalDateTime());
+            }
         }
 
         // Fallback Tier 2: Mongo for last and/or previousClose when live data is incomplete

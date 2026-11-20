@@ -107,10 +107,17 @@ class XRaySummaryBuilderTest {
         assertEquals(30.0, classes.get(HealthScoreEngine.ASSET_MUTUAL_FUND).getWeightPct());
         assertEquals(20.0, classes.get(HealthScoreEngine.ASSET_NPS).getWeightPct());
 
-        // NPS excluded from sector; equity IT remains. MF with null sector may appear as Unknown.
+        // Mutual funds are visible in Sector/Industry; NPS remains outside those equity+MF views.
         Map<String, XRayDto.WeightSliceDto> sectors = byName(xray.getSectorWeights());
         assertNotNull(sectors.get("IT"));
+        assertEquals(300_000.0, sectors.get("Mutual Funds").getValue());
+        assertEquals(37.5, sectors.get("Mutual Funds").getWeightPct());
         assertEquals(null, sectors.get(HealthScoreEngine.ASSET_NPS));
+        Map<String, XRayDto.WeightSliceDto> industries = byName(xray.getIndustryWeights());
+        assertEquals(300_000.0, industries.get("Mutual Fund Schemes").getValue());
+        Map<String, XRayDto.WeightSliceDto> caps = byName(xray.getMarketCapWeights());
+        assertEquals(null, caps.get("Mutual Funds"));
+        assertEquals(1_000_000.0, xray.getTotalValue());
     }
 
     @Test

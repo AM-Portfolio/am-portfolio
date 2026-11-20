@@ -22,6 +22,7 @@ public final class HoldingInstrumentClassifier {
     public static final String PRICE_LAST = "LAST";
     public static final String PRICE_COST = "COST_BASIS";
     public static final String PRICE_IMPORT = "IMPORT_MARK";
+    public static final String PRICE_NAV = "EOD_NAV";
 
     private HoldingInstrumentClassifier() {
     }

@@ -24,8 +24,9 @@ import java.util.stream.Collectors;
  * checks succeed and edits stay isolated.
  *
  * <p>Eligibility = no real broker book ({@link PortfolioKind#isRealBrokerBook}).
- * Paper and baskets never hide Demo. When a real broker appears, personal DEMO is
- * soft-deleted; when the last real broker is removed, Demo is re-cloned from the template.
+ * Paper and baskets never hide Demo. Any concrete broker book (including CDSL CAS)
+ * soft-deletes personal DEMO; when the last broker book is removed, Demo is re-cloned
+ * from the template.
  */
 @Service
 @RequiredArgsConstructor
@@ -88,7 +89,9 @@ public class NewUserPortfolioFallbackService {
             portfolios = Collections.emptyList();
         }
 
-        boolean hideCdsl = hasRealBrokerBook(portfolios);
+        // Hide CDSL aggregator only when a first-class broker (Zerodha/Groww/…) exists.
+        // CDSL-only CAS still hides Demo, but must remain visible in the list.
+        boolean hideCdsl = hasFirstClassBrokerBook(portfolios);
         return portfolios.stream()
                 .filter(portfolio -> portfolio != null)
                 .filter(portfolio -> !hideCdsl || !isCdslListRow(portfolio))
@@ -303,12 +306,32 @@ public class NewUserPortfolioFallbackService {
         }
     }
 
+    /** Any concrete broker book (incl. CDSL / CAS_DEMAT) — used to soft-hide Demo. */
     static boolean hasRealBrokerBook(List<PortfolioModelV1> portfolios) {
         if (portfolios == null) {
             return false;
         }
         for (PortfolioModelV1 p : portfolios) {
             if (p == null) {
+                continue;
+            }
+            if (PortfolioKind.isRealBrokerBook(p.getPortfolioKind(), p.getBrokerType())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** First-class brokers only (excludes CDSL aggregator) — used to hide CDSL list rows. */
+    static boolean hasFirstClassBrokerBook(List<PortfolioModelV1> portfolios) {
+        if (portfolios == null) {
+            return false;
+        }
+        for (PortfolioModelV1 p : portfolios) {
+            if (p == null || p.getBrokerType() == null) {
+                continue;
+            }
+            if (p.getBrokerType().isCdsl()) {
                 continue;
             }
             if (PortfolioKind.isRealBrokerBook(p.getPortfolioKind(), p.getBrokerType())) {

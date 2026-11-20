@@ -30,6 +30,7 @@ import com.portfolio.service.family.FamilyMemberService;
 import com.portfolio.service.nps.NpsImportService;
 import com.portfolio.service.intraday.IntradayCandleWarmService;
 import com.am.common.amcommondata.model.family.FamilyMember;
+import com.portfolio.service.NewUserPortfolioFallbackService;
 import com.portfolio.service.portfolio.PortfolioHoldingsService;
 import com.portfolio.service.portfolio.PortfolioIntradayService;
 import com.portfolio.service.resolver.PortfolioEquitySymbolNormalizer;
@@ -94,6 +95,7 @@ public class PortfolioUpdateConsumerService {
     private final FamilyMemberService           familyMemberService;
     private final FamilyMemberConsolidationService familyMemberConsolidationService;
     private final PortfolioHoldingsService      portfolioHoldingsService;
+    private final NewUserPortfolioFallbackService newUserPortfolioFallbackService;
 
     @Value("${app.kafka.portfolio.consumer.id:am-portfolio-consumer-group}")
     private String consumerGroupId;
@@ -282,6 +284,13 @@ public class PortfolioUpdateConsumerService {
         }
         PortfolioModelV1 saved = portfolioService.upsertDocumentPortfolio(portfolioModel);
         if (saved != null && saved.getOwner() != null) {
+            // Broker/CAS upsert retires personal Demo immediately (don't wait for next /list).
+            try {
+                newUserPortfolioFallbackService.ensurePersonalDemoLifecycle(saved.getOwner());
+            } catch (Exception e) {
+                log.warn("Demo lifecycle after document upsert failed for {}: {}",
+                        saved.getOwner(), e.getMessage());
+            }
             String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
             portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
             if (saved.getFamilyMemberId() != null && !saved.getFamilyMemberId().isBlank()) {
@@ -451,6 +460,12 @@ public class PortfolioUpdateConsumerService {
         }
         PortfolioModelV1 saved = portfolioService.updateTradePortfolio(portfolioModel);
         if (saved != null && saved.getOwner() != null) {
+            try {
+                newUserPortfolioFallbackService.ensurePersonalDemoLifecycle(saved.getOwner());
+            } catch (Exception e) {
+                log.warn("Demo lifecycle after trade upsert failed for {}: {}",
+                        saved.getOwner(), e.getMessage());
+            }
             String portfolioId = saved.getId() != null ? saved.getId().toString() : null;
             portfolioHoldingsRedisService.evictPortfolioHoldings(saved.getOwner(), portfolioId);
             if (saved.getFamilyMemberId() != null && !saved.getFamilyMemberId().isBlank()) {

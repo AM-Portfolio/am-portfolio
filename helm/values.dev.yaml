@@ -70,6 +70,7 @@ probes:
 
 env:
   SPRING_PROFILES_ACTIVE: "dev,security"
+  MF_CATALOG_API_URL: "http://am-parser-dev:8080"
   # HistoryJob + chart caches need Redis; application.yml defaults these to false.
   REDIS_CACHE_ENABLED: "true"
   PORTFOLIO_REDIS_ENABLED: "true"

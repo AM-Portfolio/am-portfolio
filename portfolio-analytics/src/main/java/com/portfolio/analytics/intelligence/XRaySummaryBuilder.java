@@ -22,11 +22,17 @@ public class XRaySummaryBuilder {
             HealthScoreEngine.ASSET_NPS,
             HealthScoreEngine.ASSET_MUTUAL_FUND
     );
+    private static final java.util.Set<String> SECTOR_INDUSTRY_EXCLUDED_CLASSES = java.util.Set.of(
+            HealthScoreEngine.ASSET_FIXED_INCOME,
+            HealthScoreEngine.ASSET_COMMODITY,
+            HealthScoreEngine.ASSET_CASH,
+            HealthScoreEngine.ASSET_NPS
+    );
 
     public XRayDto build(PortfolioIntelligenceSnapshot snapshot) {
         return XRayDto.builder()
-                .sectorWeights(groupWeights(snapshot, PortfolioIntelligenceSnapshot.Holding::getSector, h -> !isNonEquity(h)))
-                .industryWeights(groupWeights(snapshot, PortfolioIntelligenceSnapshot.Holding::getIndustry, h -> !isNonEquity(h)))
+                .sectorWeights(groupWeights(snapshot, this::sectorKey, this::includeSectorAndIndustry))
+                .industryWeights(groupWeights(snapshot, this::industryKey, this::includeSectorAndIndustry))
                 .marketCapWeights(groupWeights(snapshot, PortfolioIntelligenceSnapshot.Holding::getMarketCap, h -> !isNonEquity(h)))
                 // Class tab: all holdings (EQUITY + bonds/commodity/cash). Empty only when book has no holdings.
                 .assetClassWeights(groupWeights(snapshot, h -> HealthScoreEngine.normalizeAssetClass(h.getAssetClass()), h -> true))
@@ -71,6 +77,27 @@ public class XRaySummaryBuilder {
     private boolean isNonEquity(PortfolioIntelligenceSnapshot.Holding h) {
         String ac = HealthScoreEngine.normalizeAssetClass(h.getAssetClass());
         return NON_EQUITY_CLASSES.contains(ac);
+    }
+
+    private boolean includeSectorAndIndustry(PortfolioIntelligenceSnapshot.Holding h) {
+        return !SECTOR_INDUSTRY_EXCLUDED_CLASSES.contains(
+                HealthScoreEngine.normalizeAssetClass(h.getAssetClass()));
+    }
+
+    private String sectorKey(PortfolioIntelligenceSnapshot.Holding h) {
+        if (HealthScoreEngine.ASSET_MUTUAL_FUND.equals(
+                HealthScoreEngine.normalizeAssetClass(h.getAssetClass()))) {
+            return com.portfolio.model.portfolio.HoldingInstrumentClassifier.SECTOR_MUTUAL_FUND;
+        }
+        return h.getSector();
+    }
+
+    private String industryKey(PortfolioIntelligenceSnapshot.Holding h) {
+        if (HealthScoreEngine.ASSET_MUTUAL_FUND.equals(
+                HealthScoreEngine.normalizeAssetClass(h.getAssetClass()))) {
+            return com.portfolio.model.portfolio.HoldingInstrumentClassifier.INDUSTRY_MUTUAL_FUND;
+        }
+        return h.getIndustry();
     }
 
     private List<XRayDto.WeightSliceDto> groupWeights(

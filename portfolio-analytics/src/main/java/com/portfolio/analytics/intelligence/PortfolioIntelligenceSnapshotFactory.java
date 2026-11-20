@@ -12,6 +12,8 @@ import com.portfolio.marketdata.model.FilterType;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
 import com.portfolio.marketdata.model.InstrumentType;
 import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.marketdata.service.MutualFundNavService;
+import com.portfolio.marketdata.model.MutualFundNavMark;
 import com.portfolio.model.analytics.intelligence.CachedIntelligenceHistory;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.market.TimeFrame;
@@ -87,6 +89,7 @@ public class PortfolioIntelligenceSnapshotFactory {
     private final SecurityDetailsService securityDetailsService;
     private final PortfolioIntelligenceHistoryRedisService historyCache;
     private final TradingSymbolResolver tradingSymbolResolver;
+    private final MutualFundNavService mutualFundNavService;
 
     private final ConcurrentHashMap<String, CompletableFuture<HistoryFields>> historyInFlight =
             new ConcurrentHashMap<>();
@@ -212,6 +215,20 @@ public class PortfolioIntelligenceSnapshotFactory {
         List<AssetModel> npsModels = portfolio.getNpsModels() != null
                 ? portfolio.getNpsModels() : List.of();
 
+        List<String> mfIsins = new ArrayList<>();
+        equities.stream()
+                .filter(e -> e != null && HoldingInstrumentClassifier.quarantineEquityLtp(
+                        e.getAssetClass(), e.getSymbol(), e.getIsin(), e.getName()))
+                .map(e -> e.getIsin() != null && !e.getIsin().isBlank() ? e.getIsin() : e.getSymbol())
+                .filter(HoldingInstrumentClassifier::isSchemeMfIsin)
+                .forEach(mfIsins::add);
+        mutualFunds.stream()
+                .filter(a -> a != null)
+                .map(a -> a.getIsin() != null && !a.getIsin().isBlank() ? a.getIsin() : a.getSymbol())
+                .filter(HoldingInstrumentClassifier::isSchemeMfIsin)
+                .forEach(mfIsins::add);
+        Map<String, MutualFundNavMark> mfMarks = mutualFundNavService.getMarks(mfIsins.stream().distinct().toList());
+
         boolean anyHoldings = !equities.isEmpty()
                 || !mutualFunds.isEmpty()
                 || !bonds.isEmpty()
@@ -294,7 +311,18 @@ public class PortfolioIntelligenceSnapshotFactory {
                     eq.getAssetClass(), sym, eq.getIsin(), eq.getName() != null ? eq.getName() : eq.getCompanyName());
             MarketData md = quarantineLtp ? null : marketData.get(sym);
             double price = quarantineLtp ? 0.0 : AllocationUtils.resolvePrice(md);
-            String priceSourceHint = price > 0
+            String mfKey = eq.getIsin() != null && !eq.getIsin().isBlank()
+                    ? eq.getIsin().trim().toUpperCase(Locale.ROOT) : sym;
+            MutualFundNavMark mfMark = mfMarks.get(mfKey);
+            if (quarantineLtp && mfMark != null && mfMark.nav() > 0) {
+                price = mfMark.nav();
+                if (mfMark.schemeName() != null && !mfMark.schemeName().isBlank()) {
+                    eq.setName(mfMark.schemeName());
+                }
+            }
+            String priceSourceHint = quarantineLtp && mfMark != null && mfMark.nav() > 0
+                    ? HoldingInstrumentClassifier.PRICE_NAV
+                    : price > 0
                     ? HoldingInstrumentClassifier.PRICE_LIVE
                     : HoldingInstrumentClassifier.PRICE_COST;
             if (price <= 0) {
@@ -326,11 +354,11 @@ public class PortfolioIntelligenceSnapshotFactory {
             quantities.put(sym, eq.getQuantity());
         }
 
-        droppedNoPrice += appendAssetHoldings(holdings, mutualFunds, HealthScoreEngine.ASSET_MUTUAL_FUND);
-        droppedNoPrice += appendAssetHoldings(holdings, bonds, HealthScoreEngine.ASSET_FIXED_INCOME);
-        droppedNoPrice += appendAssetHoldings(holdings, commodities, HealthScoreEngine.ASSET_COMMODITY);
-        droppedNoPrice += appendAssetHoldings(holdings, cash, HealthScoreEngine.ASSET_CASH);
-        droppedNoPrice += appendAssetHoldings(holdings, npsModels, HealthScoreEngine.ASSET_NPS);
+        droppedNoPrice += appendAssetHoldings(holdings, mutualFunds, HealthScoreEngine.ASSET_MUTUAL_FUND, mfMarks);
+        droppedNoPrice += appendAssetHoldings(holdings, bonds, HealthScoreEngine.ASSET_FIXED_INCOME, mfMarks);
+        droppedNoPrice += appendAssetHoldings(holdings, commodities, HealthScoreEngine.ASSET_COMMODITY, mfMarks);
+        droppedNoPrice += appendAssetHoldings(holdings, cash, HealthScoreEngine.ASSET_CASH, mfMarks);
+        droppedNoPrice += appendAssetHoldings(holdings, npsModels, HealthScoreEngine.ASSET_NPS, mfMarks);
 
         if (droppedNoPrice > 0) {
             log.warn("Intel snapshot portfolioId={} dropped {} holdings with no usable price",
@@ -345,6 +373,9 @@ public class PortfolioIntelligenceSnapshotFactory {
         HistoryFields history = includeHistory
                 ? loadHistoryMetrics(histKey, symbols, quantities, fetchHistoryIfMiss, histTimeoutMs)
                 : HistoryFields.empty();
+        if (portfolio.getTotalValue() != null && portfolio.getTotalValue() > 0) {
+            reconcileHoldingValues(holdings, portfolio.getTotalValue());
+        }
         return finalizeSnapshot(
                 portfolioId,
                 holdings,
@@ -358,13 +389,36 @@ public class PortfolioIntelligenceSnapshotFactory {
     }
 
     /**
+     * Accounts Hub treats a positive saved portfolio total as authoritative, while
+     * intelligence has fresher per-line market/NAV marks. Scale those marks together
+     * so X-Ray allocations retain their proportions but reconcile to the same book
+     * value shown by the dashboard.
+     */
+    static void reconcileHoldingValues(List<PortfolioIntelligenceSnapshot.Holding> holdings, double targetValue) {
+        if (holdings == null || holdings.isEmpty() || !Double.isFinite(targetValue) || targetValue <= 0) {
+            return;
+        }
+        double markedTotal = holdings.stream()
+                .mapToDouble(PortfolioIntelligenceSnapshot.Holding::getValue)
+                .sum();
+        if (!Double.isFinite(markedTotal) || markedTotal <= 0) {
+            return;
+        }
+        double scale = targetValue / markedTotal;
+        for (PortfolioIntelligenceSnapshot.Holding holding : holdings) {
+            holding.setValue(round2(holding.getValue() * scale));
+        }
+    }
+
+    /**
      * Maps Option A non-equity lists into snapshot holdings using stored value/price.
      * @return count of rows skipped for missing price/value
      */
     private int appendAssetHoldings(
             List<PortfolioIntelligenceSnapshot.Holding> holdings,
             List<AssetModel> assets,
-            String assetClass) {
+            String assetClass,
+            Map<String, MutualFundNavMark> mfMarks) {
         if (assets == null || assets.isEmpty()) {
             return 0;
         }
@@ -373,12 +427,22 @@ public class PortfolioIntelligenceSnapshotFactory {
             if (asset == null) {
                 continue;
             }
-            double value = resolveAssetValue(asset);
+            String mfKey = asset.getIsin() != null && !asset.getIsin().isBlank()
+                    ? asset.getIsin().trim().toUpperCase(Locale.ROOT)
+                    : (asset.getSymbol() != null ? asset.getSymbol().trim().toUpperCase(Locale.ROOT) : null);
+            MutualFundNavMark mfMark = HealthScoreEngine.ASSET_MUTUAL_FUND.equals(assetClass)
+                    && mfKey != null ? mfMarks.get(mfKey) : null;
+            double value = mfMark != null && mfMark.nav() > 0 && asset.getQuantity() != null && asset.getQuantity() > 0
+                    ? mfMark.nav() * asset.getQuantity()
+                    : resolveAssetValue(asset);
             if (value <= 0) {
                 dropped++;
                 continue;
             }
             String sym = asset.getSymbol();
+            if (mfMark != null && mfMark.schemeName() != null && !mfMark.schemeName().isBlank()) {
+                sym = mfMark.schemeName();
+            }
             if (sym == null || sym.isBlank()) {
                 sym = asset.getName() != null ? asset.getName() : assetClass;
             }
@@ -386,8 +450,10 @@ public class PortfolioIntelligenceSnapshotFactory {
                     .symbol(SymbolResolver.normalize(sym))
                     .value(value)
                     .weightPct(0)
-                    .sector(null)
-                    .industry(null)
+                    .sector(HealthScoreEngine.ASSET_MUTUAL_FUND.equals(assetClass)
+                            ? HoldingInstrumentClassifier.SECTOR_MUTUAL_FUND : null)
+                    .industry(HealthScoreEngine.ASSET_MUTUAL_FUND.equals(assetClass)
+                            ? HoldingInstrumentClassifier.INDUSTRY_MUTUAL_FUND : null)
                     .marketCap(null)
                     .assetClass(assetClass)
                     .build());
