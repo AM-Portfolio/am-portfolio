@@ -237,6 +237,8 @@ public class Heatmap {
     public static class StockDetail {
         private String symbol;           // Stock symbol/ticker
         private String name;             // Short name (optional)
+        /** Scheme or equity ISIN when known (heatmap lookthrough expand key). */
+        private String isin;
         
         @Builder.Default
         @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -266,6 +268,9 @@ public class Heatmap {
 
         /** LIVE / LAST / COST_BASIS when known. */
         private String priceSource;
+
+        /** Prior close / prior EOD NAV used for day %. */
+        private Double previousClose;
         
         /**
          * Calculate the value based on price and quantity

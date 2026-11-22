@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 import com.portfolio.redis.service.PortfolioHeatmapRedisService;
@@ -52,7 +53,8 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         log.info("Generating sector heatmap for portfolio: {}", request.getCoreIdentifiers().getPortfolioId());
         
         String portfolioId = request.getCoreIdentifiers().getPortfolioId();
-        
+        applyAssetScopeToPrefetch(request);
+
         // Check cache first
         if (heatmapRedisService != null) {
             Optional<Heatmap> cached = heatmapRedisService.getCachedHeatmap(portfolioId, request);
@@ -66,6 +68,10 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             request,
             this::createEmptyResult,
             (portfolio, portfolioSymbols, marketData) -> {
+                portfolio = filterPortfolioByAssetScope(portfolio, request != null ? request.getAssetScope() : null);
+                if (portfolio.getEquityModels() == null || portfolio.getEquityModels().isEmpty()) {
+                    return createEmptyResult();
+                }
                 // ISIN-as-symbol (INF… ETF / unlisted) → broker display ticker for mosaic labels.
                 applyDisplayTickers(portfolio);
                 List<String> displaySymbols = getPortfolioSymbols(portfolio);
@@ -171,6 +177,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                         symbolToQuantity,
                         symbolToChangePercent,
                         symbolPriceSource,
+                        equityBySymbol,
                         totalPortfolioValue[0]);
                 
                 // Create heatmap with domain-driven approach
@@ -210,12 +217,91 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
      * Holdings day P&amp;L override applies only for live / 1D heatmap.
      * Non-1D requests must use hist period returns from market data.
      */
+    @Override
+    protected boolean allowsEmptyMarketData() {
+        // Mutual-fund mosaic builds from AMFI NAV synthetics when OHLC is empty.
+        return true;
+    }
+
+    @Override
+    protected boolean allowsPrefetchFanOut() {
+        return true;
+    }
+
     static boolean shouldApplyTodayChangeOverride(AdvancedAnalyticsRequest request) {
         if (request == null || request.getTimeFrameRequest() == null) {
             return true;
         }
         com.portfolio.model.market.TimeFrame tf = request.getTimeFrame();
         return tf == null || tf == com.portfolio.model.market.TimeFrame.DAY;
+    }
+
+    /** Normalize {@code ALL|EQUITY|MUTUAL_FUND}; blank → ALL. */
+    static String normalizeAssetScope(String assetScope) {
+        if (assetScope == null || assetScope.isBlank()) {
+            return "ALL";
+        }
+        String u = assetScope.trim().toUpperCase(Locale.ROOT);
+        if ("EQUITY".equals(u) || "MUTUAL_FUND".equals(u) || "MF".equals(u)) {
+            return "MF".equals(u) ? "MUTUAL_FUND" : u;
+        }
+        return "ALL";
+    }
+
+    static boolean matchesAssetScope(EquityModel equity, String assetScope) {
+        if (equity == null) {
+            return false;
+        }
+        String scope = normalizeAssetScope(assetScope);
+        if ("ALL".equals(scope)) {
+            return true;
+        }
+        String product = HoldingInstrumentClassifier.productClass(
+                equity.getAssetClass(),
+                equity.getSymbol(),
+                equity.getIsin(),
+                null,
+                equity.getName());
+        boolean mutualFund = HoldingInstrumentClassifier.PRODUCT_MUTUAL_FUND.equals(product);
+        if ("MUTUAL_FUND".equals(scope)) {
+            return mutualFund;
+        }
+        // EQUITY: listed equity + ETF + unlisted; never scheme MF.
+        return !mutualFund;
+    }
+
+    static PortfolioModelV1 filterPortfolioByAssetScope(PortfolioModelV1 portfolio, String assetScope) {
+        if (portfolio == null || portfolio.getEquityModels() == null) {
+            return portfolio;
+        }
+        if ("ALL".equals(normalizeAssetScope(assetScope))) {
+            return portfolio;
+        }
+        List<EquityModel> filtered = portfolio.getEquityModels().stream()
+                .filter(e -> matchesAssetScope(e, assetScope))
+                .collect(Collectors.toList());
+        return PortfolioModelV1.builder()
+                .id(portfolio.getId())
+                .name(portfolio.getName())
+                .owner(portfolio.getOwner())
+                .portfolioKind(portfolio.getPortfolioKind())
+                .brokerType(portfolio.getBrokerType())
+                .totalValue(portfolio.getTotalValue())
+                .equityModels(filtered)
+                .mutualFunds(portfolio.getMutualFunds())
+                .bonds(portfolio.getBonds())
+                .commodities(portfolio.getCommodities())
+                .cash(portfolio.getCash())
+                .npsModels(portfolio.getNpsModels())
+                .build();
+    }
+
+    private static void applyAssetScopeToPrefetch(AdvancedAnalyticsRequest request) {
+        if (request == null || request.getPrefetchedPortfolio() == null) {
+            return;
+        }
+        request.setPrefetchedPortfolio(
+                filterPortfolioByAssetScope(request.getPrefetchedPortfolio(), request.getAssetScope()));
     }
     
     /**
@@ -283,7 +369,11 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                                 .atStartOfDay(java.time.ZoneId.of("Asia/Kolkata")).toInstant())
                         .build();
                 priceSource = HoldingInstrumentClassifier.PRICE_NAV;
-                log.info("Heatmap EOD NAV for symbol={} nav={} date={}", symbol, navMark.nav(), navMark.navDate());
+                if (equity != null && navMark.schemeName() != null && !navMark.schemeName().isBlank()) {
+                    equity.setName(navMark.schemeName());
+                }
+                log.info("Heatmap EOD NAV for symbol={} nav={} prev={} date={}",
+                        symbol, navMark.nav(), navMark.previousNav(), navMark.navDate());
             } else if (quarantineMark != null && quarantineMark.isPresent()) {
                 data = MarketData.builder()
                         .symbol(symbol)
@@ -486,6 +576,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             Map<String, Double> symbolToQuantity,
             Map<String, Double> symbolToChangePercent,
             Map<String, String> symbolPriceSource,
+            Map<String, EquityModel> equityBySymbol,
             double totalPortfolioValue) {
         
         log.debug("Calculating performance metrics for {} sectors", sectorMarketDataMap.size());
@@ -531,10 +622,28 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 totalPortfolioValue,
                 symbolToChangePercent);
 
-            if (sectorPerformance.getStocks() != null && symbolPriceSource != null) {
+            if (sectorPerformance.getStocks() != null) {
                 for (Heatmap.StockDetail stock : sectorPerformance.getStocks()) {
-                    if (stock != null && stock.getSymbol() != null) {
+                    if (stock == null || stock.getSymbol() == null) {
+                        continue;
+                    }
+                    if (symbolPriceSource != null) {
                         stock.setPriceSource(symbolPriceSource.get(stock.getSymbol()));
+                    }
+                    EquityModel equity = equityBySymbol != null ? equityBySymbol.get(stock.getSymbol()) : null;
+                    if (equity != null) {
+                        if (equity.getName() != null && !equity.getName().isBlank()) {
+                            stock.setName(equity.getName());
+                        }
+                        String schemeIsin = equity.getIsin();
+                        if (schemeIsin == null || schemeIsin.isBlank()) {
+                            schemeIsin = stock.getSymbol();
+                        }
+                        if (schemeIsin != null && !schemeIsin.isBlank()) {
+                            stock.setIsin(schemeIsin.trim().toUpperCase(Locale.ROOT));
+                        }
+                    } else if (HoldingInstrumentClassifier.isSchemeMfIsin(stock.getSymbol())) {
+                        stock.setIsin(stock.getSymbol().trim().toUpperCase(Locale.ROOT));
                     }
                 }
             }

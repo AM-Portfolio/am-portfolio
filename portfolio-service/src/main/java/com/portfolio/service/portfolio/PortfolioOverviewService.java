@@ -187,9 +187,9 @@ public class PortfolioOverviewService {
     }
 
     /**
-     * Headline currentValue = hub residual+NPS. Keep todayGainLossPercentage from painted
-     * books; scale todayGainLoss rupees to the hub NAV so cards do not mix a tiny equity
-     * day abs with a household headline.
+     * Hub directory wealth fills the headline only when no broker book is in scope.
+     * Painted books keep the calculator total. A zero-book lift still scales todayGainLoss
+     * rupees to that hub NAV.
      */
     private PortfolioSummaryV1 applyHubResidualHeadline(
             PortfolioSummaryV1 summary, String userId, String persona) {
@@ -197,6 +197,10 @@ public class PortfolioOverviewService {
             return summary;
         }
         try {
+            // Painted broker books own the headline; hub residual applies only when no book is in scope.
+            if (personaBrokerBookCount(userId, persona) >= 1) {
+                return summary;
+            }
             double hubWealth = accountsHubService.wealthForPersona(userId, persona);
             if (hubWealth <= 0) {
                 return summary;
@@ -213,6 +217,17 @@ public class PortfolioOverviewService {
             log.warn("Hub residual headline failed for user={}: {}", userId, e.getMessage());
         }
         return summary;
+    }
+
+    private int personaBrokerBookCount(String userId, String persona) {
+        boolean household = com.am.common.amcommondata.model.family.HoldingsPersona.isHousehold(persona);
+        Set<String> liveMemberIds = household && familyMemberService != null
+                ? familyMemberService.liveMemberIdsForOwner(userId)
+                : null;
+        return (int) brokerBooksForUser(userId).stream()
+                .filter(p -> com.am.common.amcommondata.model.family.HoldingsPersona.matches(
+                        p.getFamilyMemberId(), persona, liveMemberIds))
+                .count();
     }
 
     /**

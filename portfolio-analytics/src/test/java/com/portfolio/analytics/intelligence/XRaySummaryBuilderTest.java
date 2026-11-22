@@ -1,6 +1,7 @@
 package com.portfolio.analytics.intelligence;
 
 import com.portfolio.model.analytics.intelligence.XRayDto;
+import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -118,6 +119,25 @@ class XRaySummaryBuilderTest {
         Map<String, XRayDto.WeightSliceDto> caps = byName(xray.getMarketCapWeights());
         assertEquals(null, caps.get("Mutual Funds"));
         assertEquals(1_000_000.0, xray.getTotalValue());
+    }
+
+    @Test
+    void sectorWeights_bucketEtfProductClass() {
+        PortfolioIntelligenceSnapshot snapshot = PortfolioIntelligenceSnapshot.builder()
+                .portfolioId("fixture")
+                .holdings(List.of(
+                        holding("NIFTYBEES", 100_000, 100, "Financial Services", "Index", "LARGE_CAP",
+                                HealthScoreEngine.ASSET_ETF)
+                ))
+                .totalValue(100_000)
+                .build();
+
+        XRayDto xray = builder.build(snapshot);
+        Map<String, XRayDto.WeightSliceDto> sectors = byName(xray.getSectorWeights());
+        assertEquals(100_000.0, sectors.get(HoldingInstrumentClassifier.SECTOR_ETF).getValue());
+        assertEquals(null, sectors.get("Financial Services"));
+        Map<String, XRayDto.WeightSliceDto> classes = byName(xray.getAssetClassWeights());
+        assertEquals(100.0, classes.get(HealthScoreEngine.ASSET_ETF).getWeightPct());
     }
 
     @Test

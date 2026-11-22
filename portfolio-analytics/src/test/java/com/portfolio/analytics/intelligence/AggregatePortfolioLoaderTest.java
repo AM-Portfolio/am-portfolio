@@ -14,7 +14,9 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -39,19 +41,37 @@ class AggregatePortfolioLoaderTest {
     }
 
     @Test
-    void loadMerged_cachesWithinTtl() {
+    void loadMerged_singleBookSkipsMergeAndCaches() {
         String userId = "user-1";
         PortfolioModelV1 book = new PortfolioModelV1();
         book.setId(UUID.randomUUID());
+        book.setTotalValue(930_000.0);
         when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(List.of(book));
-        when(aggregatePortfolioFactory.mergeBrokerBooks(eq(userId), anyList())).thenReturn(book);
 
         PortfolioModelV1 first = loader.loadMerged(userId);
         PortfolioModelV1 second = loader.loadMerged(userId);
 
         assertThat(first).isSameAs(book);
         assertThat(second).isSameAs(book);
+        assertThat(first.getTotalValue()).isEqualTo(930_000.0);
         verify(portfolioService, times(1)).getPortfoliosByUserId(userId);
+        verify(aggregatePortfolioFactory, never()).mergeBrokerBooks(anyString(), anyList());
+    }
+
+    @Test
+    void loadMerged_mergesMultipleBooksAndCaches() {
+        String userId = "user-3";
+        PortfolioModelV1 firstBook = new PortfolioModelV1();
+        firstBook.setId(UUID.randomUUID());
+        PortfolioModelV1 secondBook = new PortfolioModelV1();
+        secondBook.setId(UUID.randomUUID());
+        PortfolioModelV1 merged = new PortfolioModelV1();
+        merged.setTotalValue(1_500.0);
+        when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(List.of(firstBook, secondBook));
+        when(aggregatePortfolioFactory.mergeBrokerBooks(eq(userId), anyList())).thenReturn(merged);
+
+        assertThat(loader.loadMerged(userId)).isSameAs(merged);
+        assertThat(loader.loadMerged(userId)).isSameAs(merged);
         verify(aggregatePortfolioFactory, times(1)).mergeBrokerBooks(eq(userId), anyList());
     }
 
@@ -61,7 +81,6 @@ class AggregatePortfolioLoaderTest {
         PortfolioModelV1 book = new PortfolioModelV1();
         book.setId(UUID.randomUUID());
         when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(List.of(book));
-        when(aggregatePortfolioFactory.mergeBrokerBooks(eq(userId), anyList())).thenReturn(book);
 
         loader.loadMerged(userId);
         loader.evict(userId);

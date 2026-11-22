@@ -1,6 +1,7 @@
 package com.portfolio.mapper.holdings;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
+import com.am.common.amcommondata.model.asset.AssetModel;
 import com.am.common.amcommondata.model.asset.equity.EquityModel;
 import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.portfolio.model.portfolio.EquityHoldings;
@@ -70,5 +71,30 @@ class PortfolioHoldingsMapperIsinMergeTest {
                 .orElse(-1);
         assertEquals(15_542.681, bandhanQty, 1e-6);
         assertEquals(85_208.657, motilalQty, 1e-6);
+    }
+
+    @Test
+    void includesMutualFundAssetList() {
+        when(allocationLedgerService.getActiveAllocationsMap(anyString())).thenReturn(Map.of());
+        PortfolioHoldingsMapper mapper = new PortfolioHoldingsMapper(allocationLedgerService);
+
+        AssetModel fund = AssetModel.builder()
+                .symbol("INF090I01239")
+                .name("Axis Bluechip")
+                .quantity(12.0)
+                .currentValue(1_500.0)
+                .build();
+        PortfolioModelV1 book = PortfolioModelV1.builder()
+                .id(UUID.randomUUID())
+                .name("Zerodha")
+                .portfolioKind(PortfolioKind.BROKER)
+                .mutualFunds(List.of(fund))
+                .build();
+
+        List<EquityHoldings> rows = mapper.toEquityHoldings(List.of(book));
+        assertEquals(1, rows.size());
+        assertEquals(PortfolioHoldingsMapper.ASSET_MUTUAL_FUND, rows.get(0).getAssetClass());
+        assertEquals("INF090I01239", rows.get(0).getSymbol());
+        assertEquals(1_500.0, rows.get(0).getCurrentValue(), 1e-9);
     }
 }

@@ -85,9 +85,12 @@ public class XRaySummaryBuilder {
     }
 
     private String sectorKey(PortfolioIntelligenceSnapshot.Holding h) {
-        if (HealthScoreEngine.ASSET_MUTUAL_FUND.equals(
-                HealthScoreEngine.normalizeAssetClass(h.getAssetClass()))) {
+        String assetClass = HealthScoreEngine.normalizeAssetClass(h.getAssetClass());
+        if (HealthScoreEngine.ASSET_MUTUAL_FUND.equals(assetClass)) {
             return com.portfolio.model.portfolio.HoldingInstrumentClassifier.SECTOR_MUTUAL_FUND;
+        }
+        if (HealthScoreEngine.ASSET_ETF.equals(assetClass)) {
+            return com.portfolio.model.portfolio.HoldingInstrumentClassifier.SECTOR_ETF;
         }
         return h.getSector();
     }

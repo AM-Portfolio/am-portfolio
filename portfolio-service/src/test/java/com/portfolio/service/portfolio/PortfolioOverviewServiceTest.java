@@ -2,7 +2,11 @@ package com.portfolio.service.portfolio;
 
 import com.am.common.amcommondata.model.PortfolioModelV1;
 import com.am.common.amcommondata.model.enums.BrokerType;
+import com.am.common.amcommondata.model.enums.PortfolioKind;
 import com.am.common.amcommondata.service.PortfolioService;
+import com.portfolio.model.portfolio.v1.BrokerPortfolioSummary;
+import com.portfolio.service.accounts.AccountsHubService;
+import com.portfolio.service.family.FamilyMemberService;
 import com.portfolio.marketdata.service.MarketDataService;
 import com.portfolio.model.TimeInterval;
 import com.portfolio.model.mapper.PortfolioMapperv1;
@@ -23,6 +27,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -55,6 +60,9 @@ class PortfolioOverviewServiceTest {
 
     @Mock
     private FlowLogger flowLogger;
+
+    @Mock
+    private FamilyMemberService familyMemberService;
 
     @Mock
     private MarketDataService marketDataService;
@@ -449,5 +457,72 @@ class PortfolioOverviewServiceTest {
 
         assertNotNull(result);
         assertEquals(0.0, result.getInvestmentValue());
+    }
+
+    @Test
+    void overviewPortfolio_skipsHubResidualWhenOneBrokerBook() {
+        String userId = "user-1";
+        AccountsHubService accountsHubService = mock(AccountsHubService.class);
+        FamilyMemberService familyMemberService = mock(FamilyMemberService.class);
+        PortfolioOverviewService service = overviewWithHub(accountsHubService, familyMemberService);
+
+        PortfolioModelV1 book = new PortfolioModelV1();
+        book.setId(UUID.randomUUID());
+        book.setBrokerType(BrokerType.ZERODHA);
+        book.setPortfolioKind(PortfolioKind.BROKER);
+        book.setTotalValue(1_000.0);
+
+        when(portfolioSummaryRedisService.getLatestSummary(userId, TimeInterval.ONE_DAY))
+                .thenReturn(Optional.empty());
+        when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(List.of(book));
+        when(familyMemberService.liveMemberIdsForOwner(userId)).thenReturn(Set.of());
+        when(portfolioCalculator.calculateSummary(anyList(), anyDouble()))
+                .thenReturn(PortfolioSummaryV1.builder().currentValue(1_000.0).build());
+        when(portfolioMapper.toPortfolioModelV1(any(PortfolioModelV1.class)))
+                .thenReturn(BrokerPortfolioSummary.builder().build());
+        lenient().when(flowLogger.start(anyString(), any())).thenReturn(mock(FlowSpan.class));
+
+        PortfolioSummaryV1 result = service.overviewPortfolio(userId, TimeInterval.ONE_DAY);
+
+        assertEquals(1_000.0, result.getCurrentValue(), 0.01);
+        verify(accountsHubService, never()).wealthForPersona(any(), any());
+    }
+
+    @Test
+    void overviewPortfolio_appliesHubResidualWhenNoBrokerBooks() {
+        String userId = "user-none";
+        AccountsHubService accountsHubService = mock(AccountsHubService.class);
+        FamilyMemberService familyMemberService = mock(FamilyMemberService.class);
+        PortfolioOverviewService service = overviewWithHub(accountsHubService, familyMemberService);
+
+        when(portfolioSummaryRedisService.getLatestSummary(userId, TimeInterval.ONE_DAY))
+                .thenReturn(Optional.empty());
+        when(portfolioService.getPortfoliosByUserId(userId)).thenReturn(List.of());
+        when(familyMemberService.liveMemberIdsForOwner(userId)).thenReturn(Set.of());
+        lenient().when(flowLogger.start(anyString(), any())).thenReturn(mock(FlowSpan.class));
+        when(accountsHubService.wealthForPersona(userId, null)).thenReturn(2_500.0);
+
+        PortfolioSummaryV1 result = service.overviewPortfolio(userId, TimeInterval.ONE_DAY);
+
+        assertEquals(2_500.0, result.getCurrentValue(), 0.01);
+    }
+
+    private PortfolioOverviewService overviewWithHub(
+            AccountsHubService accountsHubService, FamilyMemberService familyMemberService) {
+        return new PortfolioOverviewService(
+                portfolioService,
+                familyMemberService,
+                portfolioHoldingsService,
+                portfolioMapper,
+                portfolioSummaryRedisService,
+                portfolioSnapshotService,
+                portfolioSummaryMongoService,
+                portfolioCalculator,
+                flowLogger,
+                null,
+                null,
+                null,
+                null,
+                accountsHubService);
     }
 }

@@ -27,7 +27,12 @@ public class AggregatePortfolioFactory {
      */
     public PortfolioModelV1 mergeBrokerBooks(String userId, List<PortfolioModelV1> portfolios) {
         List<PortfolioModelV1> brokers = filterBrokers(portfolios);
+        // One book after filter must stay that book so All intel reconciles to the same total.
+        if (brokers.size() == 1 && !needsNpsEquityLift(brokers.get(0))) {
+            return ensureBookTotal(brokers.get(0));
+        }
         Map<String, EquityModel> equities = new LinkedHashMap<>();
+        Map<String, Boolean> casOverlay = new LinkedHashMap<>();
         List<AssetModel> mutualFunds = new ArrayList<>();
         List<AssetModel> bonds = new ArrayList<>();
         List<AssetModel> commodities = new ArrayList<>();
@@ -42,10 +47,7 @@ public class AggregatePortfolioFactory {
             appendAll(npsModels, portfolio.getNpsModels());
             // NPS books sometimes store scheme lines only under equityModels — lift once.
             boolean npsLiftedFromEquities = false;
-            if (portfolio.getBrokerType() == BrokerType.NPS
-                    && (portfolio.getNpsModels() == null || portfolio.getNpsModels().isEmpty())
-                    && portfolio.getEquityModels() != null
-                    && !portfolio.getEquityModels().isEmpty()) {
+            if (needsNpsEquityLift(portfolio)) {
                 for (EquityModel eq : portfolio.getEquityModels()) {
                     if (eq == null) {
                         continue;
@@ -55,12 +57,12 @@ public class AggregatePortfolioFactory {
                 npsLiftedFromEquities = true;
             }
             if (!npsLiftedFromEquities) {
-                mergeEquities(equities, portfolio);
+                mergeEquities(equities, casOverlay, portfolio);
             }
         }
 
         return PortfolioModelV1.builder()
-                .id(null)
+                .id(brokers.size() == 1 ? brokers.get(0).getId() : null)
                 .name("All Portfolios")
                 .owner(userId)
                 .portfolioKind(PortfolioKind.BROKER)
@@ -70,6 +72,7 @@ public class AggregatePortfolioFactory {
                 .commodities(commodities)
                 .cash(cash)
                 .npsModels(npsModels)
+                .totalValue(sumBrokerBookValues(brokers))
                 .build();
     }
 
@@ -141,6 +144,47 @@ public class AggregatePortfolioFactory {
         return sum;
     }
 
+    /** Saved total when present, otherwise the sum of line marks. Same choice as {@link #brokerBookValues}. */
+    private static double displayedBookValue(PortfolioModelV1 p) {
+        double stored = p.getTotalValue() != null ? p.getTotalValue() : 0.0;
+        if (stored > 0) {
+            return stored;
+        }
+        return sumBookValue(p);
+    }
+
+    private static double sumBrokerBookValues(List<PortfolioModelV1> brokers) {
+        double total = 0.0;
+        for (Double value : brokerBookValues(brokers).values()) {
+            if (value != null && value > 0) {
+                total += value;
+            }
+        }
+        return total;
+    }
+
+    private static PortfolioModelV1 ensureBookTotal(PortfolioModelV1 book) {
+        if (book.getTotalValue() != null && book.getTotalValue() > 0) {
+            return book;
+        }
+        double lines = displayedBookValue(book);
+        if (lines > 0) {
+            book.setTotalValue(lines);
+        }
+        return book;
+    }
+
+    private static boolean needsNpsEquityLift(PortfolioModelV1 portfolio) {
+        return portfolio.getBrokerType() == BrokerType.NPS
+                && (portfolio.getNpsModels() == null || portfolio.getNpsModels().isEmpty())
+                && portfolio.getEquityModels() != null
+                && !portfolio.getEquityModels().isEmpty();
+    }
+
+    private static boolean isCasOverlay(BrokerType brokerType) {
+        return brokerType != null && (brokerType.isCasDemat() || brokerType.isCdsl());
+    }
+
     static List<PortfolioModelV1> filterBrokers(List<PortfolioModelV1> portfolios) {
         if (portfolios == null || portfolios.isEmpty()) {
             return List.of();
@@ -178,10 +222,14 @@ public class AggregatePortfolioFactory {
         return out;
     }
 
-    private static void mergeEquities(Map<String, EquityModel> bySymbol, PortfolioModelV1 portfolio) {
+    private static void mergeEquities(
+            Map<String, EquityModel> bySymbol,
+            Map<String, Boolean> casOverlay,
+            PortfolioModelV1 portfolio) {
         if (portfolio.getEquityModels() == null) {
             return;
         }
+        boolean incomingCas = isCasOverlay(portfolio.getBrokerType());
         for (EquityModel equity : portfolio.getEquityModels()) {
             if (equity == null) {
                 continue;
@@ -202,8 +250,20 @@ public class AggregatePortfolioFactory {
 
             EquityModel existing = bySymbol.get(mergeKey);
             if (existing == null) {
-                EquityModel copy = copyEquity(equity, symbol != null ? symbol : mergeKey, addedQty, portfolio.getBrokerType());
+                EquityModel copy = copyEquity(
+                        equity, symbol != null ? symbol : mergeKey, addedQty, portfolio.getBrokerType());
                 bySymbol.put(mergeKey, copy);
+                casOverlay.put(mergeKey, incomingCas);
+                continue;
+            }
+            // First-class broker qty wins over CAS/CDSL for the same ISIN. Do not sum that overlap.
+            boolean existingCas = Boolean.TRUE.equals(casOverlay.get(mergeKey));
+            if (incomingCas != existingCas) {
+                if (!incomingCas) {
+                    bySymbol.put(mergeKey, copyEquity(
+                            equity, symbol != null ? symbol : mergeKey, addedQty, portfolio.getBrokerType()));
+                    casOverlay.put(mergeKey, false);
+                }
                 continue;
             }
             double mergedQty = (existing.getQuantity() != null ? existing.getQuantity() : 0.0) + addedQty;

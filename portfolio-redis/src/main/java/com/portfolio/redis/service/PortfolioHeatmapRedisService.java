@@ -87,8 +87,17 @@ private final RedisTemplate<String, Heatmap> portfolioHeatmapRedisTemplate;
         String intervalCode = interval != null && interval.getTimeFrame() != null ? interval.getTimeFrame().getValue() : "all";
         String fromDate = interval != null && interval.getFromDate() != null ? interval.getFromDate().toString() : "null";
         String toDate = interval != null && interval.getToDate() != null ? interval.getToDate().toString() : "null";
-        String key = portfolioHeatmapKeyPrefix + "sec2:" + portfolioId + ":" + intervalCode + ":" + fromDate + ":" + toDate;
-        log.trace("Built cache key: {} for portfolio: {}, interval: {}, from: {}, to: {}", key, portfolioId, intervalCode, fromDate, toDate);
+        String scope = "ALL";
+        if (interval instanceof com.portfolio.model.analytics.request.AdvancedAnalyticsRequest advanced) {
+            String raw = advanced.getAssetScope();
+            if (raw != null && !raw.isBlank()) {
+                scope = raw.trim().toUpperCase(java.util.Locale.ROOT);
+            }
+        }
+        String key = portfolioHeatmapKeyPrefix + "sec2:" + portfolioId + ":" + intervalCode + ":" + fromDate + ":" + toDate
+                + ":scope:" + scope;
+        log.trace("Built cache key: {} for portfolio: {}, interval: {}, from: {}, to: {}, scope: {}",
+                key, portfolioId, intervalCode, fromDate, toDate, scope);
         return key;
     }
 }

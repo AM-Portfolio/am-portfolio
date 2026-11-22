@@ -122,9 +122,12 @@ public class PortfolioAnalyticsFacade {
         log.info("Calculating advanced analytics for portfolio: {} from {} to {}", 
                 request.getCoreIdentifiers().getPortfolioId(), request.getFromDate(), request.getToDate());
         
-        // Generate a cache key based on the request parameters (include TF enum)
+        // Generate a cache key based on the request parameters (include TF enum + assetScope)
         String tfCode = request.getTimeFrame() != null ? request.getTimeFrame().getValue() : "live";
-        String cacheKey = String.format("%s|%s|%s|%s|H:%b|M:%b|S:%b|C:%b",
+        String assetScope = request.getAssetScope() == null || request.getAssetScope().isBlank()
+                ? "ALL"
+                : request.getAssetScope().trim().toUpperCase(java.util.Locale.ROOT);
+        String cacheKey = String.format("%s|%s|%s|%s|H:%b|M:%b|S:%b|C:%b|AS:%s",
                 request.getCoreIdentifiers().getPortfolioId(),
                 request.getFromDate(),
                 request.getToDate(),
@@ -132,7 +135,8 @@ public class PortfolioAnalyticsFacade {
                 request.getFeatureToggles().isIncludeHeatmap(),
                 request.getFeatureToggles().isIncludeMovers(),
                 request.getFeatureToggles().isIncludeSectorAllocation(),
-                request.getFeatureToggles().isIncludeMarketCapAllocation());
+                request.getFeatureToggles().isIncludeMarketCapAllocation(),
+                assetScope);
         
         CachedResponse cached = fastCache.get(cacheKey);
         if (cached != null && !cached.isExpired()) {

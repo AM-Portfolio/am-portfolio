@@ -23,6 +23,7 @@ public class PortfolioHoldingsMapper {
     private final AllocationLedgerService allocationLedgerService;
 
     public static final String ASSET_EQUITY = "EQUITY";
+    public static final String ASSET_MUTUAL_FUND = "MUTUAL_FUND";
     public static final String ASSET_FIXED_INCOME = "FIXED_INCOME";
     public static final String ASSET_COMMODITY = "COMMODITY";
     public static final String ASSET_CASH = "CASH";
@@ -48,7 +49,7 @@ public class PortfolioHoldingsMapper {
     }
 
     /**
-     * Map bonds / commodities / cash into holdings rows (stored value, no live MD).
+     * Map mutual funds / bonds / commodities / cash / NPS into holdings rows (stored value, no live MD).
      */
     List<EquityHoldings> processAssetClassLists(List<PortfolioModelV1> portfolios) {
         List<EquityHoldings> out = new ArrayList<>();
@@ -61,6 +62,7 @@ public class PortfolioHoldingsMapper {
             }
             String portfolioId = portfolio.getId() != null ? portfolio.getId().toString() : null;
             String portfolioName = portfolio.getName();
+            appendAssets(out, portfolio.getMutualFunds(), ASSET_MUTUAL_FUND, portfolioId, portfolioName);
             appendAssets(out, portfolio.getBonds(), ASSET_FIXED_INCOME, portfolioId, portfolioName);
             appendAssets(out, portfolio.getCommodities(), ASSET_COMMODITY, portfolioId, portfolioName);
             appendAssets(out, portfolio.getCash(), ASSET_CASH, portfolioId, portfolioName);

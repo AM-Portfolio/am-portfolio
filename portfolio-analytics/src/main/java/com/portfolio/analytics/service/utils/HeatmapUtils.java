@@ -331,6 +331,7 @@ public class HeatmapUtils {
                 ? data.getPreviousClose()
                 : 0.0;
         if (previousCloseVal > 0) {
+            stockDetail.setPreviousClose(previousCloseVal);
             BigDecimal previousPrice = BigDecimal.valueOf(previousCloseVal);
             stockDetail.calculateChange(previousPrice)
                       .calculateChangePercent(previousPrice);

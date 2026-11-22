@@ -373,9 +373,9 @@ public class PortfolioIntelligenceSnapshotFactory {
         HistoryFields history = includeHistory
                 ? loadHistoryMetrics(histKey, symbols, quantities, fetchHistoryIfMiss, histTimeoutMs)
                 : HistoryFields.empty();
-        if (portfolio.getTotalValue() != null && portfolio.getTotalValue() > 0) {
-            reconcileHoldingValues(holdings, portfolio.getTotalValue());
-        }
+        // Live line marks (equity LTP + MF EOD NAV) are the same valuation KPI/summary uses.
+        // Do not scale holdings back to a stale Mongo portfolio.totalValue — that made X-Ray
+        // disagree with Total Balance after NAV overlays (e.g. 1.29Cr vs 1.37Cr).
         return finalizeSnapshot(
                 portfolioId,
                 holdings,

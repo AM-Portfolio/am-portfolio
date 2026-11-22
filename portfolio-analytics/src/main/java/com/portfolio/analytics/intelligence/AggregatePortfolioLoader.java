@@ -53,7 +53,11 @@ public class AggregatePortfolioLoader {
         List<PortfolioModelV1> scoped = books == null ? List.of() : books.stream()
                 .filter(p -> p != null && HoldingsPersona.matches(p.getFamilyMemberId(), persona, liveMemberIds))
                 .toList();
-        PortfolioModelV1 merged = aggregatePortfolioFactory.mergeBrokerBooks(owner, scoped);
+        List<PortfolioModelV1> brokers = AggregatePortfolioFactory.filterBrokers(scoped);
+        // One in-scope book: All intel must be that book (same id and totalValue).
+        PortfolioModelV1 merged = brokers.size() == 1
+                ? brokers.get(0)
+                : aggregatePortfolioFactory.mergeBrokerBooks(owner, scoped);
         mergeCache.put(key, new CachedMerge(merged, now + MERGE_TTL_MS));
         return merged;
     }

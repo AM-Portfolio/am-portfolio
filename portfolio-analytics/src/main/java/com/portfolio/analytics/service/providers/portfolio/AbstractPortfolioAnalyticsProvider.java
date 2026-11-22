@@ -157,12 +157,24 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
         }
         
         if (marketData == null || marketData.isEmpty()) {
-            log.warn("No market data available for portfolio: {}", portfolioId);
-            return emptyResultSupplier.get();
+            if (!allowsEmptyMarketData()) {
+                log.warn("No market data available for portfolio: {}", portfolioId);
+                return emptyResultSupplier.get();
+            }
+            log.info("No OHLC market data for {} — continuing with empty map (NAV/cost fallback)",
+                    this.getClass().getSimpleName());
+            marketData = Collections.emptyMap();
         }
         
         // Process the data with the provided processor
         return resultProcessor.process(portfolio, portfolioSymbols, marketData);
+    }
+
+    /**
+     * When true, an empty OHLC map still runs the processor (e.g. heatmap MF scope uses EOD NAV).
+     */
+    protected boolean allowsEmptyMarketData() {
+        return false;
     }
     
     /**

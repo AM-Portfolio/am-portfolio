@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AggregatePortfolioFactoryTest {
@@ -112,7 +113,47 @@ class AggregatePortfolioFactoryTest {
 
         assertEquals(1, merged.getEquityModels().size());
         assertEquals("IDEA", merged.getEquityModels().get(0).getSymbol());
-        assertEquals(20.0, merged.getEquityModels().get(0).getQuantity(), 1e-9);
+        // Groww wins the overlap; Mirae CAS and the CDSL aggregator are not added again.
+        assertEquals(10.0, merged.getEquityModels().get(0).getQuantity(), 1e-9);
+        assertEquals(0.0, merged.getTotalValue(), 1e-9);
+    }
+
+    @Test
+    void oneBookMergePreservesTotalValue() {
+        PortfolioModelV1 book = broker("Zerodha", BrokerType.ZERODHA, equity("TITAN", 10, 100.0));
+        book.setTotalValue(930_000.0);
+
+        PortfolioModelV1 merged = factory.mergeBrokerBooks("user-1", List.of(book));
+
+        assertSame(book, merged);
+        assertEquals(book.getId(), merged.getId());
+        assertEquals(930_000.0, merged.getTotalValue(), 1e-9);
+        assertEquals(10.0, merged.getEquityModels().get(0).getQuantity(), 1e-9);
+    }
+
+    @Test
+    void sameIsinDoesNotDoubleQtyWhenOneBookIsCasDemat() {
+        EquityModel brokerLine = equity("RELIANCE", 10, 100.0);
+        brokerLine.setIsin("INE002A01018");
+        brokerLine.setCurrentValue(1_000.0);
+        EquityModel casLine = equity("RELIANCE", 40, 90.0);
+        casLine.setIsin("INE002A01018");
+        casLine.setCurrentValue(5_000.0);
+        PortfolioModelV1 zerodha = broker("Zerodha", BrokerType.ZERODHA, brokerLine);
+        zerodha.setTotalValue(1_000.0);
+        PortfolioModelV1 mirae = broker("Mirae", BrokerType.CAS_DEMAT, casLine);
+        mirae.setTotalValue(5_000.0);
+
+        PortfolioModelV1 casFirst = factory.mergeBrokerBooks("user-1", List.of(mirae, zerodha));
+        assertEquals(1, casFirst.getEquityModels().size());
+        assertEquals(10.0, casFirst.getEquityModels().get(0).getQuantity(), 1e-9);
+        assertEquals(100.0, casFirst.getEquityModels().get(0).getAvgBuyingPrice(), 1e-9);
+        assertEquals(1_000.0, casFirst.getEquityModels().get(0).getCurrentValue(), 1e-9);
+        assertEquals(6_000.0, casFirst.getTotalValue(), 1e-9);
+
+        PortfolioModelV1 brokerFirst = factory.mergeBrokerBooks("user-1", List.of(zerodha, mirae));
+        assertEquals(10.0, brokerFirst.getEquityModels().get(0).getQuantity(), 1e-9);
+        assertEquals(6_000.0, brokerFirst.getTotalValue(), 1e-9);
     }
 
     @Test
