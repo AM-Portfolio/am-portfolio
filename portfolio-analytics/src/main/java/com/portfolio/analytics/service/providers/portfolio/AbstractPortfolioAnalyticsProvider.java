@@ -147,13 +147,18 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
             if (request != null && request.isPrefetchAttempted() && !allowsPrefetchFanOut()) {
                 log.warn("Prefetch already attempted with empty result — skipping individual OHLC fan-out for {}",
                         this.getClass().getSimpleName());
-                return emptyResultSupplier.get();
+                // Heatmap MF scope continues with empty OHLC and fills from EOD NAV / cost.
+                if (!allowsEmptyMarketData()) {
+                    return emptyResultSupplier.get();
+                }
+                marketData = Collections.emptyMap();
+            } else {
+                log.info("Market data not in prefetch cache. Fetching individually for provider {}", this.getClass().getSimpleName());
+                TimeFrameRequest fanOutTf = preferLiveMarketDataOnFanOut()
+                        ? null
+                        : (request != null ? request.getTimeFrameRequest() : null);
+                marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, fanOutTf);
             }
-            log.info("Market data not in prefetch cache. Fetching individually for provider {}", this.getClass().getSimpleName());
-            TimeFrameRequest fanOutTf = preferLiveMarketDataOnFanOut()
-                    ? null
-                    : (request != null ? request.getTimeFrameRequest() : null);
-            marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, fanOutTf);
         }
         
         if (marketData == null || marketData.isEmpty()) {

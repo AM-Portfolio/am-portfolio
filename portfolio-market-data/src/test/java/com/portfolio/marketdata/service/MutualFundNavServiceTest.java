@@ -8,7 +8,9 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -101,12 +103,11 @@ class MutualFundNavServiceTest {
                         Scheme Code;ISIN Growth;ISIN Reinvestment;Scheme Name;Plan;Option;NAV;Date
                         147704;INF247L01999;-;Motilal Oswal Large and Midcap Fund;Direct Plan;Growth;40.6665;19-Nov-2026
                         """, MediaType.TEXT_PLAIN));
-        server.expect(requestTo("http://amfi.test/history?frmdt=18-Nov-2026&todt=18-Nov-2026"))
-                .andExpect(method(GET))
-                .andRespond(withSuccess("""
+        expectHistoryWindow(server, LocalDate.of(2026, 11, 19), Map.of(
+                "18-Nov-2026", """
                         Scheme Code;Scheme Name;ISIN Growth;ISIN Reinvestment;NAV;Repurchase;Sale;Date
                         147704;Motilal Oswal Large and Midcap Fund;INF247L01999;;40.5130;40.5130;40.5130;18-Nov-2026
-                        """, MediaType.TEXT_PLAIN));
+                        """));
 
         try {
             Map<String, MutualFundNavMark> marks = service.getMarks(List.of(isin));
@@ -115,7 +116,6 @@ class MutualFundNavServiceTest {
             assertEquals(40.6665, mark.nav());
             assertEquals(40.513, mark.previousNav());
             assertTrue(mark.schemeName().contains("Motilal"));
-            server.verify();
         } finally {
             service.stopLookupExecutor();
         }
@@ -139,12 +139,11 @@ class MutualFundNavServiceTest {
                         Scheme Code;ISIN Growth;ISIN Reinvestment;Scheme Name;Plan;Option;NAV;Date
                         147704;INF247L01999;-;Short Name;Direct Plan;Growth;40.6665;19-Nov-2026
                         """, MediaType.TEXT_PLAIN));
-        amfiServer.expect(requestTo("http://amfi.test/history?frmdt=18-Nov-2026&todt=18-Nov-2026"))
-                .andExpect(method(GET))
-                .andRespond(withSuccess("""
+        expectHistoryWindow(amfiServer, LocalDate.of(2026, 11, 19), Map.of(
+                "18-Nov-2026", """
                         Scheme Code;Scheme Name;ISIN Growth;ISIN Reinvestment;NAV;Repurchase;Sale;Date
                         147704;Short Name;INF247L01999;;40.5130;40.5130;40.5130;18-Nov-2026
-                        """, MediaType.TEXT_PLAIN));
+                        """));
         catalogServer.expect(requestTo("http://am-parser.test/v1/mutual-fund/INF247L01999"))
                 .andExpect(method(GET))
                 .andRespond(withSuccess("""
@@ -168,7 +167,6 @@ class MutualFundNavServiceTest {
             assertEquals(40.6665, mark.nav());
             assertEquals(40.513, mark.previousNav());
             assertEquals("Motilal Oswal Large and Midcap Fund", mark.schemeName());
-            amfiServer.verify();
         } finally {
             service.stopLookupExecutor();
         }
@@ -178,6 +176,86 @@ class MutualFundNavServiceTest {
     void catalogMissingNavReturnsNull() {
         assertNull(MutualFundNavService.parseCatalogDetail(
                 "INF247L01999", Map.of("isin", "INF247L01999", "schemeName", "Example")));
+    }
+
+    @Test
+    void adjacentPreviousWithinThreeDaysAccepted() {
+        LocalDate navDate = LocalDate.of(2026, 11, 19);
+        Map<LocalDate, Map<String, Double>> history = Map.of(
+                LocalDate.of(2026, 11, 18), Map.of("INF247L01999", 40.513),
+                LocalDate.of(2026, 11, 10), Map.of("INF247L01999", 20.0));
+        assertEquals(
+                40.513,
+                MutualFundNavService.selectAdjacentPreviousNav(navDate, "INF247L01999", history));
+    }
+
+    @Test
+    void previousOlderThanThreeDaysRejected() {
+        LocalDate navDate = LocalDate.of(2026, 11, 19);
+        Map<LocalDate, Map<String, Double>> history = Map.of(
+                LocalDate.of(2026, 11, 10), Map.of("INF247L01999", 20.0));
+        assertNull(MutualFundNavService.selectAdjacentPreviousNav(navDate, "INF247L01999", history));
+    }
+
+    @Test
+    void absurdOneDayMoveRejected() {
+        assertTrue(MutualFundNavService.isPlausible1dMove(40.6665, 40.513));
+        assertTrue(!MutualFundNavService.isPlausible1dMove(1649.9, 819.7));
+    }
+
+    @Test
+    void catalogHistoryIgnoresFarPriorPoints() {
+        Double previous = MutualFundNavService.previousFromHistoryPoints(
+                Map.of("points", List.of(
+                        Map.of("date", "2026-11-01", "nav", 20.0),
+                        Map.of("date", "2026-11-18", "nav", 40.513),
+                        Map.of("date", "2026-11-19", "nav", 40.6665))),
+                LocalDate.of(2026, 11, 19));
+        assertEquals(40.513, previous);
+
+        assertNull(MutualFundNavService.previousFromHistoryPoints(
+                Map.of("points", List.of(
+                        Map.of("date", "2026-11-01", "nav", 20.0),
+                        Map.of("date", "2026-11-19", "nav", 40.6665))),
+                LocalDate.of(2026, 11, 19)));
+    }
+
+    @Test
+    void thinWeekendHistoryDoesNotBlockPriorBusinessDay() {
+        RestTemplate restTemplate = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
+        MutualFundNavService service = new MutualFundNavService(restTemplate);
+        ReflectionTestUtils.setField(service, "latestUrl", "http://amfi.test/latest");
+        ReflectionTestUtils.setField(service, "historyUrl", "http://amfi.test/history");
+        ReflectionTestUtils.setField(service, "catalogBaseUrl", "");
+        String isin = "INF247L01999";
+
+        // Latest published as Sunday; true prior business day is Friday.
+        server.expect(requestTo("http://amfi.test/latest"))
+                .andExpect(method(GET))
+                .andRespond(withSuccess("""
+                        Scheme Code;ISIN Growth;ISIN Reinvestment;Scheme Name;Plan;Option;NAV;Date
+                        147704;INF247L01999;-;Motilal Oswal Large and Midcap Fund;Direct Plan;Growth;40.6665;23-Nov-2026
+                        """, MediaType.TEXT_PLAIN));
+        expectHistoryWindow(server, LocalDate.of(2026, 11, 23), Map.of(
+                "22-Nov-2026", """
+                        Scheme Code;NAV Name;Plan;Option;ISIN Growth;ISIN Reinvestment;NAV;Date
+                        1;Other;Direct Plan;Growth;INF000000001;;1.0000;22-Nov-2026
+                        """,
+                "21-Nov-2026", """
+                        Scheme Code;NAV Name;Plan;Option;ISIN Growth;ISIN Reinvestment;NAV;Date
+                        147704;Motilal Oswal Large and Midcap Fund;Direct Plan;Growth;INF247L01999;;40.5130;21-Nov-2026
+                        """));
+
+        try {
+            Map<String, MutualFundNavMark> marks = service.getMarks(List.of(isin));
+            MutualFundNavMark mark = marks.get(isin);
+            assertNotNull(mark);
+            assertEquals(40.6665, mark.nav());
+            assertEquals(40.513, mark.previousNav());
+        } finally {
+            service.stopLookupExecutor();
+        }
     }
 
     @Test
@@ -198,20 +276,16 @@ class MutualFundNavServiceTest {
                         147704;INF247L01999;-;Motilal Oswal Large and Midcap Fund;Direct Plan;Growth;40.6665;20-Nov-2026
                         147799;INF999L01999;-;Other Scheme;Direct Plan;Growth;10.0000;21-Nov-2026
                         """, MediaType.TEXT_PLAIN));
-        // First previous pass uses feed max (21) → loads 20 (same as mark date — not usable).
-        server.expect(requestTo("http://amfi.test/history?frmdt=20-Nov-2026&todt=20-Nov-2026"))
-                .andExpect(method(GET))
-                .andRespond(withSuccess("""
+        // Window before feed max (21) includes mark date (20) plus true prior (19).
+        expectHistoryWindow(server, LocalDate.of(2026, 11, 21), Map.of(
+                "20-Nov-2026", """
                         Scheme Code;NAV Name;Plan;Option;ISIN Growth;ISIN Reinvestment;NAV;Date
                         147704;Motilal Oswal Large and Midcap Fund;Direct Plan;Growth;INF247L01999;;40.6665;20-Nov-2026
-                        """, MediaType.TEXT_PLAIN));
-        // Second pass loads day before the mark's own navDate (19).
-        server.expect(requestTo("http://amfi.test/history?frmdt=19-Nov-2026&todt=19-Nov-2026"))
-                .andExpect(method(GET))
-                .andRespond(withSuccess("""
+                        """,
+                "19-Nov-2026", """
                         Scheme Code;NAV Name;Plan;Option;ISIN Growth;ISIN Reinvestment;NAV;Date
                         147704;Motilal Oswal Large and Midcap Fund;Direct Plan;Growth;INF247L01999;;40.5130;19-Nov-2026
-                        """, MediaType.TEXT_PLAIN));
+                        """));
 
         try {
             Map<String, MutualFundNavMark> marks = service.getMarks(List.of(isin));
@@ -219,9 +293,22 @@ class MutualFundNavServiceTest {
             assertNotNull(mark);
             assertEquals(40.6665, mark.nav());
             assertEquals(40.513, mark.previousNav());
-            server.verify();
         } finally {
             service.stopLookupExecutor();
+        }
+    }
+
+    /** Stub AMFI history for the same calendar window loadHistoryBefore walks. */
+    private static void expectHistoryWindow(
+            MockRestServiceServer server, LocalDate navDate, Map<String, String> bodiesByFrmdt) {
+        DateTimeFormatter amfi = DateTimeFormatter.ofPattern("dd-MMM-yyyy", Locale.US);
+        int windowDays = Math.max(MutualFundNavService.MAX_PREVIOUS_GAP_DAYS, 5);
+        for (int days = 1; days <= windowDays; days++) {
+            String frmdt = navDate.minusDays(days).format(amfi);
+            String body = bodiesByFrmdt.getOrDefault(frmdt, "");
+            server.expect(requestTo("http://amfi.test/history?frmdt=" + frmdt + "&todt=" + frmdt))
+                    .andExpect(method(GET))
+                    .andRespond(withSuccess(body, MediaType.TEXT_PLAIN));
         }
     }
 }

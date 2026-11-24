@@ -245,6 +245,10 @@ public class MutualFundNavService {
             Double nav = asDouble(point.get("nav"));
             if (date == null || nav == null || nav <= 0) continue;
             if (latestDate != null && !date.isBefore(latestDate)) continue;
+            if (latestDate != null) {
+                long gap = java.time.temporal.ChronoUnit.DAYS.between(date, latestDate);
+                if (gap < 1 || gap > MAX_PREVIOUS_GAP_DAYS) continue;
+            }
             if (bestDate == null || date.isAfter(bestDate)) {
                 bestDate = date;
                 bestNav = nav;
@@ -308,10 +312,17 @@ public class MutualFundNavService {
         }
     }
 
-    /** Loads the nearest prior AMFI history day before [navDate] (skips empty/weekend). */
+    /**
+     * Prefetch AMFI history for every calendar day in the T−1 window before [navDate].
+     * Do not stop on the first non-empty day: weekend/holiday feeds are often thin
+     * (hundreds of schemes) and would hide the real prior business day.
+     */
     private boolean loadHistoryBefore(LocalDate navDate) {
         if (navDate == null) return false;
-        for (int days = 1; days <= 7; days++) {
+        boolean any = false;
+        // Load past the selectAdjacent gap so a Sun→Fri jump still lands in cache.
+        int windowDays = Math.max(MAX_PREVIOUS_GAP_DAYS, 5);
+        for (int days = 1; days <= windowDays; days++) {
             LocalDate candidate = navDate.minusDays(days);
             Map<String, Double> values = historyByDate.get(candidate);
             if (values == null) {
@@ -321,18 +332,19 @@ public class MutualFundNavService {
                             .queryParam("frmdt", date).queryParam("todt", date)
                             .build().encode().toUri();
                     values = parseHistory(restTemplate.getForObject(uri, String.class));
-                    historyByDate.put(candidate, values);
+                    historyByDate.put(candidate, values != null ? values : Map.of());
                 } catch (Exception e) {
                     log.debug("AMFI NAV history unavailable for {}: {}", candidate, e.getMessage());
+                    historyByDate.put(candidate, Map.of());
                     continue;
                 }
             }
             if (values != null && !values.isEmpty()) {
                 log.info("Loaded AMFI previous NAV snapshot for {} ({} schemes)", candidate, values.size());
-                return true;
+                any = true;
             }
         }
-        return false;
+        return any;
     }
 
     private void ensureHistoryForMarkDates(Iterable<MutualFundNavMark> marks) {
@@ -349,40 +361,92 @@ public class MutualFundNavService {
         return marks.values().stream().map(MutualFundNavMark::navDate).anyMatch(current::equals);
     }
 
+    /** Max calendar gap (incl. weekend/holiday) between NAV date and prior published day. */
+    static final int MAX_PREVIOUS_GAP_DAYS = 3;
+    /** Reject bogus 1D moves (wrong ISIN/history); open-end schemes do not move this much in 1D. */
+    static final double MAX_ABS_1D_PCT = 10.0;
+
     private MutualFundNavMark withPrevious(MutualFundNavMark mark) {
-        if (mark.navDate() == null || mark.previousNav() != null) return mark;
-        Double previous = previousNavFromHistory(mark);
-        if (previous == null) return mark;
+        if (mark == null || mark.navDate() == null) {
+            return mark;
+        }
+        Double previous = mark.previousNav();
+        if (previous == null || previous <= 0) {
+            previous = previousNavFromHistory(mark);
+        }
+        if (previous == null || previous <= 0) {
+            return mark.previousNav() == null
+                    ? mark
+                    : new MutualFundNavMark(mark.isin(), mark.schemeName(), mark.nav(), null, mark.navDate());
+        }
+        if (!isPlausible1dMove(mark.nav(), previous)) {
+            log.warn(
+                    "Dropping implausible MF 1D NAV move isin={} nav={} previous={} (>{})",
+                    mark.isin(),
+                    mark.nav(),
+                    previous,
+                    MAX_ABS_1D_PCT);
+            return new MutualFundNavMark(mark.isin(), mark.schemeName(), mark.nav(), null, mark.navDate());
+        }
+        if (mark.previousNav() != null && Double.compare(mark.previousNav(), previous) == 0) {
+            return mark;
+        }
         return new MutualFundNavMark(mark.isin(), mark.schemeName(), mark.nav(), previous, mark.navDate());
     }
 
-    /** Closest history NAV strictly before the mark's NAV date. */
+    /**
+     * Nearest history NAV strictly before the mark date, only if within
+     * {@link #MAX_PREVIOUS_GAP_DAYS} (true prior business day, not a week-old fill).
+     */
     private Double previousNavFromHistory(MutualFundNavMark mark) {
-        if (mark == null || mark.navDate() == null) return null;
+        if (mark == null || mark.navDate() == null) {
+            return null;
+        }
         String isin = normalize(mark.isin());
-        if (isin == null) return null;
+        if (isin == null) {
+            return null;
+        }
+        return selectAdjacentPreviousNav(mark.navDate(), isin, historyByDate);
+    }
+
+    static Double selectAdjacentPreviousNav(
+            LocalDate navDate, String isin, Map<LocalDate, Map<String, Double>> historyByDate) {
+        if (navDate == null || isin == null || historyByDate == null || historyByDate.isEmpty()) {
+            return null;
+        }
         LocalDate bestDate = null;
         Double bestNav = null;
         for (Map.Entry<LocalDate, Map<String, Double>> entry : historyByDate.entrySet()) {
             LocalDate date = entry.getKey();
-            if (date == null || !date.isBefore(mark.navDate())) continue;
+            if (date == null || !date.isBefore(navDate)) {
+                continue;
+            }
+            long gap = java.time.temporal.ChronoUnit.DAYS.between(date, navDate);
+            if (gap < 1 || gap > MAX_PREVIOUS_GAP_DAYS) {
+                continue;
+            }
             Map<String, Double> daily = entry.getValue();
-            if (daily == null || daily.isEmpty()) continue;
+            if (daily == null || daily.isEmpty()) {
+                continue;
+            }
             Double previous = daily.get(isin);
-            if (previous == null || previous <= 0) continue;
+            if (previous == null || previous <= 0) {
+                continue;
+            }
             if (bestDate == null || date.isAfter(bestDate)) {
                 bestDate = date;
                 bestNav = previous;
             }
         }
-        if (bestNav != null) return bestNav;
-        for (int days = 1; days <= 7; days++) {
-            Map<String, Double> daily = historyByDate.get(mark.navDate().minusDays(days));
-            if (daily == null || daily.isEmpty()) continue;
-            Double previous = daily.get(isin);
-            if (previous != null && previous > 0) return previous;
+        return bestNav;
+    }
+
+    static boolean isPlausible1dMove(double nav, double previous) {
+        if (previous <= 0 || nav <= 0) {
+            return false;
         }
-        return null;
+        double pct = Math.abs((nav - previous) / previous) * 100.0;
+        return pct <= MAX_ABS_1D_PCT;
     }
 
     static Map<String, MutualFundNavMark> parseLatest(String body) {

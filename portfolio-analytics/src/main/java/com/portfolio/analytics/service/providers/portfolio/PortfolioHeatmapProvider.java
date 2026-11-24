@@ -15,6 +15,8 @@ import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
 import com.portfolio.model.portfolio.HoldingMarkPriceResolver;
+import com.portfolio.model.portfolio.mf.MutualFundSchemeCategory;
+import com.portfolio.model.portfolio.mf.MutualFundSchemeCategoryResolver;
 import com.portfolio.model.resolver.TradingSymbolResolver;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -79,16 +81,20 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
 
                 // Create a map of symbol to holding quantity
                 Map<String, Double> symbolToQuantity = createSymbolToQuantityMap(portfolio);
-                
-                // Retrieve market cap and sector data using the new helper
-                Map<String, com.am.common.amcommondata.model.security.SecurityModel> securityDetails =
-                        getSecurityDetails(displaySymbols, request);
-                
-                // Align with sector allocation: group by security metadata sectors.
-                Map<String, List<String>> sectorToStocks = securityDetailsService
-                    .groupSymbolsBySector(displaySymbols, securityDetails);
 
                 Map<String, EquityModel> equityBySymbol = indexEquities(portfolio);
+                String assetScope = normalizeAssetScope(request != null ? request.getAssetScope() : null);
+                boolean mfScope = "MUTUAL_FUND".equals(assetScope);
+
+                // MF scope sectors come from schemeClass/name — skip security-details (large cold cost).
+                Map<String, List<String>> sectorToStocks;
+                if (mfScope) {
+                    sectorToStocks = new HashMap<>();
+                } else {
+                    Map<String, com.am.common.amcommondata.model.security.SecurityModel> securityDetails =
+                            getSecurityDetails(displaySymbols, request);
+                    sectorToStocks = securityDetailsService.groupSymbolsBySector(displaySymbols, securityDetails);
+                }
                 List<String> mfIsins = portfolio.getEquityModels() == null ? List.of() : portfolio.getEquityModels().stream()
                         .filter(Objects::nonNull)
                         .filter(e -> HoldingInstrumentClassifier.quarantineEquityLtp(
@@ -99,6 +105,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                         .toList();
                 Map<String, MutualFundNavMark> mfMarks = mutualFundNavService.getMarks(mfIsins);
                 // Equity holding sector + instrument classifier fills Unknown / blank meta.
+                // MUTUAL_FUND scope: place each scheme under its SEBI category (not one "Mutual Funds" bucket).
                 if (portfolio.getEquityModels() != null) {
                     for (EquityModel model : portfolio.getEquityModels()) {
                         String symbol = model.getSymbol();
@@ -109,14 +116,21 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                         String priceSourceHint = hasMd
                                 ? HoldingInstrumentClassifier.PRICE_LIVE
                                 : HoldingInstrumentClassifier.PRICE_COST;
-                        // Force ETF / Mutual Fund buckets even when MD says Financial Services.
-                        String equitySector = HoldingInstrumentClassifier.resolveSector(
-                                usableEquitySector(model.getSector()),
-                                symbol,
-                                model.getIsin(),
-                                priceSourceHint,
-                                model.getAssetClass(),
-                                model.getName());
+                        String equitySector;
+                        if (mfScope) {
+                            // Filtered MF book: parent tiles are SEBI categories only.
+                            equitySector = MutualFundSchemeCategoryResolver.resolveDisplayName(
+                                    model.getSchemeClass(),
+                                    firstNonBlank(model.getName(), model.getCompanyName(), symbol));
+                        } else {
+                            equitySector = HoldingInstrumentClassifier.resolveSector(
+                                    usableEquitySector(model.getSector()),
+                                    symbol,
+                                    model.getIsin(),
+                                    priceSourceHint,
+                                    model.getAssetClass(),
+                                    model.getName());
+                        }
                         if (equitySector == null || HoldingInstrumentClassifier.isMissingSector(equitySector)) {
                             continue;
                         }
@@ -128,7 +142,14 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                                 break;
                             }
                         }
-                        if (currentSector == null
+                        boolean forceMfCategory =
+                                mfScope
+                                        && (currentSector == null
+                                                || HoldingInstrumentClassifier.isMissingSector(currentSector)
+                                                || MutualFundSchemeCategory.isMutualFundsBucket(currentSector)
+                                                || !equitySector.equals(currentSector));
+                        if (forceMfCategory
+                                || currentSector == null
                                 || HoldingInstrumentClassifier.isMissingSector(currentSector)) {
                             if (currentSector != null) {
                                 sectorToStocks.get(currentSector).remove(symbol);
@@ -225,7 +246,9 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
 
     @Override
     protected boolean allowsPrefetchFanOut() {
-        return true;
+        // Empty/skipped prefetch must not trigger per-symbol OHLC fan-out (30–90s).
+        // MF mosaic uses NAV synthetics via allowsEmptyMarketData().
+        return false;
     }
 
     static boolean shouldApplyTodayChangeOverride(AdvancedAnalyticsRequest request) {
@@ -361,13 +384,16 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                             equity.getAvgBuyingPrice(),
                             equity.getInvestmentValue());
             if (navMark != null && navMark.nav() > 0) {
-                data = MarketData.builder()
+                // 1D % only when prior published NAV exists; never invent previousClose=last.
+                var navBuilder = MarketData.builder()
                         .symbol(symbol)
                         .lastPrice(navMark.nav())
-                        .previousClose(navMark.previousNav())
                         .timestamp(navMark.navDate() == null ? null : navMark.navDate()
-                                .atStartOfDay(java.time.ZoneId.of("Asia/Kolkata")).toInstant())
-                        .build();
+                                .atStartOfDay(java.time.ZoneId.of("Asia/Kolkata")).toInstant());
+                if (navMark.previousNav() != null && navMark.previousNav() > 0) {
+                    navBuilder.previousClose(navMark.previousNav());
+                }
+                data = navBuilder.build();
                 priceSource = HoldingInstrumentClassifier.PRICE_NAV;
                 if (equity != null && navMark.schemeName() != null && !navMark.schemeName().isBlank()) {
                     equity.setName(navMark.schemeName());
@@ -375,10 +401,10 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 log.info("Heatmap EOD NAV for symbol={} nav={} prev={} date={}",
                         symbol, navMark.nav(), navMark.previousNav(), navMark.navDate());
             } else if (quarantineMark != null && quarantineMark.isPresent()) {
+                // Size only — omit previousClose so heatmap does not paint fake 0% day change.
                 data = MarketData.builder()
                         .symbol(symbol)
                         .lastPrice(quarantineMark.price())
-                        .previousClose(quarantineMark.price())
                         .build();
                 priceSource = quarantineMark.priceSource();
                 log.info("Heatmap quarantine mark for symbol={} price={} source={}",
@@ -389,7 +415,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                     log.warn("Quarantined symbol={} has no NAV or safe fallback", symbol);
                     continue;
                 }
-                data = MarketData.builder().symbol(symbol).lastPrice(cost).previousClose(cost).build();
+                data = MarketData.builder().symbol(symbol).lastPrice(cost).build();
                 priceSource = HoldingInstrumentClassifier.PRICE_COST;
             } else if (data == null || !hasResolvablePrice(data)) {
                 Double cost = costBasisPrice(equity);
@@ -400,22 +426,28 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 data = MarketData.builder()
                         .symbol(symbol)
                         .lastPrice(cost)
-                        .previousClose(cost)
                         .build();
                 priceSource = HoldingInstrumentClassifier.PRICE_COST;
                 log.info("Heatmap cost-basis fallback for symbol={} price={}", symbol, cost);
             }
 
+            // Trust sectorToStocks (incl. SEBI MF categories). Only fill Unknown/blank via classifier.
             String sector = symbolToSector.getOrDefault(symbol, "Unknown");
-            String classified = HoldingInstrumentClassifier.resolveSector(
-                    HoldingInstrumentClassifier.isMissingSector(sector) ? null : sector,
-                    symbol,
-                    equity != null ? equity.getIsin() : null,
-                    priceSource,
-                    equity != null ? equity.getAssetClass() : null,
-                    equity != null ? equity.getName() : null);
-            if (classified != null && !HoldingInstrumentClassifier.isMissingSector(classified)) {
-                sector = classified;
+            if (HoldingInstrumentClassifier.isMissingSector(sector)
+                    || MutualFundSchemeCategory.isMutualFundsBucket(sector)) {
+                String classified = HoldingInstrumentClassifier.resolveSector(
+                        HoldingInstrumentClassifier.isMissingSector(sector) ? null : sector,
+                        symbol,
+                        equity != null ? equity.getIsin() : null,
+                        priceSource,
+                        equity != null ? equity.getAssetClass() : null,
+                        equity != null ? equity.getName() : null);
+                // Do not clobber SEBI category parents already assigned under MUTUAL_FUND scope.
+                if (classified != null
+                        && !HoldingInstrumentClassifier.isMissingSector(classified)
+                        && !MutualFundSchemeCategory.isKnownDisplayName(sector)) {
+                    sector = classified;
+                }
             }
             
             sectorMarketDataMap.computeIfAbsent(sector, k -> new ArrayList<>())
@@ -518,6 +550,18 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             }
         }
         return out;
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String v : values) {
+            if (v != null && !v.isBlank()) {
+                return v.trim();
+            }
+        }
+        return null;
     }
 
     private static String usableEquitySector(String sector) {
