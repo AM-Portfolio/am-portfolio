@@ -45,6 +45,12 @@ public class AdvancedAnalyticsRequest extends TimeFrameRequest {
     @com.fasterxml.jackson.annotation.JsonIgnore
     private transient boolean prefetchAttempted = false;
 
+    /**
+     * Heatmap / advanced mosaic scope: {@code ALL} (default), {@code EQUITY}, or {@code MUTUAL_FUND}.
+     * Mutual fund scope must not emit equity sector shells (IT, Banking, …).
+     */
+    private String assetScope;
+
     public AdvancedAnalyticsRequest() {
         this.coreIdentifiers = new CoreIdentifiers();
         this.pagination = new PaginationRequest();

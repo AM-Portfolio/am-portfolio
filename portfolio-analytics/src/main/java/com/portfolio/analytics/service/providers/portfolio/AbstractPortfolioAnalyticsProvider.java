@@ -147,22 +147,39 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
             if (request != null && request.isPrefetchAttempted() && !allowsPrefetchFanOut()) {
                 log.warn("Prefetch already attempted with empty result — skipping individual OHLC fan-out for {}",
                         this.getClass().getSimpleName());
-                return emptyResultSupplier.get();
+                // Heatmap MF scope continues with empty OHLC and fills from EOD NAV / cost.
+                if (!allowsEmptyMarketData()) {
+                    return emptyResultSupplier.get();
+                }
+                marketData = Collections.emptyMap();
+            } else {
+                log.info("Market data not in prefetch cache. Fetching individually for provider {}", this.getClass().getSimpleName());
+                TimeFrameRequest fanOutTf = preferLiveMarketDataOnFanOut()
+                        ? null
+                        : (request != null ? request.getTimeFrameRequest() : null);
+                marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, fanOutTf);
             }
-            log.info("Market data not in prefetch cache. Fetching individually for provider {}", this.getClass().getSimpleName());
-            TimeFrameRequest fanOutTf = preferLiveMarketDataOnFanOut()
-                    ? null
-                    : (request != null ? request.getTimeFrameRequest() : null);
-            marketData = AnalyticsUtils.fetchMarketData(this, portfolioSymbols, fanOutTf);
         }
         
         if (marketData == null || marketData.isEmpty()) {
-            log.warn("No market data available for portfolio: {}", portfolioId);
-            return emptyResultSupplier.get();
+            if (!allowsEmptyMarketData()) {
+                log.warn("No market data available for portfolio: {}", portfolioId);
+                return emptyResultSupplier.get();
+            }
+            log.info("No OHLC market data for {} — continuing with empty map (NAV/cost fallback)",
+                    this.getClass().getSimpleName());
+            marketData = Collections.emptyMap();
         }
         
         // Process the data with the provided processor
         return resultProcessor.process(portfolio, portfolioSymbols, marketData);
+    }
+
+    /**
+     * When true, an empty OHLC map still runs the processor (e.g. heatmap MF scope uses EOD NAV).
+     */
+    protected boolean allowsEmptyMarketData() {
+        return false;
     }
     
     /**

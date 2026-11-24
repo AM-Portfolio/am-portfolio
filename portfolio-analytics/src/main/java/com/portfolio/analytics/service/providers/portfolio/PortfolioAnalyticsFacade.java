@@ -122,9 +122,12 @@ public class PortfolioAnalyticsFacade {
         log.info("Calculating advanced analytics for portfolio: {} from {} to {}", 
                 request.getCoreIdentifiers().getPortfolioId(), request.getFromDate(), request.getToDate());
         
-        // Generate a cache key based on the request parameters (include TF enum)
+        // Generate a cache key based on the request parameters (include TF enum + assetScope)
         String tfCode = request.getTimeFrame() != null ? request.getTimeFrame().getValue() : "live";
-        String cacheKey = String.format("%s|%s|%s|%s|H:%b|M:%b|S:%b|C:%b",
+        String assetScope = request.getAssetScope() == null || request.getAssetScope().isBlank()
+                ? "ALL"
+                : request.getAssetScope().trim().toUpperCase(java.util.Locale.ROOT);
+        String cacheKey = String.format("%s|%s|%s|%s|H:%b|M:%b|S:%b|C:%b|AS:%s",
                 request.getCoreIdentifiers().getPortfolioId(),
                 request.getFromDate(),
                 request.getToDate(),
@@ -132,7 +135,8 @@ public class PortfolioAnalyticsFacade {
                 request.getFeatureToggles().isIncludeHeatmap(),
                 request.getFeatureToggles().isIncludeMovers(),
                 request.getFeatureToggles().isIncludeSectorAllocation(),
-                request.getFeatureToggles().isIncludeMarketCapAllocation());
+                request.getFeatureToggles().isIncludeMarketCapAllocation(),
+                assetScope);
         
         CachedResponse cached = fastCache.get(cacheKey);
         if (cached != null && !cached.isExpired()) {
@@ -167,13 +171,24 @@ public class PortfolioAnalyticsFacade {
                 }
             }
             if (portfolio != null) {
+                // Scope filter before prefetch so MUTUAL_FUND does not pull equity MD/security fan-out.
+                portfolio = PortfolioHeatmapProvider.filterPortfolioByAssetScope(portfolio, request.getAssetScope());
+                request.setPrefetchedPortfolio(portfolio);
                 if (portfolio.getEquityModels() != null && !portfolio.getEquityModels().isEmpty()) {
                     List<String> symbols = portfolio.getEquityModels().stream()
                             .map(EquityModel::getSymbol)
                             .filter(s -> s != null && !s.isEmpty())
                             .collect(Collectors.toList());
-                    
-                    if (!symbols.isEmpty()) {
+
+                    boolean mfScope = "MUTUAL_FUND".equalsIgnoreCase(assetScope) || "MF".equalsIgnoreCase(assetScope);
+                    // MF mosaic prices come from MutualFundNavService, not equity LTP/hist.
+                    boolean skipEquityMarketPrefetch = mfScope
+                            && request.getFeatureToggles().isIncludeHeatmap()
+                            && !request.getFeatureToggles().isIncludeMovers()
+                            && !request.getFeatureToggles().isIncludeSectorAllocation()
+                            && !request.getFeatureToggles().isIncludeMarketCapAllocation();
+
+                    if (!symbols.isEmpty() && !skipEquityMarketPrefetch) {
                         log.info("[Optimization] Prefetching market data once for {} symbols", symbols.size());
                         boolean needsHist = request.getTimeFrameRequest() != null
                                 && (request.getFeatureToggles().isIncludeHeatmap()
@@ -216,18 +231,22 @@ public class PortfolioAnalyticsFacade {
                         if (normalizedLive != null && !normalizedLive.isEmpty()) {
                             request.setPrefetchedLiveMarketData(normalizedLive);
                         }
+                    } else if (skipEquityMarketPrefetch) {
+                        log.info("[Optimization] Skipping equity MD prefetch for MF heatmap-only ({} symbols)", symbols.size());
+                        request.setPrefetchAttempted(true);
+                    }
 
-                        // Movers-only: skip security-details prefetch (not used by TopMovers).
-                        boolean moversOnly = request.getFeatureToggles().isIncludeMovers()
-                                && !request.getFeatureToggles().isIncludeHeatmap()
-                                && !request.getFeatureToggles().isIncludeSectorAllocation()
-                                && !request.getFeatureToggles().isIncludeMarketCapAllocation();
-                        if (!moversOnly) {
-                            log.info("[Optimization] Prefetching security details once for {} symbols", symbols.size());
-                            Map<String, com.am.common.amcommondata.model.security.SecurityModel> prefetchedSecurities =
-                                securityDetailsService.getSecurityDetails(symbols);
-                            request.setPrefetchedSecurityDetails(prefetchedSecurities);
-                        }
+                    // Movers-only / MF-category heatmap: skip security-details (unused).
+                    boolean moversOnly = request.getFeatureToggles().isIncludeMovers()
+                            && !request.getFeatureToggles().isIncludeHeatmap()
+                            && !request.getFeatureToggles().isIncludeSectorAllocation()
+                            && !request.getFeatureToggles().isIncludeMarketCapAllocation();
+                    boolean skipSecurityDetails = moversOnly || mfScope;
+                    if (!symbols.isEmpty() && !skipSecurityDetails) {
+                        log.info("[Optimization] Prefetching security details once for {} symbols", symbols.size());
+                        Map<String, com.am.common.amcommondata.model.security.SecurityModel> prefetchedSecurities =
+                            securityDetailsService.getSecurityDetails(symbols);
+                        request.setPrefetchedSecurityDetails(prefetchedSecurities);
                     }
                 }
             }

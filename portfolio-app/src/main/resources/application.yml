@@ -242,6 +242,14 @@ basket:
     # Discover list: skip 5Y weekly hist (slow). Miss path uses one 5Y monthly ALL wave.
     discover-skip-perf-hist: ${BASKET_DISCOVER_SKIP_PERF_HIST:true}
 
+mf:
+  catalog:
+    api:
+      # Dig: http://am-parser-dev:8080 (helm MF_CATALOG_API_URL). Empty → AMFI fallback only.
+      url: ${MF_CATALOG_API_URL:}
+      amfi-latest-url: ${MF_AMFI_LATEST_URL:https://portal.amfiindia.com/spages/NAVAll.txt}
+      amfi-history-url: ${MF_AMFI_HISTORY_URL:https://portal.amfiindia.com/DownloadNAVHistoryReport_Po.aspx}
+
 market-data:
   client:
     connect-timeout-ms: ${MARKET_DATA_CONNECT_TIMEOUT_MS:3000}
