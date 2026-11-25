@@ -148,7 +148,17 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                                                 || HoldingInstrumentClassifier.isMissingSector(currentSector)
                                                 || MutualFundSchemeCategory.isMutualFundsBucket(currentSector)
                                                 || !equitySector.equals(currentSector));
+                        // MD often parks NIFTYBEES under Financial Services — force ETF/MF product sectors.
+                        boolean forceProductSector =
+                                !mfScope
+                                        && (HoldingInstrumentClassifier.SECTOR_ETF.equals(equitySector)
+                                                || HoldingInstrumentClassifier.SECTOR_MUTUAL_FUND.equals(equitySector)
+                                                || HoldingInstrumentClassifier.SECTOR_UNLISTED.equals(equitySector))
+                                        && (currentSector == null
+                                                || HoldingInstrumentClassifier.isMissingSector(currentSector)
+                                                || !equitySector.equals(currentSector));
                         if (forceMfCategory
+                                || forceProductSector
                                 || currentSector == null
                                 || HoldingInstrumentClassifier.isMissingSector(currentSector)) {
                             if (currentSector != null) {
@@ -259,14 +269,21 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         return tf == null || tf == com.portfolio.model.market.TimeFrame.DAY;
     }
 
-    /** Normalize {@code ALL|EQUITY|MUTUAL_FUND}; blank → ALL. */
+    /** Normalize {@code ALL|EQUITY|ETF|MUTUAL_FUND}; blank → ALL. */
     static String normalizeAssetScope(String assetScope) {
         if (assetScope == null || assetScope.isBlank()) {
             return "ALL";
         }
         String u = assetScope.trim().toUpperCase(Locale.ROOT);
-        if ("EQUITY".equals(u) || "MUTUAL_FUND".equals(u) || "MF".equals(u)) {
-            return "MF".equals(u) ? "MUTUAL_FUND" : u;
+        if ("EQUITY".equals(u) || "ETF".equals(u) || "ETFS".equals(u)
+                || "MUTUAL_FUND".equals(u) || "MF".equals(u)) {
+            if ("MF".equals(u)) {
+                return "MUTUAL_FUND";
+            }
+            if ("ETFS".equals(u)) {
+                return "ETF";
+            }
+            return u;
         }
         return "ALL";
     }
@@ -286,11 +303,15 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 null,
                 equity.getName());
         boolean mutualFund = HoldingInstrumentClassifier.PRODUCT_MUTUAL_FUND.equals(product);
+        boolean etf = HoldingInstrumentClassifier.PRODUCT_ETF.equals(product);
         if ("MUTUAL_FUND".equals(scope)) {
             return mutualFund;
         }
-        // EQUITY: listed equity + ETF + unlisted; never scheme MF.
-        return !mutualFund;
+        if ("ETF".equals(scope)) {
+            return etf;
+        }
+        // EQUITY: listed equity + unlisted; never scheme MF or listed ETF.
+        return !mutualFund && !etf;
     }
 
     static PortfolioModelV1 filterPortfolioByAssetScope(PortfolioModelV1 portfolio, String assetScope) {
@@ -431,18 +452,24 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 log.info("Heatmap cost-basis fallback for symbol={} price={}", symbol, cost);
             }
 
-            // Trust sectorToStocks (incl. SEBI MF categories). Only fill Unknown/blank via classifier.
+            // Trust sectorToStocks (incl. SEBI MF categories). Force ETF/MF product sectors;
+            // fill Unknown/blank via classifier. Never leave NIFTYBEES under Financial Services.
             String sector = symbolToSector.getOrDefault(symbol, "Unknown");
-            if (HoldingInstrumentClassifier.isMissingSector(sector)
+            String classified = HoldingInstrumentClassifier.resolveSector(
+                    HoldingInstrumentClassifier.isMissingSector(sector) ? null : sector,
+                    symbol,
+                    equity != null ? equity.getIsin() : null,
+                    priceSource,
+                    equity != null ? equity.getAssetClass() : null,
+                    equity != null ? firstNonBlank(equity.getName(), equity.getCompanyName()) : null);
+            if (HoldingInstrumentClassifier.SECTOR_ETF.equals(classified)
+                    || HoldingInstrumentClassifier.SECTOR_MUTUAL_FUND.equals(classified)
+                    || HoldingInstrumentClassifier.SECTOR_UNLISTED.equals(classified)) {
+                if (!MutualFundSchemeCategory.isKnownDisplayName(sector)) {
+                    sector = classified;
+                }
+            } else if (HoldingInstrumentClassifier.isMissingSector(sector)
                     || MutualFundSchemeCategory.isMutualFundsBucket(sector)) {
-                String classified = HoldingInstrumentClassifier.resolveSector(
-                        HoldingInstrumentClassifier.isMissingSector(sector) ? null : sector,
-                        symbol,
-                        equity != null ? equity.getIsin() : null,
-                        priceSource,
-                        equity != null ? equity.getAssetClass() : null,
-                        equity != null ? equity.getName() : null);
-                // Do not clobber SEBI category parents already assigned under MUTUAL_FUND scope.
                 if (classified != null
                         && !HoldingInstrumentClassifier.isMissingSector(classified)
                         && !MutualFundSchemeCategory.isKnownDisplayName(sector)) {

@@ -159,7 +159,7 @@ public final class HoldingInstrumentClassifier {
         return false;
     }
 
-    static boolean nameSuggestsEtf(String name) {
+    public static boolean nameSuggestsEtf(String name) {
         if (name == null || name.isBlank()) {
             return false;
         }

@@ -21,6 +21,7 @@ import static com.portfolio.analytics.intelligence.HealthScoreConstants.*;
 public class HealthScoreEngine {
 
     static final String ASSET_EQUITY = "EQUITY";
+    static final String ASSET_ETF = "ETF";
     static final String ASSET_FIXED_INCOME = "FIXED_INCOME";
     static final String ASSET_COMMODITY = "COMMODITY";
     static final String ASSET_CASH = "CASH";
@@ -206,13 +207,38 @@ public class HealthScoreEngine {
         return normalized;
     }
 
+    /**
+     * Maps {@link com.portfolio.model.portfolio.HoldingInstrumentClassifier} product codes
+     * onto Class-tab keys. Unlisted books as Equity.
+     */
+    static String fromProductClass(String productClass) {
+        if (productClass == null || productClass.isBlank()) {
+            return ASSET_EQUITY;
+        }
+        String u = productClass.trim().toUpperCase(Locale.ROOT);
+        if (ASSET_ETF.equals(u) || "EXCHANGE_TRADED".equals(u)) {
+            return ASSET_ETF;
+        }
+        if (ASSET_MUTUAL_FUND.equals(u)) {
+            return ASSET_MUTUAL_FUND;
+        }
+        // PRODUCT_UNLISTED and PRODUCT_EQUITY both surface as Equity on Class.
+        return ASSET_EQUITY;
+    }
+
     static String normalizeAssetClass(String assetClass) {
         if (assetClass == null || assetClass.isBlank()) {
             return ASSET_EQUITY;
         }
-        String u = assetClass.trim().toUpperCase(Locale.ROOT);
+        String u = assetClass.trim().toUpperCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
         if (u.equals(ASSET_NPS) || u.contains("NPS")) {
             return ASSET_NPS;
+        }
+        // Listed ETF before GOLD/SILVER so GOLDBEES / "Gold ETF" stay ETF, not Commodity.
+        if (u.equals(ASSET_ETF)
+                || u.contains("EXCHANGE_TRADED")
+                || u.contains("ETF")) {
+            return ASSET_ETF;
         }
         if (u.contains("BOND") || u.contains("DEBT") || u.equals(ASSET_FIXED_INCOME) || u.equals("FIXED_INCOME")) {
             return ASSET_FIXED_INCOME;
@@ -223,8 +249,11 @@ public class HealthScoreEngine {
         if (u.contains("CASH")) {
             return ASSET_CASH;
         }
-        if (u.contains("MF") || u.contains("MUTUAL") || u.contains("ETF") || u.equals(ASSET_MUTUAL_FUND)) {
+        if (u.contains("MF") || u.contains("MUTUAL") || u.equals(ASSET_MUTUAL_FUND)) {
             return ASSET_MUTUAL_FUND;
+        }
+        if (u.contains("UNLISTED")) {
+            return ASSET_EQUITY;
         }
         return ASSET_EQUITY;
     }
@@ -259,6 +288,7 @@ public class HealthScoreEngine {
     static double withinEquityScore(PortfolioIntelligenceSnapshot s) {
         Map<String, Double> classes = classWeights(s);
         double equityW = classes.getOrDefault(ASSET_EQUITY, 0.0)
+                + classes.getOrDefault(ASSET_ETF, 0.0)
                 + classes.getOrDefault(ASSET_MUTUAL_FUND, 0.0);
         if (equityW <= 0) {
             return 70.0;
@@ -266,7 +296,7 @@ public class HealthScoreEngine {
         List<PortfolioIntelligenceSnapshot.Holding> equityHoldings = new ArrayList<>();
         for (PortfolioIntelligenceSnapshot.Holding h : s.getHoldings()) {
             String cls = normalizeAssetClass(h.getAssetClass());
-            if (ASSET_EQUITY.equals(cls) || ASSET_MUTUAL_FUND.equals(cls)) {
+            if (ASSET_EQUITY.equals(cls) || ASSET_ETF.equals(cls) || ASSET_MUTUAL_FUND.equals(cls)) {
                 equityHoldings.add(h);
             }
         }

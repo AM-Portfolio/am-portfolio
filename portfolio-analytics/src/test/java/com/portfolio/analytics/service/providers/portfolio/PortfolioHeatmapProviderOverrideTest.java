@@ -64,4 +64,32 @@ class PortfolioHeatmapProviderOverrideTest {
         assertEquals(1, filtered.getEquityModels().size());
         assertEquals("INF204KB17I5", filtered.getEquityModels().get(0).getIsin());
     }
+
+    @Test
+    void equityScopeExcludesEtfAndEtfScopeKeepsBees() {
+        EquityModel tcs = EquityModel.builder()
+                .symbol("TCS")
+                .isin("INE467B01029")
+                .name("Tata Consultancy")
+                .assetClass("EQUITY")
+                .build();
+        EquityModel niftyBees = EquityModel.builder()
+                .symbol("NIFTYBEES")
+                .isin("INF732E01037")
+                .name("Nippon India ETF Nifty BeES")
+                .assetClass("EQUITY")
+                .build();
+
+        assertTrue(PortfolioHeatmapProvider.matchesAssetScope(tcs, "EQUITY"));
+        assertFalse(PortfolioHeatmapProvider.matchesAssetScope(niftyBees, "EQUITY"));
+        assertTrue(PortfolioHeatmapProvider.matchesAssetScope(niftyBees, "ETF"));
+        assertFalse(PortfolioHeatmapProvider.matchesAssetScope(tcs, "ETF"));
+        assertEquals("ETF", PortfolioHeatmapProvider.normalizeAssetScope("ETFS"));
+
+        PortfolioModelV1 etfOnly = PortfolioHeatmapProvider.filterPortfolioByAssetScope(
+                PortfolioModelV1.builder().equityModels(List.of(tcs, niftyBees)).build(),
+                "ETF");
+        assertEquals(1, etfOnly.getEquityModels().size());
+        assertEquals("NIFTYBEES", etfOnly.getEquityModels().get(0).getSymbol());
+    }
 }

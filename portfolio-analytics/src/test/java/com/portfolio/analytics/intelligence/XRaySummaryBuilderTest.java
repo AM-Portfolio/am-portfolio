@@ -114,6 +114,30 @@ class XRaySummaryBuilderTest {
     }
 
     @Test
+    void assetClassWeights_splitEquityEtfAndMutualFund() {
+        PortfolioIntelligenceSnapshot snapshot = PortfolioIntelligenceSnapshot.builder()
+                .portfolioId("fixture")
+                .holdings(List.of(
+                        holding("TCS", 500_000, 50, "IT", "Soft", "LARGE_CAP", HealthScoreEngine.ASSET_EQUITY),
+                        holding("NIFTYBEES", 300_000, 30, "Exchange Traded Funds (ETFs)", "ETFs", "LARGE_CAP",
+                                HealthScoreEngine.ASSET_ETF),
+                        holding("GOLDBEES", 50_000, 5, "Exchange Traded Funds (ETFs)", "ETFs", "NA",
+                                "GOLD ETF"),
+                        holding("MF1", 150_000, 15, null, null, null, HealthScoreEngine.ASSET_MUTUAL_FUND)
+                ))
+                .totalValue(1_000_000)
+                .build();
+
+        XRayDto xray = builder.build(snapshot);
+        Map<String, XRayDto.WeightSliceDto> classes = byName(xray.getAssetClassWeights());
+        assertEquals(3, classes.size());
+        assertEquals(50.0, classes.get(HealthScoreEngine.ASSET_EQUITY).getWeightPct());
+        assertEquals(35.0, classes.get(HealthScoreEngine.ASSET_ETF).getWeightPct());
+        assertEquals(350_000.0, classes.get(HealthScoreEngine.ASSET_ETF).getValue());
+        assertEquals(15.0, classes.get(HealthScoreEngine.ASSET_MUTUAL_FUND).getWeightPct());
+    }
+
+    @Test
     void portfolioWeightsFromBookValues_splitsByContribution() {
         Map<String, Double> books = Map.of(
                 "Zerodha", 600_000.0,
