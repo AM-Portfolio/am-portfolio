@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.http.HttpMethod.GET;
 import static org.springframework.http.HttpMethod.POST;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -116,13 +117,56 @@ class MutualFundNavServiceTest {
     }
 
     @Test
-    void emptyCatalogUrlReturnsNoMarks() {
-        MutualFundNavService service = new MutualFundNavService(new RestTemplate());
-        ReflectionTestUtils.setField(service, "catalogBaseUrl", "");
+    void amfiFallbackFillsWhenParserBatchMissing() {
+        RestTemplate amfi = new RestTemplate();
+        RestTemplate catalog = new RestTemplate();
+        MockRestServiceServer amfiServer = MockRestServiceServer.bindTo(amfi).build();
+        MockRestServiceServer catalogServer = MockRestServiceServer.bindTo(catalog).build();
+        MutualFundNavService service = new MutualFundNavService(amfi, catalog);
+        ReflectionTestUtils.setField(service, "catalogBaseUrl", "http://am-parser.test");
+        ReflectionTestUtils.setField(service, "latestUrl", "http://amfi.test/latest");
+        ReflectionTestUtils.setField(service, "historyUrl", "http://amfi.test/history");
+        String isin = "INF247L01999";
+
+        catalogServer.expect(requestTo("http://am-parser.test/v1/mutual-fund/nav/batch"))
+                .andExpect(method(POST))
+                .andRespond(withSuccess("""
+                        {"source":"nse-master-download","marks":[],"missing":["INF247L01999"]}
+                        """, MediaType.APPLICATION_JSON));
+        amfiServer.expect(requestTo("http://amfi.test/latest"))
+                .andExpect(method(GET))
+                .andRespond(withSuccess("""
+                        Scheme Code;ISIN Growth;ISIN Reinvestment;Scheme Name;Plan;Option;NAV;Date
+                        147704;INF247L01999;-;Motilal Oswal Large and Midcap Fund;Direct Plan;Growth;40.6665;19-Nov-2026
+                        """, MediaType.TEXT_PLAIN));
+        expectHistoryWindow(amfiServer, LocalDate.of(2026, 11, 19), Map.of(
+                "18-Nov-2026", """
+                        Scheme Code;Scheme Name;ISIN Growth;ISIN Reinvestment;NAV;Repurchase;Sale;Date
+                        147704;Motilal Oswal Large and Midcap Fund;INF247L01999;;40.5130;40.5130;40.5130;18-Nov-2026
+                        """));
+
         try {
-            assertTrue(service.getMarks(List.of("INF247L01999")).isEmpty());
+            Map<String, MutualFundNavMark> marks = service.getMarks(List.of(isin));
+            MutualFundNavMark mark = marks.get(isin);
+            assertNotNull(mark);
+            assertEquals(40.6665, mark.nav());
+            assertEquals(40.513, mark.previousNav());
         } finally {
             service.stopLookupExecutor();
+        }
+    }
+
+    private static void expectHistoryWindow(
+            MockRestServiceServer server, LocalDate navDate, Map<String, String> bodiesByFrmdt) {
+        java.time.format.DateTimeFormatter amfi =
+                java.time.format.DateTimeFormatter.ofPattern("dd-MMM-yyyy", java.util.Locale.US);
+        int windowDays = Math.max(MutualFundNavService.MAX_PREVIOUS_GAP_DAYS, 5);
+        for (int days = 1; days <= windowDays; days++) {
+            String frmdt = navDate.minusDays(days).format(amfi);
+            String body = bodiesByFrmdt.getOrDefault(frmdt, "");
+            server.expect(requestTo("http://amfi.test/history?frmdt=" + frmdt + "&todt=" + frmdt))
+                    .andExpect(method(GET))
+                    .andRespond(withSuccess(body, MediaType.TEXT_PLAIN));
         }
     }
 

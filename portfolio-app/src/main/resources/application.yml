@@ -245,8 +245,8 @@ basket:
 mf:
   catalog:
     api:
-      # Dig: http://am-parser-dev:8080 (helm MF_CATALOG_API_URL). Empty → no MF NAV (CAS mark only).
-      # Primary path: POST /v1/mutual-fund/nav/batch (no AMFI NAVAll.txt on request path).
+      # Dig: http://am-parser-dev:8080 (helm MF_CATALOG_API_URL).
+      # Primary: POST /v1/mutual-fund/nav/batch; AMFI NAVAll fills ISINs still missing previousNav.
       url: ${MF_CATALOG_API_URL:}
       amfi-latest-url: ${MF_AMFI_LATEST_URL:https://portal.amfiindia.com/spages/NAVAll.txt}
       amfi-history-url: ${MF_AMFI_HISTORY_URL:https://portal.amfiindia.com/DownloadNAVHistoryReport_Po.aspx}
