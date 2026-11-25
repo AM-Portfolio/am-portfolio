@@ -4,34 +4,32 @@ import com.portfolio.marketdata.model.MutualFundNavMark;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.web.util.UriComponentsBuilder;
 
-import jakarta.annotation.PreDestroy;
 import java.net.URI;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Scheme EOD NAV for heatmap / holdings.
- * Fast path: one AMFI bulk feed for all ISINs (+ prior day once).
- * Optional: am-parser catalog enrich (names / override) with a hard request budget.
+ * Primary: one am-parser {@code POST /v1/mutual-fund/nav/batch} per book.
+ * Does not download AMFI {@code NAVAll.txt} on the request path.
  */
 @Service
 @Slf4j
@@ -40,43 +38,26 @@ public class MutualFundNavService {
     private static final DateTimeFormatter ISO_DATE = DateTimeFormatter.ISO_LOCAL_DATE;
     private static final ParameterizedTypeReference<Map<String, Object>> MAP_TYPE =
             new ParameterizedTypeReference<>() {};
-    private static final long CATALOG_BUDGET_MS = 1_800L;
+    private static final long BATCH_CACHE_TTL_MS = TimeUnit.MINUTES.toMillis(10);
 
-    private final RestTemplate restTemplate;
     private final RestTemplate catalogRestTemplate;
-    private final Map<String, MutualFundNavMark> catalogByIsin = new ConcurrentHashMap<>();
-    private volatile Map<String, MutualFundNavMark> latestByIsin = Map.of();
-    private volatile LocalDate latestFeedDate;
-    private volatile long latestLoadedAt;
-    private volatile boolean previousSnapshotLoaded;
-    private final Map<LocalDate, Map<String, Double>> historyByDate = new ConcurrentHashMap<>();
-    private final AtomicBoolean historyRefreshRunning = new AtomicBoolean();
-    private final ExecutorService lookupExecutor = Executors.newFixedThreadPool(4, task -> {
-        Thread thread = new Thread(task, "mf-nav-lookup");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private final Map<String, MutualFundNavMark> markByIsin = new ConcurrentHashMap<>();
+    private volatile long batchLoadedAt;
 
     @Value("${mf.catalog.api.url:}")
     private String catalogBaseUrl;
 
-    @Value("${mf.catalog.api.amfi-latest-url:https://portal.amfiindia.com/spages/NAVAll.txt}")
-    private String latestUrl;
-
-    @Value("${mf.catalog.api.amfi-history-url:https://portal.amfiindia.com/DownloadNAVHistoryReport_Po.aspx}")
-    private String historyUrl;
-
     public MutualFundNavService() {
-        this(createRestTemplate(2500, 8000), createRestTemplate(800, 1500));
+        this(createRestTemplate(800, 2500));
     }
 
-    MutualFundNavService(RestTemplate restTemplate) {
-        this(restTemplate, restTemplate);
-    }
-
-    MutualFundNavService(RestTemplate restTemplate, RestTemplate catalogRestTemplate) {
-        this.restTemplate = restTemplate;
+    MutualFundNavService(RestTemplate catalogRestTemplate) {
         this.catalogRestTemplate = catalogRestTemplate;
+    }
+
+    /** Dual-template ctor kept for existing tests; only the catalog client is used. */
+    MutualFundNavService(RestTemplate ignoredAmfi, RestTemplate catalogRestTemplate) {
+        this(catalogRestTemplate);
     }
 
     private static RestTemplate createRestTemplate(int connectMs, int readMs) {
@@ -86,7 +67,6 @@ public class MutualFundNavService {
         return new RestTemplate(factory);
     }
 
-    /** Returns a NAV mark by either growth/payout or reinvestment scheme ISIN. */
     public MutualFundNavMark getMark(String isin) {
         Map<String, MutualFundNavMark> marks = getMarks(List.of(isin));
         String key = normalize(isin);
@@ -94,132 +74,149 @@ public class MutualFundNavService {
     }
 
     /**
-     * Batch NAV for scheme ISINs. AMFI bulk is the request-path source of truth for speed;
-     * catalog may enrich scheme names inside a short budget without blocking overview.
+     * Batch NAV for scheme ISINs via am-parser. Empty catalog URL → empty map
+     * (callers fall back to CAS import marks).
      */
     public Map<String, MutualFundNavMark> getMarks(Iterable<String> isins) {
         if (isins == null) return Map.of();
-        List<String> keys = new ArrayList<>();
+        LinkedHashSet<String> keys = new LinkedHashSet<>();
         for (String raw : isins) {
             String key = normalize(raw);
-            if (key != null && key.startsWith("INF") && !keys.contains(key)) {
+            if (key != null && key.startsWith("INF")) {
                 keys.add(key);
             }
         }
         if (keys.isEmpty()) return Map.of();
 
-        Map<String, MutualFundNavMark> snapshot = loadLatest(true);
-        ensurePreviousSnapshotReady();
-
-        Map<String, MutualFundNavMark> result = new HashMap<>();
-        for (String key : keys) {
-            MutualFundNavMark cachedCatalog = catalogByIsin.get(key);
-            if (cachedCatalog != null && cachedCatalog.nav() > 0) {
-                result.put(key, withPrevious(cachedCatalog));
-                continue;
-            }
-            MutualFundNavMark amfi = snapshot.get(key);
-            if (amfi != null) {
-                result.put(key, withPrevious(amfi));
-            }
+        if (!catalogEnabled()) {
+            log.warn("MF catalog URL empty — no NAV marks (set MF_CATALOG_API_URL)");
+            return Map.of();
         }
 
-        // Marks can lag the feed max date (e.g. feed max=21, scheme NAV=20).
-        // Ensure history exists for each mark's own prior day, then re-attach.
-        ensureHistoryForMarkDates(result.values());
-        result.replaceAll((isin, mark) -> withPrevious(mark));
+        long age = System.currentTimeMillis() - batchLoadedAt;
+        Map<String, MutualFundNavMark> result = new HashMap<>();
+        List<String> missing = new ArrayList<>();
+        if (age < BATCH_CACHE_TTL_MS && !markByIsin.isEmpty()) {
+            for (String key : keys) {
+                MutualFundNavMark cached = markByIsin.get(key);
+                if (cached != null && cached.nav() > 0) {
+                    result.put(key, sanitize(cached));
+                } else {
+                    missing.add(key);
+                }
+            }
+            if (missing.isEmpty()) {
+                return Map.copyOf(result);
+            }
+        } else {
+            missing.addAll(keys);
+        }
 
-        enrichFromCatalogAsyncBudget(keys, result);
+        Map<String, MutualFundNavMark> fetched = fetchBatch(missing.isEmpty() ? keys : missing);
+        if (!fetched.isEmpty()) {
+            markByIsin.putAll(fetched);
+            batchLoadedAt = System.currentTimeMillis();
+            result.putAll(fetched);
+        }
+        for (String key : keys) {
+            MutualFundNavMark mark = result.get(key);
+            if (mark == null) {
+                MutualFundNavMark cached = markByIsin.get(key);
+                if (cached != null) {
+                    result.put(key, sanitize(cached));
+                }
+            } else {
+                result.put(key, sanitize(mark));
+            }
+        }
         return Map.copyOf(result);
     }
 
-    private void enrichFromCatalogAsyncBudget(List<String> keys, Map<String, MutualFundNavMark> result) {
-        if (!catalogEnabled() || keys.isEmpty()) return;
-        // Prefer catalog scheme names when the budget allows; skip ISINs already catalog-cached.
-        List<String> missingNames = keys.stream()
-                .filter(key -> !catalogByIsin.containsKey(key))
-                .limit(12)
-                .toList();
-        if (missingNames.isEmpty()) return;
-
-        long deadline = System.currentTimeMillis() + CATALOG_BUDGET_MS;
-        List<CompletableFuture<MutualFundNavMark>> futures = missingNames.stream()
-                .map(isin -> CompletableFuture.supplyAsync(() -> fetchCatalogMark(isin), lookupExecutor))
-                .toList();
+    private Map<String, MutualFundNavMark> fetchBatch(Iterable<String> isins) {
+        List<String> list = new ArrayList<>();
+        for (String isin : isins) {
+            if (isin != null && !isin.isBlank()) list.add(isin);
+        }
+        if (list.isEmpty()) return Map.of();
         try {
-            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
-                    .get(Math.max(50, deadline - System.currentTimeMillis()), TimeUnit.MILLISECONDS);
+            URI uri = URI.create(trimSlash(catalogBaseUrl) + "/v1/mutual-fund/nav/batch");
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setAccept(List.of(MediaType.APPLICATION_JSON));
+            Map<String, Object> body = Map.of("isins", list);
+            ResponseEntity<Map<String, Object>> response = catalogRestTemplate.exchange(
+                    uri, HttpMethod.POST, new HttpEntity<>(body, headers), MAP_TYPE);
+            return parseBatchResponse(response.getBody());
         } catch (Exception e) {
-            log.debug("MF catalog enrich budget elapsed: {}", e.getMessage());
+            log.warn("MF catalog nav batch failed count={} err={}", list.size(), e.getMessage());
+            return Map.of();
         }
-        for (int i = 0; i < missingNames.size(); i++) {
-            String key = missingNames.get(i);
-            MutualFundNavMark catalog = futures.get(i).getNow(null);
-            if (catalog == null || catalog.nav() <= 0) continue;
-            MutualFundNavMark existing = result.get(key);
-            String name = catalog.schemeName() != null && !catalog.schemeName().isBlank()
-                    ? catalog.schemeName()
-                    : (existing != null ? existing.schemeName() : null);
-            Double previous = catalog.previousNav() != null
-                    ? catalog.previousNav()
-                    : (existing != null ? existing.previousNav() : null);
-            double nav = catalog.nav() > 0 ? catalog.nav() : (existing != null ? existing.nav() : 0);
-            LocalDate navDate = catalog.navDate() != null
-                    ? catalog.navDate()
-                    : (existing != null ? existing.navDate() : null);
-            if (nav <= 0) continue;
-            MutualFundNavMark merged = withPrevious(
-                    new MutualFundNavMark(key, name, nav, previous, navDate));
-            catalogByIsin.put(key, merged);
-            result.put(key, merged);
+    }
+
+    static Map<String, MutualFundNavMark> parseBatchResponse(Map<String, Object> body) {
+        Map<String, MutualFundNavMark> result = new HashMap<>();
+        if (body == null || body.isEmpty()) return result;
+        Object rawMarks = body.get("marks");
+        if (!(rawMarks instanceof List<?> marks)) return result;
+        for (Object raw : marks) {
+            if (!(raw instanceof Map<?, ?> row)) continue;
+            @SuppressWarnings("unchecked")
+            Map<String, Object> markMap = (Map<String, Object>) row;
+            MutualFundNavMark mark = parseBatchMark(markMap);
+            if (mark != null) {
+                result.put(mark.isin(), mark);
+            }
         }
+        return result;
+    }
+
+    static MutualFundNavMark parseBatchMark(Map<String, Object> body) {
+        if (body == null || body.isEmpty()) return null;
+        Double nav = asDouble(body.get("nav"));
+        if (nav == null || nav <= 0) return null;
+        String isin = normalize(asString(body.get("isin")));
+        if (isin == null || !isin.startsWith("INF")) return null;
+        String schemeName = asString(body.get("schemeName"));
+        LocalDate navDate = parseIsoDate(asString(body.get("navDate")));
+        Double previous = asDouble(body.get("previousNav"));
+        return new MutualFundNavMark(isin, schemeName, nav, previous, navDate);
+    }
+
+    private MutualFundNavMark sanitize(MutualFundNavMark mark) {
+        if (mark == null) return null;
+        Double previous = mark.previousNav();
+        if (previous == null || previous <= 0) {
+            return mark.previousNav() == null
+                    ? mark
+                    : new MutualFundNavMark(mark.isin(), mark.schemeName(), mark.nav(), null, mark.navDate());
+        }
+        if (!isPlausible1dMove(mark.nav(), previous)) {
+            log.warn(
+                    "Dropping implausible MF 1D NAV move isin={} nav={} previous={} (>{}%)",
+                    mark.isin(),
+                    mark.nav(),
+                    previous,
+                    MAX_ABS_1D_PCT);
+            return new MutualFundNavMark(mark.isin(), mark.schemeName(), mark.nav(), null, mark.navDate());
+        }
+        return mark;
     }
 
     private boolean catalogEnabled() {
         return catalogBaseUrl != null && !catalogBaseUrl.isBlank();
     }
 
-    private MutualFundNavMark fetchCatalogMark(String isin) {
-        try {
-            URI detailUri = UriComponentsBuilder
-                    .fromUriString(trimSlash(catalogBaseUrl) + "/v1/mutual-fund/{isin}")
-                    .buildAndExpand(isin)
-                    .encode()
-                    .toUri();
-            ResponseEntity<Map<String, Object>> response = catalogRestTemplate.exchange(
-                    detailUri, HttpMethod.GET, null, MAP_TYPE);
-            MutualFundNavMark latest = parseCatalogDetail(isin, response.getBody());
-            if (latest == null) return null;
-            Double previous = fetchCatalogPrevious(isin, latest.navDate());
-            MutualFundNavMark mark = previous == null
-                    ? latest
-                    : new MutualFundNavMark(latest.isin(), latest.schemeName(), latest.nav(), previous, latest.navDate());
-            catalogByIsin.put(isin, mark);
-            return mark;
-        } catch (Exception e) {
-            log.debug("MF catalog NAV unavailable for {}: {}", isin, e.getMessage());
-            return null;
-        }
-    }
+    /** Max calendar gap (incl. weekend/holiday) between NAV date and prior published day. */
+    static final int MAX_PREVIOUS_GAP_DAYS = 3;
+    /** Reject bogus 1D moves (wrong ISIN/history); open-end schemes do not move this much in 1D. */
+    static final double MAX_ABS_1D_PCT = 10.0;
 
-    private Double fetchCatalogPrevious(String isin, LocalDate navDate) {
-        if (navDate == null) return null;
-        LocalDate from = navDate.minusDays(14);
-        try {
-            URI historyUri = UriComponentsBuilder
-                    .fromUriString(trimSlash(catalogBaseUrl) + "/v1/mutual-fund/{isin}/history")
-                    .queryParam("from", from.format(ISO_DATE))
-                    .queryParam("to", navDate.format(ISO_DATE))
-                    .buildAndExpand(isin)
-                    .encode()
-                    .toUri();
-            ResponseEntity<Map<String, Object>> response = catalogRestTemplate.exchange(
-                    historyUri, HttpMethod.GET, null, MAP_TYPE);
-            return previousFromHistoryPoints(response.getBody(), navDate);
-        } catch (Exception e) {
-            log.debug("MF catalog history unavailable for {}: {}", isin, e.getMessage());
-            return null;
+    static boolean isPlausible1dMove(double nav, double previous) {
+        if (previous <= 0 || nav <= 0) {
+            return false;
         }
+        double pct = Math.abs((nav - previous) / previous) * 100.0;
+        return pct <= MAX_ABS_1D_PCT;
     }
 
     static MutualFundNavMark parseCatalogDetail(String isin, Map<String, Object> body) {
@@ -257,158 +254,6 @@ public class MutualFundNavService {
         return bestNav;
     }
 
-    private Map<String, MutualFundNavMark> loadLatest(boolean forceRefresh) {
-        long age = System.currentTimeMillis() - latestLoadedAt;
-        if (!forceRefresh && !latestByIsin.isEmpty() && age < TimeUnit.HOURS.toMillis(6)) return latestByIsin;
-        if (latestLoadedAt != 0 && age < TimeUnit.MINUTES.toMillis(2)) return latestByIsin;
-        synchronized (this) {
-            age = System.currentTimeMillis() - latestLoadedAt;
-            if (latestLoadedAt != 0 && age < (forceRefresh ? TimeUnit.HOURS.toMillis(6) : TimeUnit.MINUTES.toMillis(2))) {
-                return latestByIsin;
-            }
-            try {
-                String body = restTemplate.getForObject(latestUrl, String.class);
-                Map<String, MutualFundNavMark> parsed = parseLatest(body);
-                if (!parsed.isEmpty()) {
-                    latestByIsin = Map.copyOf(parsed);
-                    if (!latestFeedDateEquals(parsed, latestFeedDate)) previousSnapshotLoaded = false;
-                    latestFeedDate = parsed.values().stream().map(MutualFundNavMark::navDate)
-                            .filter(date -> date != null).max(LocalDate::compareTo).orElse(null);
-                    historyByDate.keySet().removeIf(date -> latestFeedDate != null && date.isBefore(latestFeedDate.minusDays(8)));
-                }
-                latestLoadedAt = System.currentTimeMillis();
-            } catch (Exception e) {
-                latestLoadedAt = System.currentTimeMillis();
-                log.warn("AMFI latest NAV feed unavailable: {}", e.getMessage());
-            }
-            return latestByIsin;
-        }
-    }
-
-    private void ensurePreviousSnapshotReady() {
-        if (previousSnapshotLoaded || latestFeedDate == null) return;
-        if (historyRefreshRunning.compareAndSet(false, true)) {
-            try {
-                loadPreviousBusinessDay();
-            } finally {
-                historyRefreshRunning.set(false);
-            }
-            return;
-        }
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-        while (!previousSnapshotLoaded && System.nanoTime() < deadline) {
-            try {
-                Thread.sleep(20);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
-            }
-        }
-    }
-
-    private void loadPreviousBusinessDay() {
-        if (loadHistoryBefore(latestFeedDate)) {
-            previousSnapshotLoaded = true;
-        }
-    }
-
-    /**
-     * Prefetch AMFI history for every calendar day in the T−1 window before [navDate].
-     * Do not stop on the first non-empty day: weekend/holiday feeds are often thin
-     * (hundreds of schemes) and would hide the real prior business day.
-     */
-    private boolean loadHistoryBefore(LocalDate navDate) {
-        if (navDate == null) return false;
-        boolean any = false;
-        // Load past the selectAdjacent gap so a Sun→Fri jump still lands in cache.
-        int windowDays = Math.max(MAX_PREVIOUS_GAP_DAYS, 5);
-        for (int days = 1; days <= windowDays; days++) {
-            LocalDate candidate = navDate.minusDays(days);
-            Map<String, Double> values = historyByDate.get(candidate);
-            if (values == null) {
-                try {
-                    String date = candidate.format(AMFI_DATE);
-                    URI uri = UriComponentsBuilder.fromUriString(historyUrl)
-                            .queryParam("frmdt", date).queryParam("todt", date)
-                            .build().encode().toUri();
-                    values = parseHistory(restTemplate.getForObject(uri, String.class));
-                    historyByDate.put(candidate, values != null ? values : Map.of());
-                } catch (Exception e) {
-                    log.debug("AMFI NAV history unavailable for {}: {}", candidate, e.getMessage());
-                    historyByDate.put(candidate, Map.of());
-                    continue;
-                }
-            }
-            if (values != null && !values.isEmpty()) {
-                log.info("Loaded AMFI previous NAV snapshot for {} ({} schemes)", candidate, values.size());
-                any = true;
-            }
-        }
-        return any;
-    }
-
-    private void ensureHistoryForMarkDates(Iterable<MutualFundNavMark> marks) {
-        if (marks == null) return;
-        for (MutualFundNavMark mark : marks) {
-            if (mark == null || mark.navDate() == null || mark.previousNav() != null) continue;
-            if (previousNavFromHistory(mark) != null) continue;
-            loadHistoryBefore(mark.navDate());
-        }
-    }
-
-    private static boolean latestFeedDateEquals(Map<String, MutualFundNavMark> marks, LocalDate current) {
-        if (current == null) return false;
-        return marks.values().stream().map(MutualFundNavMark::navDate).anyMatch(current::equals);
-    }
-
-    /** Max calendar gap (incl. weekend/holiday) between NAV date and prior published day. */
-    static final int MAX_PREVIOUS_GAP_DAYS = 3;
-    /** Reject bogus 1D moves (wrong ISIN/history); open-end schemes do not move this much in 1D. */
-    static final double MAX_ABS_1D_PCT = 10.0;
-
-    private MutualFundNavMark withPrevious(MutualFundNavMark mark) {
-        if (mark == null || mark.navDate() == null) {
-            return mark;
-        }
-        Double previous = mark.previousNav();
-        if (previous == null || previous <= 0) {
-            previous = previousNavFromHistory(mark);
-        }
-        if (previous == null || previous <= 0) {
-            return mark.previousNav() == null
-                    ? mark
-                    : new MutualFundNavMark(mark.isin(), mark.schemeName(), mark.nav(), null, mark.navDate());
-        }
-        if (!isPlausible1dMove(mark.nav(), previous)) {
-            log.warn(
-                    "Dropping implausible MF 1D NAV move isin={} nav={} previous={} (>{})",
-                    mark.isin(),
-                    mark.nav(),
-                    previous,
-                    MAX_ABS_1D_PCT);
-            return new MutualFundNavMark(mark.isin(), mark.schemeName(), mark.nav(), null, mark.navDate());
-        }
-        if (mark.previousNav() != null && Double.compare(mark.previousNav(), previous) == 0) {
-            return mark;
-        }
-        return new MutualFundNavMark(mark.isin(), mark.schemeName(), mark.nav(), previous, mark.navDate());
-    }
-
-    /**
-     * Nearest history NAV strictly before the mark date, only if within
-     * {@link #MAX_PREVIOUS_GAP_DAYS} (true prior business day, not a week-old fill).
-     */
-    private Double previousNavFromHistory(MutualFundNavMark mark) {
-        if (mark == null || mark.navDate() == null) {
-            return null;
-        }
-        String isin = normalize(mark.isin());
-        if (isin == null) {
-            return null;
-        }
-        return selectAdjacentPreviousNav(mark.navDate(), isin, historyByDate);
-    }
-
     static Double selectAdjacentPreviousNav(
             LocalDate navDate, String isin, Map<LocalDate, Map<String, Double>> historyByDate) {
         if (navDate == null || isin == null || historyByDate == null || historyByDate.isEmpty()) {
@@ -441,14 +286,7 @@ public class MutualFundNavService {
         return bestNav;
     }
 
-    static boolean isPlausible1dMove(double nav, double previous) {
-        if (previous <= 0 || nav <= 0) {
-            return false;
-        }
-        double pct = Math.abs((nav - previous) / previous) * 100.0;
-        return pct <= MAX_ABS_1D_PCT;
-    }
-
+    /** Kept for unit tests of AMFI text layouts; not used on the live request path. */
     static Map<String, MutualFundNavMark> parseLatest(String body) {
         Map<String, MutualFundNavMark> result = new HashMap<>();
         if (body == null) return result;
@@ -469,11 +307,6 @@ public class MutualFundNavService {
         return result;
     }
 
-    /**
-     * AMFI history rows come in two layouts:
-     * legacy: code;name;isinGrowth;isinReinvest;nav;repurchase;sale;date
-     * current: code;name;plan;option;isinGrowth;isinReinvest;nav;date
-     */
     static Map<String, Double> parseHistory(String body) {
         Map<String, Double> result = new HashMap<>();
         if (body == null) return result;
@@ -568,6 +401,8 @@ public class MutualFundNavService {
         return base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
     }
 
-    @PreDestroy
-    void stopLookupExecutor() { lookupExecutor.shutdownNow(); }
+    /** No-op kept for tests that previously shut down the AMFI lookup pool. */
+    void stopLookupExecutor() {
+        // intentional no-op
+    }
 }
