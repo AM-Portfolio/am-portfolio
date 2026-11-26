@@ -8,6 +8,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -154,6 +155,47 @@ class MutualFundNavServiceTest {
         } finally {
             service.stopLookupExecutor();
         }
+    }
+
+    @Test
+    void amfiFallbackIsQueuedOffRequestPathAndPopulatesCache() {
+        RestTemplate amfi = new RestTemplate();
+        RestTemplate catalog = new RestTemplate();
+        MockRestServiceServer amfiServer = MockRestServiceServer.bindTo(amfi).build();
+        MockRestServiceServer catalogServer = MockRestServiceServer.bindTo(catalog).build();
+        List<Runnable> queuedTasks = new ArrayList<>();
+        MutualFundNavService service = new MutualFundNavService(amfi, catalog, queuedTasks::add);
+        ReflectionTestUtils.setField(service, "catalogBaseUrl", "http://am-parser.test");
+        ReflectionTestUtils.setField(service, "latestUrl", "http://amfi.test/latest");
+        ReflectionTestUtils.setField(service, "historyUrl", "http://amfi.test/history");
+        String isin = "INF247L01999";
+
+        catalogServer.expect(requestTo("http://am-parser.test/v1/mutual-fund/nav/batch"))
+                .andExpect(method(POST))
+                .andRespond(withSuccess("{\"marks\":[],\"missing\":[\"INF247L01999\"]}",
+                        MediaType.APPLICATION_JSON));
+        amfiServer.expect(requestTo("http://amfi.test/latest"))
+                .andExpect(method(GET))
+                .andRespond(withSuccess("""
+                        Scheme Code;ISIN Growth;ISIN Reinvestment;Scheme Name;Plan;Option;NAV;Date
+                        147704;INF247L01999;-;Motilal Oswal Large and Midcap Fund;Direct Plan;Growth;40.6665;19-Nov-2026
+                        """, MediaType.TEXT_PLAIN));
+        expectHistoryWindow(amfiServer, LocalDate.of(2026, 11, 19), Map.of(
+                "18-Nov-2026", """
+                        Scheme Code;Scheme Name;ISIN Growth;ISIN Reinvestment;NAV;Repurchase;Sale;Date
+                        147704;Motilal Oswal Large and Midcap Fund;INF247L01999;;40.5130;40.5130;40.5130;18-Nov-2026
+                        """));
+
+        Map<String, MutualFundNavMark> firstResponse = service.getMarks(List.of(isin));
+        assertTrue(firstResponse.isEmpty(), "AMFI fallback must not block the request path");
+        assertEquals(1, queuedTasks.size());
+
+        queuedTasks.get(0).run();
+        Map<String, MutualFundNavMark> afterRefresh = service.getMarks(List.of(isin));
+        assertEquals(40.6665, afterRefresh.get(isin).nav());
+        assertEquals(40.513, afterRefresh.get(isin).previousNav());
+        catalogServer.verify();
+        amfiServer.verify();
     }
 
     private static void expectHistoryWindow(

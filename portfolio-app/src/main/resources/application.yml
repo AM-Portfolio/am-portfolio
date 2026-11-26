@@ -279,8 +279,8 @@ market-data:
     # Caffeine miss-marker TTL (not Redis); successful priorClose stays ~18h
     prior-close-miss-ttl-minutes: ${MARKET_DATA_PRIOR_CLOSE_MISS_TTL_MINUTES:15}
     batch:
-      # 450 < Upstox 500-key cap → one bulk OHLC for typical books
-      chunk-size: ${MARKET_DATA_BATCH_CHUNK_SIZE:450}
+      # Keep the Upstox encoded instrument_key query comfortably sized.
+      chunk-size: ${MARKET_DATA_BATCH_CHUNK_SIZE:150}
       parallel-batching-enabled: ${MARKET_DATA_PARALLEL_BATCHING:true}
       max-parallel-chunks: ${MARKET_DATA_MAX_PARALLEL_CHUNKS:4}
       session-close-wave-timeout-ms: ${MARKET_DATA_SESSION_CLOSE_WAVE_TIMEOUT_MS:15000}

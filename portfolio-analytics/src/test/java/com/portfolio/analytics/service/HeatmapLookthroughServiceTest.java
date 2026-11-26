@@ -6,11 +6,13 @@ import com.portfolio.basket.model.EtfHolding;
 import com.portfolio.basket.service.EnrichedEtfService;
 import com.portfolio.model.analytics.lookthrough.HeatmapLookthroughResponse;
 import com.portfolio.model.analytics.lookthrough.HeatmapLookthroughResponse.Source;
+import com.github.benmanes.caffeine.cache.Cache;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 
@@ -92,6 +94,21 @@ class HeatmapLookthroughServiceTest {
         assertThat(response.getSource()).isEqualTo(Source.ETF_HOLDINGS);
         verify(enrichedEtfService).getEnrichedEtf(ETF_ISIN);
         verify(etfApiClient, never()).lookupHoldings(eq(List.of(ETF_ISIN)), eq(List.of("MUTUAL_FUND")));
+    }
+
+    @Test
+    void lookthroughCacheEvictsWhenItExceedsConfiguredMaximum() {
+        when(enrichedEtfService.getEnrichedEtf(anyString()))
+                .thenReturn(sampleBook("Example ETF", "EXAMPLE"));
+
+        for (int i = 0; i < 2_100; i++) {
+            service.lookthrough("INE" + String.format("%09d", i), 1_000.0);
+        }
+
+        @SuppressWarnings("unchecked")
+        Cache<String, ?> cache = (Cache<String, ?>) ReflectionTestUtils.getField(service, "cache");
+        cache.cleanUp();
+        assertThat(cache.estimatedSize()).isLessThanOrEqualTo(2_000L);
     }
 
     private static EtfData sampleBook(String schemeName, String symbol) {

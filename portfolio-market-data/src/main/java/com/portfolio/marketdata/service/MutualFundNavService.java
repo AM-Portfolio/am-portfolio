@@ -3,6 +3,8 @@ package com.portfolio.marketdata.service;
 import com.portfolio.marketdata.model.MutualFundNavMark;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -25,8 +27,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Scheme EOD NAV for heatmap / holdings.
@@ -42,9 +47,11 @@ public class MutualFundNavService {
     private static final ParameterizedTypeReference<Map<String, Object>> MAP_TYPE =
             new ParameterizedTypeReference<>() {};
     private static final long BATCH_CACHE_TTL_MS = TimeUnit.MINUTES.toMillis(10);
+    private static final long AMFI_FALLBACK_MIN_INTERVAL_MS = TimeUnit.MINUTES.toMillis(2);
 
     private final RestTemplate amfiRestTemplate;
     private final RestTemplate catalogRestTemplate;
+    private final Executor amfiFallbackExecutor;
     private final Map<String, MutualFundNavMark> markByIsin = new ConcurrentHashMap<>();
     private volatile Map<String, MutualFundNavMark> latestByIsin = Map.of();
     private volatile LocalDate latestFeedDate;
@@ -53,6 +60,8 @@ public class MutualFundNavService {
     private volatile boolean previousSnapshotLoaded;
     private final Map<LocalDate, Map<String, Double>> historyByDate = new ConcurrentHashMap<>();
     private final AtomicBoolean historyRefreshRunning = new AtomicBoolean();
+    private final AtomicBoolean amfiFallbackRunning = new AtomicBoolean();
+    private final AtomicLong lastAmfiFallbackAttemptAt = new AtomicLong();
 
     @Value("${mf.catalog.api.url:}")
     private String catalogBaseUrl;
@@ -63,17 +72,26 @@ public class MutualFundNavService {
     @Value("${mf.catalog.api.amfi-history-url:https://portal.amfiindia.com/DownloadNAVHistoryReport_Po.aspx}")
     private String historyUrl;
 
-    public MutualFundNavService() {
-        this(createRestTemplate(2500, 8000), createRestTemplate(800, 2500));
+    @Autowired
+    public MutualFundNavService(@Qualifier("mfNavFallbackExecutor") Executor amfiFallbackExecutor) {
+        this(createRestTemplate(2500, 8000), createRestTemplate(800, 2500), amfiFallbackExecutor);
     }
 
     MutualFundNavService(RestTemplate shared) {
-        this(shared, shared);
+        this(shared, shared, Runnable::run);
     }
 
     MutualFundNavService(RestTemplate amfiRestTemplate, RestTemplate catalogRestTemplate) {
+        this(amfiRestTemplate, catalogRestTemplate, Runnable::run);
+    }
+
+    MutualFundNavService(
+            RestTemplate amfiRestTemplate,
+            RestTemplate catalogRestTemplate,
+            Executor amfiFallbackExecutor) {
         this.amfiRestTemplate = amfiRestTemplate;
         this.catalogRestTemplate = catalogRestTemplate;
+        this.amfiFallbackExecutor = amfiFallbackExecutor;
     }
 
     private static RestTemplate createRestTemplate(int connectMs, int readMs) {
@@ -142,30 +160,56 @@ public class MutualFundNavService {
         }
 
         if (!stillMissing.isEmpty()) {
-            Map<String, MutualFundNavMark> amfi = fillFromAmfi(stillMissing);
-            for (Map.Entry<String, MutualFundNavMark> e : amfi.entrySet()) {
-                MutualFundNavMark existing = result.get(e.getKey());
-                MutualFundNavMark filled = mergePreferringPrevious(existing, e.getValue());
-                result.put(e.getKey(), filled);
-                markByIsin.put(e.getKey(), filled);
-            }
-            if (!amfi.isEmpty()) {
-                batchLoadedAt = System.currentTimeMillis();
-                log.info("MF NAV AMFI fallback filled {} / {} missing ISINs", amfi.size(), stillMissing.size());
-            }
+            scheduleAmfiFallback(stillMissing);
         }
 
         Map<String, MutualFundNavMark> out = new HashMap<>();
         for (String key : keys) {
             MutualFundNavMark mark = result.get(key);
-            if (mark == null) {
-                mark = markByIsin.get(key);
+            MutualFundNavMark cached = markByIsin.get(key);
+            if (cached != null && hasPrevious(cached) && !hasPrevious(mark)) {
+                mark = cached;
+            } else if (mark == null) {
+                mark = cached;
             }
             if (mark != null && mark.nav() > 0) {
                 out.put(key, sanitize(mark));
             }
         }
         return Map.copyOf(out);
+    }
+
+    private void scheduleAmfiFallback(List<String> isins) {
+        long now = System.currentTimeMillis();
+        long lastAttempt = lastAmfiFallbackAttemptAt.get();
+        if (now - lastAttempt < AMFI_FALLBACK_MIN_INTERVAL_MS
+                || !amfiFallbackRunning.compareAndSet(false, true)) {
+            return;
+        }
+        lastAmfiFallbackAttemptAt.set(now);
+        List<String> requested = List.copyOf(isins);
+        try {
+            amfiFallbackExecutor.execute(() -> {
+                try {
+                    Map<String, MutualFundNavMark> fallback = fillFromAmfi(requested);
+                    fallback.forEach((isin, mark) -> markByIsin.compute(
+                            isin,
+                            (key, existing) -> mergePreferringPrevious(existing, mark)));
+                    if (!fallback.isEmpty()) {
+                        batchLoadedAt = System.currentTimeMillis();
+                        log.info("MF NAV AMFI fallback filled {} / {} missing ISINs",
+                                fallback.size(), requested.size());
+                    }
+                } catch (RuntimeException e) {
+                    log.warn("MF NAV AMFI fallback failed for {} ISINs: {}", requested.size(), e.getMessage());
+                } finally {
+                    amfiFallbackRunning.set(false);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            amfiFallbackRunning.set(false);
+            log.warn("MF NAV AMFI fallback executor is busy; skipping {} ISINs", requested.size());
+        }
     }
 
     private static boolean hasPrevious(MutualFundNavMark mark) {

@@ -12,6 +12,8 @@ import com.portfolio.model.analytics.lookthrough.HeatmapLookthroughResponse.Cove
 import com.portfolio.model.analytics.lookthrough.HeatmapLookthroughResponse.HoldingSlice;
 import com.portfolio.model.analytics.lookthrough.HeatmapLookthroughResponse.SectorSlice;
 import com.portfolio.model.analytics.lookthrough.HeatmapLookthroughResponse.Source;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -32,7 +34,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -44,7 +45,6 @@ import java.util.concurrent.TimeUnit;
 public class HeatmapLookthroughService {
 
     static final int TOP_N = 40;
-    private static final long CACHE_TTL_MS = TimeUnit.HOURS.toMillis(24);
     private static final List<String> LOOKUP_PRODUCT_TYPES = List.of("ETF", "MUTUAL_FUND");
     private static final Set<String> WEIGHT_KEYS = Set.of(
             "percentage_to_nav", "percentage", "weight", "weight_pct", "weightPct");
@@ -67,7 +67,10 @@ public class HeatmapLookthroughService {
     @Nullable
     private final MutualFundNavService mutualFundNavService;
     private final RestTemplate restTemplate;
-    private final ConcurrentHashMap<String, CacheEntry> cache = new ConcurrentHashMap<>();
+    private final Cache<String, ResolvedBook> cache = Caffeine.newBuilder()
+            .maximumSize(2_000)
+            .expireAfterWrite(24, TimeUnit.HOURS)
+            .build();
 
     @Value("${etf.url:http://localhost:8022}")
     private String etfUrl = "http://localhost:8022";
@@ -91,7 +94,7 @@ public class HeatmapLookthroughService {
         if (isin == null) {
             return unavailable(null, schemeValue);
         }
-        ResolvedBook cached = readCache(isin);
+        ResolvedBook cached = cache.getIfPresent(isin);
         if (cached != null) {
             return toResponse(isin, schemeValue, cached);
         }
@@ -99,7 +102,7 @@ public class HeatmapLookthroughService {
         if (book == null || book.holdings().isEmpty()) {
             return unavailable(isin, schemeValue);
         }
-        cache.put(isin, new CacheEntry(System.currentTimeMillis() + CACHE_TTL_MS, book));
+        cache.put(isin, book);
         log.info("Heatmap lookthrough isin={} source={} holdings={}", isin, book.source(), book.holdings().size());
         return toResponse(isin, schemeValue, book);
     }
@@ -477,18 +480,6 @@ public class HeatmapLookthroughService {
                 .build();
     }
 
-    private ResolvedBook readCache(String isin) {
-        CacheEntry entry = cache.get(isin);
-        if (entry == null) {
-            return null;
-        }
-        if (entry.expiresAt() < System.currentTimeMillis()) {
-            cache.remove(isin, entry);
-            return null;
-        }
-        return entry.book();
-    }
-
     private Map<String, Object> getQuiet(URI uri) {
         try {
             ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
@@ -742,9 +733,6 @@ public class HeatmapLookthroughService {
             return null;
         }
         return value;
-    }
-
-    private record CacheEntry(long expiresAt, ResolvedBook book) {
     }
 
     private record ResolvedBook(

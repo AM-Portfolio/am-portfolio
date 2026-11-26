@@ -164,7 +164,7 @@ public class MarketDataService {
     private List<List<String>> partitionSymbols(List<String> symbols) {
         int chunkSize = (config != null && config.getBatch() != null && config.getBatch().getChunkSize() > 0)
                 ? config.getBatch().getChunkSize()
-                : 450;
+                : 150;
         boolean parallel = (config != null && config.getBatch() != null) && config.getBatch().isParallelBatchingEnabled();
         // SESSION_CLOSE: only split when N > chunkSize; waves stay sequential (maxParallel=1).
         if (activeQuoteFreshness() == QuoteFreshness.SESSION_CLOSE && symbols.size() <= chunkSize) {

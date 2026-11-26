@@ -51,7 +51,7 @@ class MarketDataServiceSessionCloseTest {
     void setUp() {
         MarketDataApiConfig config = new MarketDataApiConfig();
         MarketDataApiConfig.BatchConfig batch = new MarketDataApiConfig.BatchConfig();
-        batch.setChunkSize(450);
+        batch.setChunkSize(150);
         batch.setParallelBatchingEnabled(true);
         batch.setMaxParallelChunks(4);
         batch.setSessionCloseWaveTimeoutMs(15_000L);
@@ -106,7 +106,7 @@ class MarketDataServiceSessionCloseTest {
         when(portfolioMarketDataRedisService.isCashMarketHours()).thenReturn(false);
 
         List<String> symbols = new ArrayList<>();
-        for (int i = 0; i < 120; i++) {
+        for (int i = 0; i < 150; i++) {
             symbols.add("SYM" + i);
         }
 
@@ -130,8 +130,50 @@ class MarketDataServiceSessionCloseTest {
         Map<String, MarketData> result =
                 marketDataService.getMarketData(symbols, QuoteFreshness.SESSION_CLOSE);
 
-        assertEquals(120, result.size());
-        assertEquals(1, calls.get(), "N<=450 must be one OHLC HTTP call");
+        assertEquals(150, result.size());
+        assertEquals(1, calls.get(), "N<=150 must be one OHLC HTTP call");
+    }
+
+    @Test
+    void sessionClose_splitsAtConfiguredUpstreamBatchLimit() {
+        when(portfolioMarketDataRedisService.isCashMarketHours()).thenReturn(false);
+        List<String> symbols = new ArrayList<>();
+        for (int i = 0; i < 151; i++) {
+            symbols.add("SYM" + i);
+        }
+        List<Integer> batchSizes = new ArrayList<>();
+        when(marketDataApiClient.getOhlcData(anyList(), anyString(), anyBoolean())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<String> chunk = inv.getArgument(0);
+            batchSizes.add(chunk.size());
+            MarketDataResponseWrapper wrapper = new MarketDataResponseWrapper();
+            Map<String, MarketDataResponse> data = new java.util.HashMap<>();
+            for (String symbol : chunk) {
+                MarketDataResponse response = new MarketDataResponse();
+                response.setLastPrice(100.0);
+                response.setPreviousClose(99.0);
+                data.put(symbol, response);
+            }
+            wrapper.setData(data);
+            return Mono.just(wrapper);
+        });
+
+        Map<String, MarketData> result =
+                marketDataService.getMarketData(symbols, QuoteFreshness.SESSION_CLOSE);
+
+        assertEquals(151, result.size());
+        assertEquals(List.of(150, 1), batchSizes);
+    }
+
+    @Test
+    void quoteFreshnessIsRemovedWhenRequestThrows() {
+        when(portfolioMarketDataRedisService.isCashMarketHours())
+                .thenThrow(new IllegalStateException("simulated redis failure"));
+
+        assertThrows(IllegalStateException.class,
+                () -> marketDataService.getMarketData(List.of("TCS"), QuoteFreshness.SESSION_CLOSE));
+
+        assertEquals(QuoteFreshness.NORMAL, marketDataService.activeQuoteFreshness());
     }
 
     @Test

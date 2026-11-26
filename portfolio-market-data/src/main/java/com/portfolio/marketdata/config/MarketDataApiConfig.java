@@ -106,10 +106,10 @@ public class MarketDataApiConfig {
     public static class BatchConfig {
         /**
          * Maximum symbols per single API batch call.
-         * Default 450 stays under Upstox's 500 instrument-key hard cap so a
-         * typical book is one HTTP OHLC request.
+         * Default 150 limits the encoded Upstox instrument-key query length
+         * while keeping normal books within one HTTP OHLC request.
          */
-        private int chunkSize = 450;
+        private int chunkSize = 150;
 
         /**
          * When true: splits symbols into parallel CHUNK_SIZE batches.
