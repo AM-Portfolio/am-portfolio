@@ -279,6 +279,20 @@ class HealthScoreEngineTest {
     }
 
     @Test
+    void normalizeAssetClass_keepsEtfSeparateFromMutualFundAndGoldCommodity() {
+        assertEquals(HealthScoreEngine.ASSET_ETF, HealthScoreEngine.normalizeAssetClass("ETF"));
+        assertEquals(HealthScoreEngine.ASSET_ETF, HealthScoreEngine.normalizeAssetClass("GOLD ETF"));
+        assertEquals(HealthScoreEngine.ASSET_ETF, HealthScoreEngine.normalizeAssetClass("Exchange Traded"));
+        assertEquals(HealthScoreEngine.ASSET_MUTUAL_FUND, HealthScoreEngine.normalizeAssetClass("MUTUAL_FUND"));
+        assertEquals(HealthScoreEngine.ASSET_MUTUAL_FUND, HealthScoreEngine.normalizeAssetClass("mutual_fund_demat"));
+        assertEquals(HealthScoreEngine.ASSET_COMMODITY, HealthScoreEngine.normalizeAssetClass("GOLD"));
+        assertEquals(HealthScoreEngine.ASSET_EQUITY, HealthScoreEngine.normalizeAssetClass("UNLISTED"));
+        assertEquals(HealthScoreEngine.ASSET_EQUITY, HealthScoreEngine.fromProductClass("UNLISTED"));
+        assertEquals(HealthScoreEngine.ASSET_ETF, HealthScoreEngine.fromProductClass("ETF"));
+        assertEquals(HealthScoreEngine.ASSET_MUTUAL_FUND, HealthScoreEngine.fromProductClass("MUTUAL_FUND"));
+    }
+
+    @Test
     void concentrationReason_includesTop1SymbolWhenPresent() {
         PortfolioIntelligenceSnapshot withSymbol = PortfolioIntelligenceSnapshot.builder()
                 .top1Pct(60.06)

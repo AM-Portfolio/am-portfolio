@@ -5,6 +5,7 @@ import com.am.security.context.UserContext;
 import com.portfolio.analytics.intelligence.AggregatePortfolioKeys;
 import com.portfolio.analytics.intelligence.AggregatePortfolioLoader;
 import com.portfolio.analytics.intelligence.PortfolioIntelligenceService;
+import com.portfolio.analytics.service.HeatmapLookthroughService;
 import com.portfolio.analytics.service.providers.portfolio.PortfolioAnalyticsFacade;
 import com.portfolio.api.security.PortfolioOwnerAssert;
 import com.portfolio.model.analytics.intelligence.IntelligenceSuggestResponse;
@@ -15,6 +16,7 @@ import com.portfolio.model.analytics.intelligence.StressRequest;
 import com.portfolio.model.analytics.intelligence.StressResponse;
 import com.portfolio.model.analytics.intelligence.WhatIfRequest;
 import com.portfolio.model.analytics.intelligence.WhatIfResponse;
+import com.portfolio.model.analytics.lookthrough.HeatmapLookthroughResponse;
 import com.portfolio.model.analytics.request.AdvancedAnalyticsRequest;
 import com.portfolio.model.analytics.request.CoreIdentifiers;
 import com.portfolio.model.analytics.request.FeatureToggles;
@@ -53,6 +55,7 @@ public class PortfolioAnalyticsController {
     private final PortfolioIntelligenceService portfolioIntelligenceService;
     private final AggregatePortfolioLoader aggregatePortfolioLoader;
     private final PortfolioIntelligenceRedisService portfolioIntelligenceRedisService;
+    private final HeatmapLookthroughService heatmapLookthroughService;
 
     // ── All-Portfolios aggregate (literal paths; before /{portfolioId}/**) ──
 
@@ -147,6 +150,32 @@ public class PortfolioAnalyticsController {
     }
 
     // ── Single portfolio ──
+
+    @Operation(
+            summary = "Heatmap scheme lookthrough",
+            description = "Fund → sector → stock constituents for one ETF/MF tile. Requires portfolio ownership.",
+            operationId = "getHeatmapLookthrough")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Lookthrough resolved", content = @Content(mediaType = "application/json", schema = @Schema(implementation = HeatmapLookthroughResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Invalid portfolioId or schemeIsin"),
+            @ApiResponse(responseCode = "403", description = "Caller is not the portfolio owner"),
+            @ApiResponse(responseCode = "404", description = "Portfolio not found")
+    })
+    @GetMapping("/{portfolioId}/heatmap/lookthrough")
+    public ResponseEntity<HeatmapLookthroughResponse> getHeatmapLookthrough(
+            @PathVariable String portfolioId,
+            @RequestParam String schemeIsin,
+            @RequestParam(required = false) Double schemeValue) {
+        if (isReservedAll(portfolioId) || invalidPortfolioId(portfolioId)) {
+            return ResponseEntity.badRequest().build();
+        }
+        if (schemeIsin == null || schemeIsin.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        portfolioOwnerAssert.requireOwner(portfolioId);
+        log.info("REST heatmap lookthrough portfolio={} schemeIsin={}", portfolioId, schemeIsin);
+        return ResponseEntity.ok(heatmapLookthroughService.lookthrough(schemeIsin, schemeValue));
+    }
 
     @Operation(summary = "Get advanced portfolio analytics", description = "Retrieves comprehensive analytics for a portfolio with customizable components and timeframes. Requires portfolio ownership.", operationId = "getAdvancedPortfolioAnalytics")
     @ApiResponses(value = {

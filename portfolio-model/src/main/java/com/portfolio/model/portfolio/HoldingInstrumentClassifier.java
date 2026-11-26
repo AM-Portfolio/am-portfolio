@@ -11,15 +11,71 @@ public final class HoldingInstrumentClassifier {
 
     public static final String SECTOR_ETF = "Exchange Traded Funds (ETFs)";
     public static final String INDUSTRY_ETF = "ETFs & Index Funds";
+    public static final String SECTOR_MUTUAL_FUND = "Mutual Funds";
+    public static final String INDUSTRY_MUTUAL_FUND = "Mutual Fund Schemes";
     public static final String SECTOR_UNLISTED = "Private / Unlisted";
     public static final String PRODUCT_EQUITY = "EQUITY";
     public static final String PRODUCT_ETF = "ETF";
+    public static final String PRODUCT_MUTUAL_FUND = "MUTUAL_FUND";
     public static final String PRODUCT_UNLISTED = "UNLISTED";
     public static final String PRICE_LIVE = "LIVE";
     public static final String PRICE_LAST = "LAST";
     public static final String PRICE_COST = "COST_BASIS";
+    public static final String PRICE_IMPORT = "IMPORT_MARK";
+    public static final String PRICE_NAV = "EOD_NAV";
 
     private HoldingInstrumentClassifier() {
+    }
+
+    /**
+     * Stable holdings / aggregate identity: ISIN when present, else trading symbol.
+     * Prevents distinct demat schemes that share a poisoned ticker from summing into one row.
+     */
+    public static String holdingIdentityKey(String symbol, String isin) {
+        if (isin != null && !isin.isBlank()) {
+            return isin.trim().toUpperCase(Locale.ROOT);
+        }
+        if (symbol != null && !symbol.isBlank()) {
+            return symbol.trim().toUpperCase(Locale.ROOT);
+        }
+        return null;
+    }
+
+    /**
+     * Scheme MF ISIN ({@code INF*}) that is not a listed ETF cash ticker.
+     * These must keep ISIN as the book key and never resolve to equity LTP tickers.
+     */
+    public static boolean isSchemeMfIsin(String isinOrSymbol) {
+        if (isinOrSymbol == null || isinOrSymbol.isBlank()) {
+            return false;
+        }
+        String u = isinOrSymbol.trim().toUpperCase(Locale.ROOT);
+        if (!u.startsWith("INF")) {
+            return false;
+        }
+        return !looksLikeListedEtfTicker(u);
+    }
+
+    /**
+     * True when this row must keep ISIN (or ISIN-shaped symbol) as storage/book key —
+     * never an equity cash ticker from market-data.
+     * Listed ETF demat (NIFTYBEES / TATAGOLD / name contains ETF|BEES) may still resolve.
+     */
+    public static boolean mustKeepIsinBookKey(String assetClass, String symbol, String isin, String name) {
+        if (looksLikeListedEtfTicker(symbol) || nameSuggestsEtf(name)) {
+            return false;
+        }
+        String suggested = suggestDisplayTickerFromName(name);
+        if (looksLikeListedEtfTicker(suggested)) {
+            return false;
+        }
+        if (isUnsafeNameToTickerMap(name, symbol)) {
+            return true;
+        }
+        if (isSchemeMfIsin(isin) || isSchemeMfIsin(symbol)) {
+            return true;
+        }
+        return isMutualFundDematClass(assetClass) && nameSuggestsSchemeMf(name);
     }
 
     public static boolean isMissingSector(String sector) {
@@ -50,10 +106,83 @@ public final class HoldingInstrumentClassifier {
         if (u.startsWith("INF")) {
             return true;
         }
+        return looksLikeListedEtfTicker(u);
+    }
+
+    /**
+     * Listed ETF cash tickers (BEES / *ETF). Excludes bare INF scheme codes used as book keys
+     * for mutual_fund_demat rows that must not take equity LTP.
+     */
+    public static boolean looksLikeListedEtfTicker(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            return false;
+        }
+        String u = symbol.trim().toUpperCase(Locale.ROOT);
         return u.endsWith("BEES")
                 || u.contains("ETF")
                 || u.endsWith("IETF")
                 || (u.endsWith("GOLD") && u.length() <= 12);
+    }
+
+    public static boolean isMutualFundDematClass(String assetClass) {
+        if (assetClass == null || assetClass.isBlank()) {
+            return false;
+        }
+        String u = assetClass.trim().toUpperCase(Locale.ROOT);
+        return u.contains("MUTUAL_FUND_DEMAT")
+                || (u.contains("MUTUAL") && u.contains("DEMAT"))
+                || u.equals("MUTUAL_FUND");
+    }
+
+    /**
+     * Scheme MF demat (and unsafe AMC→equity maps) must never take equity cash LTP.
+     * Listed ETF tickers / names (NIFTYBEES, MON100 + "…ETF…") still use LTP.
+     * Do not blanket-quarantine every mutual_fund_demat row — CDSL stores ETFs under that class.
+     */
+    public static boolean quarantineEquityLtp(String assetClass, String symbol, String isin, String name) {
+        if (isUnsafeNameToTickerMap(name, symbol)) {
+            return true;
+        }
+        if (looksLikeListedEtfTicker(symbol) || nameSuggestsEtf(name)) {
+            return false;
+        }
+        if (!isMutualFundDematClass(assetClass)) {
+            return false;
+        }
+        if (nameSuggestsSchemeMf(name)) {
+            return true;
+        }
+        // Prefer ISIN: poisoned equity tickers (RECLTD) must not hide an INF* scheme ISIN.
+        if (isSchemeMfIsin(isin) || isSchemeMfIsin(symbol)) {
+            return true;
+        }
+        return false;
+    }
+
+    public static boolean nameSuggestsEtf(String name) {
+        if (name == null || name.isBlank()) {
+            return false;
+        }
+        String u = name.toUpperCase(Locale.ROOT);
+        return u.contains("ETF") || u.contains("BEES");
+    }
+
+    static boolean nameSuggestsSchemeMf(String name) {
+        if (name == null || name.isBlank() || nameSuggestsEtf(name)) {
+            return false;
+        }
+        String u = name.toUpperCase(Locale.ROOT);
+        if (u.contains("BANDHAN")
+                || u.contains("MUTUAL FUND")
+                || u.contains("MUTUALFUND")
+                || u.contains("GROWTH PLAN")
+                || u.contains("DIRECT PLAN")
+                || u.contains("DIRECT-GROWTH")
+                || u.contains("DIRECT GROWTH")) {
+            return true;
+        }
+        // Broker CAS strings: "… MF-MOTILAL …" / "PPFAS MF-" (exclude ETF/BEES above).
+        return u.contains(" MF-") || (u.contains("#") && u.contains(" MF"));
     }
 
     /**
@@ -72,8 +201,33 @@ public final class HoldingInstrumentClassifier {
     }
 
     public static String resolveSector(String currentSector, String symbol, String isin, String priceSource) {
+        return resolveSector(currentSector, symbol, isin, priceSource, null, null);
+    }
+
+    /**
+     * Sector for mosaic / X-Ray. Listed ETF tickers force ETF sector even when MD says
+     * Financial Services. Scheme MF demat uses Mutual Funds — not the ETF bucket.
+     */
+    public static String resolveSector(
+            String currentSector,
+            String symbol,
+            String isin,
+            String priceSource,
+            String assetClass,
+            String name) {
+        if (looksLikeListedEtfTicker(symbol) || nameSuggestsEtf(name)) {
+            return SECTOR_ETF;
+        }
+        if (mustKeepIsinBookKey(assetClass, symbol, isin, name)
+                || (isMutualFundDematClass(assetClass) && !nameSuggestsEtf(name) && isSchemeMfIsin(firstNonBlank(isin, symbol)))) {
+            return SECTOR_MUTUAL_FUND;
+        }
         if (!isMissingSector(currentSector)) {
             return currentSector.trim();
+        }
+        // Bare INF* without MF class still often means scheme — prefer MF over ETF mosaic.
+        if (isSchemeMfIsin(firstNonBlank(isin, symbol)) && !looksLikeListedEtfTicker(symbol)) {
+            return SECTOR_MUTUAL_FUND;
         }
         if (looksLikeEtfOrScheme(symbol, isin)) {
             return SECTOR_ETF;
@@ -85,8 +239,28 @@ public final class HoldingInstrumentClassifier {
     }
 
     public static String resolveIndustry(String currentIndustry, String symbol, String isin, String priceSource) {
+        return resolveIndustry(currentIndustry, symbol, isin, priceSource, null, null);
+    }
+
+    public static String resolveIndustry(
+            String currentIndustry,
+            String symbol,
+            String isin,
+            String priceSource,
+            String assetClass,
+            String name) {
+        if (looksLikeListedEtfTicker(symbol) || nameSuggestsEtf(name)) {
+            return INDUSTRY_ETF;
+        }
+        if (mustKeepIsinBookKey(assetClass, symbol, isin, name)
+                || (isMutualFundDematClass(assetClass) && !nameSuggestsEtf(name) && isSchemeMfIsin(firstNonBlank(isin, symbol)))) {
+            return INDUSTRY_MUTUAL_FUND;
+        }
         if (!isMissingSector(currentIndustry)) {
             return currentIndustry.trim();
+        }
+        if (isSchemeMfIsin(firstNonBlank(isin, symbol)) && !looksLikeListedEtfTicker(symbol)) {
+            return INDUSTRY_MUTUAL_FUND;
         }
         if (looksLikeEtfOrScheme(symbol, isin)) {
             return INDUSTRY_ETF;
@@ -98,6 +272,18 @@ public final class HoldingInstrumentClassifier {
     }
 
     public static String productClass(String symbol, String isin, String priceSource) {
+        return productClass(null, symbol, isin, priceSource, null);
+    }
+
+    public static String productClass(
+            String assetClass, String symbol, String isin, String priceSource, String name) {
+        if (looksLikeListedEtfTicker(symbol) || nameSuggestsEtf(name)) {
+            return PRODUCT_ETF;
+        }
+        if (quarantineEquityLtp(assetClass, symbol, isin, name)
+                || (isMutualFundDematClass(assetClass) && !nameSuggestsEtf(name))) {
+            return PRODUCT_MUTUAL_FUND;
+        }
         if (looksLikeEtfOrScheme(symbol, isin)) {
             return PRODUCT_ETF;
         }
@@ -108,7 +294,8 @@ public final class HoldingInstrumentClassifier {
     }
 
     /**
-     * Reject dangerous name→ticker maps (e.g. Jio Platforms must never become JIOFIN).
+     * Reject dangerous name→ticker maps (e.g. Jio Platforms must never become JIOFIN;
+     * Bandhan AMC / MF scheme must never become RECLTD equity).
      */
     public static boolean isUnsafeNameToTickerMap(String holdingName, String ticker) {
         if (holdingName == null || ticker == null) {
@@ -116,13 +303,56 @@ public final class HoldingInstrumentClassifier {
         }
         String name = holdingName.toUpperCase(Locale.ROOT);
         String t = ticker.trim().toUpperCase(Locale.ROOT);
+        if (t.isBlank() || looksLikeListedEtfTicker(t)) {
+            return false;
+        }
         if (name.contains("PLATFORMS") && "JIOFIN".equals(t)) {
             return true;
         }
         if (name.contains("JIO PLATFORMS") && t.startsWith("JIO") && !"JIOPLATFORMS".equals(t)) {
             return true;
         }
+        // Poison equity aliases from MD/name search (TARIL/Transformers → RECLTD, etc.).
+        if ("RECLTD".equals(t) && !(name.contains("REC LTD")
+                || name.contains("REC LIMITED")
+                || name.contains("RURAL ELECTRIFICATION")
+                || name.matches(".*\\bREC\\b.*"))) {
+            return true;
+        }
+        if (nameLooksLikeAmcOrMfScheme(name) && !nameMentionsTicker(name, t)) {
+            return true;
+        }
         return false;
+    }
+
+    static boolean nameLooksLikeAmcOrMfScheme(String nameUpper) {
+        if (nameUpper == null || nameUpper.isBlank()) {
+            return false;
+        }
+        // ETF product names often include "AMC LTD" — those are not scheme-MF poison.
+        if (nameUpper.contains("ETF") || nameUpper.contains("BEES")) {
+            return false;
+        }
+        if (nameUpper.contains("BANDHAN")
+                || nameUpper.contains("MUTUAL FUND")
+                || nameUpper.contains("MUTUALFUND")
+                || nameUpper.contains("GROWTH PLAN")
+                || nameUpper.contains("DIRECT PLAN")
+                || nameUpper.contains("DIRECT-GROWTH")
+                || nameUpper.contains("DIRECT GROWTH")
+                || nameUpper.contains("AMC LTD")
+                || nameUpper.contains("AMC ")) {
+            return true;
+        }
+        return nameUpper.contains(" MF-") || (nameUpper.contains("#") && nameUpper.contains(" MF"));
+    }
+
+    static boolean nameMentionsTicker(String nameUpper, String tickerUpper) {
+        if (nameUpper == null || tickerUpper == null || tickerUpper.length() < 3) {
+            return false;
+        }
+        String compact = nameUpper.replaceAll("[^A-Z0-9]", "");
+        return compact.contains(tickerUpper) || nameUpper.contains(tickerUpper);
     }
 
     /**
@@ -144,7 +374,10 @@ public final class HoldingInstrumentClassifier {
         int dash = raw.lastIndexOf('-');
         if (dash >= 0 && dash < raw.length() - 1) {
             String tail = raw.substring(dash + 1).trim().toUpperCase(Locale.ROOT);
-            if (isPlausibleDisplayTicker(tail) && !isUnsafeNameToTickerMap(holdingName, tail)) {
+            // Plan / option suffixes are not tickers (…-DIRECT-GROWTH → GROWTH collapses many MFs).
+            if (isGenericPlanSuffix(tail)) {
+                // fall through to compact name
+            } else if (isPlausibleDisplayTicker(tail) && !isUnsafeNameToTickerMap(holdingName, tail)) {
                 return tail;
             }
         }
@@ -180,7 +413,32 @@ public final class HoldingInstrumentClassifier {
         if (TradingSymbolResolver.looksLikeIsin(t)) {
             return false;
         }
+        if (isGenericPlanSuffix(t)) {
+            return false;
+        }
         return t.matches("^[A-Z][A-Z0-9]*$");
+    }
+
+    /** MF plan words that must never become mosaic / book display symbols. */
+    static boolean isGenericPlanSuffix(String token) {
+        if (token == null || token.isBlank()) {
+            return false;
+        }
+        switch (token.trim().toUpperCase(Locale.ROOT)) {
+            case "GROWTH":
+            case "DIVIDEND":
+            case "DIRECT":
+            case "REGULAR":
+            case "PLAN":
+            case "OPTION":
+            case "FUND":
+            case "IDCW":
+            case "PAYOUT":
+            case "REINVESTMENT":
+                return true;
+            default:
+                return false;
+        }
     }
 
     private static String firstNonBlank(String a, String b) {

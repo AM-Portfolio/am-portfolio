@@ -18,6 +18,13 @@ public class BasePortfolioSummay {
 
     private Double investmentValue;
     private Double currentValue;
+
+    /**
+     * True only when invested/return are trustworthy for this summary scope.
+     * All Portfolios: every non-empty broker book has known cost.
+     * Single book: that book has known cost. False/null → UI must hide Invested/Return.
+     */
+    private Boolean costBasisComplete;
     
     // Overall performance metrics
     private Double totalGainLoss;

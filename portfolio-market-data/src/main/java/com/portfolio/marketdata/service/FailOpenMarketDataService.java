@@ -79,6 +79,11 @@ public class FailOpenMarketDataService extends MarketDataService {
         if (symbols == null || symbols.isEmpty()) {
             return;
         }
+        // SESSION_CLOSE after-close heatmap must not re-poison OHLC misses with midday Mongo.
+        if (activeQuoteFreshness() == QuoteFreshness.SESSION_CLOSE) {
+            log.info("[OHLC data] Fail-open skipped (SESSION_CLOSE)");
+            return;
+        }
         List<String> misses = symbols.stream()
                 .filter(s -> s != null && !s.isBlank())
                 .map(this::cleanSymbol)

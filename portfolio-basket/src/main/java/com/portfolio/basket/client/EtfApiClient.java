@@ -124,15 +124,23 @@ public class EtfApiClient {
      * POST /v2/funds/holdings — primary contract (symbol, ISIN, or name query per item).
      */
     public HoldingsLookupResponse lookupHoldings(List<String> items) {
+        return lookupHoldings(items, List.of("ETF"));
+    }
+
+    /**
+     * POST /v2/funds/holdings with an explicit product-type filter (ETF, MUTUAL_FUND, or both).
+     */
+    public HoldingsLookupResponse lookupHoldings(List<String> items, List<String> productTypes) {
         if (items == null || items.isEmpty()) {
             return new HoldingsLookupResponse(items, 0, Collections.emptyList(), Collections.emptyList());
         }
         String url = apiUrl + "/v2/funds/holdings";
-        HoldingsLookupRequest request = new HoldingsLookupRequest(items);
+        HoldingsLookupRequest request = new HoldingsLookupRequest(items, productTypes);
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         HttpEntity<HoldingsLookupRequest> entity = new HttpEntity<>(request, headers);
-        log.info("POST fund holdings lookup: {} items -> {}", items.size(), url);
+        log.info("POST fund holdings lookup: {} items productTypes={} -> {}",
+                items.size(), request.getProductTypes(), url);
         return etfRestTemplate.postForObject(url, entity, HoldingsLookupResponse.class);
     }
 
@@ -504,7 +512,7 @@ public class EtfApiClient {
         return queryLen > 0 && Character.isDigit(nameLower.charAt(end - 1));
     }
 
-    private EtfData toEtfData(EtfApiResponse response) {
+    public EtfData toEtfData(EtfApiResponse response) {
         if (response == null) {
             return null;
         }
@@ -530,7 +538,9 @@ public class EtfApiClient {
                     EtfHolding holding = new EtfHolding();
                     holding.setIsin(h.getIsinCode());
                     holding.setSymbol(h.getStockName());
-                    holding.setSector("Unknown");
+                    holding.setSector(h.getSector() != null && !h.getSector().isBlank()
+                            ? h.getSector()
+                            : "Unknown");
                     holding.setWeight(h.getPercentage() != null ? h.getPercentage() : 0.0);
                     return holding;
                 })
@@ -882,8 +892,16 @@ public class EtfApiClient {
         private List<String> productTypes = List.of("ETF");
 
         public HoldingsLookupRequest(List<String> items) {
-            this.items = new ArrayList<>(items);
-            this.productTypes = List.of("ETF");
+            this(items, List.of("ETF"));
+        }
+
+        public HoldingsLookupRequest(List<String> items, List<String> productTypes) {
+            this.items = items == null ? new ArrayList<>() : new ArrayList<>(items);
+            if (productTypes == null || productTypes.isEmpty()) {
+                this.productTypes = List.of("ETF");
+            } else {
+                this.productTypes = new ArrayList<>(productTypes);
+            }
         }
     }
 
@@ -1030,5 +1048,7 @@ public class EtfApiClient {
         private Double marketValue;
 
         private Double quantity;
+
+        private String sector;
     }
 }

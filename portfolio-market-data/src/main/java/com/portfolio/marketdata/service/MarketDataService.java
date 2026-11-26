@@ -60,9 +60,10 @@ public class MarketDataService {
     @org.springframework.lang.Nullable
     private final com.am.common.amcommondata.service.price.StockPriceHistoryMongoService stockPriceHistoryMongoService;
 
+    /** Quote L1: 90s so heatmap/day% track Redis cash-hours TTL, not a 5m freeze. */
     private final com.github.benmanes.caffeine.cache.Cache<String, MarketData> localCache = 
             com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
-            .expireAfterWrite(5, java.util.concurrent.TimeUnit.MINUTES)
+            .expireAfterWrite(90, java.util.concurrent.TimeUnit.SECONDS)
             .maximumSize(20000)
             .build();
 
@@ -97,6 +98,10 @@ public class MarketDataService {
 
     @org.springframework.lang.Nullable
     private final com.portfolio.marketdata.config.MarketDataApiConfig config;
+
+    /** Active freshness for the current {@link #getMarketData} call (FailOpen / OHLC wave). */
+    private static final ThreadLocal<QuoteFreshness> ACTIVE_QUOTE_FRESHNESS =
+            ThreadLocal.withInitial(() -> QuoteFreshness.NORMAL);
 
     public MarketDataService(
             MarketDataApiClient marketDataApiClient,
@@ -149,12 +154,22 @@ public class MarketDataService {
         return now.with(MARKET_OPEN).toInstant().toEpochMilli();
     }
 
+    protected QuoteFreshness activeQuoteFreshness() {
+        return ACTIVE_QUOTE_FRESHNESS.get();
+    }
+
     /**
      * Partition symbols according to configurable batch settings (single vs parallel chunking).
      */
     private List<List<String>> partitionSymbols(List<String> symbols) {
-        int chunkSize = (config != null && config.getBatch() != null && config.getBatch().getChunkSize() > 0) ? config.getBatch().getChunkSize() : 20;
+        int chunkSize = (config != null && config.getBatch() != null && config.getBatch().getChunkSize() > 0)
+                ? config.getBatch().getChunkSize()
+                : 150;
         boolean parallel = (config != null && config.getBatch() != null) && config.getBatch().isParallelBatchingEnabled();
+        // SESSION_CLOSE: only split when N > chunkSize; waves stay sequential (maxParallel=1).
+        if (activeQuoteFreshness() == QuoteFreshness.SESSION_CLOSE && symbols.size() <= chunkSize) {
+            parallel = false;
+        }
 
         if (!parallel || symbols.size() <= chunkSize) {
             log.debug("[MarketData] Single-batch mode: sending {} symbols in 1 request (chunkSize={})", symbols.size(), chunkSize);
@@ -454,6 +469,13 @@ public class MarketDataService {
         // The HTTP client read timeout is tens of seconds. Using it as the join
         // budget made every overview wait out a full wave before painting.
         long waveTimeoutMs = 800L;
+        if (activeQuoteFreshness() == QuoteFreshness.SESSION_CLOSE) {
+            maxParallel = 1;
+            long configured = (config != null && config.getBatch() != null)
+                    ? config.getBatch().getSessionCloseWaveTimeoutMs()
+                    : 0L;
+            waveTimeoutMs = configured > 0 ? configured : 15_000L;
+        }
 
         for (int i = 0; i < chunks.size(); i += maxParallel) {
             List<List<String>> wave = chunks.subList(i, Math.min(i + maxParallel, chunks.size()));
@@ -633,7 +655,7 @@ public class MarketDataService {
     }
 
     public Map<String, MarketData> getMarketData(List<String> symbols) {
-        return getMarketData(symbols, false);
+        return getMarketData(symbols, false, QuoteFreshness.NORMAL);
     }
 
     /**
@@ -641,10 +663,33 @@ public class MarketDataService {
      *                       hist repair — Preview tables need LTP/close, not day%.
      */
     public Map<String, MarketData> getMarketData(List<String> symbols, boolean skipHistRepair) {
+        return getMarketData(symbols, skipHistRepair, QuoteFreshness.NORMAL);
+    }
+
+    /**
+     * Live/1D heatmap uses {@link QuoteFreshness#SESSION_CLOSE} so after-close day%
+     * comes from bulk exchange OHLC instead of midday Mongo ticks.
+     */
+    public Map<String, MarketData> getMarketData(List<String> symbols, QuoteFreshness freshness) {
+        return getMarketData(symbols, false, freshness != null ? freshness : QuoteFreshness.NORMAL);
+    }
+
+    public Map<String, MarketData> getMarketData(
+            List<String> symbols, boolean skipHistRepair, QuoteFreshness freshness) {
         if (symbols == null || symbols.isEmpty()) {
             return Collections.emptyMap();
         }
+        QuoteFreshness effective = freshness != null ? freshness : QuoteFreshness.NORMAL;
+        ACTIVE_QUOTE_FRESHNESS.set(effective);
+        try {
+            return getMarketDataInternal(symbols, skipHistRepair, effective);
+        } finally {
+            ACTIVE_QUOTE_FRESHNESS.remove();
+        }
+    }
 
+    private Map<String, MarketData> getMarketDataInternal(
+            List<String> symbols, boolean skipHistRepair, QuoteFreshness freshness) {
         Map<String, MarketData> result = new HashMap<>();
         List<String> normalized = symbols.stream()
                 .filter(s -> s != null && !s.isBlank())
@@ -652,33 +697,37 @@ public class MarketDataService {
                 .distinct()
                 .collect(Collectors.toList());
 
-        // 1. L1 in-pod cache (was written but never read — restore for basket latency)
-        Map<String, MarketData> l1Hits = localCache.getAllPresent(normalized);
-        if (l1Hits != null && !l1Hits.isEmpty()) {
-            result.putAll(l1Hits);
+        boolean cashOpen = marketDataRedisService != null && marketDataRedisService.isCashMarketHours();
+        boolean sessionClose = freshness == QuoteFreshness.SESSION_CLOSE;
+        // SESSION_CLOSE after close: OHLC first (skip L1/Redis/Mongo). Cash-open SESSION_CLOSE: skip L1 only.
+        boolean skipL1 = !cashOpen || sessionClose;
+        boolean skipRedis = !cashOpen;
+        boolean skipMongoFirst = sessionClose && !cashOpen;
+
+        // 1. L1 in-pod cache — cash hours only (and never on SESSION_CLOSE heatmap path).
+        if (!skipL1) {
+            Map<String, MarketData> l1Hits = localCache.getAllPresent(normalized);
+            if (l1Hits != null && !l1Hits.isEmpty()) {
+                result.putAll(l1Hits);
+            }
         }
 
         List<String> missing = normalized.stream()
             .filter(s -> !result.containsKey(s))
             .collect(Collectors.toList());
 
-        boolean cashOpen = marketDataRedisService != null && marketDataRedisService.isCashMarketHours();
-
         if (missing.isEmpty()) {
             log.debug("[MarketData] All {} symbols served from L1", result.size());
             return finalizeMarketData(result, cashOpen, skipHistRepair);
         }
 
-        // Cash-open: prefer fresh last-trade caches.
-        // Cash-closed: still use Redis/Mongo previousClose/lastPrice for basket APIs (avoid OHLC waves),
-        // then fall through to OHLC only for true misses.
         if (!cashOpen) {
-            log.info("[MarketData] Cash session closed — using Redis/Mongo close prices before OHLC for {} missing",
-                    missing.size());
+            log.info("[MarketData] Cash session closed freshness={} — {} missing (skipMongoFirst={})",
+                    freshness, missing.size(), skipMongoFirst);
         }
 
-        // 2. Redis last-trade / previous-close cache
-        if (marketDataRedisService != null) {
+        // 2. Redis last-trade cache — cash hours only.
+        if (!skipRedis && marketDataRedisService != null) {
             try {
                 Map<String, MarketData> cached = marketDataRedisService.getMarketData(missing);
                 if (cached != null) {
@@ -686,7 +735,9 @@ public class MarketDataService {
                         boolean hasUsableData = hasUsablePrice(md);
                         if (hasUsableData) {
                             result.put(symbol, md);
-                            localCache.put(symbol, md);
+                            if (!sessionClose) {
+                                localCache.put(symbol, md);
+                            }
                         } else {
                             log.debug("[MarketData] Skipping Redis entry for {} — no usable price", symbol);
                         }
@@ -705,66 +756,9 @@ public class MarketDataService {
             return finalizeMarketData(result, cashOpen, skipHistRepair);
         }
 
-        // 3. MongoDB cache (Kafka live stream / prior OHLC writes)
-        if (stockPriceMongoService != null) {
-            try {
-                java.util.Map<String, com.am.common.amcommondata.document.price.StockPriceDocument> mongoPrices =
-                        stockPriceMongoService.getPrices(missing);
-                if (mongoPrices != null && !mongoPrices.isEmpty()) {
-                    for (java.util.Map.Entry<String, com.am.common.amcommondata.document.price.StockPriceDocument> entry : mongoPrices.entrySet()) {
-                        com.am.common.amcommondata.document.price.StockPriceDocument doc = entry.getValue();
-
-                        // During cash hours, reject very stale ticks; after hours keep last known close.
-                        boolean isStale = cashOpen
-                                && doc.getUpdatedAt() != null
-                                && doc.getUpdatedAt().isBefore(java.time.LocalDateTime.now().minusHours(6));
-                        if (isStale) {
-                            log.info("[MarketData] Stale MongoDB entry for {} (updatedAt={}), forcing API refresh",
-                                doc.getSymbol(), doc.getUpdatedAt());
-                            continue;
-                        }
-
-                        Double usable = doc.getLastPrice() != null && doc.getLastPrice() > 0
-                                ? doc.getLastPrice()
-                                : (doc.getPreviousClose() != null && doc.getPreviousClose() > 0 ? doc.getPreviousClose() : null);
-                        if (usable == null) {
-                            log.debug("[MarketData] Skipping MongoDB entry for {} (no last/prev close)",
-                                      doc.getSymbol());
-                            continue;
-                        }
-                        Double previousClose = (doc.getPreviousClose() != null && doc.getPreviousClose() > 0)
-                            ? doc.getPreviousClose()
-                            : null;
-
-                        double openPx = (doc.getOpenPrice() != null && doc.getOpenPrice() > 0)
-                                ? doc.getOpenPrice()
-                                : (previousClose != null ? previousClose : usable);
-                        double highPx = (doc.getHighPrice() != null && doc.getHighPrice() > 0)
-                                ? doc.getHighPrice() : Math.max(openPx, usable);
-                        double lowPx = (doc.getLowPrice() != null && doc.getLowPrice() > 0)
-                                ? doc.getLowPrice() : Math.min(openPx, usable);
-                        MarketData md = MarketData.builder()
-                            .symbol(doc.getSymbol())
-                            .lastPrice(usable)
-                            .previousClose(previousClose)
-                            .timestamp(java.time.Instant.ofEpochMilli(doc.getTimestamp() != null ? doc.getTimestamp() : System.currentTimeMillis()))
-                            // Always attach OHLC when LTP exists so live heatmap never drops tick-only symbols.
-                            .ohlc(com.portfolio.model.market.OhlcData.builder()
-                                    .open(openPx)
-                                    .high(highPx)
-                                    .low(lowPx)
-                                    .close(usable)
-                                    .build())
-                            .build();
-                        result.put(doc.getSymbol(), md);
-                        localCache.put(doc.getSymbol(), md);
-                    }
-                    log.info("[MarketData] MongoDB cache hit for {} symbols.", mongoPrices.size());
-                }
-            } catch (Exception e) {
-                log.warn("[MarketData] MongoDB read failed: {}", e.getMessage());
-            }
-            
+        // 3. MongoDB cache — skipped on SESSION_CLOSE after close so midday ticks cannot win.
+        if (!skipMongoFirst && stockPriceMongoService != null) {
+            applyMongoPrices(missing, result, cashOpen, sessionClose);
             missing = normalized.stream()
                 .filter(s -> !result.containsKey(s))
                 .collect(Collectors.toList());
@@ -886,7 +880,19 @@ public class MarketDataService {
             }
         }
 
-
+        // SESSION_CLOSE after close: Mongo only for symbols still missing after OHLC.
+        if (skipMongoFirst && stockPriceMongoService != null) {
+            List<String> stillMissing = normalized.stream()
+                    .filter(s -> {
+                        MarketData md = result.get(s);
+                        return md == null || !hasUsablePrice(md);
+                    })
+                    .collect(Collectors.toList());
+            if (!stillMissing.isEmpty()) {
+                log.info("[MarketData] SESSION_CLOSE Mongo fallback for {} OHLC misses", stillMissing.size());
+                applyMongoPrices(stillMissing, result, cashOpen, true);
+            }
+        }
 
         // ─── Manager Audit: Log all resolution failures ───────────────────────────
         java.util.Set<String> requested = new java.util.HashSet<>(symbols);
@@ -917,10 +923,249 @@ public class MarketDataService {
 
     private Map<String, MarketData> finalizeMarketData(
             Map<String, MarketData> result, boolean cashOpen, boolean skipHistRepair) {
-        if (!cashOpen && !skipHistRepair) {
+        if (!skipHistRepair) {
+            // Collapsed last≈prev / missing prev: repair any session (cache-first; hist only on miss).
             repairCollapsedPreviousClose(result);
         }
+        // Vendor previousClose can be wrong-but-distinct (e.g. 2472 vs official 2460).
+        // Prefer authentic priorCloseCache when relative drift exceeds 15 bps — cash or closed.
+        reconcilePreviousCloseFromCache(result);
+        if (!cashOpen && !skipHistRepair) {
+            // After hours: also hist-repair wrong-but-distinct previousClose (not only collapsed).
+            repairWrongDistinctPreviousClose(result);
+        }
         return result;
+    }
+
+    private void applyMongoPrices(
+            List<String> missing,
+            Map<String, MarketData> result,
+            boolean cashOpen,
+            boolean sessionClose) {
+        if (stockPriceMongoService == null || missing == null || missing.isEmpty()) {
+            return;
+        }
+        try {
+            java.util.Map<String, com.am.common.amcommondata.document.price.StockPriceDocument> mongoPrices =
+                    stockPriceMongoService.getPrices(missing);
+            if (mongoPrices == null || mongoPrices.isEmpty()) {
+                return;
+            }
+            for (java.util.Map.Entry<String, com.am.common.amcommondata.document.price.StockPriceDocument> entry
+                    : mongoPrices.entrySet()) {
+                com.am.common.amcommondata.document.price.StockPriceDocument doc = entry.getValue();
+
+                LocalDateTime tickTime = doc.getUpdatedAt();
+                if (tickTime == null && doc.getTimestamp() != null) {
+                    tickTime = LocalDateTime.ofInstant(
+                            Instant.ofEpochMilli(doc.getTimestamp()), IST);
+                }
+                boolean isStale = false;
+                if (tickTime != null) {
+                    if (cashOpen) {
+                        isStale = tickTime.isBefore(LocalDateTime.now(IST).minusHours(6));
+                    } else {
+                        LocalDate todayIst = LocalDate.now(IST);
+                        LocalDateTime sessionCloseTime = todayIst.atTime(LocalTime.of(15, 30));
+                        isStale = !tickTime.toLocalDate().isBefore(todayIst)
+                                && tickTime.isBefore(sessionCloseTime);
+                    }
+                }
+                if (isStale) {
+                    log.info("[MarketData] Stale MongoDB entry for {} (tickTime={}), forcing API refresh",
+                            doc.getSymbol(), tickTime);
+                    continue;
+                }
+
+                Double usable = doc.getLastPrice() != null && doc.getLastPrice() > 0
+                        ? doc.getLastPrice()
+                        : (doc.getPreviousClose() != null && doc.getPreviousClose() > 0
+                                ? doc.getPreviousClose() : null);
+                if (usable == null) {
+                    continue;
+                }
+                Double previousClose = (doc.getPreviousClose() != null && doc.getPreviousClose() > 0)
+                        ? doc.getPreviousClose()
+                        : null;
+
+                double openPx = (doc.getOpenPrice() != null && doc.getOpenPrice() > 0)
+                        ? doc.getOpenPrice()
+                        : (previousClose != null ? previousClose : usable);
+                double highPx = (doc.getHighPrice() != null && doc.getHighPrice() > 0)
+                        ? doc.getHighPrice() : Math.max(openPx, usable);
+                double lowPx = (doc.getLowPrice() != null && doc.getLowPrice() > 0)
+                        ? doc.getLowPrice() : Math.min(openPx, usable);
+                MarketData md = MarketData.builder()
+                        .symbol(doc.getSymbol())
+                        .lastPrice(usable)
+                        .previousClose(previousClose)
+                        .timestamp(java.time.Instant.ofEpochMilli(
+                                doc.getTimestamp() != null ? doc.getTimestamp() : System.currentTimeMillis()))
+                        .ohlc(com.portfolio.model.market.OhlcData.builder()
+                                .open(openPx)
+                                .high(highPx)
+                                .low(lowPx)
+                                .close(usable)
+                                .build())
+                        .build();
+                result.put(doc.getSymbol(), md);
+                if (!sessionClose) {
+                    localCache.put(doc.getSymbol(), md);
+                }
+            }
+            log.info("[MarketData] MongoDB cache hit for {} symbols.", mongoPrices.size());
+        } catch (Exception e) {
+            log.warn("[MarketData] MongoDB read failed: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Prefer cached authentic prior close when vendor previousClose drifts.
+     * Cache is filled by overnight hist repair (18h Caffeine) and successful hist repairs.
+     * Do not seed unauthenticated vendor previousClose into priorCloseCache.
+     */
+    void reconcilePreviousCloseFromCache(Map<String, MarketData> result) {
+        if (result == null || result.isEmpty()) {
+            return;
+        }
+        Map<String, MarketData> repairedForRedis = new HashMap<>();
+        int fixed = 0;
+        for (Map.Entry<String, MarketData> e : result.entrySet()) {
+            MarketData md = e.getValue();
+            if (md == null) {
+                continue;
+            }
+            Double prev = md.getPreviousClose();
+            if (prev == null || prev <= 0) {
+                continue;
+            }
+            Double cached = priorCloseCache.getIfPresent(e.getKey());
+            if (cached == null || cached <= 0) {
+                continue;
+            }
+            if (Math.abs(cached - prev) / prev < 0.0015) {
+                continue;
+            }
+            if (!isDistinctPrior(cached, md.getLastPrice())) {
+                continue;
+            }
+            md.setPreviousClose(cached);
+            localCache.put(e.getKey(), md);
+            repairedForRedis.put(e.getKey(), md);
+            fixed++;
+        }
+        if (fixed > 0) {
+            log.info("[MarketData] Reconciled previousClose from cache for {} symbols", fixed);
+            writeBackRepairedMarketData(repairedForRedis);
+        }
+    }
+
+    /**
+     * After hours: vendor previousClose can be wrong but still distinct from last (TCS 2472 vs 2460).
+     * Hist-resolve official prior when cache miss; apply when relative drift vs vendor exceeds 15 bps.
+     */
+    void repairWrongDistinctPreviousClose(Map<String, MarketData> result) {
+        if (result == null || result.isEmpty()) {
+            return;
+        }
+        List<String> needsPrior = new ArrayList<>();
+        Map<String, MarketData> repairedForRedis = new HashMap<>();
+        int fromCache = 0;
+        for (Map.Entry<String, MarketData> e : result.entrySet()) {
+            MarketData md = e.getValue();
+            if (md == null) {
+                continue;
+            }
+            Double last = md.getLastPrice();
+            Double prev = md.getPreviousClose();
+            if (last == null || last <= 0 || prev == null || prev <= 0) {
+                continue;
+            }
+            if (!isDistinctPrior(prev, last)) {
+                continue; // collapsed path handled elsewhere
+            }
+            Double cached = priorCloseCache.getIfPresent(e.getKey());
+            if (cached != null && cached > 0 && Math.abs(cached - prev) / prev >= 0.0015
+                    && isDistinctPrior(cached, last)) {
+                md.setPreviousClose(cached);
+                localCache.put(e.getKey(), md);
+                repairedForRedis.put(e.getKey(), md);
+                fromCache++;
+                continue;
+            }
+            if (Boolean.TRUE.equals(priorClosePrefetchAttempted.getIfPresent(e.getKey()))) {
+                continue;
+            }
+            needsPrior.add(e.getKey());
+        }
+        if (fromCache > 0) {
+            writeBackRepairedMarketData(repairedForRedis);
+        }
+        if (needsPrior.isEmpty()) {
+            return;
+        }
+        try {
+            LocalDate to = LocalDate.now(IST);
+            LocalDate from = to.minusDays(14);
+            HistoricalDataRequest request = HistoricalDataRequest.builder()
+                    .symbols(String.join(",", needsPrior))
+                    .fromDate(from.toString())
+                    .toDate(to.toString())
+                    .interval("day")
+                    .build();
+            Map<String, MarketData> hist;
+            try {
+                CompletableFuture<Map<String, MarketData>> histFut =
+                        CompletableFuture.supplyAsync(() -> getHistoricalData(request), externalApiExecutor);
+                hist = histFut.get(2, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException te) {
+                log.warn("[MarketData] Wrong-prev repair timed out (2s) — not marking attempted");
+                return;
+            } catch (Exception ex) {
+                log.warn("[MarketData] Wrong-prev repair skipped: {}", ex.getMessage());
+                return;
+            }
+            // Empty/timeout must not poison priorClosePrefetchAttempted (retry next request).
+            if (hist == null || hist.isEmpty()) {
+                return;
+            }
+            int repaired = 0;
+            for (String symbol : needsPrior) {
+                MarketData live = result.get(symbol);
+                MarketData h = hist.get(symbol);
+                if (h == null) {
+                    h = hist.get(cleanSymbol(symbol));
+                }
+                if (live == null) {
+                    continue;
+                }
+                Double prior = h != null ? resolvePriorCloseFromHistorical(h, live.getLastPrice()) : null;
+                Double vendorPrev = live.getPreviousClose();
+                if (prior == null || prior <= 0 || vendorPrev == null || vendorPrev <= 0) {
+                    continue;
+                }
+                priorClosePrefetchAttempted.put(symbol, Boolean.TRUE);
+                if (Math.abs(prior - vendorPrev) / vendorPrev < 0.0015) {
+                    priorCloseCache.put(symbol, prior);
+                    continue;
+                }
+                if (!isDistinctPrior(prior, live.getLastPrice())) {
+                    continue;
+                }
+                live.setPreviousClose(prior);
+                priorCloseCache.put(symbol, prior);
+                localCache.put(symbol, live);
+                repairedForRedis.put(symbol, live);
+                repaired++;
+            }
+            if (repaired > 0) {
+                log.info("[MarketData] Repaired wrong-distinct previousClose hist={}/{}",
+                        repaired, needsPrior.size());
+                writeBackRepairedMarketData(repairedForRedis);
+            }
+        } catch (Exception e) {
+            log.warn("[MarketData] wrong-distinct prior repair failed: {}", e.getMessage());
+        }
     }
 
     /**
