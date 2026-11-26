@@ -57,8 +57,9 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         String portfolioId = request.getCoreIdentifiers().getPortfolioId();
         applyAssetScopeToPrefetch(request);
 
-        // Check cache first
-        if (heatmapRedisService != null) {
+        // Live/1D: never serve Redis mosaic (cash or closed) — stale after-close tiles freeze wrong day%.
+        boolean skipHeatmapCacheRead = shouldApplyTodayChangeOverride(request);
+        if (heatmapRedisService != null && !skipHeatmapCacheRead) {
             Optional<Heatmap> cached = heatmapRedisService.getCachedHeatmap(portfolioId, request);
             if (cached.isPresent()) {
                 return cached.get();
@@ -74,6 +75,8 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 if (portfolio.getEquityModels() == null || portfolio.getEquityModels().isEmpty()) {
                     return createEmptyResult();
                 }
+                // Poisoned scheme tickers (RECLTD × many INF*) → ISIN book keys first.
+                applyIsinBookKeys(portfolio);
                 // ISIN-as-symbol (INF… ETF / unlisted) → broker display ticker for mosaic labels.
                 applyDisplayTickers(portfolio);
                 List<String> displaySymbols = getPortfolioSymbols(portfolio);
@@ -224,6 +227,7 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
                 log.info("Generated heatmap with {} sectors for portfolio: {}", sectorPerformances.size(), portfolioId);
                 
                 if (heatmapRedisService != null
+                        && !skipHeatmapCacheRead
                         && heatmap.getSectors() != null
                         && !heatmap.getSectors().isEmpty()) {
                     heatmapRedisService.cacheHeatmap(heatmap, portfolioId, request);
@@ -259,6 +263,12 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
         // Empty/skipped prefetch must not trigger per-symbol OHLC fan-out (30–90s).
         // MF mosaic uses NAV synthetics via allowsEmptyMarketData().
         return false;
+    }
+
+    @Override
+    protected boolean allowsSecurityDetailsFanOutWhenPrefetchEmpty() {
+        // Named sectors for Equity mosaic (do not paint every listing as Unknown).
+        return true;
     }
 
     static boolean shouldApplyTodayChangeOverride(AdvancedAnalyticsRequest request) {
@@ -508,6 +518,35 @@ public class PortfolioHeatmapProvider extends AbstractPortfolioAnalyticsProvider
             }
         }
         return map;
+    }
+
+    /**
+     * Force ISIN as the in-memory symbol for scheme MF / unsafe AMC→equity maps so distinct
+     * demat schemes that share a poisoned ticker (RECLTD) never collapse into one mosaic cell.
+     */
+    static void applyIsinBookKeys(PortfolioModelV1 portfolio) {
+        if (portfolio == null || portfolio.getEquityModels() == null) {
+            return;
+        }
+        for (EquityModel equity : portfolio.getEquityModels()) {
+            if (equity == null) {
+                continue;
+            }
+            String isin = equity.getIsin();
+            if (isin == null || isin.isBlank()) {
+                continue;
+            }
+            String isinKey = isin.trim().toUpperCase(Locale.ROOT);
+            if (!HoldingInstrumentClassifier.mustKeepIsinBookKey(
+                    equity.getAssetClass(), equity.getSymbol(), isinKey, equity.getName())) {
+                continue;
+            }
+            String before = equity.getSymbol();
+            if (before == null || !isinKey.equalsIgnoreCase(before.trim())) {
+                log.info("Heatmap ISIN book key {} → {}", before, isinKey);
+                equity.setSymbol(isinKey);
+            }
+        }
     }
 
     /**

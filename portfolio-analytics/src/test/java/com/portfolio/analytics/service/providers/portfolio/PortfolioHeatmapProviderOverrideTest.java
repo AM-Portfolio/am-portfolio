@@ -66,6 +66,35 @@ class PortfolioHeatmapProviderOverrideTest {
     }
 
     @Test
+    void applyIsinBookKeysRewritesPoisonedRecltdSchemes() {
+        EquityModel bandhan = EquityModel.builder()
+                .symbol("RECLTD")
+                .isin("INF194KB1AL4")
+                .name("BANDHAN AMC LTD#BANDHAN MF-BANDHAN SMALL CAP FUND-DIRECT-GROWTH")
+                .assetClass("mutual_fund_demat")
+                .build();
+        EquityModel motilal = EquityModel.builder()
+                .symbol("RECLTD")
+                .isin("INF247L01CE3")
+                .name("MOTILAL OSWAL AMC LTD#MOTILAL OSWAL MF- MOTILAL OSWAL LARGE CAP FUND-DIRECT-GROWTH")
+                .assetClass("mutual_fund_demat")
+                .build();
+        EquityModel recEquity = EquityModel.builder()
+                .symbol("RECLTD")
+                .isin("INE020B01018")
+                .name("REC Limited")
+                .assetClass("equity")
+                .build();
+        PortfolioModelV1 book = PortfolioModelV1.builder()
+                .equityModels(List.of(bandhan, motilal, recEquity))
+                .build();
+        PortfolioHeatmapProvider.applyIsinBookKeys(book);
+        assertEquals("INF194KB1AL4", bandhan.getSymbol());
+        assertEquals("INF247L01CE3", motilal.getSymbol());
+        assertEquals("RECLTD", recEquity.getSymbol());
+    }
+
+    @Test
     void equityScopeExcludesEtfAndEtfScopeKeepsBees() {
         EquityModel tcs = EquityModel.builder()
                 .symbol("TCS")

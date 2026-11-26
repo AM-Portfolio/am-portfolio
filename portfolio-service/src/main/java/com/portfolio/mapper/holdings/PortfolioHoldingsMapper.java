@@ -174,12 +174,17 @@ public class PortfolioHoldingsMapper {
             if (portfolio.getEquityModels() == null) continue;
 
             for (EquityModel equity : portfolio.getEquityModels()) {
-                // Use normalized symbol instead of ISIN as the key
+                // Prefer ISIN identity when present so poisoned tickers (RECLTD on many INF*
+                // scheme rows) do not collapse distinct mutual funds into one holding.
                 String rawSymbol = equity.getSymbol();
                 String symbol = com.portfolio.model.util.SymbolResolver.normalize(rawSymbol);
-
+                String key = com.portfolio.model.portfolio.HoldingInstrumentClassifier
+                        .holdingIdentityKey(symbol, equity.getIsin());
+                if (key == null) {
+                    continue;
+                }
                 if (symbol == null) {
-                    continue; // Skip equities without a symbol
+                    symbol = key;
                 }
 
                 double addedQty = equity.getQuantity() != null ? equity.getQuantity() : 0;
@@ -195,12 +200,15 @@ public class PortfolioHoldingsMapper {
                     addedCost = equity.getAvgBuyingPrice() * addedQty;
                 }
 
-                // If this is the first time we're seeing this symbol, create a new holding
-                if (!equityHoldingsMap.containsKey(symbol)) {
-                    // Create a new holding with the correct initial quantity
+                // If this is the first time we're seeing this identity, create a new holding
+                if (!equityHoldingsMap.containsKey(key)) {
                     EquityHoldings holdings = equityHoldingsMapper.toEquityHoldings(equity);
+                    // Keep scheme-MF rows on ISIN so clients do not re-collapse poisoned tickers.
+                    if (com.portfolio.model.portfolio.HoldingInstrumentClassifier.mustKeepIsinBookKey(
+                            equity.getAssetClass(), symbol, equity.getIsin(), equity.getName())) {
+                        holdings.setSymbol(key);
+                    }
 
-                    // Enrich with portfolio context
                     holdings.setPortfolioId(portfolio.getId() != null ? portfolio.getId().toString() : null);
                     holdings.setPortfolioName(portfolio.getName());
                     holdings.setAssetClass(
@@ -209,10 +217,9 @@ public class PortfolioHoldingsMapper {
                                     : ASSET_EQUITY);
                     applyAllocationFields(holdings, portfolio, equity, allocationsByPortfolio);
 
-                    equityHoldingsMap.put(symbol, holdings);
+                    equityHoldingsMap.put(key, holdings);
                 } else {
-                    // Symbol already exists in another broker portfolio - merge quantities and cost
-                    EquityHoldings existing = equityHoldingsMap.get(symbol);
+                    EquityHoldings existing = equityHoldingsMap.get(key);
                     double mergedQty = (existing.getQuantity() != null ? existing.getQuantity() : 0) + addedQty;
                     if (addedCost != null) {
                         double prior = existing.getInvestmentCost() != null ? existing.getInvestmentCost() : 0;
@@ -223,7 +230,6 @@ public class PortfolioHoldingsMapper {
                         }
                     }
                     existing.setQuantity(mergedQty);
-                    // Re-apply allocation against merged raw for BROKER books
                     if (PortfolioKind.isBroker(portfolio.getPortfolioKind())) {
                         double alloc = allocatedForIsin(portfolio, equity.getIsin(), allocationsByPortfolio);
                         double raw = mergedQty;
@@ -237,8 +243,7 @@ public class PortfolioHoldingsMapper {
                     }
                 }
 
-                // Add broker holding to the aggregated holding object
-                equityHoldingsMap.get(symbol).getBrokerPortfolios().add(EquityBrokerHolding.builder()
+                equityHoldingsMap.get(key).getBrokerPortfolios().add(EquityBrokerHolding.builder()
                         .brokerType(portfolio.getBrokerType())
                         .quantity(addedQty)
                         .build());

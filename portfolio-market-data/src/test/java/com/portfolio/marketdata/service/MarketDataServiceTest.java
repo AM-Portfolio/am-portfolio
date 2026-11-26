@@ -106,10 +106,8 @@ class MarketDataServiceTest {
     }
 
     @Test
-    void getMarketData_whenCashClosed_usesRedisThenOhlcFallback() {
+    void getMarketData_whenCashClosed_skipsRedis_usesMongoThenOhlc() {
         when(portfolioMarketDataRedisService.isCashMarketHours()).thenReturn(false);
-        when(portfolioMarketDataRedisService.getMarketData(eq(List.of("GROWWDEFNC"))))
-                .thenReturn(Map.of());
         when(stockPriceMongoService.getPrices(eq(List.of("GROWWDEFNC"))))
                 .thenReturn(Map.of());
 
@@ -124,27 +122,31 @@ class MarketDataServiceTest {
         Map<String, MarketData> result = marketDataService.getMarketData(List.of("GROWWDEFNC"));
 
         assertEquals(98.09, result.get("GROWWDEFNC").getLastPrice());
-        verify(portfolioMarketDataRedisService).getMarketData(anyList());
+        verify(portfolioMarketDataRedisService, never()).getMarketData(anyList());
         verify(stockPriceMongoService).getPrices(anyList());
         verify(portfolioMarketDataRedisService).cacheMarketData(anyMap());
     }
 
     @Test
-    void getMarketData_whenCashClosed_prefersRedisCloseWithoutOhlc() {
+    void getMarketData_whenCashClosed_prefersMongoWithoutOhlc() {
         when(portfolioMarketDataRedisService.isCashMarketHours()).thenReturn(false);
-        MarketData cached = MarketData.builder()
-                .symbol("GROWWDEFNC")
-                .lastPrice(96.33)
-                .previousClose(95.0)
-                .build();
-        when(portfolioMarketDataRedisService.getMarketData(eq(List.of("GROWWDEFNC"))))
-                .thenReturn(Map.of("GROWWDEFNC", cached));
+        com.am.common.amcommondata.document.price.StockPriceDocument doc =
+                com.am.common.amcommondata.document.price.StockPriceDocument.builder()
+                        .symbol("GROWWDEFNC")
+                        .lastPrice(96.33)
+                        .previousClose(95.0)
+                        .timestamp(System.currentTimeMillis())
+                        .updatedAt(java.time.LocalDateTime.now(java.time.ZoneId.of("Asia/Kolkata"))
+                                .withHour(16))
+                        .build();
+        when(stockPriceMongoService.getPrices(eq(List.of("GROWWDEFNC"))))
+                .thenReturn(Map.of("GROWWDEFNC", doc));
 
         Map<String, MarketData> result = marketDataService.getMarketData(List.of("GROWWDEFNC"));
 
         assertEquals(96.33, result.get("GROWWDEFNC").getLastPrice());
         verify(marketDataApiClient, never()).getOhlcData(anyList(), anyString(), anyBoolean());
-        verify(stockPriceMongoService, never()).getPrices(anyList());
+        verify(portfolioMarketDataRedisService, never()).getMarketData(anyList());
     }
 
     @Test

@@ -424,6 +424,11 @@ public class PortfolioHoldingsService {
                 boolean isinAsSymbol = TradingSymbolResolver.looksLikeIsin(sym);
                 boolean schemeIsin = hasIsin && isin.trim().toUpperCase().startsWith("INF");
                 boolean schemeSymbol = sym != null && sym.trim().toUpperCase().startsWith("INF");
+                // Poisoned equity tickers on scheme MF rows (RECLTD × many INF*) must re-heal to ISIN.
+                boolean poisonedSchemeTicker = hasIsin
+                        && HoldingInstrumentClassifier.mustKeepIsinBookKey(
+                                e.getAssetClass(), sym, isin, name)
+                        && (sym == null || !isin.trim().equalsIgnoreCase(sym.trim()));
                 // Broker-name display tickers (PR #95) must keep healing so MD can upgrade later (PR #72).
                 boolean brokerDerivedDisplay = false;
                 if (hasIsin && name != null && !name.isBlank() && sym != null && !sym.isBlank()) {
@@ -431,7 +436,7 @@ public class PortfolioHoldingsService {
                     brokerDerivedDisplay = suggested != null && suggested.equalsIgnoreCase(sym.trim());
                 }
                 if (sym == null || sym.isBlank() || isinAsSymbol || schemeIsin || schemeSymbol
-                        || brokerDerivedDisplay) {
+                        || poisonedSchemeTicker || brokerDerivedDisplay) {
                     if (!hasIsin && !isinAsSymbol && !schemeSymbol && !brokerDerivedDisplay) {
                         continue;
                     }

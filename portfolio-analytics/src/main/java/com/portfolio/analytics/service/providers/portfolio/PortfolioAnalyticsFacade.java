@@ -173,6 +173,8 @@ public class PortfolioAnalyticsFacade {
             if (portfolio != null) {
                 // Scope filter before prefetch so MUTUAL_FUND does not pull equity MD/security fan-out.
                 portfolio = PortfolioHeatmapProvider.filterPortfolioByAssetScope(portfolio, request.getAssetScope());
+                // Request-scoped: rewrite poisoned scheme tickers (RECLTD) to ISIN before MD join.
+                PortfolioHeatmapProvider.applyIsinBookKeys(portfolio);
                 request.setPrefetchedPortfolio(portfolio);
                 if (portfolio.getEquityModels() != null && !portfolio.getEquityModels().isEmpty()) {
                     List<String> symbols = portfolio.getEquityModels().stream()
@@ -188,6 +190,25 @@ public class PortfolioAnalyticsFacade {
                             && !request.getFeatureToggles().isIncludeSectorAllocation()
                             && !request.getFeatureToggles().isIncludeMarketCapAllocation();
 
+                    // Movers-only / MF-category: skip security-details (unused).
+                    // Heatmap-only MUST prefetch security — otherwise Equity tiles stay Unknown.
+                    // Start security in parallel with MD so cold load is max(MD, security), not sum.
+                    boolean moversOnly = request.getFeatureToggles().isIncludeMovers()
+                            && !request.getFeatureToggles().isIncludeHeatmap()
+                            && !request.getFeatureToggles().isIncludeSectorAllocation()
+                            && !request.getFeatureToggles().isIncludeMarketCapAllocation();
+                    boolean skipSecurityDetails = moversOnly || mfScope;
+                    CompletableFuture<Map<String, com.am.common.amcommondata.model.security.SecurityModel>> securityFuture =
+                            null;
+                    if (!symbols.isEmpty() && !skipSecurityDetails) {
+                        log.info("[Optimization] Prefetching security details once for {} symbols (parallel with MD)",
+                                symbols.size());
+                        final List<String> securitySymbols = List.copyOf(symbols);
+                        securityFuture = CompletableFuture.supplyAsync(
+                                () -> securityDetailsService.getSecurityDetails(securitySymbols),
+                                taskExecutor);
+                    }
+
                     if (!symbols.isEmpty() && !skipEquityMarketPrefetch) {
                         log.info("[Optimization] Prefetching market data once for {} symbols", symbols.size());
                         boolean needsHist = request.getTimeFrameRequest() != null
@@ -195,7 +216,13 @@ public class PortfolioAnalyticsFacade {
                                     || request.getFeatureToggles().isIncludeSectorAllocation()
                                     || request.getFeatureToggles().isIncludeMarketCapAllocation());
                         // Live always: movers day%, summary today%, and live/1D primary path.
-                        Map<String, MarketData> livePrefetch = marketDataService.getMarketData(symbols);
+                        // Live/1D heatmap needs SESSION_CLOSE so after-close OHLC wins over midday Mongo.
+                        boolean liveOneDayHeatmap = request.getFeatureToggles().isIncludeHeatmap()
+                                && PortfolioHeatmapProvider.shouldApplyTodayChangeOverride(request);
+                        Map<String, MarketData> livePrefetch = liveOneDayHeatmap
+                                ? marketDataService.getMarketData(
+                                        symbols, com.portfolio.marketdata.service.QuoteFreshness.SESSION_CLOSE)
+                                : marketDataService.getMarketData(symbols);
                         Map<String, MarketData> periodPrefetch = null;
 
                         if (needsHist) {
@@ -236,17 +263,16 @@ public class PortfolioAnalyticsFacade {
                         request.setPrefetchAttempted(true);
                     }
 
-                    // Movers-only / MF-category heatmap: skip security-details (unused).
-                    boolean moversOnly = request.getFeatureToggles().isIncludeMovers()
-                            && !request.getFeatureToggles().isIncludeHeatmap()
-                            && !request.getFeatureToggles().isIncludeSectorAllocation()
-                            && !request.getFeatureToggles().isIncludeMarketCapAllocation();
-                    boolean skipSecurityDetails = moversOnly || mfScope;
-                    if (!symbols.isEmpty() && !skipSecurityDetails) {
-                        log.info("[Optimization] Prefetching security details once for {} symbols", symbols.size());
-                        Map<String, com.am.common.amcommondata.model.security.SecurityModel> prefetchedSecurities =
-                            securityDetailsService.getSecurityDetails(symbols);
-                        request.setPrefetchedSecurityDetails(prefetchedSecurities);
+                    if (securityFuture != null) {
+                        try {
+                            Map<String, com.am.common.amcommondata.model.security.SecurityModel> prefetchedSecurities =
+                                    securityFuture.get(45, java.util.concurrent.TimeUnit.SECONDS);
+                            if (prefetchedSecurities != null && !prefetchedSecurities.isEmpty()) {
+                                request.setPrefetchedSecurityDetails(prefetchedSecurities);
+                            }
+                        } catch (Exception se) {
+                            log.warn("[Optimization] Parallel security prefetch failed — providers may fan out", se);
+                        }
                     }
                 }
             }
@@ -366,15 +392,44 @@ public class PortfolioAnalyticsFacade {
 
                         String sym = com.portfolio.model.util.SymbolResolver.normalize(eq.getSymbol());
                         MarketData md = mdMap != null ? mdMap.get(sym) : null;
+                        boolean quarantine = com.portfolio.model.portfolio.HoldingInstrumentClassifier
+                                .quarantineEquityLtp(
+                                        eq.getAssetClass(), eq.getSymbol(), eq.getIsin(), eq.getName());
                         double ltp = 0.0;
-                        if (md != null && md.getLastPrice() != null && md.getLastPrice() > 0) {
-                            ltp = md.getLastPrice();
-                        } else if (eq.getImportMarkPrice() != null && eq.getImportMarkPrice() > 0) {
-                            ltp = eq.getImportMarkPrice();
-                        } else if (eq.getCurrentPrice() != null && eq.getCurrentPrice() > 0) {
-                            ltp = eq.getCurrentPrice();
-                        } else if (avg != null && avg > 0) {
-                            ltp = avg;
+                        Double prevClose = null;
+                        if (quarantine) {
+                            // Never paint scheme MF with equity cash LTP (poisoned RECLTD join).
+                            var mark = com.portfolio.model.portfolio.HoldingMarkPriceResolver.tryQuarantineMark(
+                                    eq.getAssetClass(),
+                                    eq.getSymbol(),
+                                    eq.getIsin(),
+                                    eq.getName(),
+                                    eq.getImportMarkPrice(),
+                                    eq.getCurrentValue(),
+                                    eq.getQuantity(),
+                                    eq.getCurrentPrice(),
+                                    eq.getAvgBuyingPrice(),
+                                    eq.getInvestmentValue());
+                            if (mark != null && mark.isPresent()) {
+                                ltp = mark.price();
+                            } else if (eq.getImportMarkPrice() != null && eq.getImportMarkPrice() > 0) {
+                                ltp = eq.getImportMarkPrice();
+                            } else if (avg != null && avg > 0) {
+                                ltp = avg;
+                            }
+                        } else {
+                            if (md != null && md.getLastPrice() != null && md.getLastPrice() > 0) {
+                                ltp = md.getLastPrice();
+                            } else if (eq.getImportMarkPrice() != null && eq.getImportMarkPrice() > 0) {
+                                ltp = eq.getImportMarkPrice();
+                            } else if (eq.getCurrentPrice() != null && eq.getCurrentPrice() > 0) {
+                                ltp = eq.getCurrentPrice();
+                            } else if (avg != null && avg > 0) {
+                                ltp = avg;
+                            }
+                            if (md != null && md.getPreviousClose() != null && md.getPreviousClose() > 0) {
+                                prevClose = md.getPreviousClose();
+                            }
                         }
                         double val = ltp * qty;
                         totalCurrent += val;
@@ -383,10 +438,6 @@ public class PortfolioAnalyticsFacade {
                             double overallGL = val - cost;
                             if (overallGL > 0) gainers++; else if (overallGL < 0) losers++;
                         }
-
-                        Double prevClose = (md != null && md.getPreviousClose() != null && md.getPreviousClose() > 0)
-                            ? md.getPreviousClose()
-                            : null;
 
                         if (prevClose != null && prevClose > 0 && ltp > 0) {
                             double dayGL = (ltp - prevClose) * qty;

@@ -216,6 +216,11 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
                 && !request.getPrefetchedSecurityDetails().isEmpty()) {
             return request.getPrefetchedSecurityDetails();
         }
+        // Heatmap mosaic needs named sectors (X-Ray already waits on security + catalog).
+        // Prefer a cold batch over painting every listed equity as Unknown.
+        if (allowsSecurityDetailsFanOutWhenPrefetchEmpty()) {
+            return securityDetailsService.getSecurityDetails(symbols);
+        }
         // LIVE advanced: facade already spent its security-details budget. Do not start a
         // per-symbol ETF/parser stampede (111× ~300ms) on the HTTP path — providers fall back
         // to EquityModel.sector / Unknown for first paint.
@@ -225,6 +230,11 @@ public abstract class AbstractPortfolioAnalyticsProvider<T> extends AbstractAnal
             return Collections.emptyMap();
         }
         return securityDetailsService.getSecurityDetails(symbols);
+    }
+
+    /** Heatmap overrides to true so Unknown-sector first paint is avoided. */
+    protected boolean allowsSecurityDetailsFanOutWhenPrefetchEmpty() {
+        return false;
     }
 
     /**

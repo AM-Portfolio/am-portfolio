@@ -271,6 +271,9 @@ public class Heatmap {
 
         /** Prior close / prior EOD NAV used for day %. */
         private Double previousClose;
+
+        /** Vendor / cache quote timestamp when known (freshness dig assert). */
+        private Instant quoteAsOf;
         
         /**
          * Calculate the value based on price and quantity

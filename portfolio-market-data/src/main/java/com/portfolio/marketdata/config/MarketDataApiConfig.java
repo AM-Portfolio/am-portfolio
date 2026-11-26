@@ -106,9 +106,10 @@ public class MarketDataApiConfig {
     public static class BatchConfig {
         /**
          * Maximum symbols per single API batch call.
-         * Default: 20 (parallel batching for fast concurrent queries).
+         * Default 450 stays under Upstox's 500 instrument-key hard cap so a
+         * typical book is one HTTP OHLC request.
          */
-        private int chunkSize = 20;
+        private int chunkSize = 450;
 
         /**
          * When true: splits symbols into parallel CHUNK_SIZE batches.
@@ -122,5 +123,12 @@ public class MarketDataApiConfig {
          * Keeps Upstox fan-out bounded when a portfolio has 100+ holdings.
          */
         private int maxParallelChunks = 2;
+
+        /**
+         * Join budget for SESSION_CLOSE OHLC waves (ms). Normal cash path keeps
+         * a short join so overview stays snappy; heatmap after close must wait
+         * for the bulk exchange quote.
+         */
+        private long sessionCloseWaveTimeoutMs = 15000L;
     }
 }

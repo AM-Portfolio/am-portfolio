@@ -184,12 +184,11 @@ public class HeatmapUtils {
             if (previousClose > 0) {
                 // Calculate timeframe change percentage based on previous close
                 double changePercent = ((resolvedLastPrice - previousClose) / previousClose) * 100;
-                
-                // Override if provided
                 if (symbolToChangePercentOverride != null && symbols != null && i < symbols.size()) {
                     String sym = symbols.get(i);
                     if (sym != null && symbolToChangePercentOverride.containsKey(sym)) {
-                        changePercent = symbolToChangePercentOverride.get(sym);
+                        changePercent = resolveDayChangePercent(
+                                changePercent, symbolToChangePercentOverride.get(sym));
                     }
                 }
                 
@@ -337,14 +336,34 @@ public class HeatmapUtils {
                       .calculateChangePercent(previousPrice);
         }
         stockDetail.calculateValue();
+        if (data.getTimestamp() != null) {
+            stockDetail.setQuoteAsOf(data.getTimestamp());
+        }
 
-        if (changePercentOverride != null) {
+        if (changePercentOverride != null && previousCloseVal > 0) {
+            stockDetail.setChangePercent(
+                    resolveDayChangePercent(stockDetail.getChangePercent(), changePercentOverride));
+        } else if (changePercentOverride != null) {
             stockDetail.setChangePercent(changePercentOverride);
         }
 
         stockDetail.updateColor();
 
         return stockDetail;
+    }
+
+    /**
+     * Holdings day-% override only when it agrees with MD within 0.3 pts.
+     * Otherwise MD (LTP vs previousClose) wins — avoids frozen +1% while tape is +2.33%.
+     */
+    public static double resolveDayChangePercent(double marketDataPercent, Double holdingsOverride) {
+        if (holdingsOverride == null) {
+            return marketDataPercent;
+        }
+        if (Math.abs(marketDataPercent - holdingsOverride) > 0.3) {
+            return marketDataPercent;
+        }
+        return holdingsOverride;
     }
     
     /**
