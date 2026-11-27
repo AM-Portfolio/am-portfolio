@@ -60,4 +60,41 @@ class PortfolioIntelligenceSnapshotFactoryTest {
                 gold, null, "GOLDBEES", HoldingInstrumentClassifier.PRICE_COST);
         assertEquals("Exchange Traded Funds (ETFs)", sector);
     }
+
+    @Test
+    void resolveSector_listedEtfBeatsStickyFinancialServices() {
+        EquityModel nifty = EquityModel.builder()
+                .symbol("NIFTYBEES")
+                .sector("Financial Services")
+                .name("NIPPON INDIA ETF NIFTY BEES")
+                .build();
+        String sector = PortfolioIntelligenceSnapshotFactory.resolveSector(
+                nifty, null, "NIFTYBEES", HoldingInstrumentClassifier.PRICE_LIVE);
+        assertEquals(HoldingInstrumentClassifier.SECTOR_ETF, sector);
+    }
+
+    @Test
+    void resolveSector_listedEtfBeatsStickyMutualFundsBucket() {
+        EquityModel small = EquityModel.builder()
+                .symbol("MOSMALL250")
+                .sector("Mutual Funds")
+                .name("MOTILAL OSWAL NIFTY SMALLCAP 250 ETF")
+                .assetClass("mutual_fund_demat")
+                .build();
+        String sector = PortfolioIntelligenceSnapshotFactory.resolveSector(
+                small, null, "MOSMALL250", HoldingInstrumentClassifier.PRICE_LIVE);
+        assertEquals(HoldingInstrumentClassifier.SECTOR_ETF, sector);
+    }
+
+    @Test
+    void resolveSector_keepsListedEquitySectorFromDoc() {
+        EquityModel tcs = EquityModel.builder()
+                .symbol("TCS")
+                .isin("INE467B01029")
+                .sector("Information Technology")
+                .build();
+        String sector = PortfolioIntelligenceSnapshotFactory.resolveSector(
+                tcs, null, "TCS", HoldingInstrumentClassifier.PRICE_COST);
+        assertEquals("Information Technology", sector);
+    }
 }

@@ -188,6 +188,31 @@ class HeatmapUtilsTest {
         assertEquals(3.15, HeatmapUtils.roundToTwoDecimals(3.145));
     }
 
+    @Test
+    void resolveDayChangePercent_mdWinsWhenHoldingsOverrideDiverges() {
+        assertEquals(2.33, HeatmapUtils.resolveDayChangePercent(2.33, 1.0), 1e-9);
+    }
+
+    @Test
+    void resolveDayChangePercent_keepsOverrideWhenWithinBand() {
+        assertEquals(2.2, HeatmapUtils.resolveDayChangePercent(2.33, 2.2), 1e-9);
+    }
+
+    @Test
+    void resolveDayChangePercent_nullOverrideUsesMd() {
+        assertEquals(2.33, HeatmapUtils.resolveDayChangePercent(2.33, null), 1e-9);
+    }
+
+    @Test
+    void convertToStockDetail_setsQuoteAsOfAndIgnoresStaleOverride() {
+        MarketData m = md(2517.3, 2460.0, 2517.3);
+        m.setTimestamp(java.time.Instant.parse("2026-11-25T10:00:00Z"));
+        var detail = HeatmapUtils.convertToStockDetail("TCS", m, 10.0, 1.0);
+        assertNotNull(detail);
+        assertEquals(java.time.Instant.parse("2026-11-25T10:00:00Z"), detail.getQuoteAsOf());
+        assertEquals(2.33, detail.getChangePercent(), 0.05);
+    }
+
     @Test void createCompleteSectorPerformance_returnsAllStocksBeyondFormerCap() {
         int n = 20;
         List<MarketData> stocks = new ArrayList<>();

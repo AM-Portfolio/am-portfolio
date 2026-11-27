@@ -390,6 +390,64 @@ public class PortfolioCalculator {
         return sum;
     }
 
+    /** Book has cost when any qty&gt;0 row carries a real investmentCost. */
+    public static boolean bookCostBasisKnown(List<EquityHoldings> bookHoldings) {
+        return sumInvestmentBasis(bookHoldings) > 0;
+    }
+
+    /**
+     * All-scope completeness: every non-empty broker book in {@code portfolios} must be cost-known.
+     * Empty books (no qty&gt;0 holdings) are skipped. No non-empty books → incomplete.
+     */
+    public static boolean aggregateCostBasisComplete(
+            List<com.am.common.amcommondata.model.PortfolioModelV1> portfolios,
+            List<EquityHoldings> allHoldings) {
+        if (portfolios == null || portfolios.isEmpty()) {
+            return false;
+        }
+        Map<String, List<EquityHoldings>> byBook = (allHoldings == null ? List.<EquityHoldings>of() : allHoldings)
+                .stream()
+                .filter(h -> h.getPortfolioId() != null && !h.getPortfolioId().isBlank())
+                .collect(Collectors.groupingBy(EquityHoldings::getPortfolioId));
+
+        boolean anyNonEmpty = false;
+        for (com.am.common.amcommondata.model.PortfolioModelV1 book : portfolios) {
+            if (book == null || book.getId() == null) {
+                continue;
+            }
+            if (!com.am.common.amcommondata.model.enums.PortfolioKind.isBroker(book.getPortfolioKind())) {
+                continue;
+            }
+            String id = book.getId().toString();
+            List<EquityHoldings> rows = byBook.getOrDefault(id, List.of());
+            boolean nonEmpty = rows.stream()
+                    .anyMatch(h -> h.getQuantity() != null && h.getQuantity() > 0);
+            if (!nonEmpty) {
+                continue;
+            }
+            anyNonEmpty = true;
+            if (!bookCostBasisKnown(rows)) {
+                return false;
+            }
+        }
+        return anyNonEmpty;
+    }
+
+    /** Null invested + overall return when cost is incomplete for the summary scope. */
+    public static void applyCostBasisCompleteness(
+            PortfolioSummaryV1 summary, boolean costBasisComplete) {
+        if (summary == null) {
+            return;
+        }
+        summary.setCostBasisComplete(costBasisComplete);
+        if (costBasisComplete) {
+            return;
+        }
+        summary.setInvestmentValue(null);
+        summary.setTotalGainLoss(null);
+        summary.setTotalGainLossPercentage(null);
+    }
+
     public PortfolioSummaryV1 calculateSummary(List<EquityHoldings> enrichedHoldings, double totalInvestmentValue) {
         double currentValue = enrichedHoldings.stream()
                 .mapToDouble(h -> {

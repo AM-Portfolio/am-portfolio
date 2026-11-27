@@ -11,11 +11,14 @@ import com.portfolio.analytics.service.utils.SecurityDetailsService;
 import com.portfolio.marketdata.model.FilterType;
 import com.portfolio.marketdata.model.HistoricalDataRequest;
 import com.portfolio.marketdata.model.InstrumentType;
+import com.portfolio.marketdata.model.MutualFundNavMark;
 import com.portfolio.marketdata.service.MarketDataService;
+import com.portfolio.marketdata.service.MutualFundNavService;
 import com.portfolio.model.analytics.intelligence.CachedIntelligenceHistory;
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.market.TimeFrame;
 import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
+import com.portfolio.model.portfolio.HoldingMarkPriceResolver;
 import com.portfolio.model.resolver.TradingSymbolResolver;
 import com.portfolio.model.util.SymbolResolver;
 import com.portfolio.redis.service.PortfolioIntelligenceHistoryRedisService;
@@ -87,6 +90,7 @@ public class PortfolioIntelligenceSnapshotFactory {
     private final SecurityDetailsService securityDetailsService;
     private final PortfolioIntelligenceHistoryRedisService historyCache;
     private final TradingSymbolResolver tradingSymbolResolver;
+    private final MutualFundNavService mutualFundNavService;
 
     private final ConcurrentHashMap<String, CompletableFuture<HistoryFields>> historyInFlight =
             new ConcurrentHashMap<>();
@@ -273,11 +277,35 @@ public class PortfolioIntelligenceSnapshotFactory {
                 }
             });
             long quoteDeadlineMs = snapshotStartedMs + (leanSecurity ? 1_000L : 500L);
-            // All-book snapshots need more than 200ms or sector falls to Unknown/Unlisted.
-            long sectorDeadlineMs = snapshotStartedMs + (leanSecurity ? 1_000L : 2_500L);
+            // Intelligence Sector/Industry need real MD sectors; 2.5s soft-timeout left equities as Unknown.
+            long sectorDeadlineMs = snapshotStartedMs + (leanSecurity ? 1_000L : 12_000L);
             securityDetails = awaitMap(sdFut, sectorDeadlineMs, portfolioId, "security");
             marketData = awaitMap(mdFut, quoteDeadlineMs, portfolioId, "market");
+            if (!leanSecurity && securityDetails.isEmpty() && !symbols.isEmpty()) {
+                try {
+                    securityDetails = securityDetailsService.getSecurityDetails(symbols);
+                    log.info("Intel security blocking fallback portfolioId={} size={}",
+                            portfolioId, securityDetails.size());
+                } catch (Exception e) {
+                    log.warn("Intel security blocking fallback failed portfolioId={} detail={}",
+                            portfolioId, e.getMessage());
+                }
+            }
         }
+
+        List<String> mfIsins = equities.stream()
+                .filter(e -> e != null
+                        && HoldingInstrumentClassifier.quarantineEquityLtp(
+                                e.getAssetClass(), e.getSymbol(), e.getIsin(),
+                                firstNonBlank(e.getName(), e.getCompanyName())))
+                .map(e -> e.getIsin() != null && !e.getIsin().isBlank() ? e.getIsin() : e.getSymbol())
+                .filter(HoldingInstrumentClassifier::isSchemeMfIsin)
+                .map(s -> s.trim().toUpperCase(Locale.ROOT))
+                .distinct()
+                .toList();
+        Map<String, MutualFundNavMark> mfMarks = mfIsins.isEmpty()
+                ? Map.of()
+                : mutualFundNavService.getMarks(mfIsins);
 
         List<PortfolioIntelligenceSnapshot.Holding> holdings = new ArrayList<>();
         Map<String, Double> quantities = new HashMap<>();
@@ -290,13 +318,56 @@ public class PortfolioIntelligenceSnapshotFactory {
                 continue;
             }
             String sym = SymbolResolver.normalize(eq.getSymbol());
+            String holdingName = firstNonBlank(
+                    joinForClassify(eq.getName(), eq.getCompanyName()),
+                    eq.getName(),
+                    eq.getCompanyName());
             MarketData md = marketData.get(sym);
-            double price = AllocationUtils.resolvePrice(md);
-            String priceSourceHint = price > 0
-                    ? HoldingInstrumentClassifier.PRICE_LIVE
-                    : HoldingInstrumentClassifier.PRICE_COST;
-            if (price <= 0) {
-                price = bookPriceFallback(eq);
+            double price = 0;
+            String priceSourceHint = HoldingInstrumentClassifier.PRICE_COST;
+            boolean quarantine = HoldingInstrumentClassifier.quarantineEquityLtp(
+                    eq.getAssetClass(), sym, eq.getIsin(), holdingName);
+            if (quarantine) {
+                String mfKey = (eq.getIsin() != null && !eq.getIsin().isBlank() ? eq.getIsin() : sym)
+                        .trim().toUpperCase(Locale.ROOT);
+                MutualFundNavMark navMark = mfMarks.get(mfKey);
+                if (navMark != null && navMark.nav() > 0) {
+                    price = navMark.nav();
+                    priceSourceHint = HoldingInstrumentClassifier.PRICE_NAV;
+                    if (navMark.schemeName() != null && !navMark.schemeName().isBlank()) {
+                        eq.setName(navMark.schemeName());
+                        holdingName = firstNonBlank(
+                                joinForClassify(eq.getName(), eq.getCompanyName()),
+                                eq.getName(),
+                                eq.getCompanyName());
+                    }
+                } else {
+                    HoldingMarkPriceResolver.Mark q = HoldingMarkPriceResolver.tryQuarantineMark(
+                            eq.getAssetClass(),
+                            sym,
+                            eq.getIsin(),
+                            holdingName,
+                            eq.getImportMarkPrice(),
+                            eq.getCurrentValue(),
+                            eq.getQuantity(),
+                            eq.getCurrentPrice(),
+                            eq.getAvgBuyingPrice(),
+                            eq.getInvestmentValue());
+                    if (q != null && q.isPresent()) {
+                        price = q.price();
+                        priceSourceHint = q.priceSource();
+                    } else {
+                        price = bookPriceFallback(eq);
+                    }
+                }
+            } else {
+                price = AllocationUtils.resolvePrice(md);
+                priceSourceHint = price > 0
+                        ? HoldingInstrumentClassifier.PRICE_LIVE
+                        : HoldingInstrumentClassifier.PRICE_COST;
+                if (price <= 0) {
+                    price = bookPriceFallback(eq);
+                }
             }
             if (price <= 0) {
                 droppedNoPrice++;
@@ -308,8 +379,22 @@ public class PortfolioIntelligenceSnapshotFactory {
             String industry = resolveIndustry(eq, sec, sym, priceSourceHint);
             String marketCap = resolveMarketCap(eq, sec);
 
-            // Honor CAS assetClass on equity rows (mutual_fund_demat / debt / nps).
-            String equityClass = HealthScoreEngine.normalizeAssetClass(eq.getAssetClass());
+            // Class SoT: productClass for ETF vs scheme MF; honor CAS for debt/NPS/cash/commodity.
+            String product = HoldingInstrumentClassifier.productClass(
+                    eq.getAssetClass(), sym, eq.getIsin(), priceSourceHint, holdingName);
+            String fromProduct = HealthScoreEngine.fromProductClass(product);
+            String fromCas = HealthScoreEngine.normalizeAssetClass(eq.getAssetClass());
+            String equityClass;
+            if (HealthScoreEngine.ASSET_ETF.equals(fromProduct)) {
+                equityClass = HealthScoreEngine.ASSET_ETF;
+            } else if (HealthScoreEngine.ASSET_FIXED_INCOME.equals(fromCas)
+                    || HealthScoreEngine.ASSET_NPS.equals(fromCas)
+                    || HealthScoreEngine.ASSET_CASH.equals(fromCas)
+                    || HealthScoreEngine.ASSET_COMMODITY.equals(fromCas)) {
+                equityClass = fromCas;
+            } else {
+                equityClass = fromProduct;
+            }
             holdings.add(PortfolioIntelligenceSnapshot.Holding.builder()
                     .symbol(sym)
                     .value(value)
@@ -378,14 +463,30 @@ public class PortfolioIntelligenceSnapshotFactory {
             if (sym == null || sym.isBlank()) {
                 sym = asset.getName() != null ? asset.getName() : assetClass;
             }
+            String resolvedClass = assetClass;
+            if (HealthScoreEngine.ASSET_MUTUAL_FUND.equals(assetClass)) {
+                String product = HoldingInstrumentClassifier.productClass(
+                        asset.getAssetClass(),
+                        sym,
+                        asset.getIsin(),
+                        HoldingInstrumentClassifier.PRICE_COST,
+                        asset.getName());
+                resolvedClass = HealthScoreEngine.fromProductClass(product);
+            }
+            String sector = HealthScoreEngine.ASSET_ETF.equals(resolvedClass)
+                    ? HoldingInstrumentClassifier.SECTOR_ETF
+                    : null;
+            String industry = HealthScoreEngine.ASSET_ETF.equals(resolvedClass)
+                    ? HoldingInstrumentClassifier.INDUSTRY_ETF
+                    : null;
             holdings.add(PortfolioIntelligenceSnapshot.Holding.builder()
                     .symbol(SymbolResolver.normalize(sym))
                     .value(value)
                     .weightPct(0)
-                    .sector(null)
-                    .industry(null)
+                    .sector(sector)
+                    .industry(industry)
                     .marketCap(null)
-                    .assetClass(assetClass)
+                    .assetClass(resolvedClass)
                     .build());
         }
         return dropped;
@@ -1007,17 +1108,34 @@ public class PortfolioIntelligenceSnapshotFactory {
 
     static String resolveSector(EquityModel eq, SecurityModel sec, String symbol, String priceSource) {
         String isin = eq != null ? eq.getIsin() : null;
+        String assetClass = eq != null ? eq.getAssetClass() : null;
+        String name = eq != null
+                ? firstNonBlank(joinForClassify(eq.getName(), eq.getCompanyName()), eq.getName(), eq.getCompanyName())
+                : null;
+        // Listed ETF / scheme-MF product only — never force Unlisted before MD/catalog
+        // (COST + ISIN used to collapse every stock into Unknown/Unlisted on Sector).
+        if (HoldingInstrumentClassifier.looksLikeListedEtfTicker(symbol)
+                || HoldingInstrumentClassifier.nameSuggestsEtf(name)) {
+            return HoldingInstrumentClassifier.SECTOR_ETF;
+        }
+        if (HoldingInstrumentClassifier.isMutualFundDematClass(assetClass)
+                && !HoldingInstrumentClassifier.nameSuggestsEtf(name)
+                && HoldingInstrumentClassifier.isSchemeMfIsin(
+                        isin != null && !isin.isBlank() ? isin : symbol)) {
+            return HoldingInstrumentClassifier.SECTOR_MUTUAL_FUND;
+        }
+
         String fromEq = usableMeta(eq != null ? eq.getSector() : null);
-        // Sticky Private/Unlisted must not win over listed industry meta.
-        boolean eqIsProductBucket = fromEq != null && (
-                HoldingInstrumentClassifier.SECTOR_UNLISTED.equalsIgnoreCase(fromEq)
-                        || HoldingInstrumentClassifier.SECTOR_ETF.equalsIgnoreCase(fromEq));
-        if (fromEq != null && !eqIsProductBucket) {
+        if (fromEq != null
+                && !HoldingInstrumentClassifier.SECTOR_ETF.equalsIgnoreCase(fromEq)
+                && !HoldingInstrumentClassifier.SECTOR_MUTUAL_FUND.equalsIgnoreCase(fromEq)) {
             return fromEq;
         }
         if (sec != null && sec.getMetadata() != null) {
             String fromSec = usableMeta(sec.getMetadata().getSector());
-            if (fromSec != null) {
+            if (fromSec != null
+                    && !HoldingInstrumentClassifier.SECTOR_ETF.equalsIgnoreCase(fromSec)
+                    && !HoldingInstrumentClassifier.SECTOR_MUTUAL_FUND.equalsIgnoreCase(fromSec)) {
                 return fromSec;
             }
         }
@@ -1026,10 +1144,8 @@ public class PortfolioIntelligenceSnapshotFactory {
         if (catalog != null && usableMeta(catalog.sector()) != null) {
             return catalog.sector();
         }
-        if (fromEq != null) {
-            return fromEq;
-        }
-        String classified = HoldingInstrumentClassifier.resolveSector(null, symbol, isin, priceSource);
+        String classified = HoldingInstrumentClassifier.resolveSector(
+                fromEq, symbol, isin, priceSource, assetClass, name);
         if (classified != null && !HoldingInstrumentClassifier.isMissingSector(classified)) {
             return classified;
         }
@@ -1037,18 +1153,38 @@ public class PortfolioIntelligenceSnapshotFactory {
     }
 
     private static String resolveIndustry(EquityModel eq, SecurityModel sec, String symbol, String priceSource) {
+        String isin = eq != null ? eq.getIsin() : null;
+        String assetClass = eq != null ? eq.getAssetClass() : null;
+        String name = eq != null
+                ? firstNonBlank(joinForClassify(eq.getName(), eq.getCompanyName()), eq.getName(), eq.getCompanyName())
+                : null;
+        if (HoldingInstrumentClassifier.looksLikeListedEtfTicker(symbol)
+                || HoldingInstrumentClassifier.nameSuggestsEtf(name)) {
+            return HoldingInstrumentClassifier.INDUSTRY_ETF;
+        }
+        if (HoldingInstrumentClassifier.isMutualFundDematClass(assetClass)
+                && !HoldingInstrumentClassifier.nameSuggestsEtf(name)
+                && HoldingInstrumentClassifier.isSchemeMfIsin(
+                        isin != null && !isin.isBlank() ? isin : symbol)) {
+            return HoldingInstrumentClassifier.INDUSTRY_MUTUAL_FUND;
+        }
+
         String fromEq = usableMeta(eq != null ? eq.getIndustry() : null);
-        if (fromEq != null) {
+        if (fromEq != null
+                && !HoldingInstrumentClassifier.INDUSTRY_ETF.equalsIgnoreCase(fromEq)
+                && !HoldingInstrumentClassifier.INDUSTRY_MUTUAL_FUND.equalsIgnoreCase(fromEq)) {
             return fromEq;
         }
         if (sec != null && sec.getMetadata() != null) {
             String fromSec = usableMeta(sec.getMetadata().getIndustry());
-            if (fromSec != null) {
+            if (fromSec != null
+                    && !HoldingInstrumentClassifier.INDUSTRY_ETF.equalsIgnoreCase(fromSec)
+                    && !HoldingInstrumentClassifier.INDUSTRY_MUTUAL_FUND.equalsIgnoreCase(fromSec)) {
                 return fromSec;
             }
         }
-        String isin = eq != null ? eq.getIsin() : null;
-        String classified = HoldingInstrumentClassifier.resolveIndustry(null, symbol, isin, priceSource);
+        String classified = HoldingInstrumentClassifier.resolveIndustry(
+                fromEq, symbol, isin, priceSource, assetClass, name);
         if (classified != null && !HoldingInstrumentClassifier.isMissingSector(classified)) {
             return classified;
         }
@@ -1065,6 +1201,31 @@ public class PortfolioIntelligenceSnapshotFactory {
             return null;
         }
         return t;
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String v : values) {
+            if (v != null && !v.isBlank()) {
+                return v.trim();
+            }
+        }
+        return null;
+    }
+
+    /** Join name fields so ETF/BEES tokens on either side are visible to productClass. */
+    private static String joinForClassify(String a, String b) {
+        String left = a != null ? a.trim() : "";
+        String right = b != null ? b.trim() : "";
+        if (left.isEmpty()) {
+            return right.isEmpty() ? null : right;
+        }
+        if (right.isEmpty() || left.equalsIgnoreCase(right)) {
+            return left;
+        }
+        return left + " " + right;
     }
 
     private static String resolveMarketCap(EquityModel eq, SecurityModel sec) {

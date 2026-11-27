@@ -186,12 +186,45 @@ public class PortfolioOverviewService {
         try {
             double hubWealth = accountsHubService.wealthForPersona(userId, persona);
             if (hubWealth > 0) {
+                Double bookValue = summary.getCurrentValue();
                 summary.setCurrentValue(Math.round(hubWealth * 100.0) / 100.0);
+                // Hub wealth is not the same universe as broker cost basis — never keep
+                // partial book Invested/Return on an inflated All headline.
+                boolean complete = Boolean.TRUE.equals(summary.getCostBasisComplete());
+                boolean hubMovedValue = bookValue != null && bookValue > 0
+                        && Math.abs(hubWealth - bookValue) / bookValue > 0.02;
+                if (!complete || hubMovedValue) {
+                    summary.setInvestmentValue(null);
+                    summary.setTotalGainLoss(null);
+                    summary.setTotalGainLossPercentage(null);
+                    summary.setCostBasisComplete(false);
+                }
             }
         } catch (Exception e) {
             log.warn("Hub residual headline failed for user={}: {}", userId, e.getMessage());
         }
         return summary;
+    }
+
+    private void applyCostBasisGateOnReprice(
+            PortfolioSummaryV1 summary,
+            String userId,
+            String portfolioId,
+            List<EquityHoldings> equityHoldings) {
+        boolean complete;
+        if (portfolioId != null && !portfolioId.isBlank() && !portfolioId.startsWith("all:")) {
+            complete = PortfolioCalculator.bookCostBasisKnown(equityHoldings);
+        } else {
+            String persona = portfolioId != null && portfolioId.startsWith("all:")
+                    ? com.am.common.amcommondata.model.family.HoldingsPersona.personaFromCacheId(portfolioId)
+                    : null;
+            List<PortfolioModelV1> books = brokerBooksForUser(userId).stream()
+                    .filter(p -> com.am.common.amcommondata.model.family.HoldingsPersona.matches(
+                            p.getFamilyMemberId(), persona))
+                    .collect(Collectors.toList());
+            complete = PortfolioCalculator.aggregateCostBasisComplete(books, equityHoldings);
+        }
+        PortfolioCalculator.applyCostBasisCompleteness(summary, complete);
     }
 
     /**
@@ -360,6 +393,7 @@ public class PortfolioOverviewService {
         PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(equityHoldings, investmentValue);
         // Unknown cost → leave investment null (do not publish 0.0 as invested).
         summary.setInvestmentValue(investmentValue > 0 ? investmentValue : null);
+        applyCostBasisGate(summary, portfolios, equityHoldings);
         if (pricedHoldings != null) {
             summary.setAsOf(pricedHoldings.getAsOf());
             summary.setPriceFreshness(pricedHoldings.getPriceFreshness());
@@ -367,6 +401,23 @@ public class PortfolioOverviewService {
             summary.setSessionDate(pricedHoldings.getSessionDate());
         }
         return summary;
+    }
+
+    /**
+     * All Portfolios: invested/return only when every non-empty broker book has cost.
+     * Single book: only when that book has cost. Partial sums must not reach the UI.
+     */
+    private void applyCostBasisGate(
+            PortfolioSummaryV1 summary,
+            List<PortfolioModelV1> portfolios,
+            List<EquityHoldings> equityHoldings) {
+        boolean complete;
+        if (portfolios != null && portfolios.size() > 1) {
+            complete = PortfolioCalculator.aggregateCostBasisComplete(portfolios, equityHoldings);
+        } else {
+            complete = PortfolioCalculator.bookCostBasisKnown(equityHoldings);
+        }
+        PortfolioCalculator.applyCostBasisCompleteness(summary, complete);
     }
 
     private PortfolioSummaryV1 repriceCachedSummary(
@@ -404,6 +455,7 @@ public class PortfolioOverviewService {
             cached.setPriceSource(ph.getPriceSource());
             cached.setSessionDate(ph.getSessionDate());
             cached.setLastUpdated(java.time.LocalDateTime.now(ZoneId.of("Asia/Kolkata")));
+            applyCostBasisGateOnReprice(cached, userId, portfolioId, ph.getEquityHoldings());
             // AS_OF + today==0 is collapsed quote math, not a known flat session — clear for freeze.
             clearCollapsedAsOfTodayGain(cached);
             applyTimeframeGainLoss(cached, userId, portfolioId, interval);

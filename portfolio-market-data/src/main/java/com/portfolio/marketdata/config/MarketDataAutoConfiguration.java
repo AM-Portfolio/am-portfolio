@@ -5,6 +5,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import com.portfolio.marketdata.client.MarketCalendarClient;
 import com.portfolio.marketdata.client.MarketDataApiClient;
@@ -23,6 +24,25 @@ import org.springframework.web.reactive.function.client.WebClient;
 @EnableConfigurationProperties(value = {MarketDataApiConfig.class})
 @ComponentScan(basePackages = "com.portfolio.marketdata")
 public class MarketDataAutoConfiguration {
+
+    /**
+     * AMFI is an external fallback and must never run on the portfolio request
+     * thread. Keep one bounded worker so a slow portal cannot grow an unbounded
+     * queue of duplicate refreshes.
+     */
+    @Bean(name = "mfNavFallbackExecutor")
+    public java.util.concurrent.Executor mfNavFallbackExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(1);
+        executor.setThreadNamePrefix("MfNavFallback-");
+        executor.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(2);
+        executor.initialize();
+        return executor;
+    }
 
     @Bean
     @ConditionalOnMissingBean

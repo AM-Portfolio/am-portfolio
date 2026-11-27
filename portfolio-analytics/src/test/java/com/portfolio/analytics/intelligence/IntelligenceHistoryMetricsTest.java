@@ -2,6 +2,8 @@ package com.portfolio.analytics.intelligence;
 
 import com.portfolio.model.market.MarketData;
 import com.portfolio.model.market.OhlcData;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -25,6 +27,16 @@ class IntelligenceHistoryMetricsTest {
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
     private static final String NIFTY = "NIFTY 50";
     private static final String AAA = "AAA";
+
+    @BeforeEach
+    void configureRawIndexAliases() {
+        IndexEtfSleeves.registerRawIndex(List.of("BANKNIFTY"));
+    }
+
+    @AfterEach
+    void clearRawIndexAliases() {
+        IndexEtfSleeves.resetConfiguredForTesting();
+    }
 
     @Test
     void compute_syntheticSeries_returnsVolAndBeta() {

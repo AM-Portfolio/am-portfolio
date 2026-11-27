@@ -9,6 +9,7 @@ vault:
     parser:
       mappings:
         ETF_API_URL: "URL"
+        MF_CATALOG_API_URL: "URL"
     market:
       mappings:
         MARKET_DATA_API_URL: "URL"

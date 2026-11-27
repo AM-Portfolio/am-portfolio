@@ -352,4 +352,70 @@ class PortfolioCalculatorTest {
         assertNull(summary.getTotalGainLossPercentage());
         assertEquals(10.0, summary.getTodayGainLoss());
     }
+
+    @Test
+    void aggregateCostBasisComplete_falseWhenOnlySomeBooksHaveCost() {
+        java.util.UUID idA = java.util.UUID.fromString("11111111-1111-1111-1111-111111111111");
+        java.util.UUID idB = java.util.UUID.fromString("22222222-2222-2222-2222-222222222222");
+        com.am.common.amcommondata.model.PortfolioModelV1 bookA =
+                org.mockito.Mockito.mock(com.am.common.amcommondata.model.PortfolioModelV1.class);
+        com.am.common.amcommondata.model.PortfolioModelV1 bookB =
+                org.mockito.Mockito.mock(com.am.common.amcommondata.model.PortfolioModelV1.class);
+        org.mockito.Mockito.when(bookA.getId()).thenReturn(idA);
+        org.mockito.Mockito.when(bookB.getId()).thenReturn(idB);
+        org.mockito.Mockito.when(bookA.getPortfolioKind())
+                .thenReturn(com.am.common.amcommondata.model.enums.PortfolioKind.BROKER);
+        org.mockito.Mockito.when(bookB.getPortfolioKind())
+                .thenReturn(com.am.common.amcommondata.model.enums.PortfolioKind.BROKER);
+
+        EquityHoldings withCost = new EquityHoldings();
+        withCost.setPortfolioId(idA.toString());
+        withCost.setQuantity(10.0);
+        withCost.setInvestmentCost(854185.0);
+        withCost.setCurrentValue(900000.0);
+
+        EquityHoldings markOnly = new EquityHoldings();
+        markOnly.setPortfolioId(idB.toString());
+        markOnly.setQuantity(5.0);
+        markOnly.setCurrentValue(25_000_000.0);
+
+        assertFalse(PortfolioCalculator.aggregateCostBasisComplete(
+                List.of(bookA, bookB), List.of(withCost, markOnly)));
+
+        PortfolioSummaryV1 summary = portfolioCalculator.calculateSummary(
+                List.of(withCost, markOnly), 854185.0);
+        summary.setInvestmentValue(854185.0);
+        PortfolioCalculator.applyCostBasisCompleteness(summary, false);
+        assertNull(summary.getInvestmentValue());
+        assertNull(summary.getTotalGainLoss());
+        assertEquals(Boolean.FALSE, summary.getCostBasisComplete());
+    }
+
+    @Test
+    void aggregateCostBasisComplete_trueWhenEveryNonEmptyBookHasCost() {
+        java.util.UUID idA = java.util.UUID.fromString("11111111-1111-1111-1111-111111111111");
+        java.util.UUID idB = java.util.UUID.fromString("22222222-2222-2222-2222-222222222222");
+        com.am.common.amcommondata.model.PortfolioModelV1 bookA =
+                org.mockito.Mockito.mock(com.am.common.amcommondata.model.PortfolioModelV1.class);
+        com.am.common.amcommondata.model.PortfolioModelV1 bookB =
+                org.mockito.Mockito.mock(com.am.common.amcommondata.model.PortfolioModelV1.class);
+        org.mockito.Mockito.when(bookA.getId()).thenReturn(idA);
+        org.mockito.Mockito.when(bookB.getId()).thenReturn(idB);
+        org.mockito.Mockito.when(bookA.getPortfolioKind())
+                .thenReturn(com.am.common.amcommondata.model.enums.PortfolioKind.BROKER);
+        org.mockito.Mockito.when(bookB.getPortfolioKind())
+                .thenReturn(com.am.common.amcommondata.model.enums.PortfolioKind.BROKER);
+
+        EquityHoldings a = new EquityHoldings();
+        a.setPortfolioId(idA.toString());
+        a.setQuantity(10.0);
+        a.setInvestmentCost(1000.0);
+        EquityHoldings b = new EquityHoldings();
+        b.setPortfolioId(idB.toString());
+        b.setQuantity(5.0);
+        b.setInvestmentCost(2000.0);
+
+        assertTrue(PortfolioCalculator.aggregateCostBasisComplete(
+                List.of(bookA, bookB), List.of(a, b)));
+    }
 }

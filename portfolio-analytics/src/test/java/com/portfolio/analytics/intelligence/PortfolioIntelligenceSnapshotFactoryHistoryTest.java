@@ -45,6 +45,8 @@ class PortfolioIntelligenceSnapshotFactoryHistoryTest {
     private PortfolioIntelligenceHistoryRedisService historyCache;
     @Mock
     private TradingSymbolResolver tradingSymbolResolver;
+    @Mock
+    private com.portfolio.marketdata.service.MutualFundNavService mutualFundNavService;
 
     private PortfolioIntelligenceSnapshotFactory factory;
 
@@ -52,7 +54,7 @@ class PortfolioIntelligenceSnapshotFactoryHistoryTest {
     void setUp() {
         factory = new PortfolioIntelligenceSnapshotFactory(
                 portfolioService, marketDataService, securityDetailsService, historyCache,
-                tradingSymbolResolver);
+                tradingSymbolResolver, mutualFundNavService);
         ReflectionTestUtils.setField(factory, "primaryBenchmarkSymbol", "NIFTY 50");
         ReflectionTestUtils.setField(factory, "historyLookbackDays", 60);
         ReflectionTestUtils.setField(factory, "historyTimeoutMs", 800L);

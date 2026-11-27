@@ -113,6 +113,35 @@ public class PortfolioEquitySymbolNormalizer {
 
         // 4) ISIN present but MD miss: undo invented display tickers so heal retries.
         revertInventedDisplayTickerToIsin(equity, isinKey);
+
+        // 5) Broker ETF / safe compressed unlisted (TATAGOLD, JIOPLATFORMS) from name.
+        String suggested = HoldingInstrumentClassifier.suggestDisplayTickerFromName(equity.getName());
+        if (suggested != null
+                && !HoldingInstrumentClassifier.isUnsafeNameToTickerMap(equity.getName(), suggested)
+                && applyTicker(equity, suggested, isinKey)) {
+            return;
+        }
+
+        // 6) Scheme MF / unsafe AMC→equity maps (RECLTD on Motilal/Bandhan/…) must keep
+        // ISIN as the mosaic/holdings key so distinct schemes never collapse.
+        forceIsinBookKeyWhenRequired(equity, isinKey);
+    }
+
+    private void forceIsinBookKeyWhenRequired(EquityModel equity, String isinKey) {
+        if (isinKey == null || isinKey.isBlank()) {
+            return;
+        }
+        String sym = equity.getSymbol();
+        // Already ISIN-shaped (unlisted / scheme): do not rewrite again.
+        if (sym != null && TradingSymbolResolver.looksLikeIsin(sym)) {
+            return;
+        }
+        if (HoldingInstrumentClassifier.mustKeepIsinBookKey(
+                equity.getAssetClass(), sym, isinKey, equity.getName())) {
+            log.info("Forced ISIN book key {} → {} (assetClass={})",
+                    sym, isinKey, equity.getAssetClass());
+            equity.setSymbol(isinKey);
+        }
     }
 
     /**
@@ -124,6 +153,13 @@ public class PortfolioEquitySymbolNormalizer {
         }
         String clean = ticker.trim().toUpperCase(Locale.ROOT);
         if (TradingSymbolResolver.looksLikeIsin(clean)) {
+            return false;
+        }
+        // Scheme MF / poisoned AMC→equity maps must keep ISIN as the book key.
+        if (HoldingInstrumentClassifier.mustKeepIsinBookKey(
+                equity.getAssetClass(), clean, isinKey, equity.getName())) {
+            log.warn("Rejected scheme-MF ticker overwrite name={} ticker={} isin={}",
+                    equity.getName(), clean, isinKey);
             return false;
         }
         if (HoldingInstrumentClassifier.isUnsafeNameToTickerMap(equity.getName(), clean)) {

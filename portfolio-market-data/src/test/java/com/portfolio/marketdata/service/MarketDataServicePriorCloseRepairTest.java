@@ -100,6 +100,51 @@ class MarketDataServicePriorCloseRepairTest {
     }
 
     @Test
+    void repairWrongDistinctPreviousClose_fixesVendorPrevFromHist() {
+        MarketData live = MarketData.builder()
+                .symbol("TCS")
+                .lastPrice(2517.3)
+                .previousClose(2472.0)
+                .build();
+        Map<String, MarketData> result = new java.util.HashMap<>();
+        result.put("TCS", live);
+        when(marketDataApiClient.getHistoricalData(any())).thenReturn(Mono.just(histWrapper(
+                "TCS",
+                List.of(2460.0, 2517.3, 2517.3))));
+
+        marketDataService.repairWrongDistinctPreviousClose(result);
+
+        assertEquals(2460.0, result.get("TCS").getPreviousClose());
+    }
+
+    @Test
+    void reconcilePreviousCloseFromCache_fixesWrongButDistinctVendorPrev() {
+        MarketData collapsed = MarketData.builder()
+                .symbol("TCS")
+                .lastPrice(2500.0)
+                .previousClose(2500.0)
+                .build();
+        Map<String, MarketData> seed = new java.util.HashMap<>();
+        seed.put("TCS", collapsed);
+        when(marketDataApiClient.getHistoricalData(any())).thenReturn(Mono.just(histWrapper(
+                "TCS",
+                List.of(2460.0, 2500.0, 2500.0))));
+        marketDataService.repairCollapsedPreviousClose(seed);
+        assertEquals(2460.0, seed.get("TCS").getPreviousClose());
+
+        MarketData drifted = MarketData.builder()
+                .symbol("TCS")
+                .lastPrice(2517.3)
+                .previousClose(2472.0)
+                .build();
+        Map<String, MarketData> live = new java.util.HashMap<>();
+        live.put("TCS", drifted);
+        marketDataService.reconcilePreviousCloseFromCache(live);
+
+        assertEquals(2460.0, live.get("TCS").getPreviousClose());
+    }
+
+    @Test
     void repairCollapsedPreviousClose_histMiss_doesNotPoisonPriorCache() {
         MarketData live = MarketData.builder()
                 .symbol("TCS")
