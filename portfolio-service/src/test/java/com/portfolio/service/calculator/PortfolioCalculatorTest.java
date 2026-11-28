@@ -115,7 +115,8 @@ class PortfolioCalculatorTest {
     }
 
     @Test
-    void enrichHoldings_infSchemeGetsEtfSector() {
+    void enrichHoldings_infSchemeGetsMutualFundSector() {
+        // Bare INF* without ETF/BEES name is scheme-MF book key — Mutual Funds, not ETF mosaic.
         EquityHoldings gold = new EquityHoldings();
         gold.setSymbol("INF277KA1976");
         gold.setIsin("INF277KA1976");
@@ -128,10 +129,73 @@ class PortfolioCalculatorTest {
         lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
 
         EquityHoldings enriched = portfolioCalculator.enrichHoldings(List.of(gold)).get(0);
-        assertEquals("Exchange Traded Funds (ETFs)", enriched.getSector());
-        assertEquals("ETF", enriched.getProductClass());
+        assertEquals("Mutual Funds", enriched.getSector());
+        assertEquals("INF277KA1976", enriched.getIsin());
         assertEquals("LIVE", enriched.getPriceSource());
         assertEquals(13.3, enriched.getCurrentPrice());
+    }
+
+    @Test
+    void enrichHoldings_listedEtfTickerKeepsEtfSector() {
+        EquityHoldings bees = new EquityHoldings();
+        bees.setSymbol("NIFTYBEES");
+        bees.setIsin("INF204KB14I2");
+        bees.setName("NIPPON INDIA ETF NIFTY 50 BEES");
+        bees.setQuantity(10.0);
+        bees.setAverageBuyingPrice(200.0);
+        bees.setInvestmentCost(2000.0);
+        MarketData md = MarketData.builder().symbol("NIFTYBEES").lastPrice(292.0).previousClose(295.0).build();
+        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("NIFTYBEES", md));
+        lenient().when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+
+        EquityHoldings enriched = portfolioCalculator.enrichHoldings(List.of(bees)).get(0);
+        assertEquals("NIFTYBEES", enriched.getSymbol());
+        assertEquals("Exchange Traded Funds (ETFs)", enriched.getSector());
+        assertEquals("ETF", enriched.getProductClass());
+        assertEquals(292.0, enriched.getCurrentPrice());
+    }
+
+    @Test
+    void enrichHoldings_schemeMfGetsDisplaySymbolFromBrokerName() {
+        EquityHoldings scheme = new EquityHoldings();
+        scheme.setSymbol("INF247L01CE3");
+        scheme.setIsin("INF247L01CE3");
+        scheme.setName("MOTILAL OSWAL AMC LTD#MOTILAL OSWAL MF- MOTILAL OSWAL LARGE CAP FUND-DIRECT-GROWTH");
+        scheme.setAssetClass("mutual_fund_demat");
+        scheme.setQuantity(85208.657);
+        scheme.setImportMarkPrice(13.593);
+
+        EquityHoldings equity = new EquityHoldings();
+        equity.setSymbol("HDFCBANK");
+        equity.setIsin("INE040A01034");
+        equity.setName("HDFC BANK LIMITED");
+        equity.setQuantity(10.0);
+        equity.setAverageBuyingPrice(800.0);
+        equity.setInvestmentCost(8000.0);
+
+        MarketData md = MarketData.builder().symbol("HDFCBANK").lastPrice(857.0).previousClose(860.0).build();
+        when(marketDataService.getMarketData(anyList())).thenReturn(Map.of("HDFCBANK", md));
+        lenient().when(marketDataService.getMarketCapData(anyList())).thenReturn(Collections.emptyMap());
+        lenient().when(marketCapMongoService.getBySymbols(anyList())).thenReturn(Map.of());
+
+        List<EquityHoldings> results = portfolioCalculator.enrichHoldings(List.of(scheme, equity));
+        EquityHoldings mf = results.stream()
+                .filter(h -> "INF247L01CE3".equalsIgnoreCase(h.getIsin()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("INF247L01CE3", mf.getIsin());
+        assertFalse(mf.getSymbol().toUpperCase().startsWith("INF"));
+        assertTrue(mf.getSymbol().toUpperCase().contains("MOTILAL OSWAL LARGE CAP"));
+        assertFalse(mf.getName().contains("#"));
+        assertTrue(mf.getName().toUpperCase().contains("MOTILAL OSWAL LARGE CAP"));
+
+        EquityHoldings bank = results.stream()
+                .filter(h -> "HDFCBANK".equals(h.getSymbol()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("HDFCBANK", bank.getSymbol());
+        assertEquals(857.0, bank.getCurrentPrice());
     }
 
     @Test

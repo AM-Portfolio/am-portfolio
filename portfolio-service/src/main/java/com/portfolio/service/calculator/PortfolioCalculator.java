@@ -14,6 +14,7 @@ import com.portfolio.model.portfolio.EquityHoldings;
 import com.portfolio.model.reference.ListedEquitySectorCatalog;
 import com.portfolio.model.resolver.TradingSymbolResolver;
 import com.portfolio.model.portfolio.HoldingInstrumentClassifier;
+import com.portfolio.model.portfolio.SchemeMfDisplayNames;
 import com.portfolio.model.portfolio.v1.PortfolioSummaryV1;
 import com.portfolio.redis.session.CashSessionClock;
 import com.am.common.amcommondata.service.price.StockPriceMongoService;
@@ -129,6 +130,7 @@ public class PortfolioCalculator {
 
         return equityHoldings.stream()
                 .map(holding -> enrichHolding(holding, finalApiDataForEnrich, finalMarketCapMap, cachedMarketCap))
+                .map(this::applySchemeMfDisplayLabels)
                 .collect(Collectors.toList());
     }
 
@@ -150,17 +152,60 @@ public class PortfolioCalculator {
         final Map<String, MarketData> finalApiData = (apiData == null) ? Map.of() : apiData;
         return equityHoldings.stream()
                 .map(holding -> enrichHolding(holding, finalApiData, Map.of(), Map.of()))
+                .map(this::applySchemeMfDisplayLabels)
                 .collect(Collectors.toList());
     }
 
-    /** Listed tickers only. An unresolved ISIN has no OHLC row and stalls the batch. */
+    /**
+     * Listed tickers only. Skip ISIN-shaped symbols and scheme-MF rows (book key / display
+     * label must not hit equity OHLC).
+     */
     private static List<String> quoteSymbols(List<EquityHoldings> equityHoldings) {
         return equityHoldings.stream()
+                .filter(h -> h.getSymbol() != null)
+                .filter(h -> !h.getSymbol().endsWith("-F"))
+                .filter(h -> !TradingSymbolResolver.looksLikeIsin(h.getSymbol()))
+                .filter(h -> !HoldingInstrumentClassifier.mustKeepIsinBookKey(
+                        h.getAssetClass(), h.getSymbol(), h.getIsin(), h.getName()))
                 .map(EquityHoldings::getSymbol)
-                .filter(symbol -> symbol != null)
-                .filter(symbol -> !symbol.endsWith("-F"))
-                .filter(symbol -> !TradingSymbolResolver.looksLikeIsin(symbol))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Read-path only: human Symbol/Company for scheme MF. Keeps {@code isin} as identity;
+     * does not change Mongo book keys. Broker-clean first; optional catalog schemeName unused
+     * in this slice.
+     */
+    private EquityHoldings applySchemeMfDisplayLabels(EquityHoldings holding) {
+        if (holding == null) {
+            return holding;
+        }
+        if (!HoldingInstrumentClassifier.mustKeepIsinBookKey(
+                holding.getAssetClass(), holding.getSymbol(), holding.getIsin(), holding.getName())) {
+            return holding;
+        }
+        String isinKey = holding.getIsin() != null && !holding.getIsin().isBlank()
+                ? holding.getIsin().trim().toUpperCase()
+                : (TradingSymbolResolver.looksLikeIsin(holding.getSymbol())
+                        ? holding.getSymbol().trim().toUpperCase()
+                        : null);
+        if (isinKey == null) {
+            return holding;
+        }
+        // Prefer existing isin field for identity even after symbol becomes a display label.
+        if (holding.getIsin() == null || holding.getIsin().isBlank()) {
+            holding.setIsin(isinKey);
+        }
+        String brokerName = holding.getName();
+        String displayName = SchemeMfDisplayNames.resolveDisplayName(null, brokerName, isinKey);
+        String displaySymbol = SchemeMfDisplayNames.resolveDisplaySymbol(null, brokerName, isinKey);
+        if (displayName != null) {
+            holding.setName(displayName);
+        }
+        if (displaySymbol != null) {
+            holding.setSymbol(displaySymbol);
+        }
+        return holding;
     }
 
     private EquityHoldings enrichHolding(EquityHoldings holding, 

@@ -203,10 +203,15 @@ public class PortfolioHoldingsMapper {
                 // If this is the first time we're seeing this identity, create a new holding
                 if (!equityHoldingsMap.containsKey(key)) {
                     EquityHoldings holdings = equityHoldingsMapper.toEquityHoldings(equity);
-                    // Keep scheme-MF rows on ISIN so clients do not re-collapse poisoned tickers.
+                    // Scheme MF: provisional Symbol=ISIN for quote filtering; identity is always
+                    // the ISIN key. PortfolioCalculator.applySchemeMfDisplayLabels rewrites
+                    // Symbol/name for the API response without touching Mongo book keys.
                     if (com.portfolio.model.portfolio.HoldingInstrumentClassifier.mustKeepIsinBookKey(
                             equity.getAssetClass(), symbol, equity.getIsin(), equity.getName())) {
                         holdings.setSymbol(key);
+                        if (holdings.getIsin() == null || holdings.getIsin().isBlank()) {
+                            holdings.setIsin(key);
+                        }
                     }
 
                     holdings.setPortfolioId(portfolio.getId() != null ? portfolio.getId().toString() : null);
